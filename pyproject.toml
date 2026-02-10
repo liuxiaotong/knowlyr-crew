@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knowlyr-crew"
+version = "0.1.0"
+description = "Digital employee management framework - define AI workers in Markdown, load in Claude Code sessions"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Liu Kai", email = "mrliukai@gmail.com" }
+]
+keywords = [
+    "digital-employee", "ai-agent", "crew", "markdown-workflow",
+    "claude-code", "prompt-engineering", "ai-automation",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "click>=8.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+dev = ["pytest", "ruff"]
+all = ["knowlyr-crew[mcp,dev]"]
+
+[project.scripts]
+knowlyr-crew = "crew.cli:main"
+
+[project.entry-points."mcp.servers"]
+knowlyr-crew = "crew.mcp_server:serve"
+
+[project.urls]
+Homepage = "https://github.com/liuxiaotong/knowlyr-crew"
+Repository = "https://github.com/liuxiaotong/knowlyr-crew"
+Issues = "https://github.com/liuxiaotong/knowlyr-crew/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crew"]
+
+[tool.hatch.build]
+artifacts = ["src/crew/employees/*.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501", "B904"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

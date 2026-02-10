@@ -1,0 +1,153 @@
+"""工作日志 — JSONL 格式追踪员工工作记录."""
+
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from crew.models import WorkLogEntry
+
+
+class WorkLogger:
+    """工作日志管理器.
+
+    日志以 JSONL 格式存储在指定目录下，
+    每个 session 一个文件。
+    """
+
+    def __init__(self, log_dir: Path | None = None):
+        """初始化日志管理器.
+
+        Args:
+            log_dir: 日志目录，默认 .crew/logs
+        """
+        self.log_dir = log_dir or Path.cwd() / ".crew" / "logs"
+
+    def _ensure_dir(self) -> None:
+        """确保日志目录存在."""
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+    def _session_file(self, session_id: str) -> Path:
+        """返回 session 文件路径."""
+        return self.log_dir / f"{session_id}.jsonl"
+
+    def create_session(
+        self,
+        employee_name: str,
+        args: dict[str, str] | None = None,
+    ) -> str:
+        """创建新的工作 session.
+
+        Args:
+            employee_name: 员工名称
+            args: 调用参数
+
+        Returns:
+            session_id
+        """
+        self._ensure_dir()
+        session_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+
+        entry = WorkLogEntry(
+            employee_name=employee_name,
+            action="session_start",
+            detail=f"员工 {employee_name} 开始工作",
+            args=args or {},
+        )
+
+        with open(self._session_file(session_id), "a", encoding="utf-8") as f:
+            f.write(entry.model_dump_json() + "\n")
+
+        return session_id
+
+    def add_entry(
+        self,
+        session_id: str,
+        action: str,
+        detail: str = "",
+    ) -> None:
+        """向 session 追加日志条目.
+
+        Args:
+            session_id: 会话 ID
+            action: 动作描述
+            detail: 详细信息
+        """
+        session_file = self._session_file(session_id)
+        if not session_file.exists():
+            raise ValueError(f"Session 不存在: {session_id}")
+
+        # 从第一条记录获取 employee_name
+        first_line = session_file.read_text(encoding="utf-8").split("\n")[0]
+        first_entry = json.loads(first_line)
+
+        entry = WorkLogEntry(
+            employee_name=first_entry["employee_name"],
+            action=action,
+            detail=detail,
+        )
+
+        with open(session_file, "a", encoding="utf-8") as f:
+            f.write(entry.model_dump_json() + "\n")
+
+    def list_sessions(
+        self,
+        employee_name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """列出工作 session.
+
+        Args:
+            employee_name: 按员工过滤
+            limit: 返回条数
+
+        Returns:
+            session 摘要列表
+        """
+        if not self.log_dir.is_dir():
+            return []
+
+        sessions = []
+        for f in sorted(self.log_dir.glob("*.jsonl"), reverse=True):
+            try:
+                first_line = f.read_text(encoding="utf-8").split("\n")[0]
+                first_entry = json.loads(first_line)
+
+                if employee_name and first_entry.get("employee_name") != employee_name:
+                    continue
+
+                line_count = sum(1 for line in f.read_text(encoding="utf-8").split("\n") if line.strip())
+
+                sessions.append({
+                    "session_id": f.stem,
+                    "employee_name": first_entry.get("employee_name", ""),
+                    "started_at": first_entry.get("timestamp", ""),
+                    "entries": line_count,
+                })
+
+                if len(sessions) >= limit:
+                    break
+            except Exception:
+                continue
+
+        return sessions
+
+    def get_session(self, session_id: str) -> list[dict]:
+        """获取 session 的所有日志条目.
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            日志条目列表
+        """
+        session_file = self._session_file(session_id)
+        if not session_file.exists():
+            return []
+
+        entries = []
+        for line in session_file.read_text(encoding="utf-8").split("\n"):
+            if line.strip():
+                entries.append(json.loads(line))
+
+        return entries
