@@ -1,0 +1,24 @@
+name: feature-design
+description: 新功能设计讨论会——从需求到方案
+topic: 讨论 $feature 功能的设计和实现方案
+goal: 确定技术方案、测试策略和文档计划
+participants:
+  - employee: product-manager
+    role: moderator
+    focus: 需求拆解和用户价值
+  - employee: code-reviewer
+    role: speaker
+    focus: 技术可行性和潜在风险
+  - employee: test-engineer
+    role: speaker
+    focus: 测试计划和质量保障
+  - employee: doc-writer
+    role: recorder
+rounds:
+  - name: "需求对齐"
+    instruction: "产品经理介绍功能背景和用户故事，其他角色提问澄清"
+  - name: "方案讨论"
+    instruction: "从技术实现、测试、文档三个角度讨论方案"
+  - name: "决议与行动项"
+    instruction: "总结方案，分配行动项，明确排期"
+output_format: decision

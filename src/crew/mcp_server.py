@@ -156,6 +156,42 @@ def create_server() -> "Server":
                     "required": ["name"],
                 },
             ),
+            Tool(
+                name="list_discussions",
+                description="列出所有可用的讨论会",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            Tool(
+                name="run_discussion",
+                description="生成讨论会 prompt，让多个数字员工围绕议题进行多轮讨论",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "讨论会名称或 YAML 文件路径",
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "传递给讨论会的参数（key-value）",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "agent_id": {
+                            "type": "integer",
+                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                        },
+                        "smart_context": {
+                            "type": "boolean",
+                            "description": "自动检测项目类型（默认 true）",
+                            "default": True,
+                        },
+                    },
+                    "required": ["name"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -291,6 +327,61 @@ def create_server() -> "Server":
                 smart_context=smart_context,
             )
             return [TextContent(type="text", text=json.dumps(outputs, ensure_ascii=False, indent=2))]
+
+        elif name == "list_discussions":
+            from crew.discussion import discover_discussions, load_discussion
+
+            discussions = discover_discussions()
+            data = []
+            for dname, dpath in discussions.items():
+                try:
+                    d = load_discussion(dpath)
+                    rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+                    data.append({
+                        "name": dname,
+                        "description": d.description,
+                        "participants": [p.employee for p in d.participants],
+                        "rounds": rounds_count,
+                        "path": str(dpath),
+                    })
+                except Exception:
+                    data.append({"name": dname, "error": "解析失败", "path": str(dpath)})
+            return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+        elif name == "run_discussion":
+            from crew.discussion import (
+                discover_discussions,
+                load_discussion,
+                render_discussion,
+                validate_discussion,
+            )
+
+            d_name = arguments["name"]
+            d_args = arguments.get("args", {})
+            agent_id = arguments.get("agent_id")
+            smart_context = arguments.get("smart_context", True)
+
+            # 查找讨论会
+            d_path = Path(d_name)
+            if not d_path.exists():
+                discussions = discover_discussions()
+                if d_name in discussions:
+                    d_path = discussions[d_name]
+                else:
+                    return [TextContent(type="text", text=f"未找到讨论会: {d_name}")]
+
+            discussion = load_discussion(d_path)
+            errors = validate_discussion(discussion)
+            if errors:
+                return [TextContent(type="text", text=f"讨论会校验失败: {'; '.join(errors)}")]
+
+            prompt = render_discussion(
+                discussion,
+                initial_args=d_args,
+                agent_id=agent_id,
+                smart_context=smart_context,
+            )
+            return [TextContent(type="text", text=prompt)]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 

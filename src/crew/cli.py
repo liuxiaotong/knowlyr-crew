@@ -632,6 +632,146 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
         click.echo(combined)
 
 
+# ── discuss 子命令组 ──
+
+
+@main.group()
+def discuss():
+    """讨论会管理 — 多员工多轮讨论."""
+    pass
+
+
+@discuss.command("list")
+def discuss_list():
+    """列出所有可用讨论会."""
+    from crew.discussion import discover_discussions, load_discussion
+
+    discussions = discover_discussions()
+    if not discussions:
+        click.echo("未找到讨论会。")
+        click.echo("在 .crew/discussions/ 中创建 YAML 文件，或使用内置讨论会。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="讨论会")
+        table.add_column("名称", style="cyan")
+        table.add_column("描述", style="green")
+        table.add_column("参与者", justify="right")
+        table.add_column("轮次", justify="right")
+        table.add_column("来源")
+
+        for name, path in discussions.items():
+            try:
+                d = load_discussion(path)
+                source = "内置" if "employees/discussions" in str(path) else "项目"
+                rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+                table.add_row(
+                    name, d.description, str(len(d.participants)),
+                    str(rounds_count), source,
+                )
+            except Exception:
+                table.add_row(name, "[解析失败]", "-", "-", str(path))
+
+        console.print(table)
+    except ImportError:
+        for name, path in discussions.items():
+            click.echo(f"  {name} — {path}")
+
+
+@discuss.command("show")
+@click.argument("name")
+def discuss_show(name: str):
+    """查看讨论会详情."""
+    from crew.discussion import discover_discussions, load_discussion
+
+    discussions = discover_discussions()
+    if name not in discussions:
+        click.echo(f"未找到讨论会: {name}", err=True)
+        sys.exit(1)
+
+    d = load_discussion(discussions[name])
+    click.echo(f"讨论会: {d.name}")
+    click.echo(f"描述: {d.description}")
+    click.echo(f"议题: {d.topic}")
+    if d.goal:
+        click.echo(f"目标: {d.goal}")
+    rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+    click.echo(f"轮次: {rounds_count}")
+    click.echo(f"输出格式: {d.output_format}")
+    click.echo()
+
+    role_labels = {"moderator": "主持人", "speaker": "发言人", "recorder": "记录员"}
+    for i, p in enumerate(d.participants, 1):
+        focus_str = f" — {p.focus}" if p.focus else ""
+        click.echo(f"  {i}. {p.employee} ({role_labels[p.role]}){focus_str}")
+
+
+@discuss.command("run")
+@click.argument("name_or_path")
+@click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
+@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
+@click.option("-o", "--output", type=click.Path(), help="输出到文件")
+def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
+                smart_context: bool, output: str | None):
+    """生成讨论会 prompt.
+
+    NAME_OR_PATH 可以是讨论会名称或 YAML 文件路径。
+    """
+    from crew.discussion import (
+        discover_discussions,
+        load_discussion,
+        render_discussion,
+        validate_discussion,
+    )
+
+    # 解析讨论会
+    path = Path(name_or_path)
+    if path.exists() and path.suffix in (".yaml", ".yml"):
+        d = load_discussion(path)
+    else:
+        discussions = discover_discussions()
+        if name_or_path not in discussions:
+            click.echo(f"未找到讨论会: {name_or_path}", err=True)
+            sys.exit(1)
+        d = load_discussion(discussions[name_or_path])
+
+    # 校验
+    errors = validate_discussion(d)
+    if errors:
+        for err in errors:
+            click.echo(f"校验错误: {err}", err=True)
+        sys.exit(1)
+
+    # 解析参数
+    initial_args: dict[str, str] = {}
+    for item in named_args:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            initial_args[k] = v
+
+    rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+    click.echo(
+        f"生成讨论会: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
+        err=True,
+    )
+
+    prompt = render_discussion(
+        d, initial_args=initial_args,
+        agent_id=agent_id, smart_context=smart_context,
+    )
+
+    if output:
+        Path(output).write_text(prompt, encoding="utf-8")
+        click.echo(f"\n已写入: {output}", err=True)
+    else:
+        click.echo(prompt)
+
+
 # ── mcp 命令 ──
 
 
