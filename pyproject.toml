@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "knowlyr-crew"
 version = "0.1.0"
-description = "Digital employee management framework - define AI workers in Markdown, load in Claude Code sessions"
+description = "AI Skill Loader - define professional skills in Markdown, load into Claude Code and other AI IDEs via MCP"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -13,8 +13,9 @@ authors = [
     { name = "Liu Kai", email = "mrliukai@gmail.com" }
 ]
 keywords = [
-    "digital-employee", "ai-agent", "crew", "markdown-workflow",
-    "claude-code", "prompt-engineering", "ai-automation",
+    "ai-skill-loader", "mcp", "model-context-protocol",
+    "digital-employee", "claude-code", "cursor", "ai-ide",
+    "prompt-engineering", "ai-automation",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -39,7 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
 all = ["knowlyr-crew[mcp,dev]"]
 
 [project.scripts]

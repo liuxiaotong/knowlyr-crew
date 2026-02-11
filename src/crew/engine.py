@@ -118,6 +118,10 @@ class CrewEngine:
 
         if employee.tags:
             parts.append(f"**标签**: {', '.join(employee.tags)}")
+        if employee.tools:
+            parts.append(f"**需要工具**: {', '.join(employee.tools)}")
+        if employee.context:
+            parts.append(f"**预读上下文**: {', '.join(employee.context)}")
 
         parts.extend(["", "---", "", rendered])
 

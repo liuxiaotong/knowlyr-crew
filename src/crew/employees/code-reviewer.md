@@ -11,6 +11,11 @@ author: knowlyr
 triggers:
   - review
   - cr
+tools:
+  - git
+  - file_read
+context:
+  - pyproject.toml
 args:
   - name: target
     description: 审查目标（分支名、PR 号或文件路径）

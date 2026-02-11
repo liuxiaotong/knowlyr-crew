@@ -147,6 +147,10 @@ def show(name: str):
             meta_lines.append(f"**标签**: {', '.join(emp.tags)}")
         if emp.triggers:
             meta_lines.append(f"**触发词**: {', '.join(emp.triggers)}")
+        if emp.tools:
+            meta_lines.append(f"**需要工具**: {', '.join(emp.tools)}")
+        if emp.context:
+            meta_lines.append(f"**预读上下文**: {', '.join(emp.context)}")
         if emp.args:
             meta_lines.append("**参数**:")
             for arg in emp.args:
@@ -222,6 +226,16 @@ def run(
         text = engine.render(emp, args=args_dict, positional=list(positional_args))
     else:
         text = engine.prompt(emp, args=args_dict, positional=list(positional_args))
+
+    # 记录工作日志
+    try:
+        from crew.log import WorkLogger
+
+        work_logger = WorkLogger()
+        session_id = work_logger.create_session(emp.name, args=args_dict)
+        work_logger.add_entry(session_id, "prompt_generated", f"via CLI, {len(text)} chars")
+    except Exception:
+        pass  # 日志失败不影响主流程
 
     # 输出
     if output:

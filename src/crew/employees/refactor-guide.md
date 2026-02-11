@@ -10,6 +10,11 @@ tags:
 author: knowlyr
 triggers:
   - refactor
+tools:
+  - file_read
+  - git
+context:
+  - pyproject.toml
 args:
   - name: target
     description: 要重构的文件或模块

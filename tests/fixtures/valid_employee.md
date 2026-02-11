@@ -6,6 +6,11 @@ tags:
   - test
 triggers:
   - tw
+tools:
+  - file_read
+  - bash
+context:
+  - tests/
 args:
   - name: target
     description: 目标路径

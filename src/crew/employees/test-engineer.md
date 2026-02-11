@@ -11,6 +11,13 @@ author: knowlyr
 triggers:
   - test
   - tests
+tools:
+  - file_read
+  - file_write
+  - bash
+context:
+  - tests/
+  - pyproject.toml
 args:
   - name: target
     description: 要测试的文件或模块路径

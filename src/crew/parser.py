@@ -96,6 +96,14 @@ def parse_employee_string(
     raw_output = frontmatter.get("output", {})
     output = EmployeeOutput(**raw_output) if isinstance(raw_output, dict) else EmployeeOutput()
 
+    # 解析 tools
+    raw_tools = frontmatter.get("tools", [])
+    tools = raw_tools if isinstance(raw_tools, list) else []
+
+    # 解析 context
+    raw_context = frontmatter.get("context", [])
+    context = raw_context if isinstance(raw_context, list) else []
+
     return Employee(
         name=name,
         display_name=frontmatter.get("display_name", ""),
@@ -106,6 +114,8 @@ def parse_employee_string(
         triggers=frontmatter.get("triggers", []),
         args=args,
         output=output,
+        tools=tools,
+        context=context,
         body=body,
         source_path=source_path,
         source_layer=source_layer,

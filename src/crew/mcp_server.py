@@ -6,7 +6,16 @@ from pathlib import Path
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import TextContent, Tool
+    from mcp.server.lowlevel.helper_types import ReadResourceContents
+    from mcp.types import (
+        GetPromptResult,
+        Prompt,
+        PromptArgument,
+        PromptMessage,
+        Resource,
+        TextContent,
+        Tool,
+    )
 
     HAS_MCP = True
 except ImportError:
@@ -137,6 +146,15 @@ def create_server() -> "Server":
             if errors:
                 return [TextContent(type="text", text=f"参数错误: {'; '.join(errors)}")]
             prompt = engine.prompt(emp, args=emp_args)
+
+            # 记录工作日志
+            try:
+                logger = WorkLogger()
+                sid = logger.create_session(emp.name, args=emp_args)
+                logger.add_entry(sid, "prompt_generated", f"{len(prompt)} chars")
+            except Exception:
+                pass  # 日志失败不影响主流程
+
             return [TextContent(type="text", text=prompt)]
 
         elif name == "get_work_log":
@@ -150,6 +168,95 @@ def create_server() -> "Server":
             )]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
+
+    # ── MCP Prompts: 每个员工 = 一个可调用的 prompt ──
+
+    @server.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        """列出所有员工作为 MCP Prompts."""
+        result = discover_employees()
+        prompts = []
+        for emp in result.employees.values():
+            arguments = [
+                PromptArgument(
+                    name=a.name,
+                    description=a.description,
+                    required=a.required,
+                )
+                for a in emp.args
+            ]
+            prompts.append(Prompt(
+                name=emp.name,
+                title=emp.effective_display_name,
+                description=emp.description,
+                arguments=arguments or None,
+            ))
+        return prompts
+
+    @server.get_prompt()
+    async def get_prompt(
+        name: str, arguments: dict[str, str] | None,
+    ) -> GetPromptResult:
+        """获取渲染后的 prompt."""
+        result = discover_employees()
+        emp = result.get(name)
+        if emp is None:
+            raise ValueError(f"未找到: {name}")
+
+        engine = CrewEngine()
+        args = arguments or {}
+        errors = engine.validate_args(emp, args=args)
+        if errors:
+            raise ValueError(f"参数错误: {'; '.join(errors)}")
+
+        rendered = engine.prompt(emp, args=args)
+        return GetPromptResult(
+            description=emp.description,
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=TextContent(type="text", text=rendered),
+                ),
+            ],
+        )
+
+    # ── MCP Resources: 员工定义的原始 Markdown ──
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        """列出所有员工定义作为可读资源."""
+        result = discover_employees()
+        return [
+            Resource(
+                uri=f"crew://employee/{emp.name}",
+                name=emp.name,
+                title=emp.effective_display_name,
+                description=emp.description,
+                mimeType="text/markdown",
+            )
+            for emp in result.employees.values()
+        ]
+
+    @server.read_resource()
+    async def read_resource(uri) -> list[ReadResourceContents]:
+        """读取员工定义的原始 Markdown 内容."""
+        uri_str = str(uri)
+        prefix = "crew://employee/"
+        if not uri_str.startswith(prefix):
+            raise ValueError(f"未知资源: {uri_str}")
+
+        emp_name = uri_str[len(prefix):]
+        result = discover_employees()
+        emp = result.get(emp_name)
+        if emp is None:
+            raise ValueError(f"未找到: {emp_name}")
+
+        if emp.source_path and emp.source_path.exists():
+            content = emp.source_path.read_text(encoding="utf-8")
+        else:
+            content = emp.body
+
+        return [ReadResourceContents(content=content, mime_type="text/markdown")]
 
     return server
 

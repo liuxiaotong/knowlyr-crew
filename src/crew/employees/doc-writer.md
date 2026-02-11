@@ -11,6 +11,12 @@ author: knowlyr
 triggers:
   - doc
   - docs
+tools:
+  - file_read
+  - file_write
+context:
+  - README.md
+  - pyproject.toml
 args:
   - name: scope
     description: 文档范围（readme / api / inline / changelog）

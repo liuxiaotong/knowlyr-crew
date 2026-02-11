@@ -38,6 +38,8 @@ class Employee(BaseModel):
     triggers: list[str] = Field(default_factory=list, description="触发别名")
     args: list[EmployeeArg] = Field(default_factory=list, description="参数定义")
     output: EmployeeOutput = Field(default_factory=EmployeeOutput, description="输出配置")
+    tools: list[str] = Field(default_factory=list, description="需要的工具声明")
+    context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
     source_layer: Literal["builtin", "global", "project"] = Field(

@@ -11,6 +11,11 @@ author: knowlyr
 triggers:
   - pr
   - pull-request
+tools:
+  - git
+  - bash
+context:
+  - pyproject.toml
 args:
   - name: base
     description: 目标分支
