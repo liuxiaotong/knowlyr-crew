@@ -33,3 +33,6 @@ Thumbs.db
 
 # Crew logs
 .crew/logs/
+
+# Private (proprietary employee definitions)
+private/

@@ -6,7 +6,7 @@ from typing import Any
 
 from crew.employees import builtin_dir
 from crew.models import DiscoveryResult, Employee
-from crew.parser import parse_employee, parse_skill, validate_employee
+from crew.parser import parse_employee, parse_employee_dir, parse_skill, validate_employee
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,11 @@ def _scan_directory(
     dir_path: Path,
     layer: str,
 ) -> list[Employee]:
-    """扫描目录中的 .md 文件，解析为 Employee 列表.
+    """扫描目录中的员工定义（支持目录格式和文件格式）.
+
+    扫描顺序:
+    1. 目录格式: <dir_path>/<name>/employee.yaml → parse_employee_dir()
+    2. 文件格式: <dir_path>/<name>.md → parse_employee()（已被目录覆盖的跳过）
 
     Args:
         dir_path: 要扫描的目录
@@ -37,9 +41,41 @@ def _scan_directory(
     if not dir_path.is_dir():
         return employees
 
+    seen_names: set[str] = set()
+
+    # 1. 扫描目录格式的员工
+    for item in sorted(dir_path.iterdir()):
+        if not item.is_dir() or not (item / "employee.yaml").exists():
+            continue
+        try:
+            # 可写层自动版本管理
+            if layer in ("global", "project"):
+                try:
+                    from crew.versioning import check_and_bump
+                    check_and_bump(item)
+                except Exception:
+                    pass
+
+            emp = parse_employee_dir(item, source_layer=layer)
+
+            errors = validate_employee(emp)
+            if errors:
+                logger.warning("跳过 %s: %s", item, "; ".join(errors))
+                continue
+
+            employees.append(emp)
+            seen_names.add(emp.name)
+        except ValueError as e:
+            logger.warning("跳过 %s: %s", item, e)
+        except Exception as e:
+            logger.warning("跳过 %s: 未知错误 %s", item, e)
+
+    # 2. 扫描文件格式的员工（向后兼容），跳过已被目录覆盖的
     for md_file in sorted(dir_path.glob("*.md")):
         if md_file.name.startswith("_") or md_file.name == "README.md":
             continue
+        if md_file.stem in seen_names:
+            continue  # 目录格式优先
         try:
             emp = parse_employee(md_file)
             emp.source_layer = layer

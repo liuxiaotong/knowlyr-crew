@@ -1,4 +1,4 @@
-"""测试三层发现机制."""
+"""测试四层发现机制（含目录格式支持）."""
 
 import tempfile
 from pathlib import Path
@@ -72,3 +72,74 @@ description: 自定义审查员
         assert d.is_dir()
         md_files = list(d.glob("*.md"))
         assert len(md_files) >= 5
+
+    def test_discover_dir_format_in_project(self):
+        """项目层应能发现目录格式的员工."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            crew_dir = Path(tmpdir) / ".crew" / "my-worker"
+            crew_dir.mkdir(parents=True)
+            (crew_dir / "employee.yaml").write_text(
+                "name: my-worker\ndescription: 目录格式员工\nversion: '1.0'\n",
+                encoding="utf-8",
+            )
+            (crew_dir / "prompt.md").write_text(
+                "# 测试\n\n这是目录格式员工。\n",
+                encoding="utf-8",
+            )
+
+            result = discover_employees(project_dir=Path(tmpdir))
+            assert "my-worker" in result.employees
+            emp = result.employees["my-worker"]
+            assert emp.source_layer == "project"
+            assert emp.source_path == crew_dir
+
+    def test_dir_format_overrides_md_format(self):
+        """同名时目录格式应覆盖文件格式."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            crew_dir = Path(tmpdir) / ".crew"
+            crew_dir.mkdir()
+
+            # 文件格式
+            (crew_dir / "dup-worker.md").write_text(
+                "---\nname: dup-worker\ndescription: 文件版\n---\n文件内容。\n",
+                encoding="utf-8",
+            )
+
+            # 目录格式（同名）
+            dir_emp = crew_dir / "dup-worker"
+            dir_emp.mkdir()
+            (dir_emp / "employee.yaml").write_text(
+                "name: dup-worker\ndescription: 目录版\nversion: '1.0'\n",
+                encoding="utf-8",
+            )
+            (dir_emp / "prompt.md").write_text("目录内容。\n", encoding="utf-8")
+
+            result = discover_employees(project_dir=Path(tmpdir))
+            emp = result.employees["dup-worker"]
+            assert emp.description == "目录版"
+            assert emp.source_path == dir_emp
+
+    def test_mixed_formats_in_same_layer(self):
+        """同一层中目录格式和文件格式员工应共存."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            crew_dir = Path(tmpdir) / ".crew"
+            crew_dir.mkdir()
+
+            # 文件格式员工
+            (crew_dir / "file-worker.md").write_text(
+                "---\nname: file-worker\ndescription: 文件员工\n---\n内容。\n",
+                encoding="utf-8",
+            )
+
+            # 目录格式员工
+            dir_emp = crew_dir / "dir-worker"
+            dir_emp.mkdir()
+            (dir_emp / "employee.yaml").write_text(
+                "name: dir-worker\ndescription: 目录员工\nversion: '1.0'\n",
+                encoding="utf-8",
+            )
+            (dir_emp / "prompt.md").write_text("目录内容。\n", encoding="utf-8")
+
+            result = discover_employees(project_dir=Path(tmpdir))
+            assert "file-worker" in result.employees
+            assert "dir-worker" in result.employees

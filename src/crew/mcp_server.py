@@ -470,7 +470,11 @@ def create_server() -> "Server":
             raise ValueError(f"未找到: {emp_name}")
 
         if emp.source_path and emp.source_path.exists():
-            content = emp.source_path.read_text(encoding="utf-8")
+            if emp.source_path.is_dir():
+                # 目录格式：返回拼接后的完整内容（即 body）
+                content = emp.body
+            else:
+                content = emp.source_path.read_text(encoding="utf-8")
         else:
             content = emp.body
 

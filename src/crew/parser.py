@@ -1,4 +1,4 @@
-"""EMPLOYEE.md / SKILL.md 解析器 — YAML frontmatter + Markdown 正文."""
+"""EMPLOYEE.md / SKILL.md / 目录格式 解析器."""
 
 import re
 from pathlib import Path
@@ -121,6 +121,102 @@ def parse_employee_string(
         model=str(frontmatter.get("model", "")),
         body=body,
         source_path=source_path,
+        source_layer=source_layer,
+    )
+
+
+def parse_employee_dir(
+    dir_path: Path,
+    source_layer: str = "builtin",
+) -> Employee:
+    """从目录结构解析员工定义.
+
+    目录结构:
+        employee.yaml   — 纯配置（等同原 frontmatter）
+        prompt.md       — 主提示词
+        workflows/*.md  — 可选：按 scope 拆分的工作流
+        adaptors/*.md   — 可选：按项目类型适配
+
+    Args:
+        dir_path: 员工目录路径
+        source_layer: 来源层标识
+
+    Raises:
+        ValueError: 缺少必要文件或必填字段
+    """
+    config_path = dir_path / "employee.yaml"
+    prompt_path = dir_path / "prompt.md"
+
+    if not config_path.exists():
+        raise ValueError(f"缺少 employee.yaml: {dir_path}")
+    if not prompt_path.exists():
+        raise ValueError(f"缺少 prompt.md: {dir_path}")
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError(f"employee.yaml 格式无效: {dir_path}")
+
+    name = config.get("name")
+    if not name:
+        raise ValueError(f"缺少必填字段 name: {config_path}")
+
+    description = config.get("description")
+    if not description:
+        raise ValueError(f"缺少必填字段 description: {config_path}")
+
+    # 拼接 body: prompt.md + workflows/*.md + adaptors/*.md
+    parts = [prompt_path.read_text(encoding="utf-8")]
+
+    for subdir in ("workflows", "adaptors"):
+        sub_path = dir_path / subdir
+        if sub_path.is_dir():
+            for md_file in sorted(sub_path.glob("*.md")):
+                parts.append(md_file.read_text(encoding="utf-8"))
+
+    body = "\n\n".join(parts)
+
+    if not body.strip():
+        raise ValueError(f"prompt.md 正文不能为空: {dir_path}")
+
+    # 解析 args
+    raw_args = config.get("args", [])
+    args = []
+    if isinstance(raw_args, list):
+        for item in raw_args:
+            if isinstance(item, dict):
+                args.append(EmployeeArg(**item))
+
+    # 解析 output
+    raw_output = config.get("output", {})
+    output = EmployeeOutput(**raw_output) if isinstance(raw_output, dict) else EmployeeOutput()
+
+    # 解析 tools
+    raw_tools = config.get("tools", [])
+    tools = raw_tools if isinstance(raw_tools, list) else []
+
+    # 解析 context
+    raw_context = config.get("context", [])
+    context = raw_context if isinstance(raw_context, list) else []
+
+    version = str(config.get("version", "1.0"))
+
+    return Employee(
+        name=name,
+        display_name=config.get("display_name", ""),
+        character_name=config.get("character_name", ""),
+        summary=config.get("summary", ""),
+        version=version,
+        description=description,
+        tags=config.get("tags", []),
+        author=config.get("author", ""),
+        triggers=config.get("triggers", []),
+        args=args,
+        output=output,
+        tools=tools,
+        context=context,
+        model=str(config.get("model", "")),
+        body=body,
+        source_path=dir_path,
         source_layer=source_layer,
     )
 

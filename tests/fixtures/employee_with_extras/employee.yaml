@@ -1,0 +1,10 @@
+name: extras-worker
+display_name: 扩展员工
+version: "2.0"
+description: 带 workflows 和 adaptors 的测试员工
+tags:
+  - test
+args:
+  - name: target
+    description: 目标
+    required: true

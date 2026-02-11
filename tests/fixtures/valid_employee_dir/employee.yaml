@@ -1,0 +1,27 @@
+name: dir-worker
+display_name: 目录员工
+character_name: 小目
+summary: 用于测试目录格式的员工定义
+version: "1.0"
+description: 目录格式测试员工
+tags:
+  - test
+  - dir-format
+author: test
+triggers:
+  - dw
+tools:
+  - file_read
+  - bash
+context:
+  - tests/
+args:
+  - name: target
+    description: 目标路径
+    required: true
+  - name: mode
+    description: 工作模式
+    default: normal
+output:
+  format: markdown
+  filename: "test-{date}.md"

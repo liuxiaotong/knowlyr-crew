@@ -10,7 +10,7 @@ import click
 from crew import __version__
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
-from crew.parser import parse_employee, validate_employee
+from crew.parser import parse_employee, parse_employee_dir, validate_employee
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -289,27 +289,68 @@ def run(
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
 def validate(path: str):
-    """校验 EMPLOYEE.md 文件或目录."""
+    """校验员工定义（支持 .md 文件、目录格式、或包含多个员工的目录）."""
     target = Path(path)
-    files = list(target.glob("*.md")) if target.is_dir() else [target]
 
     total = 0
     passed = 0
 
-    for f in files:
-        if f.name.startswith("_") or f.name == "README.md":
-            continue
+    # 单个目录格式员工：path/employee.yaml 存在
+    if target.is_dir() and (target / "employee.yaml").exists():
         total += 1
         try:
-            emp = parse_employee(f)
+            emp = parse_employee_dir(target)
             errors = validate_employee(emp)
             if errors:
-                click.echo(f"✗ {f.name}: {'; '.join(errors)}")
+                click.echo(f"✗ {target.name}/: {'; '.join(errors)}")
             else:
-                click.echo(f"✓ {f.name} ({emp.effective_display_name})")
+                click.echo(f"✓ {target.name}/ ({emp.effective_display_name} v{emp.version})")
                 passed += 1
         except ValueError as e:
-            click.echo(f"✗ {f.name}: {e}")
+            click.echo(f"✗ {target.name}/: {e}")
+    elif target.is_dir():
+        # 扫描目录中的所有员工（目录格式 + 文件格式）
+        for item in sorted(target.iterdir()):
+            if item.is_dir() and (item / "employee.yaml").exists():
+                total += 1
+                try:
+                    emp = parse_employee_dir(item)
+                    errors = validate_employee(emp)
+                    if errors:
+                        click.echo(f"✗ {item.name}/: {'; '.join(errors)}")
+                    else:
+                        click.echo(f"✓ {item.name}/ ({emp.effective_display_name} v{emp.version})")
+                        passed += 1
+                except ValueError as e:
+                    click.echo(f"✗ {item.name}/: {e}")
+
+        for f in sorted(target.glob("*.md")):
+            if f.name.startswith("_") or f.name == "README.md":
+                continue
+            total += 1
+            try:
+                emp = parse_employee(f)
+                errors = validate_employee(emp)
+                if errors:
+                    click.echo(f"✗ {f.name}: {'; '.join(errors)}")
+                else:
+                    click.echo(f"✓ {f.name} ({emp.effective_display_name})")
+                    passed += 1
+            except ValueError as e:
+                click.echo(f"✗ {f.name}: {e}")
+    else:
+        # 单个 .md 文件
+        total += 1
+        try:
+            emp = parse_employee(target)
+            errors = validate_employee(emp)
+            if errors:
+                click.echo(f"✗ {target.name}: {'; '.join(errors)}")
+            else:
+                click.echo(f"✓ {target.name} ({emp.effective_display_name})")
+                passed += 1
+        except ValueError as e:
+            click.echo(f"✗ {target.name}: {e}")
 
     click.echo(f"\n{passed}/{total} 通过校验")
     if passed < total:
@@ -318,13 +359,58 @@ def validate(path: str):
 
 @main.command()
 @click.option("--employee", type=str, default=None, help="创建指定员工的模板")
-def init(employee: str | None):
+@click.option("--dir-format", is_flag=True, default=False, help="使用目录格式创建员工模板")
+def init(employee: str | None, dir_format: bool):
     """初始化 .crew/ 目录或创建员工模板."""
     crew_dir = Path.cwd() / ".crew"
     crew_dir.mkdir(exist_ok=True)
 
-    if employee:
-        # 创建员工模板
+    if employee and dir_format:
+        # 目录格式模板
+        emp_dir = crew_dir / employee
+        if emp_dir.exists():
+            click.echo(f"目录已存在: {emp_dir}", err=True)
+            sys.exit(1)
+
+        emp_dir.mkdir()
+        (emp_dir / "employee.yaml").write_text(
+            f"""name: {employee}
+display_name: {employee}
+description: 在此填写一句话描述
+version: "1.0"
+tags: []
+triggers: []
+args:
+  - name: target
+    description: 目标
+    required: true
+output:
+  format: markdown
+""",
+            encoding="utf-8",
+        )
+        (emp_dir / "prompt.md").write_text(
+            """# 角色定义
+
+你是……
+
+## 工作流程
+
+1. 第一步
+2. 第二步
+3. 第三步
+
+## 输出格式
+
+按需定义输出格式。
+""",
+            encoding="utf-8",
+        )
+        click.echo(f"已创建: {emp_dir}/")
+        click.echo(f"  ├── employee.yaml")
+        click.echo(f"  └── prompt.md")
+    elif employee:
+        # 单文件格式模板
         template = f"""---
 name: {employee}
 display_name: {employee}
@@ -362,6 +448,7 @@ output:
     else:
         click.echo(f"已初始化: {crew_dir}/")
         click.echo("使用 --employee <name> 创建员工模板。")
+        click.echo("添加 --dir-format 使用目录格式。")
 
 
 # ── Skills 导出命令 ──
