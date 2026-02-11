@@ -127,8 +127,10 @@ class CrewEngine:
             f"# {display}",
             "",
             f"**角色**: {display}",
-            f"**描述**: {employee.description}",
         ]
+        if employee.character_name:
+            parts.append(f"**姓名**: {employee.character_name}")
+        parts.append(f"**描述**: {employee.description}")
 
         # 注入 Agent 身份信息
         if agent_identity:
@@ -139,6 +141,8 @@ class CrewEngine:
             if agent_identity.domains:
                 parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
 
+        if employee.model:
+            parts.append(f"**模型**: {employee.model}")
         if employee.tags:
             parts.append(f"**标签**: {', '.join(employee.tags)}")
         if employee.tools:

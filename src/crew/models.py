@@ -44,6 +44,8 @@ class Employee(BaseModel):
 
     name: str = Field(description="唯一标识符，仅 [a-z0-9-]")
     display_name: str = Field(default="", description="中文显示名")
+    character_name: str = Field(default="", description="角色姓名")
+    summary: str = Field(default="", description="一段话摘要（用于讨论会 summary 模式）")
     version: str = Field(default="1.0", description="版本号")
     description: str = Field(description="一句话描述")
     tags: list[str] = Field(default_factory=list, description="分类标签")
@@ -53,6 +55,7 @@ class Employee(BaseModel):
     output: EmployeeOutput = Field(default_factory=EmployeeOutput, description="输出配置")
     tools: list[str] = Field(default_factory=list, description="需要的工具声明")
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
+    model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
     source_layer: Literal["builtin", "global", "skill", "project"] = Field(

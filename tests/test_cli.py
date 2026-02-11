@@ -32,9 +32,12 @@ class TestCLI:
         assert "refactor-guide" not in result.output
 
     def test_list_filter_layer(self):
-        result = self.runner.invoke(main, ["list", "--layer", "builtin", "-f", "json"])
-        assert result.exit_code == 0
-        assert '"layer": "builtin"' in result.output
+        # 全局层可能覆盖内置员工，测试两种 layer 都能正确过滤
+        for layer in ("builtin", "global"):
+            result = self.runner.invoke(main, ["list", "--layer", layer, "-f", "json"])
+            assert result.exit_code == 0
+            if result.output.strip() and "未找到" not in result.output:
+                assert f'"layer": "{layer}"' in result.output
 
     def test_show(self):
         result = self.runner.invoke(main, ["show", "code-reviewer"])

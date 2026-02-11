@@ -107,6 +107,8 @@ def parse_employee_string(
     return Employee(
         name=name,
         display_name=frontmatter.get("display_name", ""),
+        character_name=frontmatter.get("character_name", ""),
+        summary=frontmatter.get("summary", ""),
         version=str(frontmatter.get("version", "1.0")),
         description=description,
         tags=frontmatter.get("tags", []),
@@ -116,6 +118,7 @@ def parse_employee_string(
         output=output,
         tools=tools,
         context=context,
+        model=str(frontmatter.get("model", "")),
         body=body,
         source_path=source_path,
         source_layer=source_layer,
@@ -331,6 +334,8 @@ def parse_skill_string(
     return Employee(
         name=name,
         display_name=metadata.get("display_name", ""),
+        character_name=metadata.get("character_name", ""),
+        summary=metadata.get("summary", ""),
         version=metadata.get("version", "1.0"),
         description=description,
         tags=metadata.get("tags", []),
@@ -340,6 +345,7 @@ def parse_skill_string(
         output=EmployeeOutput(**metadata["output"]) if "output" in metadata else EmployeeOutput(),
         tools=tools,
         context=metadata.get("context", []),
+        model=metadata.get("model", ""),
         body=clean_body,
         source_path=source_path,
         source_layer="skill",

@@ -207,9 +207,11 @@ def create_server() -> "Server":
                 {
                     "name": e.name,
                     "display_name": e.effective_display_name,
+                    "character_name": e.character_name,
                     "description": e.description,
                     "tags": e.tags,
                     "triggers": e.triggers,
+                    "model": e.model,
                     "layer": e.source_layer,
                 }
                 for e in employees

@@ -1,6 +1,7 @@
 ---
 name: test-worker
 display_name: 测试员工
+character_name: 小测
 description: 用于测试的员工定义
 tags:
   - test
