@@ -79,6 +79,10 @@ def create_server() -> "Server":
                             "description": "传递给员工的参数（key-value）",
                             "additionalProperties": {"type": "string"},
                         },
+                        "agent_id": {
+                            "type": "integer",
+                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                        },
                     },
                     "required": ["name"],
                 },
@@ -137,6 +141,7 @@ def create_server() -> "Server":
         elif name == "run_employee":
             emp_name = arguments["name"]
             emp_args = arguments.get("args", {})
+            agent_id = arguments.get("agent_id")
             result = discover_employees()
             emp = result.get(emp_name)
             if emp is None:
@@ -145,15 +150,33 @@ def create_server() -> "Server":
             errors = engine.validate_args(emp, args=emp_args)
             if errors:
                 return [TextContent(type="text", text=f"参数错误: {'; '.join(errors)}")]
-            prompt = engine.prompt(emp, args=emp_args)
+
+            # 获取 Agent 身份（可选）
+            agent_identity = None
+            if agent_id is not None:
+                try:
+                    from crew.id_client import fetch_agent_identity
+                    agent_identity = fetch_agent_identity(agent_id)
+                except Exception:
+                    pass
+
+            prompt = engine.prompt(emp, args=emp_args, agent_identity=agent_identity)
 
             # 记录工作日志
             try:
-                logger = WorkLogger()
-                sid = logger.create_session(emp.name, args=emp_args)
-                logger.add_entry(sid, "prompt_generated", f"{len(prompt)} chars")
+                log = WorkLogger()
+                sid = log.create_session(emp.name, args=emp_args, agent_id=agent_id)
+                log.add_entry(sid, "prompt_generated", f"{len(prompt)} chars")
             except Exception:
                 pass  # 日志失败不影响主流程
+
+            # 发送心跳（可选）
+            if agent_id is not None:
+                try:
+                    from crew.id_client import send_heartbeat
+                    send_heartbeat(agent_id, detail=f"employee={emp.name}")
+                except Exception:
+                    pass
 
             return [TextContent(type="text", text=prompt)]
 

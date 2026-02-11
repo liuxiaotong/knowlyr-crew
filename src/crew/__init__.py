@@ -11,6 +11,8 @@ from crew.models import (
     Employee,
     EmployeeArg,
     EmployeeOutput,
+    SKILL_TO_TOOL,
+    TOOL_TO_SKILL,
     WorkLogEntry,
 )
 
@@ -19,6 +21,8 @@ __all__ = [
     "Employee",
     "EmployeeArg",
     "EmployeeOutput",
+    "SKILL_TO_TOOL",
+    "TOOL_TO_SKILL",
     "WorkLogEntry",
     "__version__",
 ]

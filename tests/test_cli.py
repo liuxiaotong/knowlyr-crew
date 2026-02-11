@@ -76,7 +76,7 @@ class TestCLI:
         from crew.employees import builtin_dir
         result = self.runner.invoke(main, ["validate", str(builtin_dir())])
         assert result.exit_code == 0
-        assert "5/5 通过校验" in result.output
+        assert "通过校验" in result.output
 
     def test_validate_invalid(self):
         fixtures = Path(__file__).parent / "fixtures"

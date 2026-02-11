@@ -40,7 +40,7 @@ def main(ctx: click.Context, verbose: bool):
 @main.command("list")
 @click.option("--tag", type=str, default=None, help="按标签过滤")
 @click.option(
-    "--layer", type=click.Choice(["builtin", "global", "project"]),
+    "--layer", type=click.Choice(["builtin", "global", "skill", "project"]),
     default=None, help="按来源层过滤",
 )
 @click.option(
@@ -178,6 +178,7 @@ def show(name: str):
 @click.argument("name")
 @click.argument("positional_args", nargs=-1)
 @click.option("--arg", "named_args", multiple=True, help="命名参数 (key=value)")
+@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--raw", is_flag=True, help="输出原始渲染结果（不包裹 prompt 格式）")
 @click.option("--copy", "to_clipboard", is_flag=True, help="复制到剪贴板")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
@@ -185,6 +186,7 @@ def run(
     name: str,
     positional_args: tuple[str, ...],
     named_args: tuple[str, ...],
+    agent_id: int | None,
     raw: bool,
     to_clipboard: bool,
     output: str | None,
@@ -221,21 +223,43 @@ def run(
             click.echo(f"参数错误: {err}", err=True)
         sys.exit(1)
 
+    # 获取 Agent 身份（可选）
+    agent_identity = None
+    if agent_id is not None:
+        try:
+            from crew.id_client import fetch_agent_identity
+            agent_identity = fetch_agent_identity(agent_id)
+            if agent_identity is None:
+                click.echo(f"Warning: 无法获取 Agent {agent_id} 身份，继续生成 prompt", err=True)
+        except ImportError:
+            click.echo("Warning: httpx 未安装，无法连接 knowlyr-id", err=True)
+
     # 生成
     if raw:
         text = engine.render(emp, args=args_dict, positional=list(positional_args))
     else:
-        text = engine.prompt(emp, args=args_dict, positional=list(positional_args))
+        text = engine.prompt(
+            emp, args=args_dict, positional=list(positional_args),
+            agent_identity=agent_identity,
+        )
 
     # 记录工作日志
     try:
         from crew.log import WorkLogger
 
         work_logger = WorkLogger()
-        session_id = work_logger.create_session(emp.name, args=args_dict)
+        session_id = work_logger.create_session(emp.name, args=args_dict, agent_id=agent_id)
         work_logger.add_entry(session_id, "prompt_generated", f"via CLI, {len(text)} chars")
     except Exception:
         pass  # 日志失败不影响主流程
+
+    # 发送心跳（可选）
+    if agent_id is not None:
+        try:
+            from crew.id_client import send_heartbeat
+            send_heartbeat(agent_id, detail=f"employee={emp.name}")
+        except Exception:
+            pass  # 心跳失败不影响主流程
 
     # 输出
     if output:
@@ -329,6 +353,85 @@ output:
     else:
         click.echo(f"已初始化: {crew_dir}/")
         click.echo("使用 --employee <name> 创建员工模板。")
+
+
+# ── Skills 导出命令 ──
+
+
+@main.command("export")
+@click.argument("name")
+@click.option(
+    "-d", "--dir", "project_dir", type=click.Path(),
+    default=None, help="项目根目录（默认当前目录）",
+)
+def export_cmd(name: str, project_dir: str | None):
+    """导出单个员工到 .claude/skills/<name>/SKILL.md."""
+    from crew.skill_converter import export_employee
+
+    result = discover_employees()
+    emp = result.get(name)
+
+    if emp is None:
+        click.echo(f"未找到员工: {name}", err=True)
+        sys.exit(1)
+
+    pdir = Path(project_dir) if project_dir else Path.cwd()
+    path = export_employee(emp, pdir)
+    click.echo(f"已导出: {path}")
+
+
+@main.command("export-all")
+@click.option(
+    "-d", "--dir", "project_dir", type=click.Path(),
+    default=None, help="项目根目录（默认当前目录）",
+)
+def export_all_cmd(project_dir: str | None):
+    """导出所有员工到 .claude/skills/."""
+    from crew.skill_converter import export_all
+
+    result = discover_employees()
+    employees = list(result.employees.values())
+
+    if not employees:
+        click.echo("未找到员工。", err=True)
+        return
+
+    pdir = Path(project_dir) if project_dir else Path.cwd()
+    paths = export_all(employees, pdir)
+    for p in paths:
+        click.echo(f"已导出: {p}")
+    click.echo(f"\n共导出 {len(paths)} 个员工到 .claude/skills/")
+
+
+@main.command()
+@click.option("--clean", is_flag=True, help="删除不再存在的孤儿技能目录")
+@click.option(
+    "-d", "--dir", "project_dir", type=click.Path(),
+    default=None, help="项目根目录（默认当前目录）",
+)
+def sync(clean: bool, project_dir: str | None):
+    """同步所有员工到 .claude/skills/ 目录.
+
+    --clean 会删除 .claude/skills/ 中不再对应任何员工的孤儿目录。
+    """
+    from crew.skill_converter import sync_skills
+
+    result = discover_employees()
+    employees = list(result.employees.values())
+
+    if not employees:
+        click.echo("未找到员工。", err=True)
+        return
+
+    pdir = Path(project_dir) if project_dir else Path.cwd()
+    report = sync_skills(employees, pdir, clean=clean)
+
+    for p in report["exported"]:
+        click.echo(f"已同步: {p}")
+    for p in report["removed"]:
+        click.echo(f"已删除: {p}")
+
+    click.echo(f"\n同步完成: {len(report['exported'])} 导出, {len(report['removed'])} 删除")
 
 
 # ── log 子命令组 ──

@@ -101,10 +101,14 @@ class CrewEngine:
         employee: Employee,
         args: dict[str, str] | None = None,
         positional: list[str] | None = None,
+        agent_identity: "AgentIdentity | None" = None,
     ) -> str:
         """生成完整的 system prompt.
 
         包含角色前言 + 渲染后正文 + 输出约束。
+
+        Args:
+            agent_identity: 可选的 knowlyr-id Agent 身份（注入 prompt header）
         """
         rendered = self.render(employee, args=args, positional=positional)
         display = employee.effective_display_name
@@ -116,12 +120,25 @@ class CrewEngine:
             f"**描述**: {employee.description}",
         ]
 
+        # 注入 Agent 身份信息
+        if agent_identity:
+            if agent_identity.nickname:
+                parts.append(f"**Agent**: {agent_identity.nickname}")
+            if agent_identity.title:
+                parts.append(f"**职称**: {agent_identity.title}")
+            if agent_identity.domains:
+                parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
+
         if employee.tags:
             parts.append(f"**标签**: {', '.join(employee.tags)}")
         if employee.tools:
             parts.append(f"**需要工具**: {', '.join(employee.tools)}")
         if employee.context:
             parts.append(f"**预读上下文**: {', '.join(employee.context)}")
+
+        # Agent memory（持久记忆/上下文）
+        if agent_identity and agent_identity.memory:
+            parts.extend(["", "---", "", "## Agent 记忆", "", agent_identity.memory])
 
         parts.extend(["", "---", "", rendered])
 

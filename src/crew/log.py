@@ -35,12 +35,14 @@ class WorkLogger:
         self,
         employee_name: str,
         args: dict[str, str] | None = None,
+        agent_id: int | None = None,
     ) -> str:
         """创建新的工作 session.
 
         Args:
             employee_name: 员工名称
             args: 调用参数
+            agent_id: 关联的 knowlyr-id Agent ID
 
         Returns:
             session_id
@@ -53,6 +55,7 @@ class WorkLogger:
             action="session_start",
             detail=f"员工 {employee_name} 开始工作",
             args=args or {},
+            agent_id=agent_id,
         )
 
         with open(self._session_file(session_id), "a", encoding="utf-8") as f:

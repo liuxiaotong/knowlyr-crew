@@ -8,11 +8,11 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-65_passed-brightgreen.svg)](#开发)
+[![Tests](https://img.shields.io/badge/tests-122_passed-brightgreen.svg)](#开发)
 
 **GitHub Topics**: `ai-skill-loader`, `mcp`, `model-context-protocol`, `digital-employee`, `claude-code`
 
-[MCP 集成](#mcp-集成推荐) · [CLI 使用](#cli-使用) · [内置技能](#内置技能) · [自定义技能](#自定义技能) · [生态](#data-pipeline-生态)
+[MCP 集成](#mcp-集成推荐) · [CLI 使用](#cli-使用) · [内置技能](#内置技能) · [自定义技能](#自定义技能) · [Skills 互通](#claude-code-skills-互通) · [knowlyr-id 协作](#knowlyr-id-协作) · [生态](#data-pipeline-生态)
 
 </div>
 
@@ -33,6 +33,12 @@
 │  角色+流程   │     MCP Tools        │  自行执行工作流  │
 │  +参数+工具  │ ──────────────────▶  │                  │
 └──────────────┘                      └──────────────────┘
+        ▲                                      │
+        │         knowlyr-id                   │
+        │    ┌──────────────────┐              │
+        └─── │  Agent 身份/配置  │ ◀────────────┘
+             │  heartbeat 回报   │   --agent-id
+             └──────────────────┘
 ```
 
 Crew 通过 MCP 协议暴露三种原语：
@@ -90,6 +96,9 @@ knowlyr-crew run code-reviewer main
 # 用触发词（简写）
 knowlyr-crew run review main --arg focus=security
 
+# 绑定 knowlyr-id Agent 身份
+knowlyr-crew run code-reviewer main --agent-id 3050
+
 # 复制到剪贴板
 knowlyr-crew run review main --copy
 
@@ -102,9 +111,12 @@ knowlyr-crew show code-reviewer
 ```bash
 knowlyr-crew list [--tag TAG] [--layer LAYER] [-f json]   # 列出技能
 knowlyr-crew show <name>                                   # 查看详情
-knowlyr-crew run <name> [ARGS...] [--arg k=v] [--copy]    # 生成 prompt
+knowlyr-crew run <name> [ARGS...] [--agent-id ID] [--copy] # 生成 prompt
 knowlyr-crew validate <path>                               # 校验文件
 knowlyr-crew init [--employee <name>]                      # 初始化
+knowlyr-crew export <name>                                 # 导出为 SKILL.md
+knowlyr-crew export-all                                    # 批量导出
+knowlyr-crew sync [--clean]                                # 同步到 .claude/skills/
 knowlyr-crew log list [--employee NAME]                    # 工作日志
 knowlyr-crew log show <session_id>                         # 日志详情
 knowlyr-crew mcp                                           # 启动 MCP Server
@@ -126,13 +138,14 @@ knowlyr-crew mcp                                           # 启动 MCP Server
 
 ## 自定义技能
 
-### 三层发现机制
+### 四层发现机制
 
 | 优先级 | 位置 | 说明 |
 |--------|------|------|
-| 高 | `.crew/*.md`（项目目录） | 项目专属技能 |
+| 最高 | `.crew/*.md`（项目目录） | 项目专属技能 |
+| 高 | `.claude/skills/<name>/SKILL.md` | Claude Code Skills 格式 |
 | 中 | `~/.knowlyr/crew/*.md` | 全局自定义技能 |
-| 低 | 包内置 | 5 个默认技能 |
+| 低 | 包内置 | 默认技能 |
 
 高层同名技能会覆盖低层。
 
@@ -186,6 +199,72 @@ output:                       # 可选，输出配置
 
 ---
 
+## Claude Code Skills 互通
+
+Crew 支持与 Claude Code 原生 Skills 系统双向转换，实现**一次定义，多处使用**。
+
+### 格式对照
+
+| EMPLOYEE.md | SKILL.md | 转换 |
+|-------------|----------|------|
+| `tools: [file_read, git]` | `allowed-tools: Read Bash(git:*)` | 自动映射 |
+| `args` (typed, required) | `argument-hint: <target> [mode]` | `<>` = 必填, `[]` = 可选 |
+| `$target`, `$focus` | `$0`, `$1` | 位置变量互转 |
+| `display_name`, `tags` 等 | HTML 注释保留 | 元数据往返 |
+
+### 导出到 Claude Code
+
+```bash
+# 导出单个员工
+knowlyr-crew export code-reviewer
+# → .claude/skills/code-reviewer/SKILL.md
+
+# 批量导出所有员工
+knowlyr-crew export-all
+
+# 同步（+ 清理孤儿）
+knowlyr-crew sync --clean
+```
+
+### 从 Skills 发现
+
+`.claude/skills/<name>/SKILL.md` 中的技能会被自动发现，与 EMPLOYEE.md 一样参与四层优先级合并。
+
+---
+
+## knowlyr-id 协作
+
+Crew 可与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——
+**id 管"人事档案"（身份、配额、API Key），Crew 管"岗位技能"（流程、工具、参数）**。
+
+### 工作流
+
+```
+knowlyr-crew run code-reviewer main --agent-id 3050
+    │
+    ├─ 1. 发现 code-reviewer 技能定义（不变）
+    ├─ 2. 从 knowlyr-id 获取 Agent 3050 的身份
+    │      → nickname, title, domains, memory
+    ├─ 3. 生成 prompt（注入 Agent 身份到 header）
+    ├─ 4. 向 knowlyr-id 发送心跳（计入日执行数）
+    └─ 5. 输出 prompt
+```
+
+### 配置
+
+```bash
+# 环境变量
+export KNOWLYR_ID_URL=https://id.knowlyr.com
+export AGENT_API_TOKEN=your-token
+
+# 安装 HTTP 客户端依赖
+pip install knowlyr-crew[id]
+```
+
+不带 `--agent-id` 时，所有行为与原来完全一致。knowlyr-id 连接是可选的。
+
+---
+
 ## Data Pipeline 生态
 
 <details>
@@ -207,11 +286,14 @@ graph LR
         Recorder --> Reward["Reward<br/>过程打分"]
     end
     Crew["Crew<br/>AI Skill Loader"]
+    ID["ID<br/>身份系统"]
     Crew -.-> Radar
     Crew -.-> Check
     Crew -.-> Audit
     Crew -.-> Hub
+    Crew <--> ID
     style Crew fill:#0969da,color:#fff,stroke:#0969da
+    style ID fill:#2da44e,color:#fff,stroke:#2da44e
 ```
 
 </details>
@@ -224,6 +306,7 @@ graph LR
 | 生产 | **DataLabel** | knowlyr-datalabel | 轻量标注 | [GitHub](https://github.com/liuxiaotong/data-label) |
 | 质检 | **DataCheck** | knowlyr-datacheck | 规则验证、重复检测 | [GitHub](https://github.com/liuxiaotong/data-check) |
 | 审计 | **ModelAudit** | knowlyr-modelaudit | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
+| 身份 | **knowlyr-id** | — | 用户身份、Agent 管理 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
 | 协作 | **Crew** | knowlyr-crew | AI Skill Loader | You are here |
 | Agent | **knowlyr-agent** | knowlyr-sandbox / recorder / reward / hub | 沙箱 + 录制 + Reward + 编排 | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
 
@@ -238,7 +321,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**测试**: 65 个用例，覆盖解析、发现、引擎、CLI、MCP Server、工作日志全链路。
+**测试**: 122 个用例，覆盖解析、发现、引擎、CLI、MCP Server、Skills 转换、knowlyr-id 客户端全链路。
 
 ## License
 

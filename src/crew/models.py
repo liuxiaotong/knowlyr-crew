@@ -6,6 +6,19 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+# ── Crew tools <-> Claude Code Skills allowed-tools 映射 ──
+
+TOOL_TO_SKILL: dict[str, str] = {
+    "file_read": "Read",
+    "file_write": "Write",
+    "git": "Bash(git:*)",
+    "bash": "Bash",
+    "grep": "Grep",
+    "glob": "Glob",
+}
+
+SKILL_TO_TOOL: dict[str, str] = {v: k for k, v in TOOL_TO_SKILL.items()}
+
 
 class EmployeeArg(BaseModel):
     """员工参数定义."""
@@ -42,7 +55,7 @@ class Employee(BaseModel):
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
-    source_layer: Literal["builtin", "global", "project"] = Field(
+    source_layer: Literal["builtin", "global", "skill", "project"] = Field(
         default="builtin", description="来源层"
     )
 
@@ -60,6 +73,7 @@ class WorkLogEntry(BaseModel):
     action: str = Field(description="动作描述")
     detail: str = Field(default="", description="详细信息")
     args: dict[str, str] = Field(default_factory=dict, description="调用参数")
+    agent_id: int | None = Field(default=None, description="关联的 knowlyr-id Agent ID")
 
 
 class DiscoveryResult(BaseModel):

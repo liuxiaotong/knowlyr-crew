@@ -23,8 +23,10 @@ class TestDiscovery:
     def test_builtin_source_layer(self):
         """内置员工的 source_layer 应为 builtin."""
         result = discover_employees(project_dir=Path("/nonexistent"))
-        for emp in result.employees.values():
-            assert emp.source_layer == "builtin"
+        # 只检查内置的 5 个员工（全局层可能有额外员工）
+        builtin_names = ["code-reviewer", "test-engineer", "doc-writer", "refactor-guide", "pr-creator"]
+        for name in builtin_names:
+            assert result.employees[name].source_layer == "builtin"
 
     def test_project_overrides_builtin(self):
         """项目层员工应覆盖同名内置员工."""

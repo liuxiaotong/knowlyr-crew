@@ -85,3 +85,34 @@ class TestCrewEngine:
         # output.filename 非空，应有输出约束部分
         assert "输出约束" in result
         assert "markdown" in result
+
+    def test_prompt_with_agent_identity(self):
+        """带 Agent 身份时 prompt 应包含身份信息."""
+        from crew.id_client import AgentIdentity
+        identity = AgentIdentity(
+            agent_id=3050,
+            nickname="Alice",
+            title="Senior Reviewer",
+            domains=["python", "security"],
+            memory="偏好简洁的审查风格。",
+        )
+        result = self.engine.prompt(
+            self.employee,
+            args={"target": "test"},
+            agent_identity=identity,
+        )
+        assert "Alice" in result
+        assert "Senior Reviewer" in result
+        assert "python" in result
+        assert "Agent 记忆" in result
+        assert "偏好简洁" in result
+
+    def test_prompt_without_agent_identity(self):
+        """不带 Agent 身份时 prompt 应与原来一致."""
+        result = self.engine.prompt(
+            self.employee,
+            args={"target": "test"},
+            agent_identity=None,
+        )
+        assert "**Agent**" not in result
+        assert "Agent 记忆" not in result

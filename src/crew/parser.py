@@ -1,11 +1,11 @@
-"""EMPLOYEE.md 解析器 — YAML frontmatter + Markdown 正文."""
+"""EMPLOYEE.md / SKILL.md 解析器 — YAML frontmatter + Markdown 正文."""
 
 import re
 from pathlib import Path
 
 import yaml
 
-from crew.models import Employee, EmployeeArg, EmployeeOutput
+from crew.models import Employee, EmployeeArg, EmployeeOutput, SKILL_TO_TOOL
 
 # name 格式：仅小写字母、数字、连字符，不以连字符开头或结尾
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -160,3 +160,203 @@ def validate_employee(employee: Employee) -> list[str]:
             errors.append(f"trigger '{trigger}' 格式无效")
 
     return errors
+
+
+# ── SKILL.md 解析 ──
+
+
+def _parse_allowed_tools(tools_str: str) -> list[str]:
+    """解析 allowed-tools 字符串为 Crew 工具名列表.
+
+    处理带括号的语法，如 'Read Bash(git:*) Grep'。
+
+    Args:
+        tools_str: 空格分隔的工具字符串
+
+    Returns:
+        Crew 工具名列表（未映射的保留原名）
+    """
+    if not tools_str or not tools_str.strip():
+        return []
+
+    tokens: list[str] = []
+    current = ""
+    depth = 0
+
+    for ch in tools_str:
+        if ch == "(":
+            depth += 1
+            current += ch
+        elif ch == ")":
+            depth -= 1
+            current += ch
+        elif ch == " " and depth == 0:
+            if current:
+                tokens.append(current)
+                current = ""
+        else:
+            current += ch
+
+    if current:
+        tokens.append(current)
+
+    # 映射到 Crew 工具名
+    result = []
+    for token in tokens:
+        crew_name = SKILL_TO_TOOL.get(token)
+        if crew_name:
+            result.append(crew_name)
+        else:
+            result.append(token)
+
+    return result
+
+
+def _parse_argument_hint(hint_str: str) -> list[EmployeeArg]:
+    """解析 argument-hint 字符串为 EmployeeArg 列表.
+
+    格式: '<target> [mode]' — <> 表示必填，[] 表示可选。
+
+    Args:
+        hint_str: argument-hint 字符串
+
+    Returns:
+        EmployeeArg 列表
+    """
+    if not hint_str or not hint_str.strip():
+        return []
+
+    args: list[EmployeeArg] = []
+    # 匹配 <name> 或 [name]
+    for match in re.finditer(r"<([^>]+)>|\[([^\]]+)\]", hint_str):
+        required_name = match.group(1)
+        optional_name = match.group(2)
+        if required_name:
+            args.append(EmployeeArg(name=required_name, required=True))
+        elif optional_name:
+            args.append(EmployeeArg(name=optional_name, required=False))
+
+    return args
+
+
+def _extract_skill_metadata(body: str) -> tuple[dict, str]:
+    """从 SKILL.md 正文中提取 HTML 注释里的 Crew 元数据.
+
+    查找 <!-- knowlyr-crew metadata {...} --> 格式的注释。
+
+    Returns:
+        (metadata_dict, clean_body)
+    """
+    pattern = r"<!--\s*knowlyr-crew\s+metadata\s+(.*?)\s*-->"
+    match = re.search(pattern, body, re.DOTALL)
+    if not match:
+        return {}, body
+
+    import json
+    try:
+        metadata = json.loads(match.group(1))
+    except (json.JSONDecodeError, ValueError):
+        return {}, body
+
+    clean_body = body[:match.start()] + body[match.end():]
+    clean_body = clean_body.strip()
+    return metadata, clean_body
+
+
+def _convert_skill_variables(body: str, args: list[EmployeeArg]) -> str:
+    """将 SKILL.md 的位置变量 ($0, $1) 转为 Crew 的命名变量 ($argname).
+
+    Args:
+        body: SKILL.md 正文
+        args: 已解析的参数列表
+
+    Returns:
+        转换后的正文
+    """
+    result = body
+
+    # $ARGUMENTS → 所有参数名的组合（保留原样，仅供参考）
+    # $0, $1, ... → $argname
+    for i, arg in enumerate(args):
+        result = result.replace(f"${i}", f"${arg.name}")
+
+    return result
+
+
+def parse_skill_string(
+    content: str,
+    source_path: Path | None = None,
+    skill_name: str | None = None,
+) -> Employee:
+    """从 SKILL.md 字符串解析为 Employee 对象.
+
+    Args:
+        content: SKILL.md 文件内容
+        source_path: 来源文件路径
+        skill_name: 技能名称（通常从目录名推断）
+
+    Raises:
+        ValueError: 解析失败或必填字段缺失
+    """
+    frontmatter, body = _split_frontmatter(content)
+
+    if not frontmatter:
+        raise ValueError("缺少 YAML frontmatter（文件需以 --- 开头）")
+
+    name = skill_name or frontmatter.get("name")
+    if not name:
+        raise ValueError("缺少 name（SKILL.md 需在 frontmatter 或目录名中提供）")
+
+    description = frontmatter.get("description", "")
+    if not description:
+        raise ValueError("缺少必填字段: description")
+
+    if not body:
+        raise ValueError("Markdown 正文不能为空")
+
+    # 解析 allowed-tools
+    tools_str = frontmatter.get("allowed-tools", "")
+    tools = _parse_allowed_tools(str(tools_str)) if tools_str else []
+
+    # 解析 argument-hint
+    hint_str = frontmatter.get("argument-hint", "")
+    args = _parse_argument_hint(str(hint_str)) if hint_str else []
+
+    # 提取 HTML 注释中的 Crew 元数据
+    metadata, clean_body = _extract_skill_metadata(body)
+
+    # 转换位置变量为命名变量
+    clean_body = _convert_skill_variables(clean_body, args)
+
+    return Employee(
+        name=name,
+        display_name=metadata.get("display_name", ""),
+        version=metadata.get("version", "1.0"),
+        description=description,
+        tags=metadata.get("tags", []),
+        author=metadata.get("author", ""),
+        triggers=metadata.get("triggers", []),
+        args=args,
+        output=EmployeeOutput(**metadata["output"]) if "output" in metadata else EmployeeOutput(),
+        tools=tools,
+        context=metadata.get("context", []),
+        body=clean_body,
+        source_path=source_path,
+        source_layer="skill",
+    )
+
+
+def parse_skill(path: Path, skill_name: str | None = None) -> Employee:
+    """解析 SKILL.md 文件，返回 Employee 对象.
+
+    Args:
+        path: SKILL.md 文件路径
+        skill_name: 技能名称（默认从父目录名推断）
+
+    Raises:
+        ValueError: 解析失败或必填字段缺失
+    """
+    content = path.read_text(encoding="utf-8")
+    if skill_name is None:
+        skill_name = path.parent.name
+    return parse_skill_string(content, source_path=path, skill_name=skill_name)
