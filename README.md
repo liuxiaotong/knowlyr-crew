@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-122_passed-brightgreen.svg)](#开发)
+[![Tests](https://img.shields.io/badge/tests-170_passed-brightgreen.svg)](#开发)
 
 **GitHub Topics**: `ai-skill-loader`, `mcp`, `model-context-protocol`, `digital-employee`, `claude-code`
 
@@ -25,20 +25,13 @@
 
 ## 工作原理
 
-```
-┌──────────────┐     MCP Prompts      ┌──────────────────┐
-│ EMPLOYEE.md  │ ──────────────────▶  │  Claude Code /   │
-│  (Markdown)  │     MCP Resources    │  Cursor / AI IDE │
-│              │ ──────────────────▶  │                  │
-│  角色+流程   │     MCP Tools        │  自行执行工作流  │
-│  +参数+工具  │ ──────────────────▶  │                  │
-└──────────────┘                      └──────────────────┘
-        ▲                                      │
-        │         knowlyr-id                   │
-        │    ┌──────────────────┐              │
-        └─── │  Agent 身份/配置  │ ◀────────────┘
-             │  heartbeat 回报   │   --agent-id
-             └──────────────────┘
+```mermaid
+graph LR
+    E["EMPLOYEE.md<br/>(Markdown)<br/>角色+流程+参数+工具"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE<br/>自行执行工作流"]
+    E -->|MCP Resources| IDE
+    E -->|MCP Tools| IDE
+    IDE -->|--agent-id| ID["knowlyr-id<br/>Agent 身份/配置<br/>heartbeat 回报"]
+    ID --> E
 ```
 
 Crew 通过 MCP 协议暴露三种原语：
@@ -47,7 +40,7 @@ Crew 通过 MCP 协议暴露三种原语：
 |----------|------|------|
 | **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 每员工 1 个 |
 | **Resources** | 员工定义的原始 Markdown，可读取查看 | 每员工 1 个 |
-| **Tools** | 列出 / 查看 / 运行员工，查看工作日志 | 4 个 |
+| **Tools** | 列出 / 查看 / 运行员工，工作日志，项目检测，流水线 | 7 个 |
 
 ---
 
@@ -109,17 +102,20 @@ knowlyr-crew show code-reviewer
 ### 全部命令
 
 ```bash
-knowlyr-crew list [--tag TAG] [--layer LAYER] [-f json]   # 列出技能
-knowlyr-crew show <name>                                   # 查看详情
-knowlyr-crew run <name> [ARGS...] [--agent-id ID] [--copy] # 生成 prompt
-knowlyr-crew validate <path>                               # 校验文件
-knowlyr-crew init [--employee <name>]                      # 初始化
-knowlyr-crew export <name>                                 # 导出为 SKILL.md
-knowlyr-crew export-all                                    # 批量导出
-knowlyr-crew sync [--clean]                                # 同步到 .claude/skills/
-knowlyr-crew log list [--employee NAME]                    # 工作日志
-knowlyr-crew log show <session_id>                         # 日志详情
-knowlyr-crew mcp                                           # 启动 MCP Server
+knowlyr-crew list [--tag TAG] [--layer LAYER] [-f json]       # 列出技能
+knowlyr-crew show <name>                                       # 查看详情
+knowlyr-crew run <name> [ARGS...] [--smart-context] [--copy]   # 生成 prompt
+knowlyr-crew validate <path>                                   # 校验文件
+knowlyr-crew init [--employee <name>]                          # 初始化
+knowlyr-crew export <name>                                     # 导出为 SKILL.md
+knowlyr-crew export-all                                        # 批量导出
+knowlyr-crew sync [--clean]                                    # 同步到 .claude/skills/
+knowlyr-crew pipeline list                                     # 列出流水线
+knowlyr-crew pipeline show <name>                              # 查看流水线
+knowlyr-crew pipeline run <name> [--arg key=val]               # 执行流水线
+knowlyr-crew log list [--employee NAME]                        # 工作日志
+knowlyr-crew log show <session_id>                             # 日志详情
+knowlyr-crew mcp                                               # 启动 MCP Server
 ```
 
 ---
@@ -133,6 +129,7 @@ knowlyr-crew mcp                                           # 启动 MCP Server
 | `doc-writer` | 文档工程师 | `doc`, `docs` | file_read, file_write | README.md, pyproject.toml | 生成或更新文档 |
 | `refactor-guide` | 重构顾问 | `refactor` | file_read, git | pyproject.toml | 分析代码结构，提出重构方案 |
 | `pr-creator` | PR 创建员 | `pr` | git, bash | pyproject.toml | 分析变更，创建规范 Pull Request |
+| `product-manager` | 产品经理 | `pm` | file_read, git | README.md, pyproject.toml | 需求分析、优先级排序、路线图 |
 
 ---
 
@@ -321,7 +318,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**测试**: 122 个用例，覆盖解析、发现、引擎、CLI、MCP Server、Skills 转换、knowlyr-id 客户端全链路。
+**测试**: 170 个用例，覆盖解析、发现、引擎、CLI、MCP Server、Skills 转换、knowlyr-id 客户端、项目检测、流水线全链路。
 
 ## License
 

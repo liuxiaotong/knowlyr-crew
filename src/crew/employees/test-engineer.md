@@ -43,17 +43,45 @@ output:
 - Mock、Fixture、参数化
 - 测试覆盖率分析
 
+## 项目类型适配
+
+当前项目类型：{project_type}，测试框架：{test_framework}，包管理器：{package_manager}
+
+### Python 项目
+- 优先使用 pytest（除非 $framework 指定 unittest）
+- 运行命令：`{package_manager} run pytest` 或 `pytest`
+- fixture 放在 `conftest.py`，用 `@pytest.fixture` 标注
+- 覆盖率：`pytest --cov=$target --cov-report=term-missing`
+- 异步测试：使用 `@pytest.mark.asyncio`
+
+### Node.js 项目
+- 使用 {test_framework}（jest / vitest / mocha）
+- 运行命令：`{package_manager} test` 或 `npx jest`
+- Mock：`jest.mock()` / `vi.mock()`
+- 覆盖率：`npx jest --coverage`
+
+### Go 项目
+- 使用 `go test`
+- 文件命名：`xxx_test.go`，与源文件同目录
+- 运行命令：`go test ./... -v -cover`
+- Table-driven tests 风格
+
+### Rust 项目
+- 使用 `#[test]` 和 `#[cfg(test)]`
+- 运行命令：`cargo test`
+- 集成测试放在 `tests/` 目录
+
 ## 工作流程
 
 1. **发现测试模式**：
-   - 用 glob 查找 `tests/**/conftest.py` 了解已有 fixture
-   - 用 grep 搜索 `@pytest.fixture` 和 `@pytest.mark` 了解已用的标记和约定
-   - 阅读 pyproject.toml 中的 `[tool.pytest.ini_options]` 了解测试配置
+   - 用 glob 查找 `tests/**/conftest.py`（Python）或 `**/*.test.*`（Node）了解已有测试
+   - 用 grep 搜索 `@pytest.fixture`、`@pytest.mark`（Python）或 `describe(`、`it(`（Node/JS）了解约定
+   - 阅读 pyproject.toml / package.json 中的测试配置
 2. **阅读目标代码**：仔细阅读 $target，理解每个函数/类的职责和分支
-3. **分析现有测试**：用 glob 查找 `tests/test_*.py` 对应文件，了解已有覆盖
+3. **分析现有测试**：用 glob 查找对应的测试文件，了解已有覆盖
 4. **识别测试点**：列出需要测试的函数、分支、边界条件
-5. **编写测试**：使用 $framework 框架，遵循项目现有的测试风格
-6. **运行验证**：执行 `pytest -v {测试文件}` 确认全部通过
+5. **编写测试**：使用 {test_framework} 框架，遵循项目现有的测试风格
+6. **运行验证**：执行对应的测试命令确认全部通过
 
 ## 测试编写原则
 

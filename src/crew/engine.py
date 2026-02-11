@@ -102,6 +102,7 @@ class CrewEngine:
         args: dict[str, str] | None = None,
         positional: list[str] | None = None,
         agent_identity: "AgentIdentity | None" = None,
+        project_info: "ProjectInfo | None" = None,
     ) -> str:
         """生成完整的 system prompt.
 
@@ -109,8 +110,17 @@ class CrewEngine:
 
         Args:
             agent_identity: 可选的 knowlyr-id Agent 身份（注入 prompt header）
+            project_info: 可选的项目类型检测结果（注入 prompt header + 环境变量）
         """
         rendered = self.render(employee, args=args, positional=positional)
+
+        # 项目类型环境变量替换（在渲染后的 body 中）
+        if project_info:
+            rendered = rendered.replace("{project_type}", project_info.project_type)
+            rendered = rendered.replace("{framework}", project_info.framework)
+            rendered = rendered.replace("{test_framework}", project_info.test_framework)
+            rendered = rendered.replace("{package_manager}", project_info.package_manager)
+
         display = employee.effective_display_name
 
         parts = [
@@ -135,6 +145,16 @@ class CrewEngine:
             parts.append(f"**需要工具**: {', '.join(employee.tools)}")
         if employee.context:
             parts.append(f"**预读上下文**: {', '.join(employee.context)}")
+
+        # 注入项目类型信息
+        if project_info and project_info.project_type != "unknown":
+            parts.append(f"**项目类型**: {project_info.display_label}")
+            if project_info.test_framework:
+                parts.append(f"**测试框架**: {project_info.test_framework}")
+            if project_info.lint_tools:
+                parts.append(f"**Lint**: {', '.join(project_info.lint_tools)}")
+            if project_info.package_manager:
+                parts.append(f"**包管理**: {project_info.package_manager}")
 
         # Agent memory（持久记忆/上下文）
         if agent_identity and agent_identity.memory:

@@ -45,14 +45,40 @@ output:
 - 代码注释补充（docstring、行内注释）
 - CHANGELOG 维护（Keep a Changelog 标准）
 
+## 项目类型适配
+
+当前项目类型：{project_type}，框架：{framework}，包管理器：{package_manager}
+
+### Python 项目
+- 安装命令：`pip install xxx` 或 `uv add xxx`（当 {package_manager} = uv）
+- API 文档：从 docstring（Google 风格）提取
+- 代码示例中使用 `python` 或 `python3`
+- 依赖信息从 pyproject.toml 获取
+
+### Node.js 项目
+- 安装命令：`npm install xxx` / `yarn add xxx` / `pnpm add xxx`（按 {package_manager}）
+- API 文档：从 JSDoc / TypeScript 类型提取
+- 代码示例区分 CommonJS (`require`) 和 ESM (`import`)
+- 依赖信息从 package.json 获取
+
+### Go 项目
+- 安装命令：`go get xxx`
+- API 文档：从 Go doc 注释提取
+- 代码示例使用 `go run`
+
+### Rust 项目
+- 安装命令：`cargo add xxx`
+- API 文档：从 `///` doc 注释提取
+- 代码示例使用 `cargo run`
+
 ## 工作流程
 
 ### scope = readme
 
-1. 用 glob 扫描 `src/**/*.py` 和 `**/*.ts` 了解项目结构
-2. 阅读 pyproject.toml 获取项目名、版本、依赖
+1. 用 glob 扫描 `src/**/*.py`、`**/*.ts`、`**/*.go` 了解项目结构（按 {project_type} 选择）
+2. 阅读 pyproject.toml / package.json / go.mod / Cargo.toml 获取项目信息
 3. 阅读现有 README.md（如果有），保留好的内容
-4. 按下方模板生成/更新 README
+4. 按下方模板生成/更新 README，使用 {package_manager} 对应的安装命令
 5. 用 bash 运行文档中的 CLI 示例（如 `--help`）确认参数与文档一致
 
 ### scope = api

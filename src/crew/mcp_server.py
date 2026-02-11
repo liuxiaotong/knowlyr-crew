@@ -21,9 +21,11 @@ try:
 except ImportError:
     HAS_MCP = False
 
+from crew.context_detector import detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
+from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
 
 
 def create_server() -> "Server":
@@ -105,6 +107,55 @@ def create_server() -> "Server":
                     },
                 },
             ),
+            Tool(
+                name="detect_project",
+                description="检测当前项目类型、框架、包管理器等信息",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_dir": {
+                            "type": "string",
+                            "description": "项目目录路径（默认当前目录）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="list_pipelines",
+                description="列出所有可用的流水线",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            Tool(
+                name="run_pipeline",
+                description="执行流水线，按顺序运行多个员工并生成 prompt 序列",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "流水线名称或 YAML 文件路径",
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "传递给流水线的参数（key-value）",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "agent_id": {
+                            "type": "integer",
+                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                        },
+                        "smart_context": {
+                            "type": "boolean",
+                            "description": "自动检测项目类型（默认 true）",
+                            "default": True,
+                        },
+                    },
+                    "required": ["name"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -160,7 +211,10 @@ def create_server() -> "Server":
                 except Exception:
                     pass
 
-            prompt = engine.prompt(emp, args=emp_args, agent_identity=agent_identity)
+            # 智能上下文检测
+            project_info = detect_project()
+
+            prompt = engine.prompt(emp, args=emp_args, agent_identity=agent_identity, project_info=project_info)
 
             # 记录工作日志
             try:
@@ -189,6 +243,54 @@ def create_server() -> "Server":
                 type="text",
                 text=json.dumps(sessions, ensure_ascii=False, indent=2),
             )]
+
+        elif name == "detect_project":
+            project_dir = arguments.get("project_dir")
+            info = detect_project(Path(project_dir) if project_dir else None)
+            data = info.model_dump(mode="json")
+            data["display_label"] = info.display_label
+            return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+        elif name == "list_pipelines":
+            pipelines = discover_pipelines()
+            data = []
+            for pname, ppath in pipelines.items():
+                pl = load_pipeline(ppath)
+                data.append({
+                    "name": pname,
+                    "description": pl.description,
+                    "steps": [s.employee for s in pl.steps],
+                    "path": str(ppath),
+                })
+            return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+        elif name == "run_pipeline":
+            pl_name = arguments["name"]
+            pl_args = arguments.get("args", {})
+            agent_id = arguments.get("agent_id")
+            smart_context = arguments.get("smart_context", True)
+
+            # 查找流水线
+            pl_path = Path(pl_name)
+            if not pl_path.exists():
+                pipelines = discover_pipelines()
+                if pl_name in pipelines:
+                    pl_path = pipelines[pl_name]
+                else:
+                    return [TextContent(type="text", text=f"未找到流水线: {pl_name}")]
+
+            pipeline = load_pipeline(pl_path)
+            errors = validate_pipeline(pipeline)
+            if errors:
+                return [TextContent(type="text", text=f"流水线校验失败: {'; '.join(errors)}")]
+
+            outputs = run_pipeline(
+                pipeline,
+                initial_args=pl_args,
+                agent_id=agent_id,
+                smart_context=smart_context,
+            )
+            return [TextContent(type="text", text=json.dumps(outputs, ensure_ascii=False, indent=2))]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 

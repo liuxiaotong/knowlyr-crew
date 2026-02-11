@@ -41,10 +41,33 @@ output:
 - 模块化拆分
 - 性能优化
 
+## 项目类型适配
+
+当前项目类型：{project_type}，框架：{framework}
+
+### Python 项目
+- 依赖搜索：`from $target import` / `import $target`
+- 复杂度工具：`radon cc $target -s`（如有 radon）
+- 类型检查：`mypy $target` / `pyright $target`
+- 推荐模式：dataclass、Protocol、ContextManager、依赖注入
+
+### Node.js 项目
+- 依赖搜索：`import.*from.*$target` / `require.*$target`
+- 推荐模式：ES Module、TypeScript interface、依赖注入、组合优于继承
+- 框架特定：React 组件拆分、hooks 提取；Express 中间件分层
+
+### Go 项目
+- 依赖搜索：`".*/$target"`（import path）
+- 推荐模式：interface 隔离、functional options、table-driven
+- 检查：`go vet`、`golangci-lint run`
+
+### Rust 项目
+- 推荐模式：trait 抽象、错误类型统一（thiserror）、builder pattern
+
 ## 工作流程
 
 1. **阅读代码**：仔细阅读 $target 及其相关文件
-2. **分析依赖**：用 grep 搜索 `from $target import` 和 `import $target` 找出所有依赖者
+2. **分析依赖**：用 grep 搜索导入语句（按 {project_type} 选择对应语法）找出所有依赖者
 3. **识别问题**：按重构目标 $goal 找出需要改进的点
 4. **制定方案**：为每个问题提出具体的重构方案，含 before/after 代码
 5. **评估影响**：标注每个方案的兼容性和影响范围

@@ -118,12 +118,30 @@ output:
 - **Ease**: 实施难度（10 = 最简单）
 - **ICE** = Impact x Confidence x Ease
 
+## 项目类型适配
+
+当前项目类型：{project_type}，框架：{framework}，包管理器：{package_manager}
+
+### Python 项目
+- 依赖分析：读取 pyproject.toml 的 `[project.dependencies]`
+- 版本检查：`pip list --outdated` 或 `uv pip list --outdated`
+- 技术栈评估：FastAPI/Django/Flask 等框架成熟度和社区活跃度
+
+### Node.js 项目
+- 依赖分析：读取 package.json 的 `dependencies` 和 `devDependencies`
+- 版本检查：`npm outdated`
+- 技术栈评估：React/Vue/Express 等框架生态和维护状态
+
+### Go 项目
+- 依赖分析：读取 go.mod 的 `require` 段
+- 版本检查：`go list -m -u all`
+
 ## 技术债评估
 
 需求分析时同步评估技术债：
 
 1. 用 grep 搜索 `TODO|FIXME|HACK|XXX|DEPRECATED` 统计已知债务数量
-2. 检查 pyproject.toml 中依赖版本是否过时
+2. 检查项目配置文件中依赖版本是否过时（按 {project_type} 选择对应工具）
 3. 高风险技术债（影响稳定性/安全性的）视为 P1
 
 | 位置 | 类型 | 影响 | 建议优先级 |

@@ -179,6 +179,7 @@ def show(name: str):
 @click.argument("positional_args", nargs=-1)
 @click.option("--arg", "named_args", multiple=True, help="命名参数 (key=value)")
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--smart-context", is_flag=True, help="自动检测项目类型并注入上下文")
 @click.option("--raw", is_flag=True, help="输出原始渲染结果（不包裹 prompt 格式）")
 @click.option("--copy", "to_clipboard", is_flag=True, help="复制到剪贴板")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
@@ -187,6 +188,7 @@ def run(
     positional_args: tuple[str, ...],
     named_args: tuple[str, ...],
     agent_id: int | None,
+    smart_context: bool,
     raw: bool,
     to_clipboard: bool,
     output: str | None,
@@ -234,6 +236,12 @@ def run(
         except ImportError:
             click.echo("Warning: httpx 未安装，无法连接 knowlyr-id", err=True)
 
+    # 检测项目类型（可选）
+    project_info = None
+    if smart_context:
+        from crew.context_detector import detect_project
+        project_info = detect_project()
+
     # 生成
     if raw:
         text = engine.render(emp, args=args_dict, positional=list(positional_args))
@@ -241,6 +249,7 @@ def run(
         text = engine.prompt(
             emp, args=args_dict, positional=list(positional_args),
             agent_identity=agent_identity,
+            project_info=project_info,
         )
 
     # 记录工作日志
@@ -500,6 +509,127 @@ def log_show(session_id: str):
         action = entry.get("action", "")
         detail = entry.get("detail", "")
         click.echo(f"[{ts}] {action}: {detail}")
+
+
+# ── pipeline 子命令组 ──
+
+
+@main.group()
+def pipeline():
+    """流水线管理 — 多员工顺序执行."""
+    pass
+
+
+@pipeline.command("list")
+def pipeline_list():
+    """列出所有可用流水线."""
+    from crew.pipeline import discover_pipelines, load_pipeline
+
+    pipelines = discover_pipelines()
+    if not pipelines:
+        click.echo("未找到流水线。")
+        click.echo("在 .crew/pipelines/ 中创建 YAML 文件，或使用内置流水线。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="流水线")
+        table.add_column("名称", style="cyan")
+        table.add_column("描述", style="green")
+        table.add_column("步骤数", justify="right")
+        table.add_column("来源")
+
+        for name, path in pipelines.items():
+            try:
+                p = load_pipeline(path)
+                source = "内置" if "employees/pipelines" in str(path) else "项目"
+                table.add_row(name, p.description, str(len(p.steps)), source)
+            except Exception:
+                table.add_row(name, "[解析失败]", "-", str(path))
+
+        console.print(table)
+    except ImportError:
+        for name, path in pipelines.items():
+            click.echo(f"  {name} — {path}")
+
+
+@pipeline.command("show")
+@click.argument("name")
+def pipeline_show(name: str):
+    """查看流水线详情."""
+    from crew.pipeline import discover_pipelines, load_pipeline
+
+    pipelines = discover_pipelines()
+    if name not in pipelines:
+        click.echo(f"未找到流水线: {name}", err=True)
+        sys.exit(1)
+
+    p = load_pipeline(pipelines[name])
+    click.echo(f"流水线: {p.name}")
+    click.echo(f"描述: {p.description}")
+    click.echo(f"步骤: {len(p.steps)}")
+    click.echo()
+    for i, step in enumerate(p.steps, 1):
+        args_str = ", ".join(f"{k}={v}" for k, v in step.args.items())
+        click.echo(f"  {i}. {step.employee}" + (f" ({args_str})" if args_str else ""))
+
+
+@pipeline.command("run")
+@click.argument("name_or_path")
+@click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
+@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
+@click.option("-o", "--output", type=click.Path(), help="输出到文件")
+def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
+                 smart_context: bool, output: str | None):
+    """执行流水线.
+
+    NAME_OR_PATH 可以是流水线名称或 YAML 文件路径。
+    """
+    from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline
+
+    # 解析流水线
+    path = Path(name_or_path)
+    if path.exists() and path.suffix in (".yaml", ".yml"):
+        p = load_pipeline(path)
+    else:
+        pipelines = discover_pipelines()
+        if name_or_path not in pipelines:
+            click.echo(f"未找到流水线: {name_or_path}", err=True)
+            sys.exit(1)
+        p = load_pipeline(pipelines[name_or_path])
+
+    # 解析参数
+    initial_args: dict[str, str] = {}
+    for item in named_args:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            initial_args[k] = v
+
+    click.echo(f"执行流水线: {p.name} ({len(p.steps)} 步)", err=True)
+
+    results = run_pipeline(
+        p, initial_args=initial_args,
+        agent_id=agent_id, smart_context=smart_context,
+    )
+
+    # 输出
+    parts = []
+    for i, r in enumerate(results, 1):
+        header = f"{'=' * 60}\n## 步骤 {i}: {r['employee']}\n{'=' * 60}"
+        parts.append(f"{header}\n\n{r['prompt']}")
+        click.echo(f"  ✓ 步骤 {i}: {r['employee']}", err=True)
+
+    combined = "\n\n".join(parts)
+
+    if output:
+        Path(output).write_text(combined, encoding="utf-8")
+        click.echo(f"\n已写入: {output}", err=True)
+    else:
+        click.echo(combined)
 
 
 # ── mcp 命令 ──

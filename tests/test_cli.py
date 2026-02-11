@@ -34,7 +34,7 @@ class TestCLI:
     def test_list_filter_layer(self):
         result = self.runner.invoke(main, ["list", "--layer", "builtin", "-f", "json"])
         assert result.exit_code == 0
-        assert "code-reviewer" in result.output
+        assert '"layer": "builtin"' in result.output
 
     def test_show(self):
         result = self.runner.invoke(main, ["show", "code-reviewer"])
@@ -103,3 +103,37 @@ class TestCLI:
                 assert (Path(tmpdir) / ".crew" / "my-worker.md").exists()
             finally:
                 os.chdir(old_cwd)
+
+    def test_run_smart_context(self):
+        result = self.runner.invoke(
+            main, ["run", "code-reviewer", "main", "--smart-context"],
+        )
+        assert result.exit_code == 0
+        assert "代码审查员" in result.output
+        # 当前项目是 Python，应检测到项目类型
+        assert "项目类型" in result.output
+
+    def test_pipeline_list(self):
+        result = self.runner.invoke(main, ["pipeline", "list"])
+        assert result.exit_code == 0
+        assert "review-test-pr" in result.output
+        assert "full-review" in result.output
+
+    def test_pipeline_show(self):
+        result = self.runner.invoke(main, ["pipeline", "show", "review-test-pr"])
+        assert result.exit_code == 0
+        assert "code-reviewer" in result.output
+
+    def test_pipeline_show_not_found(self):
+        result = self.runner.invoke(main, ["pipeline", "show", "nonexistent"])
+        assert result.exit_code == 1
+
+    def test_pipeline_run(self):
+        builtin = Path(__file__).parent.parent / "src" / "crew" / "employees" / "pipelines" / "full-review.yaml"
+        result = self.runner.invoke(
+            main, ["pipeline", "run", str(builtin), "--arg", "target=main"],
+        )
+        assert result.exit_code == 0
+        assert "code-reviewer" in result.output
+        assert "refactor-guide" in result.output
+        assert "test-engineer" in result.output

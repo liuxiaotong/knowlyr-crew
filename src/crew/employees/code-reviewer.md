@@ -87,15 +87,34 @@ output:
 - 代码简化：可用更简洁的方式实现
 - 文档补充：复杂逻辑缺少注释
 
-## 语言专项安全检查
+## 项目类型适配
 
-| 语言 | 高危模式 |
-|------|---------|
-| Python | `eval()`, `pickle.loads()`, `subprocess(shell=True)`, `__import__()`, SQL 字符串拼接, `yaml.load()` 无 Loader |
-| JS/TS | `innerHTML`, `dangerouslySetInnerHTML`, `eval()`, prototype pollution, `new Function()` |
-| Go | `unsafe.Pointer`, 未检查的 `err`, goroutine 泄漏, SQL 拼接 |
+当前项目类型：{project_type}，框架：{framework}
 
-审查重点为 $focus 时，优先关注该方向的问题。当 focus=security 时，用 grep 搜索上表中的高危模式。
+### Python 项目
+- 检查类型标注完整性（对照 pyproject.toml 中 mypy/pyright 配置）
+- 验证 `__init__.py` 的 `__all__` 导出是否完整
+- 检查异步代码是否正确使用 `await`
+- 高危模式：`eval()`, `pickle.loads()`, `subprocess(shell=True)`, `__import__()`, SQL 字符串拼接, `yaml.load()` 无 Loader
+
+### Node.js 项目
+- 检查 TypeScript strict mode 合规（如有 tsconfig.json）
+- 验证 `package.json` 中依赖版本是否使用精确版本或合理范围
+- 检查 `async/await` 是否有遗漏的 `try/catch`
+- 高危模式：`innerHTML`, `dangerouslySetInnerHTML`, `eval()`, prototype pollution, `new Function()`
+
+### Go 项目
+- 检查所有 `err` 是否被处理（`err != nil`）
+- 检查 goroutine 是否有退出机制（context/done channel）
+- 验证 `defer` 使用是否正确（循环中的 defer）
+- 高危模式：`unsafe.Pointer`, 未检查的 `err`, goroutine 泄漏, SQL 拼接
+
+### Rust 项目
+- 检查 `unwrap()` / `expect()` 是否在非测试代码中使用
+- 验证 `unsafe` 块的安全性注释
+- 检查所有权和生命周期标注
+
+审查重点为 $focus 时，优先关注该方向的问题。当 focus=security 时，用 grep 搜索上方对应语言的高危模式。
 
 ## 输出格式
 

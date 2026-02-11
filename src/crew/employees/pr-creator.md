@@ -126,6 +126,24 @@ EOF
 - 使用 `gh pr create --draft` 创建草稿
 - 在 body 开头标注 `> Draft — 尚未完成，请勿合并`
 
+## 项目类型适配
+
+当前项目类型：{project_type}，框架：{framework}，测试框架：{test_framework}
+
+### Python 项目
+- Test Plan 中建议运行：`pytest tests/ -q`
+- 检查 `pyproject.toml` 版本号是否需要更新
+- 检查是否有 `ruff` / `mypy` CI 检查需要通过
+
+### Node.js 项目
+- Test Plan 中建议运行：`npm test` / `yarn test`
+- 检查 `package.json` 版本号是否需要更新
+- 检查是否有 `eslint` / `tsc` CI 检查需要通过
+
+### Go 项目
+- Test Plan 中建议运行：`go test ./...`
+- 检查是否有 `golangci-lint` CI 检查需要通过
+
 ## 注意事项
 
 - 如果有未提交的变更，提示用户先提交

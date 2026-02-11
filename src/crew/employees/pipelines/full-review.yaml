@@ -1,0 +1,14 @@
+name: full-review
+description: 代码审查 → 重构建议 → 补充测试
+steps:
+  - employee: code-reviewer
+    args:
+      target: $target
+      focus: all
+  - employee: refactor-guide
+    args:
+      target: $target
+      goal: all
+  - employee: test-engineer
+    args:
+      target: $target

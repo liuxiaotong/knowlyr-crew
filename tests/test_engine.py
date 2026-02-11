@@ -116,3 +116,32 @@ class TestCrewEngine:
         )
         assert "**Agent**" not in result
         assert "Agent 记忆" not in result
+
+    def test_prompt_with_project_info(self):
+        """带项目信息时 prompt 应包含项目类型."""
+        from crew.context_detector import ProjectInfo
+        info = ProjectInfo(
+            project_type="python",
+            framework="fastapi",
+            test_framework="pytest",
+            lint_tools=["ruff", "mypy"],
+            package_manager="uv",
+        )
+        result = self.engine.prompt(
+            self.employee,
+            args={"target": "test"},
+            project_info=info,
+        )
+        assert "Python (Fastapi)" in result
+        assert "pytest" in result
+        assert "ruff" in result
+        assert "uv" in result
+
+    def test_prompt_without_project_info(self):
+        """不带项目信息时 prompt 不应有项目类型段."""
+        result = self.engine.prompt(
+            self.employee,
+            args={"target": "test"},
+            project_info=None,
+        )
+        assert "**项目类型**" not in result
