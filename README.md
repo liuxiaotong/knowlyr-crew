@@ -8,14 +8,14 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-196_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-219_passed-brightgreen.svg)](#开发--development)
 
 [快速开始](#快速开始--quick-start) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [讨论会](#讨论会--discussions) · [自定义技能](#自定义技能--custom-skills) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [生态](#生态--ecosystem)
 
 </div>
 
 > **Crew 不是又一个 Agent 框架。**
-> 它是 AI IDE 的"人才市场"—— 每个"数字员工"是一个 Markdown 文件，
+> 它是 AI IDE 的"人才市场"—— 每个"数字员工"是一个 Markdown 文件或目录，
 > 通过 MCP 协议加载为可复用的专业技能。
 > AI IDE 自己决定怎么执行，Crew 只负责定义"谁做什么"。
 
@@ -41,7 +41,7 @@ knowlyr-crew run code-reviewer main
 
 ```mermaid
 graph LR
-    E["EMPLOYEE.md<br/>(Markdown)<br/>Role + Workflow + Args + Tools"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE"]
+    E["EMPLOYEE.md / Dir<br/>(Markdown + YAML)<br/>Role + Workflow + Args + Tools"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE"]
     E -->|MCP Resources| IDE
     E -->|MCP Tools| IDE
     IDE -->|--agent-id| ID["knowlyr-id<br/>Agent Identity"]
@@ -200,10 +200,12 @@ output_format: decision                     # decision / transcript / summary
 
 | Priority | Location | Description |
 |----------|----------|-------------|
-| Highest | `.crew/*.md` (project) | Project-specific skills |
+| Highest | `.crew/<name>/` or `.crew/*.md` (project) | Project-specific skills |
 | High | `.claude/skills/<name>/SKILL.md` | Claude Code Skills format |
-| Medium | `~/.knowlyr/crew/*.md` | Global custom skills |
+| Medium | `~/.knowlyr/crew/<name>/` or `*.md` | Global custom skills |
 | Low | Package builtin | Default skills |
+
+每层同时支持目录格式和单文件格式，同名时目录格式优先 / Each layer supports both directory and single-file formats; directory format takes priority.
 
 高层同名技能覆盖低层 / Higher layers override lower layers by name.
 
@@ -211,11 +213,56 @@ output_format: decision                     # decision / transcript / summary
 
 ```bash
 knowlyr-crew init
-knowlyr-crew init --employee security-auditor
+knowlyr-crew init --employee security-auditor             # Single-file format
+knowlyr-crew init --employee security-auditor --dir-format # Directory format
 knowlyr-crew validate .crew/
 ```
 
-### EMPLOYEE.md 格式 / Format
+### 目录格式 / Directory Format (Recommended)
+
+配置与提示词分离，支持工作流拆分和自动版本管理：
+
+```
+security-auditor/
+├── employee.yaml    # Config (metadata, args, tools, output)
+├── prompt.md        # Main prompt (role + instructions)
+├── workflows/       # Optional: split workflows by scope
+│   ├── scan.md
+│   └── report.md
+└── adaptors/        # Optional: per-project-type adaptation
+    ├── python.md
+    └── nodejs.md
+```
+
+**employee.yaml**:
+```yaml
+name: security-auditor
+display_name: Security Auditor
+version: "1.0"
+description: Audit security vulnerabilities
+tags: [security, audit]
+triggers: [audit, sec]
+tools: [file_read, bash, grep]
+context: [pyproject.toml, src/]
+args:
+  - name: target
+    description: Audit target
+    required: true
+  - name: severity
+    description: Minimum severity level
+    default: medium
+output:
+  format: markdown
+  filename: "audit-{date}.md"
+```
+
+**prompt.md** 和所有 `workflows/*.md` + `adaptors/*.md` 按字母序拼接为完整提示词。
+
+All `.md` files under `prompt.md`, `workflows/`, and `adaptors/` are concatenated alphabetically into the final prompt body.
+
+**自动版本管理 / Auto Versioning**: 可写层（global、project）的目录格式员工会自动跟踪内容哈希，当 prompt/workflow/adaptor 文件变更时 patch 版本自动递增。
+
+### EMPLOYEE.md 格式 / Single-File Format
 
 ```yaml
 ---
@@ -359,7 +406,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 196 cases covering parsing, discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, and discussions.
+**Tests**: 219 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions, and auto versioning.
 
 ## License
 
