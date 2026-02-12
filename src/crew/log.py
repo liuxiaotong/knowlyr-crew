@@ -113,13 +113,22 @@ class WorkLogger:
         sessions = []
         for f in sorted(self.log_dir.glob("*.jsonl"), reverse=True):
             try:
-                first_line = f.read_text(encoding="utf-8").split("\n")[0]
-                first_entry = json.loads(first_line)
+                first_entry: dict | None = None
+                line_count = 0
+                with f.open("r", encoding="utf-8") as fh:
+                    for raw_line in fh:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        line_count += 1
+                        if first_entry is None:
+                            first_entry = json.loads(line)
+
+                if not first_entry:
+                    continue
 
                 if employee_name and first_entry.get("employee_name") != employee_name:
                     continue
-
-                line_count = sum(1 for line in f.read_text(encoding="utf-8").split("\n") if line.strip())
 
                 sessions.append({
                     "session_id": f.stem,

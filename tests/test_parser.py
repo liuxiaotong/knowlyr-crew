@@ -50,6 +50,20 @@ description: 最小员工
         assert emp.display_name == ""
         assert emp.effective_display_name == "minimal"
 
+    def test_parse_frontmatter_contains_hyphens(self):
+        content = """---
+name: hyphen-test
+description: "描述里包含 --- 以及多段文本"
+tags: ["test"]
+---
+
+正文。
+"""
+        emp = parse_employee_string(content)
+        assert emp.name == "hyphen-test"
+        assert emp.description.startswith("描述里包含")
+        assert emp.tags == ["test"]
+
     def test_parse_no_frontmatter(self):
         with pytest.raises(ValueError, match="frontmatter"):
             parse_employee_string("这是纯文本，没有 frontmatter。")

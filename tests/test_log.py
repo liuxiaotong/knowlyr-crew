@@ -67,6 +67,12 @@ class TestWorkLogger:
         sessions = self.logger.list_sessions(limit=3)
         assert len(sessions) == 3
 
+    def test_list_sessions_counts_entries(self):
+        session_id = self.logger.create_session("doc-writer")
+        self.logger.add_entry(session_id, "step1", "detail1")
+        sessions = self.logger.list_sessions()
+        assert any(s["session_id"] == session_id and s["entries"] == 2 for s in sessions)
+
     def test_get_session(self):
         """应能获取 session 的所有条目."""
         session_id = self.logger.create_session("code-reviewer")

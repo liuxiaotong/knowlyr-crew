@@ -17,17 +17,22 @@ def _split_frontmatter(content: str) -> tuple[dict, str]:
     Returns:
         (frontmatter_dict, body_text)
     """
-    content = content.strip()
+    content = content.lstrip()
     if not content.startswith("---"):
         return {}, content
 
-    # 查找第二个 ---
-    end = content.find("---", 3)
-    if end == -1:
+    lines = content.splitlines()
+    end_idx = None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_idx = i
+            break
+
+    if end_idx is None:
         return {}, content
 
-    yaml_str = content[3:end].strip()
-    body = content[end + 3:].strip()
+    yaml_str = "\n".join(lines[1:end_idx]).strip()
+    body = "\n".join(lines[end_idx + 1 :]).strip()
 
     try:
         frontmatter = yaml.safe_load(yaml_str)

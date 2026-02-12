@@ -4,7 +4,33 @@
 加载不同员工，按预设流程自动完成工作。
 """
 
-__version__ = "0.1.0"
+from pathlib import Path
+import re
+
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+except ImportError:  # pragma: no cover
+    PackageNotFoundError = Exception  # type: ignore
+
+
+def _load_local_version() -> str:
+    """从 pyproject.toml 读取版本，供本地开发环境使用."""
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if not pyproject.exists():
+        return "0.0.0"
+    try:
+        match = re.search(r"^version\s*=\s*\"([^\"]+)\"", pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return "0.0.0"
+
+
+try:
+    __version__ = _pkg_version("knowlyr-crew")
+except PackageNotFoundError:  # pragma: no cover - editable install
+    __version__ = _load_local_version()
 
 from crew.models import (
     DiscoveryResult,

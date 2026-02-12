@@ -53,7 +53,7 @@ def load_template(name: str, project_dir: Path | None = None) -> TemplateRecord 
     return templates.get(name)
 
 
-_TEMPLATE_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_-]+)\s*}}")
+_TEMPLATE_PATTERN = re.compile(r"{{\s*([^{}\s]+)\s*}}")
 
 
 def render_template(content: str, variables: dict[str, str]) -> str:
