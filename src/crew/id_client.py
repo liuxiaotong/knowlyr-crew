@@ -126,6 +126,7 @@ def register_agent(
     domains: list[str] | None = None,
     model: str = "",
     system_prompt: str = "",
+    avatar_base64: str | None = None,
 ) -> int | None:
     """在 knowlyr-id 注册新 Agent.
 
@@ -152,6 +153,8 @@ def register_agent(
         payload["model"] = model
     if system_prompt:
         payload["system_prompt"] = system_prompt
+    if avatar_base64 is not None:
+        payload["avatar_base64"] = avatar_base64
 
     try:
         resp = httpx.post(
@@ -176,6 +179,7 @@ def update_agent(
     model: str | None = None,
     system_prompt: str | None = None,
     memory: str | None = None,
+    avatar_base64: str | None = None,
 ) -> bool:
     """更新 knowlyr-id Agent 配置.
 
@@ -202,6 +206,8 @@ def update_agent(
         payload["system_prompt"] = system_prompt
     if memory is not None:
         payload["memory"] = memory
+    if avatar_base64 is not None:
+        payload["avatar_base64"] = avatar_base64
 
     if not payload:
         return True  # nothing to update

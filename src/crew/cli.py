@@ -366,7 +366,15 @@ def validate(path: str):
 @main.command()
 @click.option("--employee", type=str, default=None, help="创建指定员工的模板")
 @click.option("--dir-format", is_flag=True, default=False, help="使用目录格式创建员工模板")
-def init(employee: str | None, dir_format: bool):
+@click.option("--avatar", is_flag=True, default=False, help="创建后自动生成头像（需要 Gemini CLI）")
+@click.option("--display-name", type=str, default=None, help="显示名称")
+@click.option("--description", "desc", type=str, default=None, help="一句话描述")
+@click.option("--character-name", type=str, default=None, help="角色姓名（如 陆明哲）")
+@click.option("--avatar-prompt", type=str, default=None, help="头像生成描述")
+@click.option("--tags", type=str, default=None, help="标签（逗号分隔）")
+def init(employee: str | None, dir_format: bool, avatar: bool,
+         display_name: str | None, desc: str | None, character_name: str | None,
+         avatar_prompt: str | None, tags: str | None):
     """初始化 .crew/ 目录或创建员工模板."""
     crew_dir = Path.cwd() / ".crew"
     crew_dir.mkdir(exist_ok=True)
@@ -378,21 +386,42 @@ def init(employee: str | None, dir_format: bool):
             click.echo(f"目录已存在: {emp_dir}", err=True)
             sys.exit(1)
 
+        # 收集员工信息：CLI 参数优先，缺失时交互式（--avatar），否则占位符
+        if avatar:
+            display_name = display_name or click.prompt("显示名称", default=employee)
+            desc = desc or click.prompt("一句话描述")
+            character_name = character_name if character_name is not None else click.prompt("角色姓名（如 陆明哲）", default="")
+            avatar_prompt = avatar_prompt if avatar_prompt is not None else click.prompt("头像描述（留空自动推断）", default="")
+            tags_input = tags if tags is not None else click.prompt("标签（逗号分隔）", default="")
+            tags_list = [t.strip() for t in tags_input.split(",") if t.strip()] if tags_input else []
+        else:
+            display_name = display_name or employee
+            desc = desc or "在此填写一句话描述"
+            character_name = character_name or ""
+            avatar_prompt = avatar_prompt or ""
+            tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
         emp_dir.mkdir()
+
+        import yaml as _yaml
+        config_data = {
+            "name": employee,
+            "display_name": display_name,
+            "description": desc,
+            "version": "1.0",
+            "tags": tags_list,
+            "triggers": [],
+            "args": [{"name": "target", "description": "目标", "required": True}],
+            "output": {"format": "markdown"},
+        }
+        if character_name:
+            config_data["character_name"] = character_name
+        if avatar_prompt:
+            config_data["avatar_prompt"] = avatar_prompt
+
         (emp_dir / "employee.yaml").write_text(
-            f"""name: {employee}
-display_name: {employee}
-description: 在此填写一句话描述
-version: "1.0"
-tags: []
-triggers: []
-args:
-  - name: target
-    description: 目标
-    required: true
-output:
-  format: markdown
-""",
+            _yaml.dump(config_data, allow_unicode=True, sort_keys=False,
+                       default_flow_style=False),
             encoding="utf-8",
         )
         (emp_dir / "prompt.md").write_text(
@@ -415,6 +444,15 @@ output:
         click.echo(f"已创建: {emp_dir}/")
         click.echo(f"  ├── employee.yaml")
         click.echo(f"  └── prompt.md")
+
+        if avatar:
+            _run_avatar_gen(
+                emp_dir,
+                display_name=display_name,
+                character_name=character_name,
+                description=desc,
+                avatar_prompt=avatar_prompt,
+            )
     elif employee:
         # 单文件格式模板
         template = f"""---
@@ -995,6 +1033,11 @@ def register(name: str, dry_run: bool):
     if model:
         click.echo(f"  model:    {model}", err=True)
 
+    # 检查头像
+    avatar_b64 = _load_avatar_base64(emp)
+    if avatar_b64:
+        click.echo(f"  avatar:   ✓ (avatar.webp)", err=True)
+
     if dry_run:
         click.echo("\n(dry-run 模式，未执行注册)", err=True)
         return
@@ -1006,6 +1049,7 @@ def register(name: str, dry_run: bool):
         title=title,
         domains=domains,
         model=model,
+        avatar_base64=avatar_b64,
     )
     if agent_id is None:
         click.echo("注册失败（检查 KNOWLYR_ID_URL 和 AGENT_API_TOKEN 环境变量）", err=True)
@@ -1018,6 +1062,18 @@ def register(name: str, dry_run: bool):
         _write_agent_id(emp, agent_id)
     else:
         click.echo(f"  提示: 请手动在员工定义中添加 agent_id: {agent_id}", err=True)
+
+
+def _load_avatar_base64(emp) -> str | None:
+    """从员工目录加载 avatar.webp 并 base64 编码."""
+    if not emp.source_path:
+        return None
+    avatar_dir = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
+    avatar_path = avatar_dir / "avatar.webp"
+    if not avatar_path.exists():
+        return None
+    import base64
+    return base64.b64encode(avatar_path.read_bytes()).decode()
 
 
 def _write_agent_id(emp, agent_id: int) -> None:
@@ -1050,6 +1106,72 @@ def _write_agent_id(emp, agent_id: int) -> None:
             new_content = f"{match.group(1)}agent_id: {agent_id}\n{match.group(2)}{content[match.end():]}"
             source.write_text(new_content, encoding="utf-8")
             click.echo(f"✓ agent_id 已写入 {source}", err=True)
+
+
+# ── avatar 命令 ──
+
+
+def _run_avatar_gen(
+    output_dir: Path,
+    display_name: str = "",
+    character_name: str = "",
+    description: str = "",
+    avatar_prompt: str = "",
+) -> None:
+    """执行头像生成 + 压缩流程."""
+    from crew.avatar import generate_avatar, compress_avatar
+
+    click.echo("正在调用 Gemini CLI 生成头像...", err=True)
+    raw = generate_avatar(
+        display_name=display_name,
+        character_name=character_name,
+        description=description,
+        avatar_prompt=avatar_prompt,
+        output_dir=output_dir,
+    )
+    if raw is None:
+        click.echo("头像生成失败", err=True)
+        return
+
+    click.echo(f"原图已生成: {raw}", err=True)
+
+    result = compress_avatar(raw)
+    if result is None:
+        click.echo("头像压缩失败", err=True)
+        return
+
+    size_kb = result.stat().st_size / 1024
+    click.echo(f"✓ 头像已保存: {result} ({size_kb:.1f} KB)", err=True)
+
+
+@main.command()
+@click.argument("name")
+def avatar(name: str):
+    """为员工生成头像（需要 Gemini CLI + Pillow）."""
+    result = discover_employees()
+    emp = result.get(name)
+    if not emp:
+        click.echo(f"未找到员工: {name}", err=True)
+        raise SystemExit(1)
+
+    if not emp.source_path:
+        click.echo(f"员工 '{name}' 无源文件路径", err=True)
+        raise SystemExit(1)
+
+    # 确定输出目录
+    if emp.source_path.is_dir():
+        output_dir = emp.source_path
+    else:
+        # 单文件格式：在同目录创建
+        output_dir = emp.source_path.parent
+
+    _run_avatar_gen(
+        output_dir=output_dir,
+        display_name=emp.display_name,
+        character_name=emp.character_name,
+        description=emp.description,
+        avatar_prompt=emp.avatar_prompt,
+    )
 
 
 # ── agents 子命令组 ──
@@ -1126,7 +1248,11 @@ def agents_sync_cmd(name: str):
     title = emp.description[:100]
     domains = emp.tags[:5] if emp.tags else []
 
+    avatar_b64 = _load_avatar_base64(emp)
+
     click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
+    if avatar_b64:
+        click.echo("  avatar: ✓", err=True)
 
     ok = update_agent(
         agent_id=emp.agent_id,
@@ -1134,6 +1260,7 @@ def agents_sync_cmd(name: str):
         title=title,
         domains=domains,
         model=emp.model or None,
+        avatar_base64=avatar_b64,
     )
     if not ok:
         click.echo("同步失败", err=True)
