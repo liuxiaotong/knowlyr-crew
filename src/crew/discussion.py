@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, Field
@@ -12,6 +12,9 @@ from crew.context_detector import ProjectInfo, detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.models import Employee
+
+if TYPE_CHECKING:
+    from crew.id_client import AgentIdentity
 
 
 # ── 数据模型 ──
@@ -152,6 +155,7 @@ def _render_header(
     topic: str,
     goal: str,
     project_info: ProjectInfo | None,
+    agent_identity: "AgentIdentity | None",
 ) -> list[str]:
     """渲染头部：标题、议题、目标、项目类型."""
     parts = [
@@ -164,6 +168,20 @@ def _render_header(
     if project_info and project_info.project_type != "unknown":
         parts.append(f"**项目类型**: {project_info.display_label}")
     parts.append("")
+
+    if agent_identity:
+        if agent_identity.nickname:
+            parts.append(f"**Agent**: {agent_identity.nickname}")
+        if agent_identity.title:
+            parts.append(f"**职称**: {agent_identity.title}")
+        if agent_identity.domains:
+            parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
+        if agent_identity.model:
+            parts.append(f"**Agent 模型**: {agent_identity.model}")
+        if agent_identity.memory:
+            parts.extend(["", "## Agent 记忆", "", agent_identity.memory])
+        parts.append("")
+
     return parts
 
 
@@ -172,6 +190,7 @@ def _render_participants(
     engine: CrewEngine,
     initial_args: dict[str, str],
     bg_mode: Literal["full", "summary", "minimal"],
+    project_info: ProjectInfo | None,
 ) -> list[str]:
     """渲染参会者信息 + 专业背景."""
     parts = ["---", "", "## 参会者", ""]
@@ -196,6 +215,15 @@ def _render_participants(
         # 根据 background_mode 注入专业背景
         if bg_mode == "full":
             rendered_body = engine.render(emp, args=dict(initial_args))
+            if project_info:
+                rendered_body = rendered_body.replace("{project_type}", project_info.project_type)
+                rendered_body = rendered_body.replace("{framework}", project_info.framework)
+                rendered_body = rendered_body.replace(
+                    "{test_framework}", project_info.test_framework
+                )
+                rendered_body = rendered_body.replace(
+                    "{package_manager}", project_info.package_manager
+                )
             parts.append(f"<专业背景>\n{rendered_body}\n</专业背景>")
             parts.append("")
         elif bg_mode == "summary":
@@ -271,13 +299,14 @@ def render_discussion(
     project_info = detect_project(project_dir) if smart_context else None
 
     # 获取 agent 身份（可选）
+    agent_identity: "AgentIdentity | None" = None
     if agent_id is not None:
         try:
             from crew.id_client import fetch_agent_identity
 
-            fetch_agent_identity(agent_id)
+            agent_identity = fetch_agent_identity(agent_id)
         except ImportError:
-            pass
+            agent_identity = None
 
     # 变量替换（topic, goal）
     topic = discussion.topic
@@ -296,8 +325,12 @@ def render_discussion(
 
     # 组装各段
     parts: list[str] = []
-    parts.extend(_render_header(discussion, topic, goal, project_info))
-    parts.extend(_render_participants(participants_info, engine, initial_args, bg_mode))
+    parts.extend(
+        _render_header(discussion, topic, goal, project_info, agent_identity)
+    )
+    parts.extend(
+        _render_participants(participants_info, engine, initial_args, bg_mode, project_info)
+    )
     parts.extend(_render_rules(discussion))
     parts.extend(_render_rounds(discussion))
     parts.extend(_render_output(discussion.output_format))

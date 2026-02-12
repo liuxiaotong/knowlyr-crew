@@ -5,7 +5,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from crew.models import Employee
+from crew.models import Employee, EmployeeOutput
 
 
 def _get_git_branch() -> str:
@@ -74,8 +74,8 @@ class CrewEngine:
             text = text.replace(f"${name}", effective_args[name])
 
         # 3. 位置参数替换 $1, $2, ...
-        for i, val in enumerate(positional, 1):
-            text = text.replace(f"${i}", val)
+        for i in range(len(positional), 0, -1):
+            text = text.replace(f"${i}", positional[i - 1])
 
         # 4. $ARGUMENTS 和 $@
         all_args_str = " ".join(positional) if positional else " ".join(effective_args.values())
@@ -167,7 +167,14 @@ class CrewEngine:
         parts.extend(["", "---", "", rendered])
 
         # 输出约束
-        if employee.output.format != "markdown" or employee.output.filename:
+        default_output = EmployeeOutput()
+        needs_output_section = (
+            employee.output.format != default_output.format
+            or bool(employee.output.filename)
+            or employee.output.dir != default_output.dir
+        )
+
+        if needs_output_section:
             parts.extend(["", "---", "", "## 输出约束"])
             parts.append(f"- 输出格式: {employee.output.format}")
             if employee.output.filename:

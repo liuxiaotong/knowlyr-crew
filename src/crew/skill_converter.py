@@ -72,6 +72,10 @@ def _build_metadata_comment(employee: Employee) -> str:
 
     if employee.display_name:
         metadata["display_name"] = employee.display_name
+    if employee.character_name:
+        metadata["character_name"] = employee.character_name
+    if employee.summary:
+        metadata["summary"] = employee.summary
     if employee.tags:
         metadata["tags"] = employee.tags
     if employee.triggers:
@@ -80,6 +84,8 @@ def _build_metadata_comment(employee: Employee) -> str:
         metadata["author"] = employee.author
     if employee.version != "1.0":
         metadata["version"] = employee.version
+    if employee.model:
+        metadata["model"] = employee.model
     if employee.context:
         metadata["context"] = employee.context
     if employee.output and (employee.output.filename or employee.output.format != "markdown"):
