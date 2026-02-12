@@ -57,8 +57,8 @@ description: 发现层测试
             assert "skill-test" in result.employees
             assert result.employees["skill-test"].source_layer == "skill"
 
-    def test_project_overrides_skill(self):
-        """项目层 (.crew/) 应覆盖技能层 (.claude/skills/)."""
+    def test_private_overrides_skill(self):
+        """private/employees/ 应覆盖技能层 (.claude/skills/)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
 
@@ -73,9 +73,9 @@ description: skill 层版本
 技能版本。
 """, encoding="utf-8")
 
-            # 创建 project 层
-            crew_dir = project_dir / ".crew"
-            crew_dir.mkdir()
+            # 创建 private 层
+            crew_dir = project_dir / "private" / "employees"
+            crew_dir.mkdir(parents=True)
             (crew_dir / "my-emp.md").write_text("""---
 name: my-emp
 description: project 层版本
@@ -86,7 +86,7 @@ description: project 层版本
 
             result = discover_employees(project_dir=project_dir)
             emp = result.employees["my-emp"]
-            assert emp.source_layer == "project"
+            assert emp.source_layer == "private"
             assert emp.description == "project 层版本"
             assert len(result.conflicts) >= 1
 

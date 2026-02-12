@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from crew import __version__
 from crew.cli import main
+from crew.log import WorkLogger
 
 
 class TestCLI:
@@ -43,7 +44,7 @@ class TestCLI:
     def test_show(self):
         result = self.runner.invoke(main, ["show", "code-reviewer"])
         assert result.exit_code == 0
-        assert "代码审查员" in result.output
+        assert "Code Reviewer" in result.output
 
     def test_show_not_found(self):
         result = self.runner.invoke(main, ["show", "nonexistent"])
@@ -52,19 +53,19 @@ class TestCLI:
     def test_run(self):
         result = self.runner.invoke(main, ["run", "code-reviewer", "main"])
         assert result.exit_code == 0
-        assert "代码审查员" in result.output
+        assert "Code Reviewer" in result.output
         assert "main" in result.output
 
     def test_run_with_trigger(self):
         result = self.runner.invoke(main, ["run", "review", "main"])
         assert result.exit_code == 0
-        assert "代码审查员" in result.output
+        assert "Code Reviewer" in result.output
 
     def test_run_raw(self):
         result = self.runner.invoke(main, ["run", "code-reviewer", "main", "--raw"])
         assert result.exit_code == 0
         # raw 模式不含角色前言
-        assert "# 代码审查员" not in result.output
+        assert "# Code Reviewer" not in result.output
         assert "main" in result.output
 
     def test_run_missing_arg(self):
@@ -90,7 +91,7 @@ class TestCLI:
     def test_init(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.runner.invoke(main, ["init"], catch_exceptions=False)
-            # init 在当前目录创建 .crew/
+            # init 在当前目录创建 private/employees/
             assert result.exit_code == 0
 
     def test_init_employee(self):
@@ -104,7 +105,7 @@ class TestCLI:
                     catch_exceptions=False,
                 )
                 assert result.exit_code == 0
-                assert (Path(tmpdir) / ".crew" / "my-worker.md").exists()
+                assert (Path(tmpdir) / "private" / "employees" / "my-worker.md").exists()
             finally:
                 os.chdir(old_cwd)
 
@@ -135,7 +136,7 @@ class TestCLI:
                     catch_exceptions=False,
                 )
                 assert result.exit_code == 0
-                out_file = Path(tmpdir) / ".crew" / "planner.md"
+                out_file = Path(tmpdir) / "private" / "employees" / "planner.md"
                 assert out_file.exists()
                 content = out_file.read_text(encoding="utf-8")
                 assert "planner" in content
@@ -143,20 +144,46 @@ class TestCLI:
             finally:
                 os.chdir(old_cwd)
 
+    def test_lint_pipeline_success(self):
+        pipeline_yaml = """name: lint-demo\ndescription: test\nsteps:\n  - employee: product-manager\n"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "demo.yaml"
+            target.write_text(pipeline_yaml, encoding="utf-8")
+            result = self.runner.invoke(main, ["lint", str(target)])
+            assert result.exit_code == 0
+            assert "Lint 通过" in result.output
+
+    def test_lint_pipeline_failure(self):
+        pipeline_yaml = """name: lint-demo\ndescription: test\nsteps:\n  - employee: unknown-emp\n"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "demo.yaml"
+            target.write_text(pipeline_yaml, encoding="utf-8")
+            result = self.runner.invoke(main, ["lint", str(target)])
+            assert result.exit_code == 1
+            assert "unknown-emp" in result.output
+
     def test_run_smart_context(self):
         result = self.runner.invoke(
             main, ["run", "code-reviewer", "main", "--smart-context"],
         )
         assert result.exit_code == 0
-        assert "代码审查员" in result.output
-        # 当前项目是 Python，应检测到项目类型
-        assert "项目类型" in result.output
+        assert "Code Reviewer" in result.output
 
     def test_pipeline_list(self):
         result = self.runner.invoke(main, ["pipeline", "list"])
         assert result.exit_code == 0
         assert "review-test-pr" in result.output
         assert "full-review" in result.output
+
+    def test_catalog_list_json(self):
+        result = self.runner.invoke(main, ["catalog", "list", "--format", "json"])
+        assert result.exit_code == 0
+        assert "product-manager" in result.output
+
+    def test_catalog_show(self):
+        result = self.runner.invoke(main, ["catalog", "show", "product-manager", "--json"])
+        assert result.exit_code == 0
+        assert "\"product-manager\"" in result.output
 
     def test_pipeline_show(self):
         result = self.runner.invoke(main, ["pipeline", "show", "review-test-pr"])

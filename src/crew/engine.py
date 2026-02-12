@@ -164,6 +164,16 @@ class CrewEngine:
         if agent_identity and agent_identity.memory:
             parts.extend(["", "---", "", "## Agent 记忆", "", agent_identity.memory])
 
+        # 本地持久化记忆
+        try:
+            from crew.memory import MemoryStore
+            memory_store = MemoryStore()
+            memory_text = memory_store.format_for_prompt(employee.name)
+            if memory_text:
+                parts.extend(["", "---", "", "## 历史经验", "", memory_text])
+        except Exception:
+            pass  # 记忆加载失败不影响主流程
+
         parts.extend(["", "---", "", rendered])
 
         # 输出约束

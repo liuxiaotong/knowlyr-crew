@@ -34,9 +34,12 @@ except PackageNotFoundError:  # pragma: no cover - editable install
 
 from crew.models import (
     DiscoveryResult,
+    DiscussionPlan,
     Employee,
     EmployeeArg,
     EmployeeOutput,
+    ParticipantPrompt,
+    RoundPlan,
     SKILL_TO_TOOL,
     TOOL_TO_SKILL,
     WorkLogEntry,
@@ -44,9 +47,12 @@ from crew.models import (
 
 __all__ = [
     "DiscoveryResult",
+    "DiscussionPlan",
     "Employee",
     "EmployeeArg",
     "EmployeeOutput",
+    "ParticipantPrompt",
+    "RoundPlan",
     "SKILL_TO_TOOL",
     "TOOL_TO_SKILL",
     "WorkLogEntry",

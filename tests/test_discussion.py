@@ -14,8 +14,10 @@ from crew.discussion import (
     discover_discussions,
     load_discussion,
     render_discussion,
+    render_discussion_plan,
     validate_discussion,
 )
+from crew.models import DiscussionPlan, ParticipantPrompt, RoundPlan
 
 
 # ── 数据模型测试 ──
@@ -348,8 +350,8 @@ class TestRenderDiscussion:
             rounds=2,
         )
         prompt = render_discussion(d, initial_args={"target": "main"}, smart_context=False)
-        assert "代码审查员" in prompt
-        assert "测试工程师" in prompt
+        assert "Code Reviewer" in prompt
+        assert "Test Engineer" in prompt
         assert "讨论 main" in prompt
         assert "主持人" in prompt
         assert "发言人" in prompt
@@ -473,7 +475,7 @@ class TestRenderDiscussion:
         )
         prompt = render_discussion(d, smart_context=False)
         assert "未找到" in prompt
-        assert "代码审查员" in prompt
+        assert "Code Reviewer" in prompt
 
     def test_render_with_round_template(self):
         d = Discussion(
@@ -673,7 +675,7 @@ class TestAdhocDiscussion:
         )
         prompt = render_discussion(d, smart_context=False)
         assert "auth 模块代码质量" in prompt
-        assert "代码审查员" in prompt
+        assert "Code Reviewer" in prompt
 
 
 # ── 发现测试 ──
@@ -720,3 +722,254 @@ class TestDiscoverDiscussions:
         discussions = discover_discussions(project_dir=tmp_path)
         d = load_discussion(discussions["architecture-review"])
         assert d.description == "自定义版"
+
+
+# ── 编排式讨论（Session 隔离）测试 ──
+
+
+class TestRenderDiscussionPlan:
+    """测试编排式讨论计划生成."""
+
+    def test_plan_returns_discussion_plan(self):
+        d = Discussion(
+            name="test",
+            topic="测试议题",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer", role="moderator"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        assert isinstance(plan, DiscussionPlan)
+        assert plan.discussion_name == "test"
+        assert plan.topic == "测试议题"
+
+    def test_plan_has_correct_round_count(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=3,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # 讨论轮次 = 3，可能还有 research round (round 0)
+        discussion_rounds = [r for r in plan.rounds if r.round_number > 0]
+        assert len(discussion_rounds) == 3
+
+    def test_plan_each_round_has_all_participants(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        for rnd in plan.rounds:
+            assert len(rnd.participant_prompts) == 2
+
+    def test_plan_prompts_are_independent(self):
+        """每个参会者的 prompt 只包含自己的完整背景."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # 取第一个讨论轮（跳过 research round）
+        discussion_round = next(r for r in plan.rounds if r.round_number > 0)
+        prompts = discussion_round.participant_prompts
+
+        # 第一个参会者的 prompt 包含"你的身份"
+        assert "你的身份" in prompts[0].prompt
+        assert "你的身份" in prompts[1].prompt
+
+        # 各自的 prompt 提到"其他参会者"
+        assert "其他参会者" in prompts[0].prompt
+        assert "其他参会者" in prompts[1].prompt
+
+    def test_plan_first_round_no_placeholder(self):
+        """第一个讨论轮不包含 {previous_rounds} 占位符."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        first_discussion_round = next(r for r in plan.rounds if r.round_number > 0)
+        for pp in first_discussion_round.participant_prompts:
+            assert "{previous_rounds}" not in pp.prompt
+            assert "尚无前序记录" in pp.prompt
+
+    def test_plan_later_rounds_have_placeholder(self):
+        """后续轮次包含 {previous_rounds} 占位符."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        later_rounds = [r for r in plan.rounds if r.round_number > 1]
+        assert len(later_rounds) >= 1
+        for pp in later_rounds[0].participant_prompts:
+            assert "{previous_rounds}" in pp.prompt
+
+    def test_plan_variable_substitution(self):
+        d = Discussion(
+            name="test",
+            topic="评审 $target",
+            goal="改进 $target",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, initial_args={"target": "auth.py"}, smart_context=False)
+        assert plan.topic == "评审 auth.py"
+        assert plan.goal == "改进 auth.py"
+        assert "评审 auth.py" in plan.rounds[0].participant_prompts[0].prompt
+
+    def test_plan_with_round_template(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            round_template="adversarial",
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # adversarial 模板有 4 轮（可能还有 research round）
+        discussion_rounds = [r for r in plan.rounds if r.round_number > 0]
+        assert len(discussion_rounds) == 4
+
+    def test_plan_has_synthesis_prompt(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        assert plan.synthesis_prompt
+        assert "{all_rounds}" in plan.synthesis_prompt
+
+    def test_plan_unknown_employee_no_crash(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="nonexistent"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # 取第一个讨论轮（跳过 research round）
+        discussion_round = next(r for r in plan.rounds if r.round_number > 0)
+        prompts = discussion_round.participant_prompts
+        assert len(prompts) == 2
+        assert "未找到" in prompts[1].prompt
+
+    def test_plan_serializable(self):
+        """确认 plan 能正确序列化为 JSON."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        json_str = plan.model_dump_json()
+        assert '"discussion_name"' in json_str
+        assert '"participant_prompts"' in json_str
+
+    def test_plan_research_round_when_tools_present(self):
+        """有 tools 的员工应触发 research round."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+                DiscussionParticipant(employee="test-engineer"),
+            ],
+            rounds=2,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # code-reviewer 和 test-engineer 都有 tools，应有 research round
+        assert plan.rounds[0].round_number == 0
+        assert plan.rounds[0].name == "预研"
+        assert len(plan.rounds) == 3  # research + 2 discussion rounds
+
+    def test_plan_research_round_prompts_mention_tools(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        if plan.rounds[0].round_number == 0:
+            research_prompt = plan.rounds[0].participant_prompts[0].prompt
+            assert "工具" in research_prompt
+            assert "禁止编造" in research_prompt
+
+    def test_plan_first_round_has_research_findings_placeholder(self):
+        """第一轮 prompt 应包含 {research_findings} 占位符."""
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        # 找到第一个非-research round
+        discussion_rounds = [r for r in plan.rounds if r.round_number > 0]
+        if discussion_rounds:
+            prompt = discussion_rounds[0].participant_prompts[0].prompt
+            assert "{research_findings}" in prompt
+
+    def test_plan_with_focus(self):
+        d = Discussion(
+            name="test",
+            topic="测试",
+            participants=[
+                DiscussionParticipant(employee="code-reviewer", focus="安全性"),
+                DiscussionParticipant(employee="test-engineer", focus="覆盖率"),
+            ],
+            rounds=1,
+        )
+        plan = render_discussion_plan(d, smart_context=False)
+        discussion_rounds = [r for r in plan.rounds if r.round_number > 0]
+        assert "安全性" in discussion_rounds[0].participant_prompts[0].prompt
+        assert "覆盖率" in discussion_rounds[0].participant_prompts[1].prompt

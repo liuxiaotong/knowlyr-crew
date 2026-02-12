@@ -1,4 +1,4 @@
-"""四层发现机制 — 内置 + 全局 + skill + 项目."""
+"""发现机制 — 内置 + .claude/skills + private/employees."""
 
 import logging
 from pathlib import Path
@@ -10,14 +10,11 @@ from crew.parser import parse_employee, parse_employee_dir, parse_skill, validat
 
 logger = logging.getLogger(__name__)
 
-# 全局员工目录
-GLOBAL_DIR = Path.home() / ".knowlyr" / "crew"
-
-# 项目员工目录名
-PROJECT_DIR_NAME = ".crew"
-
 # Claude Code Skills 目录
 SKILLS_DIR_NAME = ".claude/skills"
+
+# 自定义员工目录（相对项目根）
+PRIVATE_DIR_NAME = "private/employees"
 
 
 def _scan_directory(
@@ -49,7 +46,7 @@ def _scan_directory(
             continue
         try:
             # 可写层自动版本管理
-            if layer in ("global", "project"):
+            if layer in ("private",):
                 try:
                     from crew.versioning import check_and_bump
                     check_and_bump(item)
@@ -174,13 +171,12 @@ def _merge_employee(
 def discover_employees(
     project_dir: Path | None = None,
 ) -> DiscoveryResult:
-    """执行完整的四层发现.
+    """执行员工发现（内置 + skills + private/employees）.
 
     优先级（高覆盖低）:
-    1. 项目层: {project_dir}/.crew/*.md
+    1. 内置层: 包内 employees/*.md
     2. 技能层: {project_dir}/.claude/skills/<name>/SKILL.md
-    3. 全局层: ~/.knowlyr/crew/*.md
-    4. 内置层: 包内 employees/*.md
+    3. private 层: {project_dir}/private/employees/
 
     Args:
         project_dir: 项目根目录，默认为当前工作目录
@@ -188,34 +184,25 @@ def discover_employees(
     Returns:
         DiscoveryResult 包含去重后的员工映射和冲突记录
     """
-    if project_dir is None:
-        project_dir = Path.cwd()
-
-    # 按优先级从低到高扫描（低层先入，高层覆盖）
-    md_layers: list[tuple[str, Path]] = [
-        ("builtin", builtin_dir()),
-        ("global", GLOBAL_DIR),
-    ]
-
-    skills_dir = project_dir / SKILLS_DIR_NAME
-    project_crew_dir = project_dir / PROJECT_DIR_NAME
+    root = Path(project_dir) if project_dir else Path.cwd()
 
     employees: dict[str, Employee] = {}
-    trigger_map: dict[str, str] = {}  # trigger -> employee name
+    trigger_map: dict[str, str] = {}
     conflicts: list[dict[str, Any]] = []
 
-    # 先扫描 .md 格式的层（builtin, global）
-    for layer_name, layer_dir in md_layers:
-        for emp in _scan_directory(layer_dir, layer_name):
-            _merge_employee(emp, layer_name, employees, trigger_map, conflicts)
+    # 低优先级：内置层
+    for emp in _scan_directory(builtin_dir(), "builtin"):
+        _merge_employee(emp, "builtin", employees, trigger_map, conflicts)
 
-    # 扫描 .claude/skills/ 层
+    # 中优先级：.claude/skills/
+    skills_dir = root / SKILLS_DIR_NAME
     for emp in _scan_skills_directory(skills_dir):
         _merge_employee(emp, "skill", employees, trigger_map, conflicts)
 
-    # 扫描项目 .crew/ 层（最高优先级）
-    for emp in _scan_directory(project_crew_dir, "project"):
-        _merge_employee(emp, "project", employees, trigger_map, conflicts)
+    # 高优先级：private/employees/
+    private_dir = root / PRIVATE_DIR_NAME
+    for emp in _scan_directory(private_dir, "private"):
+        _merge_employee(emp, "private", employees, trigger_map, conflicts)
 
     return DiscoveryResult(employees=employees, conflicts=conflicts)
 

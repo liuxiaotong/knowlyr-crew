@@ -36,6 +36,7 @@ class WorkLogger:
         employee_name: str,
         args: dict[str, str] | None = None,
         agent_id: int | None = None,
+        detail: str | None = None,
     ) -> str:
         """创建新的工作 session.
 
@@ -53,7 +54,7 @@ class WorkLogger:
         entry = WorkLogEntry(
             employee_name=employee_name,
             action="session_start",
-            detail=f"员工 {employee_name} 开始工作",
+            detail=detail or f"员工 {employee_name} 开始工作",
             args=args or {},
             agent_id=agent_id,
         )
@@ -68,6 +69,9 @@ class WorkLogger:
         session_id: str,
         action: str,
         detail: str = "",
+        severity: str = "info",
+        metrics: dict[str, float] | None = None,
+        links: list[str] | None = None,
     ) -> None:
         """向 session 追加日志条目.
 
@@ -88,6 +92,9 @@ class WorkLogger:
             employee_name=first_entry["employee_name"],
             action=action,
             detail=detail,
+            severity=severity,
+            metrics=metrics or {},
+            links=links or [],
         )
 
         with open(session_file, "a", encoding="utf-8") as f:

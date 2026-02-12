@@ -209,7 +209,116 @@ def create_server() -> "Server":
                             "description": "自动检测项目类型（默认 true）",
                             "default": True,
                         },
+                        "orchestrated": {
+                            "type": "boolean",
+                            "description": "编排模式：每个参会者独立推理（默认 false）",
+                            "default": False,
+                        },
                     },
+                },
+            ),
+            Tool(
+                name="add_memory",
+                description="为员工添加一条持久化记忆",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee": {
+                            "type": "string",
+                            "description": "员工名称",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["decision", "estimate", "finding", "correction"],
+                            "description": "记忆类别",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "记忆内容",
+                        },
+                        "source_session": {
+                            "type": "string",
+                            "description": "来源 session ID（可选）",
+                        },
+                    },
+                    "required": ["employee", "category", "content"],
+                },
+            ),
+            Tool(
+                name="query_memory",
+                description="查询员工的持久化记忆",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee": {
+                            "type": "string",
+                            "description": "员工名称",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["decision", "estimate", "finding", "correction"],
+                            "description": "按类别过滤（可选）",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "最大返回条数（默认 20）",
+                            "default": 20,
+                        },
+                    },
+                    "required": ["employee"],
+                },
+            ),
+            Tool(
+                name="track_decision",
+                description="记录一个待评估的决策（来自会议或日常工作）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee": {
+                            "type": "string",
+                            "description": "提出决策的员工名称",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["estimate", "recommendation", "commitment"],
+                            "description": "决策类别",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "决策内容",
+                        },
+                        "expected_outcome": {
+                            "type": "string",
+                            "description": "预期结果（可选）",
+                        },
+                        "meeting_id": {
+                            "type": "string",
+                            "description": "来源会议 ID（可选）",
+                        },
+                    },
+                    "required": ["employee", "category", "content"],
+                },
+            ),
+            Tool(
+                name="evaluate_decision",
+                description="评估一个决策 — 记录实际结果并将经验写入员工记忆",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "decision_id": {
+                            "type": "string",
+                            "description": "决策 ID",
+                        },
+                        "actual_outcome": {
+                            "type": "string",
+                            "description": "实际结果",
+                        },
+                        "evaluation": {
+                            "type": "string",
+                            "description": "评估结论（可选，为空则自动生成）",
+                        },
+                    },
+                    "required": ["decision_id", "actual_outcome"],
                 },
             ),
             Tool(
@@ -408,12 +517,14 @@ def create_server() -> "Server":
                 discover_discussions,
                 load_discussion,
                 render_discussion,
+                render_discussion_plan,
                 validate_discussion,
             )
 
             d_args = arguments.get("args", {})
             agent_id = arguments.get("agent_id")
             smart_context = arguments.get("smart_context", True)
+            is_orchestrated = arguments.get("orchestrated", False)
 
             employees_list = arguments.get("employees")
             adhoc_topic = arguments.get("topic")
@@ -445,13 +556,83 @@ def create_server() -> "Server":
             if errors:
                 return [TextContent(type="text", text=f"讨论会校验失败: {'; '.join(errors)}")]
 
-            prompt = render_discussion(
-                discussion,
-                initial_args=d_args,
-                agent_id=agent_id,
-                smart_context=smart_context,
+            if is_orchestrated:
+                plan = render_discussion_plan(
+                    discussion,
+                    initial_args=d_args,
+                    agent_id=agent_id,
+                    smart_context=smart_context,
+                )
+                return [TextContent(
+                    type="text",
+                    text=plan.model_dump_json(indent=2),
+                )]
+            else:
+                prompt = render_discussion(
+                    discussion,
+                    initial_args=d_args,
+                    agent_id=agent_id,
+                    smart_context=smart_context,
+                )
+                return [TextContent(type="text", text=prompt)]
+
+        elif name == "add_memory":
+            from crew.memory import MemoryStore
+            store = MemoryStore()
+            entry = store.add(
+                employee=arguments["employee"],
+                category=arguments["category"],
+                content=arguments["content"],
+                source_session=arguments.get("source_session", ""),
             )
-            return [TextContent(type="text", text=prompt)]
+            return [TextContent(
+                type="text",
+                text=json.dumps(entry.model_dump(), ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "query_memory":
+            from crew.memory import MemoryStore
+            store = MemoryStore()
+            entries = store.query(
+                employee=arguments["employee"],
+                category=arguments.get("category"),
+                limit=arguments.get("limit", 20),
+            )
+            data = [e.model_dump() for e in entries]
+            return [TextContent(
+                type="text",
+                text=json.dumps(data, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "track_decision":
+            from crew.evaluation import EvaluationEngine
+            engine = EvaluationEngine()
+            decision = engine.track(
+                employee=arguments["employee"],
+                category=arguments["category"],
+                content=arguments["content"],
+                expected_outcome=arguments.get("expected_outcome", ""),
+                meeting_id=arguments.get("meeting_id", ""),
+            )
+            return [TextContent(
+                type="text",
+                text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "evaluate_decision":
+            from crew.evaluation import EvaluationEngine
+            engine = EvaluationEngine()
+            decision = engine.evaluate(
+                decision_id=arguments["decision_id"],
+                actual_outcome=arguments["actual_outcome"],
+                evaluation=arguments.get("evaluation", ""),
+            )
+            if decision is None:
+                return [TextContent(type="text", text=f"未找到决策: {arguments['decision_id']}")]
+            return [TextContent(
+                type="text",
+                text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
+            )]
 
         elif name == "list_meeting_history":
             from crew.meeting_log import MeetingLogger

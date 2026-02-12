@@ -82,7 +82,7 @@ class TestMCPTools:
             ),
         )))
         text = result.root.content[0].text
-        assert "代码审查员" in text
+        assert "Code Reviewer" in text
         assert "main" in text
 
 

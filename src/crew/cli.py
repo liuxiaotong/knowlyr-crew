@@ -8,11 +8,22 @@ from pathlib import Path
 import click
 
 from crew import __version__
+from crew import sdk
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
+from crew.log import WorkLogger
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
 from crew.template_manager import apply_template, discover_templates
 from crew.template_manager import apply_template, discover_templates
+from crew.pipeline import load_pipeline, validate_pipeline
+from crew.discussion import load_discussion, validate_discussion
+
+EMPLOYEE_SUBDIR = Path("private") / "employees"
+
+
+def _employee_root() -> Path:
+    """返回当前项目的员工根目录."""
+    return Path.cwd() / EMPLOYEE_SUBDIR
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -119,6 +130,242 @@ def list_cmd(ctx: click.Context, tag: str | None, layer: str | None, output_form
             click.echo(f"  {c}", err=True)
 
 
+def _lint_file(path: Path, project_dir: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - YAML parse error surfaced below
+        return [f"{path}: 无法解析 YAML ({exc})"]
+
+    if not isinstance(data, dict):
+        return [f"{path}: YAML 内容应为对象"]
+
+    kind = "pipeline" if "steps" in data else "discussion" if "participants" in data else None
+
+    if kind == "pipeline":
+        try:
+            pipeline = load_pipeline(path)
+        except Exception as exc:
+            return [f"{path}: 解析失败 ({exc})"]
+        errors = [f"{path}: {e}" for e in validate_pipeline(pipeline, project_dir=project_dir)]
+    elif kind == "discussion":
+        try:
+            discussion = load_discussion(path)
+        except Exception as exc:
+            return [f"{path}: 解析失败 ({exc})"]
+        errors = [f"{path}: {e}" for e in validate_discussion(discussion, project_dir=project_dir)]
+    else:
+        errors = [f"{path}: 未识别的 YAML 类型（缺少 steps/participants）"]
+
+    return errors
+
+
+def _lint_targets(targets: list[Path]) -> list[str]:
+    project_dir = Path.cwd()
+    errors: list[str] = []
+
+    for target in targets:
+        if not target.exists():
+            errors.append(f"{target}: 路径不存在")
+            continue
+
+        if target.is_file():
+            errors.extend(_lint_file(target, project_dir))
+        else:
+            files = sorted(p for p in target.rglob("*.yaml"))
+            if not files:
+                errors.append(f"{target}: 未找到 *.yaml 文件")
+            for file in files:
+                errors.extend(_lint_file(file, project_dir))
+
+    return errors
+
+
+def _scan_log_severity(log_dir: Path) -> tuple[dict[str, int], int]:
+    import json as _json
+
+    counts: dict[str, int] = {}
+    entries = 0
+    if not log_dir.is_dir():
+        return counts, entries
+
+    for file in sorted(log_dir.glob("*.jsonl")):
+        try:
+            content = file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in content.splitlines():
+            if not line.strip():
+                continue
+            try:
+                data = _json.loads(line)
+            except ValueError:
+                continue
+            severity = str(data.get("severity", "info"))
+            counts[severity] = counts.get(severity, 0) + 1
+            entries += 1
+
+    return counts, entries
+
+
+@main.command("lint")
+@click.argument("paths", nargs=-1, type=click.Path(path_type=Path))
+def lint_cmd(paths: tuple[Path, ...]):
+    """Lint pipelines/discussions YAML（默认扫描 .crew/pipelines 和 .crew/discussions）。"""
+    targets = list(paths)
+
+    if not targets:
+        default_dirs = [Path.cwd() / ".crew" / "pipelines", Path.cwd() / ".crew" / "discussions"]
+        targets = [d for d in default_dirs if d.exists()]
+        if not targets:
+            click.echo("未指定路径，且未找到 .crew/pipelines 或 .crew/discussions。", err=True)
+            sys.exit(1)
+
+    errors = _lint_targets(targets)
+    if errors:
+        for err in errors:
+            click.echo(err, err=True)
+        click.echo(f"\nLint 失败: {len(errors)} 个问题", err=True)
+        sys.exit(1)
+
+    click.echo("Lint 通过 ✓")
+
+
+@main.command("check")
+@click.option("--no-lint", is_flag=True, default=False, help="跳过 lint 检查")
+@click.option("--no-logs", is_flag=True, default=False, help="跳过日志质量检查")
+@click.option("--json", "json_output", is_flag=True, help="JSON 输出")
+@click.option("--path", "lint_paths", multiple=True, type=click.Path(path_type=Path), help="要 lint 的路径（可多次指定）")
+def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple[Path, ...]):
+    """执行 lint + 日志质量检查。"""
+    report: dict[str, Any] = {}
+    exit_code = 0
+
+    if not no_lint:
+        targets = list(lint_paths)
+        if not targets:
+            default_dirs = [Path.cwd() / ".crew" / "pipelines", Path.cwd() / ".crew" / "discussions"]
+            targets = [d for d in default_dirs if d.exists()]
+        lint_errors = _lint_targets(targets)
+        if lint_errors:
+            exit_code = 1
+            report["lint"] = {"status": "failed", "errors": lint_errors}
+        else:
+            report["lint"] = {"status": "ok"}
+
+    if not no_logs:
+        logger = WorkLogger()
+        counts, entries = _scan_log_severity(logger.log_dir)
+        report["logs"] = {"entries": entries, "severity": counts}
+        if counts.get("critical", 0) > 0:
+            exit_code = 1
+
+    if json_output:
+        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        if "lint" in report:
+            status = report["lint"].get("status")
+            if status == "ok":
+                click.echo("Lint: OK")
+            else:
+                click.echo("Lint: FAILED", err=True)
+                for err in report["lint"].get("errors", []):
+                    click.echo(f"  - {err}", err=True)
+        if "logs" in report:
+            logs = report["logs"]
+            click.echo(f"日志条目: {logs['entries']}")
+            severity = logs.get("severity", {})
+            if severity:
+                click.echo("Severity:")
+                for key, value in severity.items():
+                    click.echo(f"  {key}: {value}")
+
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
+@main.group()
+def catalog():
+    """员工 Catalog 查询."""
+    pass
+
+
+def _catalog_data() -> list[dict[str, Any]]:
+    result = discover_employees()
+    employees = []
+    for emp in result.employees.values():
+        employees.append({
+            "name": emp.name,
+            "display_name": emp.display_name,
+            "character_name": emp.character_name,
+            "description": emp.description,
+            "tags": emp.tags,
+            "triggers": emp.triggers,
+            "tools": emp.tools,
+            "context": emp.context,
+            "agent_id": emp.agent_id,
+            "source_layer": emp.source_layer,
+        })
+    return employees
+
+
+@catalog.command("list")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def catalog_list(output_format: str):
+    """列出所有员工元数据."""
+    data = _catalog_data()
+
+    if not data:
+        click.echo("未找到员工。", err=True)
+        return
+
+    if output_format == "json":
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="员工 Catalog")
+        table.add_column("名称", style="cyan")
+        table.add_column("显示名")
+        table.add_column("角色名")
+        table.add_column("AgentID")
+        table.add_column("触发词")
+        for item in data:
+            table.add_row(
+                item["name"],
+                item["display_name"],
+                item["character_name"],
+                str(item["agent_id"] or "-"),
+                ", ".join(item["triggers"]),
+            )
+        console.print(table)
+    except ImportError:
+        for item in data:
+            click.echo(f"{item['name']:<18} {item['display_name']:<12} agent={item['agent_id'] or '-'}")
+
+
+@catalog.command("show")
+@click.argument("name")
+@click.option("--json", "json_output", is_flag=True, help="JSON 输出")
+def catalog_show(name: str, json_output: bool):
+    """查看指定员工元数据."""
+    for item in _catalog_data():
+        if item["name"] == name or name in item.get("triggers", []):
+            if json_output:
+                click.echo(json.dumps(item, ensure_ascii=False, indent=2))
+            else:
+                click.echo(json.dumps(item, ensure_ascii=False, indent=2))
+            return
+    click.echo(f"未找到员工: {name}", err=True)
+    sys.exit(1)
+
+
 @main.command()
 @click.argument("name")
 def show(name: str):
@@ -199,9 +446,7 @@ def run(
 
     NAME 为员工名称或触发别名。后续参数作为位置参数传递。
     """
-    result = discover_employees()
-    emp = result.get(name)
-
+    emp = sdk.get_employee(name)
     if emp is None:
         click.echo(f"未找到员工: {name}", err=True)
         sys.exit(1)
@@ -249,14 +494,14 @@ def run(
         project_info = detect_project()
 
     # 生成
-    if raw:
-        text = engine.render(emp, args=args_dict, positional=list(positional_args))
-    else:
-        text = engine.prompt(
-            emp, args=args_dict, positional=list(positional_args),
-            agent_identity=agent_identity,
-            project_info=project_info,
-        )
+    text = sdk.generate_prompt(
+        emp,
+        args=args_dict,
+        positional=list(positional_args),
+        raw=raw,
+        agent_identity=agent_identity,
+        project_info=project_info,
+    )
 
     # 记录工作日志
     try:
@@ -375,9 +620,9 @@ def validate(path: str):
 def init(employee: str | None, dir_format: bool, avatar: bool,
          display_name: str | None, desc: str | None, character_name: str | None,
          avatar_prompt: str | None, tags: str | None):
-    """初始化 .crew/ 目录或创建员工模板."""
-    crew_dir = Path.cwd() / ".crew"
-    crew_dir.mkdir(exist_ok=True)
+    """初始化 private/employees/ 目录或创建员工模板."""
+    crew_dir = _employee_root()
+    crew_dir.mkdir(parents=True, exist_ok=True)
 
     if employee and dir_format:
         # 目录格式模板
@@ -551,12 +796,12 @@ def template_list():
 @click.option("--var", "variables", multiple=True, help="额外模板变量，格式 key=value")
 @click.option(
     "-o", "--output", type=click.Path(), default=None,
-    help="输出文件路径（默认 .crew/<employee>.md）",
+    help="输出文件路径（默认 private/employees/<employee>.md）",
 )
 @click.option("--force", is_flag=True, help="如目标已存在则覆盖")
 def template_apply(template_name: str, employee: str | None, variables: tuple[str, ...],
                    output: str | None, force: bool):
-    """渲染模板并输出到 .crew/ 目录."""
+    """渲染模板并输出到 private/employees/ 目录."""
     parsed_vars = _parse_variables(variables)
 
     defaults: dict[str, str] = {}
@@ -575,7 +820,7 @@ def template_apply(template_name: str, employee: str | None, variables: tuple[st
     target_path = Path(output) if output else None
     if target_path is None:
         filename = merged_vars.get("name") or template_name
-        target_path = Path.cwd() / ".crew" / f"{filename}.md"
+        target_path = _employee_root() / f"{filename}.md"
 
     try:
         result_path = apply_template(
@@ -943,9 +1188,11 @@ def discuss_show(name: str):
 @click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
+@click.option("--orchestrated", is_flag=True, default=False,
+              help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                smart_context: bool, output: str | None):
+                smart_context: bool, orchestrated: bool, output: str | None):
     """生成讨论会 prompt.
 
     NAME_OR_PATH 可以是讨论会名称或 YAML 文件路径。
@@ -954,6 +1201,7 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
         discover_discussions,
         load_discussion,
         render_discussion,
+        render_discussion_plan,
         validate_discussion,
     )
 
@@ -983,21 +1231,36 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
             initial_args[k] = v
 
     rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
-    click.echo(
-        f"生成讨论会: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
-        err=True,
-    )
 
-    prompt = render_discussion(
-        d, initial_args=initial_args,
-        agent_id=agent_id, smart_context=smart_context,
-    )
-
-    if output:
-        Path(output).write_text(prompt, encoding="utf-8")
-        click.echo(f"\n已写入: {output}", err=True)
+    if orchestrated:
+        click.echo(
+            f"生成编排式讨论: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
+            err=True,
+        )
+        plan = render_discussion_plan(
+            d, initial_args=initial_args,
+            agent_id=agent_id, smart_context=smart_context,
+        )
+        result_text = plan.model_dump_json(indent=2)
+        if output:
+            Path(output).write_text(result_text, encoding="utf-8")
+            click.echo(f"\n已写入: {output}", err=True)
+        else:
+            click.echo(result_text)
     else:
-        click.echo(prompt)
+        click.echo(
+            f"生成讨论会: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
+            err=True,
+        )
+        prompt = render_discussion(
+            d, initial_args=initial_args,
+            agent_id=agent_id, smart_context=smart_context,
+        )
+        if output:
+            Path(output).write_text(prompt, encoding="utf-8")
+            click.echo(f"\n已写入: {output}", err=True)
+        else:
+            click.echo(prompt)
 
 
 @discuss.command("adhoc")
@@ -1011,10 +1274,13 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
               default="summary", help="输出格式")
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
+@click.option("--orchestrated", is_flag=True, default=False,
+              help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
                   round_template: str | None, output_format: str,
-                  agent_id: int | None, smart_context: bool, output: str | None):
+                  agent_id: int | None, smart_context: bool, orchestrated: bool,
+                  output: str | None):
     """发起即席讨论（无需 YAML 定义）.
 
     示例:
@@ -1024,6 +1290,7 @@ def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
     from crew.discussion import (
         create_adhoc_discussion,
         render_discussion,
+        render_discussion_plan,
         validate_discussion,
     )
 
@@ -1049,21 +1316,36 @@ def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
 
     mode_label = "1v1 会议" if d.effective_mode == "meeting" else "讨论会"
     rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
-    click.echo(
-        f"生成即席{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
-        err=True,
-    )
 
-    prompt = render_discussion(
-        d, initial_args={},
-        agent_id=agent_id, smart_context=smart_context,
-    )
-
-    if output:
-        Path(output).write_text(prompt, encoding="utf-8")
-        click.echo(f"\n已写入: {output}", err=True)
+    if orchestrated:
+        click.echo(
+            f"生成编排式{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
+            err=True,
+        )
+        plan = render_discussion_plan(
+            d, initial_args={},
+            agent_id=agent_id, smart_context=smart_context,
+        )
+        result_text = plan.model_dump_json(indent=2)
+        if output:
+            Path(output).write_text(result_text, encoding="utf-8")
+            click.echo(f"\n已写入: {output}", err=True)
+        else:
+            click.echo(result_text)
     else:
-        click.echo(prompt)
+        click.echo(
+            f"生成即席{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
+            err=True,
+        )
+        prompt = render_discussion(
+            d, initial_args={},
+            agent_id=agent_id, smart_context=smart_context,
+        )
+        if output:
+            Path(output).write_text(prompt, encoding="utf-8")
+            click.echo(f"\n已写入: {output}", err=True)
+        else:
+            click.echo(prompt)
 
 
 @discuss.command("history")
@@ -1130,6 +1412,163 @@ def discuss_view(meeting_id: str):
     click.echo(f"时间: {record.started_at}")
     click.echo()
     click.echo(content)
+
+
+# ── memory 子命令组 ──
+
+
+@main.group()
+def memory():
+    """员工记忆管理 — 持久化经验存储."""
+    pass
+
+
+@memory.command("list")
+def memory_list():
+    """列出有记忆的员工."""
+    from crew.memory import MemoryStore
+
+    store = MemoryStore()
+    employees = store.list_employees()
+    if not employees:
+        click.echo("暂无记忆数据。")
+        return
+    for emp in employees:
+        entries = store.query(emp)
+        click.echo(f"  {emp}: {len(entries)} 条记忆")
+
+
+@memory.command("show")
+@click.argument("employee")
+@click.option("--category", type=click.Choice(["decision", "estimate", "finding", "correction"]),
+              default=None, help="按类别过滤")
+@click.option("-n", "--limit", type=int, default=20, help="返回条数")
+def memory_show(employee: str, category: str | None, limit: int):
+    """查看员工记忆."""
+    from crew.memory import MemoryStore
+
+    store = MemoryStore()
+    entries = store.query(employee, category=category, limit=limit)
+    if not entries:
+        click.echo(f"员工 '{employee}' 暂无记忆。")
+        return
+
+    for entry in entries:
+        conf = f" [{entry.confidence:.0%}]" if entry.confidence < 1.0 else ""
+        click.echo(f"  [{entry.id}] ({entry.category}){conf} {entry.content}")
+
+
+@memory.command("add")
+@click.argument("employee")
+@click.option("--category", "-c", required=True,
+              type=click.Choice(["decision", "estimate", "finding", "correction"]),
+              help="记忆类别")
+@click.option("--content", "-m", required=True, help="记忆内容")
+def memory_add(employee: str, category: str, content: str):
+    """手动添加员工记忆."""
+    from crew.memory import MemoryStore
+
+    store = MemoryStore()
+    entry = store.add(employee=employee, category=category, content=content)
+    click.echo(f"已添加: [{entry.id}] ({entry.category}) {entry.content}")
+
+
+@memory.command("correct")
+@click.argument("employee")
+@click.argument("old_id")
+@click.option("--content", "-m", required=True, help="纠正后的内容")
+def memory_correct(employee: str, old_id: str, content: str):
+    """纠正一条记忆."""
+    from crew.memory import MemoryStore
+
+    store = MemoryStore()
+    new_entry = store.correct(employee=employee, old_id=old_id, new_content=content)
+    if new_entry is None:
+        click.echo(f"未找到记忆: {old_id}", err=True)
+        sys.exit(1)
+    click.echo(f"已纠正: [{new_entry.id}] {new_entry.content}")
+
+
+# ── eval 子命令组 ──
+
+
+@main.group(name="eval")
+def eval_group():
+    """决策评估 — 追踪决策质量、回溯评估."""
+    pass
+
+
+@eval_group.command("track")
+@click.argument("employee")
+@click.option("--category", "-c", required=True,
+              type=click.Choice(["estimate", "recommendation", "commitment"]),
+              help="决策类别")
+@click.option("--content", "-m", required=True, help="决策内容")
+@click.option("--expected", "-e", default="", help="预期结果")
+@click.option("--meeting-id", default="", help="来源会议 ID")
+def eval_track(employee: str, category: str, content: str, expected: str, meeting_id: str):
+    """记录一个待评估的决策."""
+    from crew.evaluation import EvaluationEngine
+
+    engine = EvaluationEngine()
+    decision = engine.track(
+        employee=employee,
+        category=category,
+        content=content,
+        expected_outcome=expected,
+        meeting_id=meeting_id,
+    )
+    click.echo(f"已记录: [{decision.id}] ({decision.category}) {decision.content}")
+
+
+@eval_group.command("list")
+@click.option("--employee", default=None, help="按员工过滤")
+@click.option("--status", type=click.Choice(["pending", "evaluated"]), default=None, help="按状态过滤")
+@click.option("-n", "--limit", type=int, default=20, help="返回条数")
+def eval_list(employee: str | None, status: str | None, limit: int):
+    """列出决策记录."""
+    from crew.evaluation import EvaluationEngine
+
+    engine = EvaluationEngine()
+    decisions = engine.list_decisions(employee=employee, status=status, limit=limit)
+    if not decisions:
+        click.echo("暂无决策记录。")
+        return
+
+    for d in decisions:
+        status_icon = "✓" if d.status == "evaluated" else "○"
+        click.echo(f"  {status_icon} [{d.id}] {d.employee} ({d.category}): {d.content}")
+
+
+@eval_group.command("run")
+@click.argument("decision_id")
+@click.option("--actual", "-a", required=True, help="实际结果")
+@click.option("--evaluation", "-e", default="", help="评估结论（可选）")
+def eval_run(decision_id: str, actual: str, evaluation: str):
+    """评估一个决策并将结论写入记忆."""
+    from crew.evaluation import EvaluationEngine
+
+    engine = EvaluationEngine()
+    result = engine.evaluate(decision_id, actual_outcome=actual, evaluation=evaluation)
+    if result is None:
+        click.echo(f"未找到决策: {decision_id}", err=True)
+        sys.exit(1)
+    click.echo(f"已评估: [{result.id}] {result.evaluation}")
+    click.echo("评估结论已写入员工记忆。")
+
+
+@eval_group.command("prompt")
+@click.argument("decision_id")
+def eval_prompt(decision_id: str):
+    """生成回溯评估 prompt."""
+    from crew.evaluation import EvaluationEngine
+
+    engine = EvaluationEngine()
+    prompt = engine.generate_evaluation_prompt(decision_id)
+    if prompt is None:
+        click.echo(f"未找到决策: {decision_id}", err=True)
+        sys.exit(1)
+    click.echo(prompt)
 
 
 # ── register 命令 ──

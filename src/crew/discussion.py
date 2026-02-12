@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from crew.context_detector import ProjectInfo, detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
-from crew.models import Employee, EmployeeOutput
+from crew.models import DiscussionPlan, Employee, EmployeeOutput, ParticipantPrompt, RoundPlan
 
 if TYPE_CHECKING:
     from crew.id_client import AgentIdentity
@@ -558,6 +558,414 @@ def render_discussion(
     prompt = "\n".join(parts)
     _log_meeting(discussion, prompt, initial_args)
     return prompt
+
+
+# ── 编排式讨论（独立 session）──
+
+
+def _render_participant_prompt(
+    emp: Employee,
+    participant: DiscussionParticipant,
+    discussion: Discussion,
+    topic: str,
+    goal: str,
+    round_info: DiscussionRound | dict,
+    round_number: int,
+    total_rounds: int,
+    other_participants: list[dict],
+    engine: CrewEngine,
+    initial_args: dict[str, str],
+    project_info: ProjectInfo | None,
+    is_first_round: bool,
+) -> str:
+    """为单个参会者生成独立的 prompt."""
+    role_label = ROLE_LABELS.get(participant.role, participant.role)
+
+    # 轮次信息
+    if isinstance(round_info, DiscussionRound):
+        round_name = round_info.name or f"第 {round_number} 轮"
+        round_instruction = round_info.instruction
+        interaction = round_info.interaction
+    else:
+        round_name = f"第 {round_number} 轮"
+        round_instruction = round_info.get("instruction", "")
+        interaction = round_info.get("interaction", "free")
+
+    parts: list[str] = [
+        f"# 讨论会：{discussion.description or discussion.name}",
+        "",
+        f"**议题**: {topic}",
+    ]
+    if goal:
+        parts.append(f"**目标**: {goal}")
+    if project_info and project_info.project_type != "unknown":
+        parts.append(f"**项目类型**: {project_info.display_label}")
+    parts.append(f"**当前轮次**: {round_name}（第 {round_number}/{total_rounds} 轮）")
+    parts.append("")
+
+    # 自己的身份和背景
+    parts.extend(["---", "", "## 你的身份", ""])
+    display = emp.character_name or emp.effective_display_name
+    parts.append(f"你是 **{display}**（{role_label}），{emp.description}。")
+    if participant.focus:
+        parts.append(f"本次讨论你重点关注：**{participant.focus}**")
+    parts.append("")
+
+    rendered_body = engine.render(emp, args=dict(initial_args))
+    if project_info:
+        rendered_body = rendered_body.replace("{project_type}", project_info.project_type)
+        rendered_body = rendered_body.replace("{framework}", project_info.framework)
+        rendered_body = rendered_body.replace("{test_framework}", project_info.test_framework)
+        rendered_body = rendered_body.replace("{package_manager}", project_info.package_manager)
+    parts.append(f"<专业背景>\n{rendered_body}\n</专业背景>")
+    parts.append("")
+
+    # 其他参会者（摘要）
+    if other_participants:
+        parts.extend(["---", "", "## 其他参会者", ""])
+        for other in other_participants:
+            other_emp: Employee | None = other["employee"]
+            other_p: DiscussionParticipant = other["participant"]
+            other_role = ROLE_LABELS.get(other_p.role, other_p.role)
+            if other_emp:
+                other_display = other_emp.character_name or other_emp.effective_display_name
+                summary = other_emp.summary or other_emp.description
+                parts.append(f"- **{other_display}**（{other_role}）: {summary}")
+            else:
+                parts.append(f"- {other_p.employee}（{other_role}）: 未找到")
+        parts.append("")
+
+    # 讨论规则
+    rules = discussion.rules if discussion.rules is not None else _DEFAULT_RULES
+    parts.extend(["---", "", "## 讨论规则", ""])
+    for i, rule in enumerate(rules, 1):
+        parts.append(f"{i}. {rule}")
+    parts.append("")
+
+    # 本轮要求
+    parts.extend(["## 本轮要求", ""])
+    if round_instruction:
+        parts.append(round_instruction)
+    if interaction != "free" and interaction in _INTERACTION_RULES:
+        parts.append("")
+        parts.append(_INTERACTION_RULES[interaction])
+    parts.append("")
+
+    # 历史经验（从持久化记忆注入）
+    try:
+        from crew.memory import MemoryStore
+        memory_store = MemoryStore()
+        memory_text = memory_store.format_for_prompt(emp.name, limit=5)
+        if memory_text:
+            parts.extend(["---", "", "## 你的历史经验", "", memory_text, ""])
+    except Exception:
+        pass
+
+    # 预研发现（如果有 research round，第一轮注入）
+    if is_first_round and emp.research_instructions or (is_first_round and emp.tools):
+        parts.extend(["---", "", "## 你的预研发现", ""])
+        parts.append("{research_findings}")
+        parts.append("")
+        parts.append("**重要**：你的发言必须引用上述预研发现中的数据，不得编造。")
+        parts.append("")
+
+    # 前序讨论记录（占位符）
+    parts.extend(["---", "", "## 前序讨论记录", ""])
+    if is_first_round:
+        parts.append("（这是第一轮讨论，尚无前序记录。请直接给出你的观点。）")
+    else:
+        parts.append("{previous_rounds}")
+    parts.append("")
+
+    # 输出要求
+    parts.extend(["---", "", "## 输出要求", ""])
+    parts.append(
+        f"以 **【{display}（{role_label}）】** 的身份发言。"
+        "发言应基于你的专业背景，针对议题给出具体、有依据的观点。"
+    )
+    if not is_first_round:
+        parts.append("你必须回应前序讨论中其他参会者的观点，不能忽略他们的发言。")
+    if interaction == "challenge":
+        parts.append("你必须对至少一位其他参会者的观点提出质疑或挑战。")
+    elif interaction == "response":
+        parts.append("你必须回应上一轮中对你的质疑。如果没有人直接质疑你，也要回应他人的论点。")
+    parts.append("")
+
+    return "\n".join(parts)
+
+
+def _render_synthesis_prompt(
+    discussion: Discussion,
+    topic: str,
+    goal: str,
+    participants_info: list[dict],
+) -> str:
+    """生成最终汇总 prompt."""
+    parts: list[str] = [
+        f"# 讨论会汇总：{discussion.description or discussion.name}",
+        "",
+        f"**议题**: {topic}",
+    ]
+    if goal:
+        parts.append(f"**目标**: {goal}")
+    parts.append("")
+
+    parts.extend(["## 参会者", ""])
+    for info in participants_info:
+        p: DiscussionParticipant = info["participant"]
+        emp: Employee | None = info["employee"]
+        role_label = ROLE_LABELS.get(p.role, p.role)
+        if emp:
+            display = emp.character_name or emp.effective_display_name
+            parts.append(f"- **{display}**（{role_label}）")
+        else:
+            parts.append(f"- {p.employee}（{role_label}）")
+    parts.append("")
+
+    parts.extend([
+        "## 所有讨论记录",
+        "",
+        "{all_rounds}",
+        "",
+        "---",
+        "",
+    ])
+
+    parts.append(_OUTPUT_TEMPLATES[discussion.output_format])
+
+    # 自动保存
+    if discussion.output is not None and discussion.output.filename:
+        parts.extend(_render_auto_save(discussion.output, topic, {}))
+
+    return "\n".join(parts)
+
+
+def render_discussion_plan(
+    discussion: Discussion,
+    initial_args: dict[str, str] | None = None,
+    project_dir: Path | None = None,
+    agent_id: int | None = None,
+    smart_context: bool = True,
+) -> DiscussionPlan:
+    """渲染编排式讨论计划 — 每个参会者独立 prompt.
+
+    与 render_discussion() 的区别:
+    - render_discussion() 生成单个 prompt，所有角色在同一次推理中
+    - render_discussion_plan() 生成结构化计划，每个角色独立推理
+
+    Args:
+        discussion: 讨论会定义
+        initial_args: 参数替换
+        project_dir: 项目目录
+        agent_id: Agent ID
+        smart_context: 自动检测项目类型
+
+    Returns:
+        DiscussionPlan，包含多轮多人独立 prompt
+    """
+    initial_args = initial_args or {}
+    result = discover_employees(project_dir=project_dir)
+    engine = CrewEngine()
+
+    project_info = detect_project(project_dir) if smart_context else None
+
+    # 变量替换
+    topic = discussion.topic
+    goal = discussion.goal
+    for k, v in initial_args.items():
+        topic = topic.replace(f"${k}", v)
+        goal = goal.replace(f"${k}", v)
+
+    # 解析参与者
+    participants_info = []
+    for p in discussion.participants:
+        emp = result.get(p.employee)
+        participants_info.append({"participant": p, "employee": emp})
+
+    # 解析轮次
+    rounds = _resolve_rounds(discussion)
+    if isinstance(rounds, int):
+        round_list: list[DiscussionRound | dict] = []
+        for i in range(1, rounds + 1):
+            if i == 1:
+                round_list.append({"name": "开场", "instruction": "每位参会者从自身专业角度给出初步观点。", "interaction": "round-robin"})
+            elif i == rounds:
+                round_list.append({"name": "总结与决议", "instruction": "基于前几轮讨论，达成共识，形成明确的决议和行动项。", "interaction": "free"})
+            else:
+                round_list.append({"name": "深入讨论", "instruction": "回应前轮观点，深入探讨分歧点，提出具体方案。", "interaction": "free"})
+    else:
+        round_list = list(rounds)
+
+    # ── Research round (round 0) ──
+    # 当任意参会者有 research_instructions 或 tools 时，自动插入预研轮
+    has_research = any(
+        info["employee"] is not None
+        and (info["employee"].research_instructions or info["employee"].tools)
+        for info in participants_info
+    )
+
+    plan_rounds: list[RoundPlan] = []
+
+    if has_research:
+        research_prompts: list[ParticipantPrompt] = []
+        for info in participants_info:
+            emp: Employee | None = info["employee"]
+            p: DiscussionParticipant = info["participant"]
+            if emp is None:
+                continue
+
+            role_label = ROLE_LABELS.get(p.role, p.role)
+            display = emp.character_name or emp.effective_display_name
+            tools_str = ", ".join(emp.tools) if emp.tools else "无特定工具"
+            context_str = ", ".join(emp.context) if emp.context else "无指定上下文"
+
+            r_parts: list[str] = [
+                f"# 预研：{discussion.description or discussion.name}",
+                "",
+                f"**议题**: {topic}",
+                f"**你的身份**: {display}（{role_label}），{emp.description}",
+                f"**可用工具**: {tools_str}",
+                f"**预读上下文**: {context_str}",
+                "",
+                "---",
+                "",
+                "## 任务",
+                "",
+                "你即将参加一场讨论会。在发言之前，请先使用你的工具收集真实数据。",
+                "**禁止编造任何数据或估算值**——所有信息必须来自工具调用的实际结果。",
+                "",
+            ]
+
+            if emp.research_instructions:
+                r_parts.extend([
+                    "## 预研指令",
+                    "",
+                    emp.research_instructions,
+                    "",
+                ])
+            else:
+                # 根据工具自动生成通用预研指令
+                r_parts.extend([
+                    "## 预研指令",
+                    "",
+                    f"请根据议题「{topic}」，使用你的工具收集相关信息。",
+                ])
+                if emp.context:
+                    r_parts.append(f"建议先读取以下文件：{', '.join(emp.context)}")
+                r_parts.append("")
+
+            r_parts.extend([
+                "## 输出格式",
+                "",
+                "以 JSON 格式输出你的发现：",
+                "",
+                "```json",
+                "{",
+                '  "findings": [',
+                '    {"id": "F1", "content": "发现内容", "source": "工具/文件来源"},',
+                '    {"id": "F2", "content": "发现内容", "source": "工具/文件来源"}',
+                "  ]",
+                "}",
+                "```",
+                "",
+                "这些发现将注入你在讨论中的 prompt，作为你发言的依据。",
+            ])
+
+            research_prompts.append(ParticipantPrompt(
+                employee_name=emp.name,
+                character_name=emp.character_name,
+                role=p.role,
+                prompt="\n".join(r_parts),
+            ))
+
+        if research_prompts:
+            plan_rounds.append(RoundPlan(
+                round_number=0,
+                name="预研",
+                instruction="各参会者使用工具收集真实数据",
+                interaction="free",
+                participant_prompts=research_prompts,
+            ))
+
+    total_rounds = len(round_list)
+
+    for idx, round_info in enumerate(round_list):
+        round_number = idx + 1
+        is_first_round = (idx == 0)
+
+        # 轮次元数据
+        if isinstance(round_info, DiscussionRound):
+            rnd_name = round_info.name or f"第 {round_number} 轮"
+            rnd_instruction = round_info.instruction
+            rnd_interaction = round_info.interaction
+        else:
+            rnd_name = round_info.get("name", f"第 {round_number} 轮")
+            rnd_instruction = round_info.get("instruction", "")
+            rnd_interaction = round_info.get("interaction", "free")
+
+        participant_prompts: list[ParticipantPrompt] = []
+
+        for i, info in enumerate(participants_info):
+            p: DiscussionParticipant = info["participant"]
+            emp: Employee | None = info["employee"]
+
+            if emp is None:
+                participant_prompts.append(ParticipantPrompt(
+                    employee_name=p.employee,
+                    role=p.role,
+                    prompt=f"# 错误\n\n未找到员工: {p.employee}",
+                ))
+                continue
+
+            # 其他参会者
+            others = [x for j, x in enumerate(participants_info) if j != i]
+
+            prompt_text = _render_participant_prompt(
+                emp=emp,
+                participant=p,
+                discussion=discussion,
+                topic=topic,
+                goal=goal,
+                round_info=round_info,
+                round_number=round_number,
+                total_rounds=total_rounds,
+                other_participants=others,
+                engine=engine,
+                initial_args=initial_args,
+                project_info=project_info,
+                is_first_round=is_first_round,
+            )
+
+            participant_prompts.append(ParticipantPrompt(
+                employee_name=emp.name,
+                character_name=emp.character_name,
+                role=p.role,
+                prompt=prompt_text,
+            ))
+
+        plan_rounds.append(RoundPlan(
+            round_number=round_number,
+            name=rnd_name,
+            instruction=rnd_instruction,
+            interaction=rnd_interaction,
+            participant_prompts=participant_prompts,
+        ))
+
+    # 汇总 prompt
+    synthesis = _render_synthesis_prompt(discussion, topic, goal, participants_info)
+
+    plan = DiscussionPlan(
+        discussion_name=discussion.name,
+        topic=topic,
+        goal=goal,
+        rounds=plan_rounds,
+        synthesis_prompt=synthesis,
+    )
+
+    # 记录会议
+    _log_meeting(discussion, f"[orchestrated plan] {len(plan_rounds)} rounds", initial_args)
+
+    return plan
 
 
 # ── 发现 ──

@@ -58,9 +58,12 @@ class Employee(BaseModel):
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
     avatar_prompt: str = Field(default="", description="头像生成 prompt（留空则自动推断）")
+    research_instructions: str = Field(
+        default="", description="讨论前预研指令（编排式讨论的 round 0）"
+    )
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
-    source_layer: Literal["builtin", "global", "skill", "project"] = Field(
+    source_layer: Literal["builtin", "global", "skill", "project", "private"] = Field(
         default="builtin", description="来源层"
     )
 
@@ -79,6 +82,49 @@ class WorkLogEntry(BaseModel):
     detail: str = Field(default="", description="详细信息")
     args: dict[str, str] = Field(default_factory=dict, description="调用参数")
     agent_id: int | None = Field(default=None, description="关联的 knowlyr-id Agent ID")
+    severity: str = Field(default="info", description="info / warning / critical")
+    metrics: dict[str, float] = Field(default_factory=dict, description="可选指标（数值类型）")
+    links: list[str] = Field(default_factory=list, description="关联链接或引用")
+
+
+class ParticipantPrompt(BaseModel):
+    """编排式讨论中单个参会者的独立 prompt."""
+
+    employee_name: str = Field(description="员工标识符")
+    character_name: str = Field(default="", description="角色姓名")
+    role: str = Field(default="speaker", description="会议角色")
+    prompt: str = Field(description="完整的独立 prompt")
+
+
+class RoundPlan(BaseModel):
+    """编排式讨论中单轮的计划."""
+
+    round_number: int = Field(description="轮次序号（从 1 开始）")
+    name: str = Field(default="", description="轮次名称")
+    instruction: str = Field(default="", description="轮次指令")
+    interaction: str = Field(default="free", description="互动模式")
+    participant_prompts: list[ParticipantPrompt] = Field(
+        default_factory=list, description="各参会者的独立 prompt"
+    )
+
+
+class DiscussionPlan(BaseModel):
+    """编排式讨论的完整计划 — 多轮多人独立 prompt.
+
+    使用方式:
+    1. 依次执行每轮的 participant_prompts（同一轮内可并行）
+    2. 收集每轮所有参会者的输出
+    3. 将输出填入下一轮 prompt 中的 {previous_rounds} 占位符
+    4. 最后一轮结束后，用 synthesis_prompt 生成最终汇总
+    """
+
+    discussion_name: str = Field(description="讨论会名称")
+    topic: str = Field(description="议题")
+    goal: str = Field(default="", description="目标")
+    rounds: list[RoundPlan] = Field(default_factory=list, description="各轮计划")
+    synthesis_prompt: str = Field(
+        default="", description="最终汇总 prompt（在所有轮次结束后执行）"
+    )
 
 
 class DiscoveryResult(BaseModel):

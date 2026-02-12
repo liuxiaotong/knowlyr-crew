@@ -25,13 +25,13 @@ class TestDiscovery:
         result = discover_employees(project_dir=Path("/nonexistent"))
         builtin_names = ["code-reviewer", "test-engineer", "doc-writer", "refactor-guide", "pr-creator"]
         for name in builtin_names:
-            assert result.employees[name].source_layer in ("builtin", "global")
+            assert result.employees[name].source_layer == "builtin"
 
-    def test_project_overrides_builtin(self):
-        """项目层员工应覆盖同名内置员工."""
+    def test_private_overrides_builtin(self):
+        """private 层员工应覆盖同名内置员工."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            crew_dir = Path(tmpdir) / ".crew"
-            crew_dir.mkdir()
+            crew_dir = Path(tmpdir) / "private" / "employees"
+            crew_dir.mkdir(parents=True)
             (crew_dir / "code-reviewer.md").write_text(
                 """---
 name: code-reviewer
@@ -45,7 +45,7 @@ description: 自定义审查员
 
             result = discover_employees(project_dir=Path(tmpdir))
             emp = result.employees["code-reviewer"]
-            assert emp.source_layer == "project"
+            assert emp.source_layer == "private"
             assert emp.description == "自定义审查员"
             assert len(result.conflicts) >= 1
 
@@ -73,10 +73,10 @@ description: 自定义审查员
         md_files = list(d.glob("*.md"))
         assert len(md_files) >= 5
 
-    def test_discover_dir_format_in_project(self):
-        """项目层应能发现目录格式的员工."""
+    def test_discover_dir_format_in_private(self):
+        """private 层应能发现目录格式的员工."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            crew_dir = Path(tmpdir) / ".crew" / "my-worker"
+            crew_dir = Path(tmpdir) / "private" / "employees" / "my-worker"
             crew_dir.mkdir(parents=True)
             (crew_dir / "employee.yaml").write_text(
                 "name: my-worker\ndescription: 目录格式员工\nversion: '1.0'\n",
@@ -90,14 +90,14 @@ description: 自定义审查员
             result = discover_employees(project_dir=Path(tmpdir))
             assert "my-worker" in result.employees
             emp = result.employees["my-worker"]
-            assert emp.source_layer == "project"
+            assert emp.source_layer == "private"
             assert emp.source_path == crew_dir
 
     def test_dir_format_overrides_md_format(self):
-        """同名时目录格式应覆盖文件格式."""
+        """private 层同名时目录格式应覆盖文件格式."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            crew_dir = Path(tmpdir) / ".crew"
-            crew_dir.mkdir()
+            crew_dir = Path(tmpdir) / "private" / "employees"
+            crew_dir.mkdir(parents=True)
 
             # 文件格式
             (crew_dir / "dup-worker.md").write_text(
@@ -120,10 +120,10 @@ description: 自定义审查员
             assert emp.source_path == dir_emp
 
     def test_mixed_formats_in_same_layer(self):
-        """同一层中目录格式和文件格式员工应共存."""
+        """private 层中目录格式和文件格式员工应共存."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            crew_dir = Path(tmpdir) / ".crew"
-            crew_dir.mkdir()
+            crew_dir = Path(tmpdir) / "private" / "employees"
+            crew_dir.mkdir(parents=True)
 
             # 文件格式员工
             (crew_dir / "file-worker.md").write_text(

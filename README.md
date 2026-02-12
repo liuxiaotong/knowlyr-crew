@@ -8,10 +8,10 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-281_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-337_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
-[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
+[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
 
 </div>
 
@@ -59,10 +59,10 @@ Crew 通过 MCP 协议暴露三种原语：
 |----------|------|------|
 | **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 列出/查看/运行员工、讨论会、流水线、日志、项目检测、会议历史 | 11 |
+| **Tools** | 列出/查看/运行员工、讨论会、流水线、记忆、评估、日志、项目检测、会议历史 | 15 |
 
 <details>
-<summary>11 个 MCP Tools 详情</summary>
+<summary>15 个 MCP Tools 详情</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -74,7 +74,11 @@ Crew 通过 MCP 协议暴露三种原语：
 | `list_pipelines` | 列出所有流水线 |
 | `run_pipeline` | 执行流水线 |
 | `list_discussions` | 列出所有讨论会 |
-| `run_discussion` | 生成讨论会 prompt（支持预定义 YAML 或即席讨论） |
+| `run_discussion` | 生成讨论会 prompt（支持预定义/即席/编排模式） |
+| `add_memory` | 为员工添加一条持久化记忆 |
+| `query_memory` | 查询员工的持久化记忆 |
+| `track_decision` | 记录一个待评估的决策 |
+| `evaluate_decision` | 评估决策并将经验写入员工记忆 |
 | `list_meeting_history` | 查看讨论会历史记录 |
 | `get_meeting_detail` | 获取某次讨论会的完整记录 |
 
@@ -105,7 +109,9 @@ Crew 通过 MCP 协议暴露三种原语：
 - 读取员工定义了解能力范围
 - 使用 `run_employee` tool 动态生成 prompt
 - 运行 `run_pipeline` 串联多员工流水线
-- 运行 `run_discussion` 发起多员工讨论
+- 运行 `run_discussion` 发起多员工讨论（支持编排模式）
+- 使用 `add_memory` / `query_memory` 积累和查询员工经验
+- 使用 `track_decision` / `evaluate_decision` 追踪和评估决策
 
 ```bash
 pip install knowlyr-crew[mcp]
@@ -152,10 +158,23 @@ knowlyr-crew sync [--clean]                           # 同步到 .claude/skills
 knowlyr-crew discuss list                             # 列出讨论会
 knowlyr-crew discuss show <name>                      # 查看详情
 knowlyr-crew discuss run <name> [--arg key=val]       # 运行讨论
+knowlyr-crew discuss run <name> --orchestrated        # 编排模式（每人独立推理）
 knowlyr-crew discuss adhoc -e "员工1,员工2" -t "议题"  # 即席讨论（免 YAML）
 knowlyr-crew discuss adhoc -e "员工" -t "议题"         # 1v1 会议
 knowlyr-crew discuss history [-n 20] [--keyword ...]  # 会议历史
 knowlyr-crew discuss view <meeting_id>                # 查看历史会议
+
+# ── 持久化记忆 ──
+knowlyr-crew memory list                              # 列出有记忆的员工
+knowlyr-crew memory show <employee> [--category ...]  # 查看员工记忆
+knowlyr-crew memory add <employee> <category> <text>  # 添加记忆
+knowlyr-crew memory correct <employee> <old_id> <text> # 纠正旧记忆
+
+# ── 评估闭环 ──
+knowlyr-crew eval track <employee> <category> <text>  # 记录决策
+knowlyr-crew eval list [--employee NAME] [--status pending] # 列出决策
+knowlyr-crew eval run <decision_id> <actual_outcome>  # 评估决策
+knowlyr-crew eval prompt <decision_id>                # 生成评估 prompt
 
 # ── 流水线 ──
 knowlyr-crew pipeline list                            # 列出流水线
@@ -163,7 +182,7 @@ knowlyr-crew pipeline show <name>                     # 查看详情
 knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
 
 # ── 工作日志 ──
-knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志
+knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志（severity/links）
 knowlyr-crew log show <session_id>                    # 查看会话详情
 
 # ── 头像生成 ──
@@ -194,31 +213,34 @@ knowlyr-crew mcp                                      # 启动 MCP Server
 | `pr-creator` | PR Creator | `pr`, `pull-request` | 分析变更，创建规范的 Pull Request |
 | `employee-generator` | 员工生成器 | `gen-employee`, `scaffold` | 将高层需求转化为 EMPLOYEE.md 草稿 |
 
-所有内置员工默认使用 `claude-opus-4-6` 模型，通过 `~/.knowlyr/crew/` 可覆盖或扩展。
+所有内置员工默认使用 `claude-opus-4-6` 模型，可在 `private/employees/` 中放置同名员工进行覆盖。
 
 ---
 
 ## 自定义技能 / Custom Skills
 
-### 四层发现 / 4-Layer Discovery
+### 发现优先级
 
 | 优先级 | 位置 | 说明 |
 |--------|------|------|
-| 最高 | `.crew/<name>/` 或 `.crew/*.md` | 项目级员工 |
-| 高 | `.claude/skills/<name>/SKILL.md` | Claude Code Skills 格式 |
-| 中 | `~/.knowlyr/crew/<name>/` 或 `*.md` | 全局自定义员工 |
+| 最高 | `private/employees/<name>/` 或 `private/employees/*.md` | 仓库内的自定义员工（目录或单文件） |
+| 中 | `.claude/skills/<name>/SKILL.md` | Claude Code Skills 兼容层 |
 | 低 | 包内置 | 默认员工 |
 
-- 每层同时支持**目录格式**和**单文件格式**，同名时目录格式优先
-- 高层同名员工覆盖低层
+- 目录格式与单文件格式可共存，同名时目录优先
+- 高优先级会覆盖低优先级的同名员工
 
 ### 创建自定义技能
 
 ```bash
-knowlyr-crew init                                         # 初始化 .crew/
+knowlyr-crew init                                         # 初始化 private/employees/
 knowlyr-crew init --employee security-auditor             # 单文件模板
 knowlyr-crew init --employee security-auditor --dir-format # 目录格式模板
-knowlyr-crew validate .crew/                              # 校验定义
+knowlyr-crew validate private/employees/                  # 校验定义
+knowlyr-crew lint .crew/pipelines                        # Lint 流水线 YAML
+knowlyr-crew check --json                                 # Lint + 日志质量检查
+knowlyr-crew catalog list --format json                 # 查看员工 Catalog 元数据
+knowlyr-crew catalog show product-manager --json        # 查看指定员工详情
 ```
 
 ### 模板与经验库
@@ -228,7 +250,7 @@ knowlyr-crew validate .crew/                              # 校验定义
 | 命令 | 说明 |
 |------|------|
 | `knowlyr-crew template list` | 查看所有模板（内置 / `~/.knowlyr/crew/templates/` / `.crew/templates/`），项目模板会覆盖同名内置 |
-| `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `.crew/foo.md` |
+| `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `private/employees/foo.md` |
 | `knowlyr-crew template apply meta-prompt -o prompt.md --var name=安全审计师` | 生成参数化 Meta Prompt，交给 Claude/Cursor 填写 |
 
 - 内置模板位于 `src/crew/builtin_templates/`，包含“高级员工骨架”和“员工生成 Meta Prompt”。
@@ -247,7 +269,22 @@ knowlyr-crew run employee-generator "安全审计师" \
   --arg context_hints="README.md, {project_type}, {framework}"
 ```
 
-生成的结果可直接保存为 `.crew/<name>.md`，或结合模板系统继续加工，构建“需求 → 模板 → 上线”的自动化流程。
+生成的结果可直接保存为 `private/employees/<name>.md`，或结合模板系统继续加工，构建“需求 → 模板 → 上线”的自动化流程。
+
+### SDK 调用
+
+在 python 项目或 knowlyr-ID 中可直接使用 `crew.sdk`：
+
+```python
+from crew import sdk
+
+text = sdk.generate_prompt_by_name(
+    "product-manager", args={"target": "ai-roadmap"}, smart_context=True,
+)
+print(text)
+```
+
+`sdk.list_employees()` 可返回所有员工对象，`sdk.generate_prompt()` 则接受 `Employee` 实例，方便批量生成 prompt 或在 ID 服务中直接调用。
 
 ### 目录格式（推荐）
 
@@ -466,6 +503,9 @@ output:                                     # 可选，自动保存
 
 | 特性 | 说明 |
 |------|------|
+| **编排模式** | `--orchestrated` 为每位参会者生成独立 prompt，消除单推理回声室效应 |
+| **预研轮次** | 有工具或 `research_instructions` 的员工自动获得 round 0，先用工具收集真实数据再发言 |
+| **持久化记忆** | 讨论 prompt 自动注入员工历史经验，发言基于真实积累而非临时编造 |
 | **1v1 会议** | 单个参与者自动切换为会话式 prompt，无多轮结构 |
 | **即席讨论** | CLI `discuss adhoc` 或 MCP `run_discussion(employees=..., topic=...)` 免 YAML |
 | **会议记录** | 自动保存到 `.crew/meetings/`，`discuss history` 查看历史 |
@@ -474,6 +514,71 @@ output:                                     # 可选，自动保存
 | **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
 | **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
 | **三层发现** | `builtin < global (~/.knowlyr/crew/discussions/) < project (.crew/discussions/)` |
+
+---
+
+## 持久化记忆 / Persistent Memory
+
+每个员工拥有独立的经验记忆库，跨会话积累——不再每次从零开始：
+
+```bash
+# 添加记忆
+knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
+knowlyr-crew memory add code-reviewer decision "建议按模块拆分 CSS"
+
+# 查看记忆
+knowlyr-crew memory list                          # 列出有记忆的员工
+knowlyr-crew memory show code-reviewer            # 查看全部记忆
+knowlyr-crew memory show code-reviewer --category finding  # 按类别过滤
+
+# 纠正旧记忆
+knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天"
+```
+
+### 工作机制
+
+| 特性 | 说明 |
+|------|------|
+| **自动注入** | `run_employee` 和讨论会 prompt 自动包含该员工的历史记忆 |
+| **四种类别** | `decision`（决策）、`estimate`（估算）、`finding`（发现）、`correction`（纠正） |
+| **置信度** | 每条记忆带 `confidence` 权重，查询时可按最低置信度过滤 |
+| **纠正机制** | `correct` 命令标记旧记忆为 superseded，创建新 correction 条目 |
+| **MCP Tools** | `add_memory` / `query_memory`，AI IDE 可在工作中自主积累经验 |
+
+存储路径：`.crew/memory/{employee_name}.jsonl`
+
+---
+
+## 评估闭环 / Evaluation Loop
+
+追踪决策质量，回溯评估后自动将经验教训写入员工记忆——形成"决策→执行→复盘→改进"闭环：
+
+```bash
+# 记录决策
+knowlyr-crew eval track pm estimate "CSS 拆分需要 2 天" \
+  --expected "2 天完成" --meeting-id M001
+
+# 查看待评估决策
+knowlyr-crew eval list --status pending
+
+# 评估（实际结果 + 结论自动写入员工记忆）
+knowlyr-crew eval run <decision_id> "实际花了 5 天" \
+  --evaluation "低估了跨模块依赖的复杂度，未来类似任务 ×2.5"
+
+# 生成评估 prompt（交给 AI 分析偏差原因）
+knowlyr-crew eval prompt <decision_id>
+```
+
+### 工作机制
+
+| 特性 | 说明 |
+|------|------|
+| **三种决策类别** | `estimate`（估算）、`recommendation`（建议）、`commitment`（承诺） |
+| **自动回写** | 评估结论自动作为 `correction` 类型写入该员工的持久化记忆 |
+| **评估 prompt** | `eval prompt` 生成结构化回溯分析模板，输出偏差描述、原因分析、经验教训 |
+| **MCP Tools** | `track_decision` / `evaluate_decision`，支持 AI IDE 在会议中自动提取和追踪决策 |
+
+存储路径：`.crew/evaluations/decisions.jsonl`
 
 ---
 
@@ -614,7 +719,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 281 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates), meeting log, and auto versioning.
+**Tests**: 337 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, and auto versioning.
 
 ## License
 
