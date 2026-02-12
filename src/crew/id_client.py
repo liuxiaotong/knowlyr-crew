@@ -35,8 +35,10 @@ class AgentIdentity(BaseModel):
     bio: str = ""
     domains: list[str] = Field(default_factory=list)
     model: str = ""
+    api_key: str = ""
     temperature: float | None = None
     max_tokens: int | None = None
+    agent_status: str = "active"
     system_prompt: str = ""
     memory: str = ""
 
@@ -180,6 +182,10 @@ def update_agent(
     system_prompt: str | None = None,
     memory: str | None = None,
     avatar_base64: str | None = None,
+    api_key: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    agent_status: str | None = None,
 ) -> bool:
     """更新 knowlyr-id Agent 配置.
 
@@ -208,6 +214,14 @@ def update_agent(
         payload["memory"] = memory
     if avatar_base64 is not None:
         payload["avatar_base64"] = avatar_base64
+    if api_key is not None:
+        payload["api_key"] = api_key
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if agent_status is not None:
+        payload["agent_status"] = agent_status
 
     if not payload:
         return True  # nothing to update
