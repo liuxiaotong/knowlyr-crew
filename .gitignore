@@ -26,13 +26,14 @@ htmlcov/
 
 # Claude Code
 CLAUDE.md
+.claude/settings.local.json
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Crew logs
-.crew/logs/
+# Crew runtime (logs + user-created discussions/pipelines)
+.crew/
 
 # Private (proprietary employee definitions)
 private/
