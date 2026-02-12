@@ -1000,6 +1000,138 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
         click.echo(prompt)
 
 
+@discuss.command("adhoc")
+@click.option("-e", "--employees", required=True, help="员工名称（逗号分隔）")
+@click.option("-t", "--topic", required=True, help="议题")
+@click.option("-g", "--goal", default="", help="目标")
+@click.option("-r", "--rounds", type=int, default=2, help="轮次数（默认 2）")
+@click.option("--round-template", type=str, default=None,
+              help="轮次模板 (standard, brainstorm-to-decision, adversarial)")
+@click.option("--output-format", type=click.Choice(["decision", "transcript", "summary"]),
+              default="summary", help="输出格式")
+@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
+@click.option("-o", "--output", type=click.Path(), help="输出到文件")
+def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
+                  round_template: str | None, output_format: str,
+                  agent_id: int | None, smart_context: bool, output: str | None):
+    """发起即席讨论（无需 YAML 定义）.
+
+    示例:
+        crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块代码质量"
+        crew discuss adhoc -e "hr-manager" -t "招聘方案"
+    """
+    from crew.discussion import (
+        create_adhoc_discussion,
+        render_discussion,
+        validate_discussion,
+    )
+
+    emp_list = [e.strip() for e in employees.split(",") if e.strip()]
+    if not emp_list:
+        click.echo("错误: 至少指定 1 个员工", err=True)
+        sys.exit(1)
+
+    d = create_adhoc_discussion(
+        employees=emp_list,
+        topic=topic,
+        goal=goal,
+        rounds=rounds,
+        output_format=output_format,
+        round_template=round_template,
+    )
+
+    errors = validate_discussion(d)
+    if errors:
+        for err in errors:
+            click.echo(f"校验错误: {err}", err=True)
+        sys.exit(1)
+
+    mode_label = "1v1 会议" if d.effective_mode == "meeting" else "讨论会"
+    rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+    click.echo(
+        f"生成即席{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
+        err=True,
+    )
+
+    prompt = render_discussion(
+        d, initial_args={},
+        agent_id=agent_id, smart_context=smart_context,
+    )
+
+    if output:
+        Path(output).write_text(prompt, encoding="utf-8")
+        click.echo(f"\n已写入: {output}", err=True)
+    else:
+        click.echo(prompt)
+
+
+@discuss.command("history")
+@click.option("-n", "--limit", type=int, default=20, help="显示条数")
+@click.option("--keyword", type=str, default=None, help="按关键词搜索")
+def discuss_history(limit: int, keyword: str | None):
+    """查看历史会议记录."""
+    from crew.meeting_log import MeetingLogger
+
+    logger = MeetingLogger()
+    records = logger.list(limit=limit, keyword=keyword)
+
+    if not records:
+        click.echo("暂无会议记录。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="会议历史")
+        table.add_column("ID", style="cyan")
+        table.add_column("名称", style="green")
+        table.add_column("议题")
+        table.add_column("参与者", justify="right")
+        table.add_column("模式")
+        table.add_column("时间")
+
+        for r in records:
+            table.add_row(
+                r.meeting_id,
+                r.name,
+                r.topic[:40],
+                str(len(r.participants)),
+                r.mode,
+                r.started_at[:16],
+            )
+        console.print(table)
+    except ImportError:
+        for r in records:
+            click.echo(f"  {r.meeting_id}  {r.name}  {r.topic[:40]}  ({r.mode})")
+
+
+@discuss.command("view")
+@click.argument("meeting_id")
+def discuss_view(meeting_id: str):
+    """查看某次会议的完整记录."""
+    from crew.meeting_log import MeetingLogger
+
+    logger = MeetingLogger()
+    result = logger.get(meeting_id)
+
+    if result is None:
+        click.echo(f"未找到会议: {meeting_id}", err=True)
+        sys.exit(1)
+
+    record, content = result
+    click.echo(f"会议 ID: {record.meeting_id}")
+    click.echo(f"名称: {record.name}")
+    click.echo(f"议题: {record.topic}")
+    click.echo(f"参与者: {', '.join(record.participants)}")
+    click.echo(f"模式: {record.mode}")
+    click.echo(f"时间: {record.started_at}")
+    click.echo()
+    click.echo(content)
+
+
 # ── register 命令 ──
 
 

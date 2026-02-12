@@ -166,13 +166,34 @@ def create_server() -> "Server":
             ),
             Tool(
                 name="run_discussion",
-                description="生成讨论会 prompt，让多个数字员工围绕议题进行多轮讨论",
+                description="生成讨论会 prompt — 支持预定义 YAML 或即席讨论（employees+topic）",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "讨论会名称或 YAML 文件路径",
+                            "description": "讨论会名称或 YAML 文件路径（与 employees+topic 二选一）",
+                        },
+                        "employees": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "即席讨论的员工列表（与 name 二选一）",
+                        },
+                        "topic": {
+                            "type": "string",
+                            "description": "即席讨论的议题（与 employees 搭配使用）",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "讨论目标（可选）",
+                        },
+                        "rounds": {
+                            "type": "integer",
+                            "description": "讨论轮次（默认 2，即席讨论时使用）",
+                        },
+                        "round_template": {
+                            "type": "string",
+                            "description": "轮次模板 (standard, brainstorm-to-decision, adversarial)",
                         },
                         "args": {
                             "type": "object",
@@ -189,7 +210,38 @@ def create_server() -> "Server":
                             "default": True,
                         },
                     },
-                    "required": ["name"],
+                },
+            ),
+            Tool(
+                name="list_meeting_history",
+                description="查看讨论会历史记录",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "返回条数（默认 20）",
+                            "default": 20,
+                        },
+                        "keyword": {
+                            "type": "string",
+                            "description": "按关键词过滤",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="get_meeting_detail",
+                description="获取某次讨论会的完整记录",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "meeting_id": {
+                            "type": "string",
+                            "description": "会议 ID",
+                        },
+                    },
+                    "required": ["meeting_id"],
                 },
             ),
         ]
@@ -352,27 +404,43 @@ def create_server() -> "Server":
 
         elif name == "run_discussion":
             from crew.discussion import (
+                create_adhoc_discussion,
                 discover_discussions,
                 load_discussion,
                 render_discussion,
                 validate_discussion,
             )
 
-            d_name = arguments["name"]
             d_args = arguments.get("args", {})
             agent_id = arguments.get("agent_id")
             smart_context = arguments.get("smart_context", True)
 
-            # 查找讨论会
-            d_path = Path(d_name)
-            if not d_path.exists():
-                discussions = discover_discussions()
-                if d_name in discussions:
-                    d_path = discussions[d_name]
-                else:
-                    return [TextContent(type="text", text=f"未找到讨论会: {d_name}")]
+            employees_list = arguments.get("employees")
+            adhoc_topic = arguments.get("topic")
 
-            discussion = load_discussion(d_path)
+            if employees_list and adhoc_topic:
+                # 即席讨论模式
+                discussion = create_adhoc_discussion(
+                    employees=employees_list,
+                    topic=adhoc_topic,
+                    goal=arguments.get("goal", ""),
+                    rounds=arguments.get("rounds", 2),
+                    round_template=arguments.get("round_template"),
+                )
+            elif "name" in arguments:
+                d_name = arguments["name"]
+                # 查找讨论会
+                d_path = Path(d_name)
+                if not d_path.exists():
+                    discussions = discover_discussions()
+                    if d_name in discussions:
+                        d_path = discussions[d_name]
+                    else:
+                        return [TextContent(type="text", text=f"未找到讨论会: {d_name}")]
+                discussion = load_discussion(d_path)
+            else:
+                return [TextContent(type="text", text="请提供 name 或 employees+topic")]
+
             errors = validate_discussion(discussion)
             if errors:
                 return [TextContent(type="text", text=f"讨论会校验失败: {'; '.join(errors)}")]
@@ -384,6 +452,28 @@ def create_server() -> "Server":
                 smart_context=smart_context,
             )
             return [TextContent(type="text", text=prompt)]
+
+        elif name == "list_meeting_history":
+            from crew.meeting_log import MeetingLogger
+
+            logger = MeetingLogger()
+            records = logger.list(
+                limit=arguments.get("limit", 20),
+                keyword=arguments.get("keyword"),
+            )
+            data = [r.model_dump() for r in records]
+            return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+        elif name == "get_meeting_detail":
+            from crew.meeting_log import MeetingLogger
+
+            logger = MeetingLogger()
+            result = logger.get(arguments["meeting_id"])
+            if result is None:
+                return [TextContent(type="text", text=f"未找到会议: {arguments['meeting_id']}")]
+            record, content = result
+            data = {**record.model_dump(), "content": content}
+            return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 

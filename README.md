@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-238_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-281_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -59,10 +59,10 @@ Crew 通过 MCP 协议暴露三种原语：
 |----------|------|------|
 | **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 列出/查看/运行员工、讨论会、流水线、日志、项目检测 | 9 |
+| **Tools** | 列出/查看/运行员工、讨论会、流水线、日志、项目检测、会议历史 | 11 |
 
 <details>
-<summary>9 个 MCP Tools 详情</summary>
+<summary>11 个 MCP Tools 详情</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -74,7 +74,9 @@ Crew 通过 MCP 协议暴露三种原语：
 | `list_pipelines` | 列出所有流水线 |
 | `run_pipeline` | 执行流水线 |
 | `list_discussions` | 列出所有讨论会 |
-| `run_discussion` | 生成讨论会 prompt |
+| `run_discussion` | 生成讨论会 prompt（支持预定义 YAML 或即席讨论） |
+| `list_meeting_history` | 查看讨论会历史记录 |
+| `get_meeting_detail` | 获取某次讨论会的完整记录 |
 
 </details>
 
@@ -150,6 +152,10 @@ knowlyr-crew sync [--clean]                           # 同步到 .claude/skills
 knowlyr-crew discuss list                             # 列出讨论会
 knowlyr-crew discuss show <name>                      # 查看详情
 knowlyr-crew discuss run <name> [--arg key=val]       # 运行讨论
+knowlyr-crew discuss adhoc -e "员工1,员工2" -t "议题"  # 即席讨论（免 YAML）
+knowlyr-crew discuss adhoc -e "员工" -t "议题"         # 1v1 会议
+knowlyr-crew discuss history [-n 20] [--keyword ...]  # 会议历史
+knowlyr-crew discuss view <meeting_id>                # 查看历史会议
 
 # ── 流水线 ──
 knowlyr-crew pipeline list                            # 列出流水线
@@ -396,12 +402,20 @@ steps:
 
 ## 讨论会 / Discussions
 
-多名数字员工围绕议题进行多轮结构化讨论，支持交叉挑战与辩论：
+多名数字员工围绕议题进行多轮结构化讨论，也支持 1v1 会议和即席讨论：
 
 ```bash
+# 预定义讨论会
 knowlyr-crew discuss list
 knowlyr-crew discuss run architecture-review --arg target=auth.py
-knowlyr-crew discuss run .crew/discussions/my-review.yaml
+
+# 即席讨论（无需 YAML）
+knowlyr-crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块质量"
+knowlyr-crew discuss adhoc -e "hr-manager" -t "招聘方案"           # 1v1 会议
+
+# 会议历史
+knowlyr-crew discuss history
+knowlyr-crew discuss view 20260212_143052
 ```
 
 ### 内置讨论会
@@ -410,6 +424,7 @@ knowlyr-crew discuss run .crew/discussions/my-review.yaml
 |------|--------|------|------|
 | `architecture-review` | 4 | 3 | 多角色架构评审 |
 | `feature-design` | 4 | 3 (custom) | 从需求到方案的功能设计 |
+| `full-review` | 6 | 3 (custom) | 全员评审：round-robin → challenge → response |
 
 ### YAML 格式
 
@@ -417,6 +432,7 @@ knowlyr-crew discuss run .crew/discussions/my-review.yaml
 name: my-review
 topic: Review $target design
 goal: Produce improvement decisions
+mode: auto                                  # auto / discussion / meeting
 background_mode: auto                       # full / summary / minimal / auto
 participants:
   - employee: product-manager
@@ -428,11 +444,12 @@ participants:
 rules:                                      # 可选，默认提供 6 条规则
   - Every participant must speak each round
   - Encourage constructive disagreement
+round_template: adversarial                 # 可选，使用预定义轮次模板
 rounds:                                     # int（自动生成）或 list（自定义）
   - name: Initial Assessment
     instruction: Each role gives initial evaluation
     interaction: round-robin                # free / round-robin / challenge / response
-  - name: Cross-Challenge
+  - name: Cross-Challenge                   #   / brainstorm / vote / debate
     instruction: Challenge each other's conclusions
     interaction: challenge
   - name: Response
@@ -440,16 +457,22 @@ rounds:                                     # int（自动生成）或 list（�
   - name: Decision
     instruction: Summarize action items
 output_format: decision                     # decision / transcript / summary
+output:                                     # 可选，自动保存
+  filename: "{date}-$target.md"
+  dir: ~/Desktop/meetings
 ```
 
 ### 核心特性
 
 | 特性 | 说明 |
 |------|------|
+| **1v1 会议** | 单个参与者自动切换为会话式 prompt，无多轮结构 |
+| **即席讨论** | CLI `discuss adhoc` 或 MCP `run_discussion(employees=..., topic=...)` 免 YAML |
+| **会议记录** | 自动保存到 `.crew/meetings/`，`discuss history` 查看历史 |
+| **互动模式** | `free` / `round-robin` / `challenge` / `response` / `brainstorm` / `vote` / `debate` |
+| **轮次模板** | `standard` / `brainstorm-to-decision` / `adversarial`，`round_template` 字段一键展开 |
 | **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
-| **interaction** | `challenge` 轮次自动附加质疑规则；`response` 轮次要求逐点回应 |
 | **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
-| **自定义规则** | 定义自己的讨论规则，或省略使用默认 6 条 |
 | **三层发现** | `builtin < global (~/.knowlyr/crew/discussions/) < project (.crew/discussions/)` |
 
 ---
@@ -591,7 +614,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 238 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions, and auto versioning.
+**Tests**: 281 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates), meeting log, and auto versioning.
 
 ## License
 

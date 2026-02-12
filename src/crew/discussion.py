@@ -35,9 +35,10 @@ class DiscussionRound(BaseModel):
 
     name: str = Field(default="", description="轮次名称")
     instruction: str = Field(default="", description="该轮特殊指令")
-    interaction: Literal["free", "round-robin", "challenge", "response"] = Field(
-        default="free", description="互动模式"
-    )
+    interaction: Literal[
+        "free", "round-robin", "challenge", "response",
+        "brainstorm", "vote", "debate",
+    ] = Field(default="free", description="互动模式")
 
 
 class Discussion(BaseModel):
@@ -49,6 +50,12 @@ class Discussion(BaseModel):
     goal: str = Field(default="", description="讨论目标")
     participants: list[DiscussionParticipant] = Field(description="参与者列表")
     rounds: int | list[DiscussionRound] = Field(default=3, description="讨论轮次")
+    round_template: str | None = Field(
+        default=None, description="轮次模板名称（优先于 rounds）"
+    )
+    mode: Literal["auto", "discussion", "meeting"] = Field(
+        default="auto", description="auto=按参与者数自动判断"
+    )
     rules: list[str] | None = Field(default=None, description="自定义讨论规则（None=默认）")
     background_mode: Literal["full", "summary", "minimal", "auto"] = Field(
         default="auto", description="专业背景注入模式"
@@ -59,6 +66,13 @@ class Discussion(BaseModel):
     output: EmployeeOutput | None = Field(
         default=None, description="自动保存配置（filename/dir），为 None 时不自动保存"
     )
+
+    @property
+    def effective_mode(self) -> str:
+        """根据参与者数自动判断模式."""
+        if self.mode != "auto":
+            return self.mode
+        return "meeting" if len(self.participants) == 1 else "discussion"
 
 
 ROLE_LABELS = {"moderator": "主持人", "speaker": "发言人", "recorder": "记录员"}
@@ -83,7 +97,58 @@ _INTERACTION_RULES: dict[str, str] = {
         "回应必须明确接受、部分接受或反驳，不能模糊回避。"
         "发言格式：**【回应】YY → XX**: 回应内容；追问用 **【追问】XX → YY**: 内容"
     ),
+    "brainstorm": (
+        "**本轮要求**：发散思维阶段。每位参会者至少提出 2 个新想法或方案，"
+        "不评判他人的想法，鼓励天马行空。"
+        "发言格式：**【创意】姓名**: 想法内容"
+    ),
+    "vote": (
+        "**本轮要求**：投票决策。每位参会者对前面提出的方案/选项进行投票，"
+        "必须给出明确的支持/反对/弃权，并附简要理由。"
+        "发言格式：**【投票】姓名 → 方案X**: 支持/反对/弃权 — 理由"
+    ),
+    "debate": (
+        "**本轮要求**：结构化辩论。参会者分为正方和反方，"
+        "正方先陈述论点，反方逐一反驳。每方发言需引用具体事实和数据。"
+        "发言格式：**【正方/反方】姓名**: 论点内容"
+    ),
 }
+
+_1V1_RULES = [
+    "这是一场一对一的专业咨询/讨论",
+    "员工以自己的专业视角提供意见和建议",
+    "对话应保持互动性，主动询问用户的想法和补充信息",
+    "在讨论结束时，总结要点和行动建议",
+]
+
+_ROUND_TEMPLATES: dict[str, list[DiscussionRound]] = {
+    "standard": [
+        DiscussionRound(name="开场", instruction="主持人介绍议题，各方给出初步观点"),
+        DiscussionRound(name="深入讨论", instruction="回应前轮观点，深入分歧点"),
+        DiscussionRound(name="总结决议", instruction="达成共识，形成行动项"),
+    ],
+    "brainstorm-to-decision": [
+        DiscussionRound(name="发散", instruction="自由提出创意和方案", interaction="brainstorm"),
+        DiscussionRound(name="筛选讨论", instruction="评估各方案的可行性", interaction="round-robin"),
+        DiscussionRound(name="投票决策", instruction="对最终方案投票", interaction="vote"),
+    ],
+    "adversarial": [
+        DiscussionRound(name="各抒己见", instruction="每位参会者表明立场", interaction="round-robin"),
+        DiscussionRound(name="质疑挑战", instruction="互相挑战观点", interaction="challenge"),
+        DiscussionRound(name="回应辩护", instruction="回应质疑", interaction="response"),
+        DiscussionRound(name="共识决议", instruction="达成共识，形成决议"),
+    ],
+}
+
+
+# ── 轮次解析 ──
+
+
+def _resolve_rounds(discussion: Discussion) -> int | list[DiscussionRound]:
+    """解析轮次：round_template > rounds list > rounds int."""
+    if discussion.round_template and discussion.round_template in _ROUND_TEMPLATES:
+        return _ROUND_TEMPLATES[discussion.round_template]
+    return discussion.rounds
 
 
 # ── 加载 / 校验 ──
@@ -109,8 +174,8 @@ def validate_discussion(
     """校验讨论会定义，返回错误列表."""
     errors: list[str] = []
 
-    if len(discussion.participants) < 2:
-        errors.append("讨论会至少需要 2 个参与者")
+    if len(discussion.participants) < 1:
+        errors.append("讨论会至少需要 1 个参与者")
         return errors
 
     rounds_count = (
@@ -251,13 +316,14 @@ def _render_rules(discussion: Discussion) -> list[str]:
 def _render_rounds(discussion: Discussion) -> list[str]:
     """渲染轮次安排."""
     parts = ["## 轮次安排", ""]
+    rounds = _resolve_rounds(discussion)
 
-    if isinstance(discussion.rounds, int):
-        for i in range(1, discussion.rounds + 1):
+    if isinstance(rounds, int):
+        for i in range(1, rounds + 1):
             if i == 1:
                 parts.append(f"### 第 {i} 轮：开场")
                 parts.append("主持人介绍议题，每位参会者从自身专业角度给出初步观点。")
-            elif i == discussion.rounds:
+            elif i == rounds:
                 parts.append(f"### 第 {i} 轮：总结与决议")
                 parts.append("主持人总结各方观点，达成共识，形成明确的决议和行动项。")
             else:
@@ -265,7 +331,7 @@ def _render_rounds(discussion: Discussion) -> list[str]:
                 parts.append("回应前轮观点，深入探讨分歧点，提出具体方案。")
             parts.append("")
     else:
-        for i, rnd in enumerate(discussion.rounds, 1):
+        for i, rnd in enumerate(rounds, 1):
             title = rnd.name or f"第 {i} 轮"
             parts.append(f"### {title}")
             if rnd.instruction:
@@ -331,6 +397,97 @@ def _render_auto_save(
     return parts
 
 
+def _render_1v1_meeting(
+    discussion: Discussion,
+    topic: str,
+    goal: str,
+    participants_info: list[dict],
+    engine: CrewEngine,
+    initial_args: dict[str, str],
+    project_info: ProjectInfo | None,
+    agent_identity: "AgentIdentity | None",
+) -> str:
+    """渲染 1v1 会议 prompt — 会话式而非多轮结构."""
+    info = participants_info[0]
+    p: DiscussionParticipant = info["participant"]
+    emp: Employee | None = info["employee"]
+
+    parts: list[str] = [
+        f"# 会议：{discussion.description or topic}",
+        "",
+        f"**议题**: {topic}",
+    ]
+    if goal:
+        parts.append(f"**目标**: {goal}")
+    if project_info and project_info.project_type != "unknown":
+        parts.append(f"**项目类型**: {project_info.display_label}")
+    parts.append("")
+
+    if agent_identity:
+        if agent_identity.nickname:
+            parts.append(f"**Agent**: {agent_identity.nickname}")
+        if agent_identity.title:
+            parts.append(f"**职称**: {agent_identity.title}")
+        if agent_identity.domains:
+            parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
+        if agent_identity.model:
+            parts.append(f"**Agent 模型**: {agent_identity.model}")
+        if agent_identity.memory:
+            parts.extend(["", "## Agent 记忆", "", agent_identity.memory])
+        parts.append("")
+
+    # 员工信息
+    parts.extend(["---", "", "## 参会者", ""])
+    if emp is None:
+        parts.append(f"### {p.employee} — 未找到")
+        parts.append("")
+    else:
+        title = _participant_title(emp, p.role)
+        parts.append(f"### {title}")
+        parts.append(f"**描述**: {emp.description}")
+        if p.focus:
+            parts.append(f"**本次关注**: {p.focus}")
+        parts.append("")
+        # 1v1 始终注入完整背景
+        rendered_body = engine.render(emp, args=dict(initial_args))
+        if project_info:
+            rendered_body = rendered_body.replace("{project_type}", project_info.project_type)
+            rendered_body = rendered_body.replace("{framework}", project_info.framework)
+            rendered_body = rendered_body.replace("{test_framework}", project_info.test_framework)
+            rendered_body = rendered_body.replace("{package_manager}", project_info.package_manager)
+        parts.append(f"<专业背景>\n{rendered_body}\n</专业背景>")
+        parts.append("")
+
+    # 会议规则
+    rules = discussion.rules if discussion.rules is not None else _1V1_RULES
+    parts.extend(["---", "", "## 会议规则", ""])
+    for i, rule in enumerate(rules, 1):
+        parts.append(f"{i}. {rule}")
+    parts.append("")
+
+    # 输出格式
+    parts.extend(["---", "", "## 输出格式", "", _1V1_OUTPUT_TEMPLATES[discussion.output_format]])
+
+    # 自动保存
+    if discussion.output is not None and discussion.output.filename:
+        parts.extend(_render_auto_save(discussion.output, topic, initial_args))
+
+    return "\n".join(parts)
+
+
+def _log_meeting(
+    discussion: Discussion, prompt: str, initial_args: dict[str, str]
+) -> None:
+    """尝试记录会议日志（静默失败）."""
+    try:
+        from crew.meeting_log import MeetingLogger
+
+        logger = MeetingLogger()
+        logger.save(discussion, prompt, initial_args)
+    except Exception:
+        pass
+
+
 # ── 主渲染入口 ──
 
 
@@ -371,6 +528,15 @@ def render_discussion(
         emp = result.get(p.employee)
         participants_info.append({"participant": p, "employee": emp})
 
+    # 1v1 会议走单独渲染路径
+    if discussion.effective_mode == "meeting":
+        prompt = _render_1v1_meeting(
+            discussion, topic, goal, participants_info,
+            engine, initial_args, project_info, agent_identity,
+        )
+        _log_meeting(discussion, prompt, initial_args)
+        return prompt
+
     bg_mode = _resolve_background_mode(discussion)
 
     # 组装各段
@@ -389,7 +555,9 @@ def render_discussion(
     if discussion.output is not None and discussion.output.filename:
         parts.extend(_render_auto_save(discussion.output, topic, initial_args))
 
-    return "\n".join(parts)
+    prompt = "\n".join(parts)
+    _log_meeting(discussion, prompt, initial_args)
+    return prompt
 
 
 # ── 发现 ──
@@ -429,7 +597,95 @@ def discover_discussions(project_dir: Path | None = None) -> dict[str, Path]:
     return discussions
 
 
+# ── 即席讨论 ──
+
+
+def create_adhoc_discussion(
+    employees: list[str],
+    topic: str,
+    goal: str = "",
+    rounds: int = 2,
+    output_format: str = "summary",
+    round_template: str | None = None,
+) -> Discussion:
+    """创建即席讨论会（无需 YAML）.
+
+    Args:
+        employees: 员工名称列表（1+ 个）
+        topic: 议题
+        goal: 目标
+        rounds: 轮次数（默认 2）
+        output_format: 输出格式（默认 summary）
+        round_template: 轮次模板名称
+    """
+    participants = []
+    for i, emp_name in enumerate(employees):
+        if i == 0 and len(employees) > 1:
+            role = "moderator"
+        else:
+            role = "speaker"
+        participants.append(DiscussionParticipant(employee=emp_name, role=role))
+
+    name = f"adhoc-{'-'.join(employees[:3])}"
+
+    return Discussion(
+        name=name,
+        description=f"即席讨论：{topic[:50]}",
+        topic=topic,
+        goal=goal,
+        participants=participants,
+        rounds=rounds,
+        output_format=output_format,
+        round_template=round_template,
+    )
+
+
 # ── 输出格式模板 ──
+
+_1V1_OUTPUT_TEMPLATES = {
+    "decision": """\
+请按以下格式输出会议结果：
+
+# 会议纪要
+
+## 议题
+（一句话概括）
+
+## 讨论要点
+1. ...
+2. ...
+
+## 建议与决议
+1. ...
+
+## 行动项
+| 序号 | 事项 | 优先级 |
+|------|------|--------|
+| 1 | ... | P0-P3 |""",
+    "transcript": """\
+请按以下格式输出完整的会议记录：
+
+# 会议完整记录
+
+## 议题
+（一句话概括）
+
+## 对话过程
+（保留完整的对话内容，不做压缩）""",
+    "summary": """\
+请按以下格式输出会议总结：
+
+# 会议总结
+
+## 议题
+（一句话概括）
+
+## 核心观点
+- ...
+
+## 后续行动
+1. ...""",
+}
 
 _OUTPUT_TEMPLATES = {
     "decision": """\
