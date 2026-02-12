@@ -13,6 +13,7 @@ from crew import sdk
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
+from datetime import datetime
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
 from crew.template_manager import apply_template, discover_templates
 from crew.pipeline import load_pipeline, validate_pipeline

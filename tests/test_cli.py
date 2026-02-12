@@ -1,5 +1,6 @@
 """测试 CLI 命令."""
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -205,6 +206,49 @@ class TestCLI:
         result = self.runner.invoke(main, ["catalog", "show", "product-manager", "--json"])
         assert result.exit_code == 0
         assert "\"product-manager\"" in result.output
+
+    def test_check_json_output(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                (Path(tmpdir) / ".crew" / "pipelines").mkdir(parents=True)
+                (Path(tmpdir) / ".crew" / "pipelines" / "ok.yaml").write_text(
+                    """name: lint-demo\nsteps:\n  - employee: product-manager\n""",
+                    encoding="utf-8",
+                )
+                result = self.runner.invoke(main, ["check", "--json", "--no-logs", "--no-file"])
+                assert result.exit_code == 0
+                assert "\"lint\":" in result.output
+            finally:
+                os.chdir(old_cwd)
+
+    def test_check_writes_report_file(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                (Path(tmpdir) / ".crew" / "pipelines").mkdir(parents=True)
+                (Path(tmpdir) / ".crew" / "pipelines" / "ok.yaml").write_text(
+                    """name: lint-demo\nsteps:\n  - employee: product-manager\n""",
+                    encoding="utf-8",
+                )
+                logger = WorkLogger()
+                session = logger.create_session("product-manager")
+                logger.add_entry(session, "action", severity="warning")
+                result = self.runner.invoke(main, ["check"])
+                assert result.exit_code == 0
+                report_path = Path(".crew/quality-report.json")
+                assert report_path.exists()
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+                assert data["lint"]["status"] == "ok"
+                assert "logs" in data
+            finally:
+                os.chdir(old_cwd)
 
     def test_pipeline_show(self):
         result = self.runner.invoke(main, ["pipeline", "show", "review-test-pr"])
