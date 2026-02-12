@@ -9,8 +9,9 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-238_passed-brightgreen.svg)](#开发--development)
+[![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
-[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [生态](#生态--ecosystem)
+[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
 
 </div>
 
@@ -158,6 +159,14 @@ knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
 # ── 工作日志 ──
 knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志
 knowlyr-crew log show <session_id>                    # 查看会话详情
+
+# ── 头像生成 ──
+knowlyr-crew avatar <name>                             # 为员工生成头像（通义万相）
+
+# ── Agent 管理 ──
+knowlyr-crew register <name> [--dry-run]               # 注册员工到 knowlyr-id
+knowlyr-crew agents list                               # 列出已注册 Agent
+knowlyr-crew agents sync <name>                        # 同步元数据到 knowlyr-id
 
 # ── MCP 服务 ──
 knowlyr-crew mcp                                      # 启动 MCP Server
@@ -489,6 +498,41 @@ pip install knowlyr-crew[id]
 
 不带 `--agent-id` 时行为完全一致，knowlyr-id 连接是可选的。
 
+### 字段映射 / Field Mapping
+
+| Crew Employee | knowlyr-id | 说明 |
+|---|---|---|
+| `character_name` | `nickname` | 人名 |
+| `display_name` | `title` | 头衔 |
+| `description` | `capabilities` | 能力介绍 |
+| `tags` | `domains` | 能力领域 |
+| `body` | `system_prompt` | 系统提示词 |
+| `avatar.webp` | `avatar_url` | 头像 |
+
+---
+
+## 头像生成 / Avatar
+
+通过通义万相（DashScope）API 为数字员工生成写实职业照头像：
+
+```bash
+pip install knowlyr-crew[avatar]
+export DASHSCOPE_API_KEY=sk-xxx
+
+# 为员工生成头像（768x768 → 256x256 webp）
+knowlyr-crew avatar security-auditor
+
+# 创建员工时同时生成头像
+knowlyr-crew init --employee my-skill --dir-format --avatar
+```
+
+头像流程：
+1. 从 `employee.yaml` 的 `avatar_prompt` 构建 prompt（无则自动推断）
+2. 调用通义万相 `wanx2.0-t2i-turbo` 生成 768×768 原图
+3. Pillow 中心裁剪 + 缩放为 256×256 webp（~5-8 KB）
+4. 保存到员工目录 `avatar.webp`
+5. `agents sync` 时自动上传到 knowlyr-id
+
 ---
 
 ## 生态 / Ecosystem
@@ -547,7 +591,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 219 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions, and auto versioning.
+**Tests**: 238 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions, and auto versioning.
 
 ## License
 

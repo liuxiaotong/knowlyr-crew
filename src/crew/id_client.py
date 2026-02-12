@@ -125,6 +125,7 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
 def register_agent(
     nickname: str,
     title: str = "",
+    capabilities: str = "",
     domains: list[str] | None = None,
     model: str = "",
     system_prompt: str = "",
@@ -149,6 +150,8 @@ def register_agent(
     payload: dict = {"nickname": nickname}
     if title:
         payload["title"] = title[:100]
+    if capabilities:
+        payload["capabilities"] = capabilities
     if domains:
         payload["domains"] = domains[:5]
     if model:
@@ -177,6 +180,7 @@ def update_agent(
     agent_id: int,
     nickname: str | None = None,
     title: str | None = None,
+    capabilities: str | None = None,
     domains: list[str] | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
@@ -204,6 +208,8 @@ def update_agent(
         payload["nickname"] = nickname
     if title is not None:
         payload["title"] = title[:100]
+    if capabilities is not None:
+        payload["capabilities"] = capabilities
     if domains is not None:
         payload["domains"] = domains[:5]
     if model is not None:

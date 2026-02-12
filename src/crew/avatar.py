@@ -1,16 +1,34 @@
-"""头像生成模块 — 调用 Gemini CLI 生成 + Pillow 压缩."""
+"""头像生成模块 — 调用通义万相文生图 + Pillow 压缩."""
 
 from __future__ import annotations
 
+import json
 import logging
-import shutil
-import subprocess
+import os
+import time
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 AVATAR_SIZE = 256
 AVATAR_QUALITY = 85
+
+DASHSCOPE_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+DASHSCOPE_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks/{}"
+DASHSCOPE_MODEL = "wanx2.0-t2i-turbo"
+DASHSCOPE_SIZE = "768*768"
+
+# 生成任务轮询参数
+POLL_INTERVAL = 5  # 秒
+POLL_MAX_ATTEMPTS = 60  # 最多等 5 分钟
+
+PHOTO_SUFFIX = (
+    "。Professional headshot photo. Neutral light grey background, "
+    "soft studio lighting, head and shoulders framing, "
+    "looking at camera with natural expression. "
+    "High quality, photorealistic, corporate profile photo style."
+)
 
 
 def _get_pillow():
@@ -22,9 +40,9 @@ def _get_pillow():
         return None
 
 
-def _find_gemini() -> str | None:
-    """查找 gemini CLI 可执行文件路径."""
-    return shutil.which("gemini")
+def _get_api_key() -> str:
+    """读取 DashScope API Key."""
+    return os.environ.get("DASHSCOPE_API_KEY", "")
 
 
 def build_avatar_prompt(
@@ -35,22 +53,14 @@ def build_avatar_prompt(
 ) -> str:
     """构建头像生成 prompt.
 
-    方案 D：有 avatar_prompt 就用，没有则自动推断。
+    优先使用 avatar_prompt，否则自动推断。
     """
     if avatar_prompt:
-        return avatar_prompt
+        return avatar_prompt + PHOTO_SUFFIX
 
-    # 自动推断
     name = character_name or display_name or "a professional"
     role = description or "employee"
-
-    return (
-        f"Generate a professional headshot photo of {name}, "
-        f"who works as {role}. "
-        "Neutral light grey background, soft studio lighting, "
-        "head and shoulders framing, looking at camera with a natural expression. "
-        "High quality, photorealistic, corporate profile photo style."
-    )
+    return f"{name}，{role}" + PHOTO_SUFFIX
 
 
 def generate_avatar(
@@ -60,27 +70,20 @@ def generate_avatar(
     avatar_prompt: str = "",
     output_dir: Path | None = None,
 ) -> Path | None:
-    """调用 Gemini CLI 生成头像.
+    """调用通义万相生成头像.
 
-    Args:
-        display_name: 员工显示名
-        character_name: 角色姓名
-        description: 一句话描述
-        avatar_prompt: 自定义头像 prompt（优先使用）
-        output_dir: 输出目录
+    需要环境变量 DASHSCOPE_API_KEY。
 
     Returns:
-        生成的图片路径（avatar.png），失败返回 None
+        生成的图片路径（avatar_raw.png），失败返回 None
     """
-    gemini = _find_gemini()
-    if not gemini:
-        logger.error("未找到 gemini CLI，请先安装: npm install -g @anthropic-ai/gemini")
+    api_key = _get_api_key()
+    if not api_key:
+        logger.error("DASHSCOPE_API_KEY 未设置")
         return None
 
     if output_dir is None:
         output_dir = Path.cwd()
-
-    output_path = output_dir / "avatar.png"
 
     prompt = build_avatar_prompt(
         display_name=display_name,
@@ -89,42 +92,79 @@ def generate_avatar(
         avatar_prompt=avatar_prompt,
     )
 
-    # 完整 prompt：生成图片 + 保存到指定路径
-    full_prompt = (
-        f"{prompt}\n\n"
-        f"Save the generated image to: {output_path}"
-    )
+    # 提交异步任务
+    payload = json.dumps({
+        "model": DASHSCOPE_MODEL,
+        "input": {"prompt": prompt},
+        "parameters": {"size": DASHSCOPE_SIZE, "n": 1},
+    }).encode()
+
+    req = urllib.request.Request(DASHSCOPE_URL, data=payload, headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+    })
 
     try:
-        result = subprocess.run(
-            [gemini, "-p", full_prompt, "--sandbox", "false"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=str(output_dir),
-        )
-
-        if result.returncode != 0:
-            logger.warning("Gemini CLI 非零退出: %s\nstderr: %s", result.returncode, result.stderr)
-
-        # 检查是否生成了文件
-        if output_path.exists() and output_path.stat().st_size > 0:
-            return output_path
-
-        # 也检查 webp 格式（Gemini 可能直接输出 webp）
-        webp_path = output_dir / "avatar.webp"
-        if webp_path.exists() and webp_path.stat().st_size > 0:
-            return webp_path
-
-        logger.warning("Gemini CLI 执行完成但未生成头像文件")
-        return None
-
-    except subprocess.TimeoutExpired:
-        logger.error("Gemini CLI 执行超时（120s）")
-        return None
+        resp = urllib.request.urlopen(req, timeout=30)
+        result = json.loads(resp.read())
     except Exception as e:
-        logger.error("Gemini CLI 执行异常: %s", e)
+        logger.error("提交生成任务失败: %s", e)
         return None
+
+    task_id = result.get("output", {}).get("task_id")
+    if not task_id:
+        logger.error("未获取到 task_id: %s", result)
+        return None
+
+    logger.info("已提交生成任务: %s", task_id)
+
+    # 轮询等待完成
+    for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
+        time.sleep(POLL_INTERVAL)
+
+        poll_req = urllib.request.Request(
+            DASHSCOPE_TASK_URL.format(task_id),
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        try:
+            poll_resp = urllib.request.urlopen(poll_req, timeout=15)
+            data = json.loads(poll_resp.read())
+        except Exception as e:
+            logger.warning("轮询任务失败 (attempt %d): %s", attempt, e)
+            continue
+
+        status = data.get("output", {}).get("task_status", "")
+
+        if status == "SUCCEEDED":
+            results = data["output"].get("results", [])
+            if not results:
+                logger.error("任务成功但无结果")
+                return None
+            img_url = results[0].get("url")
+            if not img_url:
+                logger.error("任务成功但无图片 URL")
+                return None
+
+            # 下载图片
+            output_path = output_dir / "avatar_raw.png"
+            try:
+                urllib.request.urlretrieve(img_url, str(output_path))
+                logger.info("头像已下载: %s (%d KB)", output_path, output_path.stat().st_size // 1024)
+                return output_path
+            except Exception as e:
+                logger.error("下载图片失败: %s", e)
+                return None
+
+        elif status == "FAILED":
+            msg = data["output"].get("message", "未知错误")
+            logger.error("生成失败: %s", msg)
+            return None
+
+        # PENDING / RUNNING → 继续等待
+
+    logger.error("生成超时（%d 次轮询）", POLL_MAX_ATTEMPTS)
+    return None
 
 
 def compress_avatar(input_path: Path, output_path: Path | None = None) -> Path | None:

@@ -1020,23 +1020,25 @@ def register(name: str, dry_run: bool):
         click.echo(f"员工 '{emp.name}' 已绑定 Agent #{emp.agent_id}", err=True)
         raise SystemExit(1)
 
-    nickname = emp.display_name or emp.name
-    title = emp.description[:100]
+    nickname = emp.character_name or emp.display_name or emp.name
+    title = emp.display_name or emp.name
+    capabilities = emp.description
     domains = emp.tags[:5] if emp.tags else []
     model = emp.model
 
     click.echo(f"注册员工 \"{emp.name}\" 到 knowlyr-id...", err=True)
-    click.echo(f"  nickname: {nickname}", err=True)
-    click.echo(f"  title:    {title}", err=True)
+    click.echo(f"  nickname:     {nickname}", err=True)
+    click.echo(f"  title:        {title}", err=True)
+    click.echo(f"  capabilities: {capabilities}", err=True)
     if domains:
-        click.echo(f"  domains:  {', '.join(domains)}", err=True)
+        click.echo(f"  domains:      {', '.join(domains)}", err=True)
     if model:
-        click.echo(f"  model:    {model}", err=True)
+        click.echo(f"  model:        {model}", err=True)
 
     # 检查头像
     avatar_b64 = _load_avatar_base64(emp)
     if avatar_b64:
-        click.echo(f"  avatar:   ✓ (avatar.webp)", err=True)
+        click.echo(f"  avatar:       ✓ (avatar.webp)", err=True)
 
     if dry_run:
         click.echo("\n(dry-run 模式，未执行注册)", err=True)
@@ -1047,6 +1049,7 @@ def register(name: str, dry_run: bool):
     agent_id = register_agent(
         nickname=nickname,
         title=title,
+        capabilities=capabilities,
         domains=domains,
         model=model,
         avatar_base64=avatar_b64,
@@ -1121,7 +1124,7 @@ def _run_avatar_gen(
     """执行头像生成 + 压缩流程."""
     from crew.avatar import generate_avatar, compress_avatar
 
-    click.echo("正在调用 Gemini CLI 生成头像...", err=True)
+    click.echo("正在调用通义万相生成头像...", err=True)
     raw = generate_avatar(
         display_name=display_name,
         character_name=character_name,
@@ -1147,7 +1150,7 @@ def _run_avatar_gen(
 @main.command()
 @click.argument("name")
 def avatar(name: str):
-    """为员工生成头像（需要 Gemini CLI + Pillow）."""
+    """为员工生成头像（需要 DASHSCOPE_API_KEY + Pillow）."""
     result = discover_employees()
     emp = result.get(name)
     if not emp:
@@ -1244,8 +1247,9 @@ def agents_sync_cmd(name: str):
         click.echo(f"员工 '{emp.name}' 未绑定 Agent（先执行 knowlyr-crew register {name}）", err=True)
         raise SystemExit(1)
 
-    nickname = emp.display_name or emp.name
-    title = emp.description[:100]
+    nickname = emp.character_name or emp.display_name or emp.name
+    title = emp.display_name or emp.name
+    capabilities = emp.description
     domains = emp.tags[:5] if emp.tags else []
     system_prompt = emp.body if emp.body else None
 
@@ -1254,6 +1258,7 @@ def agents_sync_cmd(name: str):
     click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
     click.echo(f"  nickname:      {nickname}", err=True)
     click.echo(f"  title:         {title}", err=True)
+    click.echo(f"  capabilities:  {capabilities}", err=True)
     if domains:
         click.echo(f"  domains:       {', '.join(domains)}", err=True)
     if system_prompt:
@@ -1265,6 +1270,7 @@ def agents_sync_cmd(name: str):
         agent_id=emp.agent_id,
         nickname=nickname,
         title=title,
+        capabilities=capabilities,
         domains=domains,
         model=emp.model or None,
         system_prompt=system_prompt,
