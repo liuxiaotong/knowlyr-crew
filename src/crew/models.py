@@ -56,6 +56,7 @@ class Employee(BaseModel):
     tools: list[str] = Field(default_factory=list, description="需要的工具声明")
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
+    agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
     source_layer: Literal["builtin", "global", "skill", "project"] = Field(

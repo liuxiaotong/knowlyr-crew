@@ -2,7 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
-from crew.id_client import AgentIdentity, fetch_agent_identity, send_heartbeat
+from crew.id_client import (
+    AgentIdentity,
+    fetch_agent_identity,
+    list_agents,
+    register_agent,
+    send_heartbeat,
+    update_agent,
+)
 
 
 class TestAgentIdentityModel:
@@ -131,3 +138,115 @@ class TestSendHeartbeat:
         mock_httpx_fn.return_value = mock_httpx
 
         assert send_heartbeat(3050) is False
+
+
+class TestRegisterAgent:
+    """测试 Agent 注册."""
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token", "KNOWLYR_ID_URL": "http://test"})
+    @patch("crew.id_client._get_httpx")
+    def test_register_success(self, mock_httpx_fn):
+        """成功注册应返回 agent_id."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"agent_id": 3055, "created": True}
+        mock_resp.raise_for_status = MagicMock()
+        mock_httpx = MagicMock()
+        mock_httpx.post.return_value = mock_resp
+        mock_httpx_fn.return_value = mock_httpx
+
+        result = register_agent("测试员工", title="Tester", domains=["test"])
+        assert result == 3055
+        mock_httpx.post.assert_called_once()
+        call_kwargs = mock_httpx.post.call_args
+        assert call_kwargs.kwargs["json"]["nickname"] == "测试员工"
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": ""})
+    def test_register_no_token(self):
+        """无 token 应返回 None."""
+        assert register_agent("Test") is None
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token"})
+    @patch("crew.id_client._get_httpx", return_value=None)
+    def test_register_no_httpx(self, _):
+        """httpx 未安装应返回 None."""
+        assert register_agent("Test") is None
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token", "KNOWLYR_ID_URL": "http://test"})
+    @patch("crew.id_client._get_httpx")
+    def test_register_network_error(self, mock_httpx_fn):
+        """网络错误应返回 None."""
+        mock_httpx = MagicMock()
+        mock_httpx.post.side_effect = Exception("connection refused")
+        mock_httpx_fn.return_value = mock_httpx
+
+        assert register_agent("Test") is None
+
+
+class TestUpdateAgent:
+    """测试 Agent 更新."""
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token", "KNOWLYR_ID_URL": "http://test"})
+    @patch("crew.id_client._get_httpx")
+    def test_update_success(self, mock_httpx_fn):
+        """成功更新应返回 True."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"agent_id": 3050, "updated": True}
+        mock_resp.raise_for_status = MagicMock()
+        mock_httpx = MagicMock()
+        mock_httpx.put.return_value = mock_resp
+        mock_httpx_fn.return_value = mock_httpx
+
+        assert update_agent(3050, nickname="New Name", title="New Title") is True
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token"})
+    def test_update_nothing(self):
+        """无更新内容应返回 True."""
+        assert update_agent(3050) is True
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": ""})
+    def test_update_no_token(self):
+        """无 token 应返回 False."""
+        assert update_agent(3050, nickname="Test") is False
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token", "KNOWLYR_ID_URL": "http://test"})
+    @patch("crew.id_client._get_httpx")
+    def test_update_network_error(self, mock_httpx_fn):
+        """网络错误应返回 False."""
+        mock_httpx = MagicMock()
+        mock_httpx.put.side_effect = Exception("timeout")
+        mock_httpx_fn.return_value = mock_httpx
+
+        assert update_agent(3050, title="Test") is False
+
+
+class TestListAgents:
+    """测试 Agent 列表."""
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token", "KNOWLYR_ID_URL": "http://test"})
+    @patch("crew.id_client._get_httpx")
+    def test_list_success(self, mock_httpx_fn):
+        """成功获取应返回列表."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            {"id": 3050, "nickname": "Alice"},
+            {"id": 3051, "nickname": "Bob"},
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        mock_httpx = MagicMock()
+        mock_httpx.get.return_value = mock_resp
+        mock_httpx_fn.return_value = mock_httpx
+
+        result = list_agents()
+        assert result is not None
+        assert len(result) == 2
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": ""})
+    def test_list_no_token(self):
+        """无 token 应返回 None."""
+        assert list_agents() is None
+
+    @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token"})
+    @patch("crew.id_client._get_httpx", return_value=None)
+    def test_list_no_httpx(self, _):
+        """httpx 未安装应返回 None."""
+        assert list_agents() is None

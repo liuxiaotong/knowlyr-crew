@@ -118,3 +118,133 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
     except Exception as e:
         logger.warning("Agent %s 心跳发送失败: %s", agent_id, e)
         return False
+
+
+def register_agent(
+    nickname: str,
+    title: str = "",
+    domains: list[str] | None = None,
+    model: str = "",
+    system_prompt: str = "",
+) -> int | None:
+    """在 knowlyr-id 注册新 Agent.
+
+    Returns:
+        agent_id（成功）或 None（失败，不抛异常）
+    """
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法注册 Agent")
+        return None
+
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 注册")
+        return None
+
+    url = f"{base_url}/api/agents"
+    payload: dict = {"nickname": nickname}
+    if title:
+        payload["title"] = title[:100]
+    if domains:
+        payload["domains"] = domains[:5]
+    if model:
+        payload["model"] = model
+    if system_prompt:
+        payload["system_prompt"] = system_prompt
+
+    try:
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("agent_id")
+    except Exception as e:
+        logger.warning("Agent 注册失败: %s", e)
+        return None
+
+
+def update_agent(
+    agent_id: int,
+    nickname: str | None = None,
+    title: str | None = None,
+    domains: list[str] | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    memory: str | None = None,
+) -> bool:
+    """更新 knowlyr-id Agent 配置.
+
+    Returns:
+        True 成功, False 失败（不抛异常）
+    """
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return False
+
+    base_url, token = _get_config()
+    url = f"{base_url}/api/agents/{agent_id}"
+
+    payload: dict = {}
+    if nickname is not None:
+        payload["nickname"] = nickname
+    if title is not None:
+        payload["title"] = title[:100]
+    if domains is not None:
+        payload["domains"] = domains[:5]
+    if model is not None:
+        payload["model"] = model
+    if system_prompt is not None:
+        payload["system_prompt"] = system_prompt
+    if memory is not None:
+        payload["memory"] = memory
+
+    if not payload:
+        return True  # nothing to update
+
+    try:
+        resp = httpx.put(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        logger.warning("Agent %s 更新失败: %s", agent_id, e)
+        return False
+
+
+def list_agents() -> list[dict] | None:
+    """列出 knowlyr-id 中所有活跃 Agent.
+
+    Returns:
+        Agent 列表（成功）或 None（失败，不抛异常）
+    """
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法列出 Agent")
+        return None
+
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 列表")
+        return None
+
+    url = f"{base_url}/api/agents"
+    try:
+        resp = httpx.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logger.warning("Agent 列表获取失败: %s", e)
+        return None

@@ -122,6 +122,18 @@ args:
         errors = validate_employee(emp)
         assert any("重复" in e for e in errors)
 
+    def test_agent_id_parsed(self):
+        """应解析 frontmatter 中的 agent_id."""
+        content = "---\nname: test\ndescription: 测试\nagent_id: 3060\n---\n\n内容。\n"
+        emp = parse_employee_string(content)
+        assert emp.agent_id == 3060
+
+    def test_agent_id_none_by_default(self):
+        """未设置 agent_id 时应为 None."""
+        content = "---\nname: test\ndescription: 测试\n---\n\n内容。\n"
+        emp = parse_employee_string(content)
+        assert emp.agent_id is None
+
 
 class TestParseEmployeeDir:
     """测试目录格式解析."""
@@ -187,6 +199,22 @@ class TestParseEmployeeDir:
         (emp_dir / "prompt.md").write_text("内容")
         with pytest.raises(ValueError, match="name"):
             parse_employee_dir(emp_dir)
+
+    def test_agent_id_none_by_default(self):
+        """未设置 agent_id 时应为 None."""
+        emp = parse_employee_dir(FIXTURES / "valid_employee_dir")
+        assert emp.agent_id is None
+
+    def test_agent_id_parsed(self, tmp_path):
+        """应解析 employee.yaml 中的 agent_id."""
+        emp_dir = tmp_path / "with-agent"
+        emp_dir.mkdir()
+        (emp_dir / "employee.yaml").write_text(
+            "name: test-agent\ndescription: test\nagent_id: 3050\n"
+        )
+        (emp_dir / "prompt.md").write_text("内容")
+        emp = parse_employee_dir(emp_dir)
+        assert emp.agent_id == 3050
 
     def test_validate_dir_employee(self):
         """目录解析的员工应能通过校验."""

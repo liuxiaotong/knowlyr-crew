@@ -225,6 +225,10 @@ def run(
             click.echo(f"参数错误: {err}", err=True)
         sys.exit(1)
 
+    # 自动使用绑定的 agent_id
+    if agent_id is None and emp.agent_id is not None:
+        agent_id = emp.agent_id
+
     # 获取 Agent 身份（可选）
     agent_identity = None
     if agent_id is not None:
@@ -857,6 +861,186 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
         click.echo(f"\n已写入: {output}", err=True)
     else:
         click.echo(prompt)
+
+
+# ── register 命令 ──
+
+
+@main.command()
+@click.argument("name")
+@click.option("--dry-run", is_flag=True, help="预览操作但不执行")
+def register(name: str, dry_run: bool):
+    """将员工注册为 knowlyr-id Agent 并保存 agent_id."""
+    from crew.discovery import discover_employees
+
+    result = discover_employees()
+    emp = result.get(name)
+    if not emp:
+        click.echo(f"未找到员工: {name}", err=True)
+        raise SystemExit(1)
+
+    if emp.agent_id is not None:
+        click.echo(f"员工 '{emp.name}' 已绑定 Agent #{emp.agent_id}", err=True)
+        raise SystemExit(1)
+
+    nickname = emp.display_name or emp.name
+    title = emp.description[:100]
+    domains = emp.tags[:5] if emp.tags else []
+    model = emp.model
+
+    click.echo(f"注册员工 \"{emp.name}\" 到 knowlyr-id...", err=True)
+    click.echo(f"  nickname: {nickname}", err=True)
+    click.echo(f"  title:    {title}", err=True)
+    if domains:
+        click.echo(f"  domains:  {', '.join(domains)}", err=True)
+    if model:
+        click.echo(f"  model:    {model}", err=True)
+
+    if dry_run:
+        click.echo("\n(dry-run 模式，未执行注册)", err=True)
+        return
+
+    from crew.id_client import register_agent
+
+    agent_id = register_agent(
+        nickname=nickname,
+        title=title,
+        domains=domains,
+        model=model,
+    )
+    if agent_id is None:
+        click.echo("注册失败（检查 KNOWLYR_ID_URL 和 AGENT_API_TOKEN 环境变量）", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"✓ 已注册为 Agent #{agent_id}", err=True)
+
+    # 回写 agent_id 到源文件
+    if emp.source_path and emp.source_layer in ("global", "project"):
+        _write_agent_id(emp, agent_id)
+    else:
+        click.echo(f"  提示: 请手动在员工定义中添加 agent_id: {agent_id}", err=True)
+
+
+def _write_agent_id(emp, agent_id: int) -> None:
+    """将 agent_id 回写到员工定义文件."""
+    import yaml
+
+    source = emp.source_path
+    if source is None:
+        return
+
+    if source.is_dir():
+        # 目录格式: 更新 employee.yaml
+        config_path = source / "employee.yaml"
+        if config_path.exists():
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            config["agent_id"] = agent_id
+            config_path.write_text(
+                yaml.dump(config, allow_unicode=True, sort_keys=False,
+                          default_flow_style=False),
+                encoding="utf-8",
+            )
+            click.echo(f"✓ agent_id 已写入 {config_path}", err=True)
+    elif source.is_file() and source.suffix == ".md":
+        # 单文件格式: 在 frontmatter 末尾 --- 之前插入 agent_id
+        import re
+        content = source.read_text(encoding="utf-8")
+        # 匹配第二个 ---
+        match = re.match(r"(---\n.*?)(---)", content, re.DOTALL)
+        if match:
+            new_content = f"{match.group(1)}agent_id: {agent_id}\n{match.group(2)}{content[match.end():]}"
+            source.write_text(new_content, encoding="utf-8")
+            click.echo(f"✓ agent_id 已写入 {source}", err=True)
+
+
+# ── agents 子命令组 ──
+
+
+@main.group()
+def agents():
+    """Agent 管理（与 knowlyr-id 交互）."""
+
+
+@agents.command("list")
+@click.option("-f", "--format", "output_format",
+              type=click.Choice(["table", "json"]), default="table")
+def agents_list_cmd(output_format: str):
+    """列出 knowlyr-id 中的所有 Agent."""
+    from crew.id_client import list_agents
+
+    data = list_agents()
+    if data is None:
+        click.echo("获取失败（检查 KNOWLYR_ID_URL 和 AGENT_API_TOKEN 环境变量）", err=True)
+        raise SystemExit(1)
+
+    if not data:
+        click.echo("暂无 Agent", err=True)
+        return
+
+    if output_format == "json":
+        import json
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(title="Agents")
+    table.add_column("ID", style="cyan")
+    table.add_column("Nickname", style="bold")
+    table.add_column("Title")
+    table.add_column("Domains")
+    table.add_column("Status", style="green")
+    table.add_column("Heartbeat")
+
+    for agent in data:
+        table.add_row(
+            str(agent.get("id", "")),
+            agent.get("nickname", ""),
+            agent.get("title", ""),
+            ", ".join(agent.get("domains", [])),
+            agent.get("status", ""),
+            str(agent.get("heartbeat_count", 0)),
+        )
+
+    Console(stderr=True).print(table)
+
+
+@agents.command("sync")
+@click.argument("name")
+def agents_sync_cmd(name: str):
+    """同步员工元数据到 knowlyr-id Agent."""
+    from crew.discovery import discover_employees
+    from crew.id_client import update_agent
+
+    result = discover_employees()
+    emp = result.get(name)
+    if not emp:
+        click.echo(f"未找到员工: {name}", err=True)
+        raise SystemExit(1)
+
+    if emp.agent_id is None:
+        click.echo(f"员工 '{emp.name}' 未绑定 Agent（先执行 knowlyr-crew register {name}）", err=True)
+        raise SystemExit(1)
+
+    nickname = emp.display_name or emp.name
+    title = emp.description[:100]
+    domains = emp.tags[:5] if emp.tags else []
+
+    click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
+
+    ok = update_agent(
+        agent_id=emp.agent_id,
+        nickname=nickname,
+        title=title,
+        domains=domains,
+        model=emp.model or None,
+    )
+    if not ok:
+        click.echo("同步失败", err=True)
+        raise SystemExit(1)
+
+    click.echo("✓ 同步完成", err=True)
 
 
 # ── mcp 命令 ──
