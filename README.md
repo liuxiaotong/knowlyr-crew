@@ -2,20 +2,20 @@
 
 <h1>Crew — AI Skill Loader</h1>
 
-<p><strong>用 Markdown 定义专业技能，通过 MCP 加载到 AI IDE</strong><br/>
-<em>Define professional AI skills in Markdown, load into Claude Code / Cursor via MCP</em></p>
+<p><strong>用 Markdown + YAML 定义专业技能，通过 MCP 加载到 AI IDE</strong><br/>
+<em>Define professional AI skills in Markdown + YAML, load into Claude Code / Cursor via MCP</em></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-219_passed-brightgreen.svg)](#开发--development)
 
-[快速开始](#快速开始--quick-start) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [讨论会](#讨论会--discussions) · [自定义技能](#自定义技能--custom-skills) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [生态](#生态--ecosystem)
+[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [生态](#生态--ecosystem)
 
 </div>
 
 > **Crew 不是又一个 Agent 框架。**
-> 它是 AI IDE 的"人才市场"—— 每个"数字员工"是一个 Markdown 文件或目录，
+> 它是 AI IDE 的"人才市场"—— 每个"数字员工"是一个目录或 Markdown 文件，
 > 通过 MCP 协议加载为可复用的专业技能。
 > AI IDE 自己决定怎么执行，Crew 只负责定义"谁做什么"。
 
@@ -26,11 +26,15 @@
 ```bash
 pip install knowlyr-crew[mcp]
 
-# 列出所有可用技能 / List available skills
+# 列出所有可用技能
 knowlyr-crew list
 
-# 运行代码审查 / Run code review
+# 运行代码审查（支持触发词 review）
 knowlyr-crew run code-reviewer main
+knowlyr-crew run review main --arg focus=security
+
+# 智能上下文：自动检测项目类型并注入适配提示
+knowlyr-crew run test-engineer src/auth.py --smart-context
 
 # 或配置 MCP 后由 AI IDE 自动调用（见下方）
 ```
@@ -41,26 +45,43 @@ knowlyr-crew run code-reviewer main
 
 ```mermaid
 graph LR
-    E["EMPLOYEE.md / Dir<br/>(Markdown + YAML)<br/>Role + Workflow + Args + Tools"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE"]
+    E["员工定义<br/>(目录 / Markdown)<br/>角色 + 工作流 + 参数 + 工具"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE"]
     E -->|MCP Resources| IDE
     E -->|MCP Tools| IDE
     IDE -->|--agent-id| ID["knowlyr-id<br/>Agent Identity"]
     ID --> E
 ```
 
-Crew 通过 MCP 协议暴露三种原语 / Three MCP primitives:
+Crew 通过 MCP 协议暴露三种原语：
 
-| MCP Primitive | Purpose | Count |
-|---------------|---------|-------|
-| **Prompts** | Each employee = a callable prompt template with typed arguments | 1 per employee |
-| **Resources** | Raw Markdown definition, readable by AI IDE | 1 per employee |
-| **Tools** | List / show / run employees, discussions, logs, project detection, pipelines | 9 |
+| MCP 原语 | 作用 | 数量 |
+|----------|------|------|
+| **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
+| **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
+| **Tools** | 列出/查看/运行员工、讨论会、流水线、日志、项目检测 | 9 |
+
+<details>
+<summary>9 个 MCP Tools 详情</summary>
+
+| Tool | Description |
+|------|-------------|
+| `list_employees` | 列出所有员工（可按 tag 过滤） |
+| `get_employee` | 获取完整员工定义 |
+| `run_employee` | 生成可执行 prompt |
+| `get_work_log` | 查看员工工作日志 |
+| `detect_project` | 检测项目类型、框架、包管理器 |
+| `list_pipelines` | 列出所有流水线 |
+| `run_pipeline` | 执行流水线 |
+| `list_discussions` | 列出所有讨论会 |
+| `run_discussion` | 生成讨论会 prompt |
+
+</details>
 
 ---
 
 ## MCP 集成 / MCP Integration
 
-将以下内容添加到 MCP 配置文件 / Add to your MCP config:
+将以下内容添加到 MCP 配置文件：
 
 ```json
 {
@@ -75,11 +96,13 @@ Crew 通过 MCP 协议暴露三种原语 / Three MCP primitives:
 
 > Claude Desktop: `claude_desktop_config.json` · Claude Code: `.mcp.json`
 
-配置后 AI IDE 可直接 / After setup, AI IDE can:
-- Call `code-reviewer` prompt to review code
-- Call `test-engineer` prompt to write tests
-- Read employee definitions to understand capabilities
-- Use `run_employee` tool to generate prompts dynamically
+配置后 AI IDE 可直接：
+- 调用 `code-reviewer` prompt 审查代码
+- 调用 `test-engineer` prompt 编写测试
+- 读取员工定义了解能力范围
+- 使用 `run_employee` tool 动态生成 prompt
+- 运行 `run_pipeline` 串联多员工流水线
+- 运行 `run_discussion` 发起多员工讨论
 
 ```bash
 pip install knowlyr-crew[mcp]
@@ -92,51 +115,246 @@ pip install knowlyr-crew[mcp]
 ```bash
 pip install knowlyr-crew
 
-knowlyr-crew list                                     # List all skills
-knowlyr-crew show <name>                              # Show details
-knowlyr-crew run <name> [ARGS...] [--copy]            # Generate prompt
-knowlyr-crew run review main --arg focus=security     # Trigger word + args
-knowlyr-crew run code-reviewer main --agent-id 3050   # With knowlyr-id
+# ── 核心命令 ──
+knowlyr-crew list                                     # 列出所有员工
+knowlyr-crew list --tag security --layer project      # 按 tag / 层过滤
+knowlyr-crew list -f json                             # JSON 输出
+knowlyr-crew show <name>                              # 查看员工详情
+knowlyr-crew run <name> [ARGS...] [OPTIONS]           # 生成 prompt
 
-knowlyr-crew validate <path>                          # Validate definition
-knowlyr-crew init [--employee <name>]                 # Initialize .crew/
-knowlyr-crew export <name>                            # Export to SKILL.md
-knowlyr-crew export-all                               # Export all
-knowlyr-crew sync [--clean]                           # Sync to .claude/skills/
+# ── run 选项 ──
+knowlyr-crew run review main --arg focus=security     # 触发词 + 命名参数
+knowlyr-crew run code-reviewer main --smart-context   # 自动检测项目上下文
+knowlyr-crew run code-reviewer main --agent-id 3050   # 绑定 knowlyr-id 身份
+knowlyr-crew run code-reviewer main --copy            # 复制到剪贴板
+knowlyr-crew run code-reviewer main -o review.md      # 输出到文件
+knowlyr-crew run code-reviewer main --raw             # 原始渲染（无包装）
 
-knowlyr-crew discuss list                             # List discussions
-knowlyr-crew discuss show <name>                      # Show discussion
-knowlyr-crew discuss run <name> [--arg key=val]       # Run discussion
+# ── 项目初始化 ──
+knowlyr-crew init                                     # 初始化 .crew/ 目录
+knowlyr-crew init --employee my-skill                 # 创建单文件员工模板
+knowlyr-crew init --employee my-skill --dir-format    # 创建目录格式员工模板
+knowlyr-crew validate .crew/                          # 校验员工定义
 
-knowlyr-crew pipeline list | show | run <name>        # Pipelines
-knowlyr-crew log list [--employee NAME]               # Work logs
-knowlyr-crew mcp                                      # Start MCP Server
+# ── Skills 互通 ──
+knowlyr-crew export <name>                            # 导出为 SKILL.md
+knowlyr-crew export-all                               # 导出全部
+knowlyr-crew sync [--clean]                           # 同步到 .claude/skills/
+
+# ── 讨论会 ──
+knowlyr-crew discuss list                             # 列出讨论会
+knowlyr-crew discuss show <name>                      # 查看详情
+knowlyr-crew discuss run <name> [--arg key=val]       # 运行讨论
+
+# ── 流水线 ──
+knowlyr-crew pipeline list                            # 列出流水线
+knowlyr-crew pipeline show <name>                     # 查看详情
+knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
+
+# ── 工作日志 ──
+knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志
+knowlyr-crew log show <session_id>                    # 查看会话详情
+
+# ── MCP 服务 ──
+knowlyr-crew mcp                                      # 启动 MCP Server
 ```
 
 ---
 
 ## 内置技能 / Builtin Skills
 
-6 个通用数字员工，各有专业工作流 / 6 generic employees with professional workflows:
+6 个通用数字员工，各有专业工作流：
 
-| ID | Display Name | Triggers | Purpose |
-|----|-------------|----------|---------|
-| `product-manager` | Product Manager | `pm` | Requirements analysis, prioritization, roadmap |
-| `code-reviewer` | Code Reviewer | `review`, `cr` | Review code for quality, security, maintainability |
-| `test-engineer` | Test Engineer | `test` | Write or supplement unit tests |
-| `refactor-guide` | Refactor Guide | `refactor` | Analyze structure, propose refactoring plans |
-| `doc-writer` | Doc Writer | `doc`, `docs` | Generate or update documentation |
-| `pr-creator` | PR Creator | `pr` | Analyze changes, create well-formatted PRs |
+| ID | 显示名 | 触发词 | 用途 |
+|----|--------|--------|------|
+| `product-manager` | Product Manager | `pm`, `product` | 需求分析、用户故事、优先级排序、路线图、竞品分析 |
+| `code-reviewer` | Code Reviewer | `review`, `cr` | 代码审查：质量、安全性、性能、风格 |
+| `test-engineer` | Test Engineer | `test`, `tests` | 编写或补充单元测试 |
+| `refactor-guide` | Refactor Guide | `refactor` | 分析代码结构，提出重构建议 |
+| `doc-writer` | Doc Writer | `doc`, `docs` | 生成或更新文档（README、API、注释、CHANGELOG） |
+| `pr-creator` | PR Creator | `pr`, `pull-request` | 分析变更，创建规范的 Pull Request |
 
-通过 `~/.knowlyr/crew/` 可覆盖或扩展内置员工 / Override or extend via `~/.knowlyr/crew/`.
+所有内置员工默认使用 `claude-opus-4-6` 模型，通过 `~/.knowlyr/crew/` 可覆盖或扩展。
+
+---
+
+## 自定义技能 / Custom Skills
+
+### 四层发现 / 4-Layer Discovery
+
+| 优先级 | 位置 | 说明 |
+|--------|------|------|
+| 最高 | `.crew/<name>/` 或 `.crew/*.md` | 项目级员工 |
+| 高 | `.claude/skills/<name>/SKILL.md` | Claude Code Skills 格式 |
+| 中 | `~/.knowlyr/crew/<name>/` 或 `*.md` | 全局自定义员工 |
+| 低 | 包内置 | 默认员工 |
+
+- 每层同时支持**目录格式**和**单文件格式**，同名时目录格式优先
+- 高层同名员工覆盖低层
+
+### 创建自定义技能
+
+```bash
+knowlyr-crew init                                         # 初始化 .crew/
+knowlyr-crew init --employee security-auditor             # 单文件模板
+knowlyr-crew init --employee security-auditor --dir-format # 目录格式模板
+knowlyr-crew validate .crew/                              # 校验定义
+```
+
+### 目录格式（推荐）
+
+配置与提示词分离，支持工作流拆分和自动版本管理：
+
+```
+security-auditor/
+├── employee.yaml    # 配置（元数据、参数、工具、输出）
+├── prompt.md        # 主提示词（角色定义 + 核心指令）
+├── workflows/       # 可选：按 scope 拆分的工作流
+│   ├── scan.md
+│   └── report.md
+└── adaptors/        # 可选：按项目类型适配
+    ├── python.md
+    └── nodejs.md
+```
+
+**employee.yaml**:
+```yaml
+name: security-auditor
+display_name: Security Auditor
+character_name: Alex Morgan      # 可选，讨论会中的人设名
+summary: 安全审计专家...           # 可选，讨论会摘要模式使用
+version: "1.0"
+description: 审计安全漏洞
+model: claude-opus-4-6           # 可选，推荐使用的模型
+tags: [security, audit]
+triggers: [audit, sec]
+tools: [file_read, bash, grep]
+context: [pyproject.toml, src/]
+args:
+  - name: target
+    description: 审计目标
+    required: true
+  - name: severity
+    description: 最低严重等级
+    default: medium
+output:
+  format: markdown               # markdown / json / text
+  filename: "audit-{date}.md"
+  dir: ".crew/logs"
+```
+
+`prompt.md` + `workflows/*.md` + `adaptors/*.md` 按字母序拼接为完整提示词。
+
+**自动版本管理**：可写层（global、project）的目录格式员工自动跟踪内容哈希，当提示词文件变更时 patch 版本自动递增（如 `1.0` → `1.0.1`）。
+
+### 单文件格式
+
+适合简单员工，单个 `.md` 文件包含 YAML frontmatter + Markdown 正文：
+
+```yaml
+---
+name: security-auditor
+display_name: Security Auditor
+character_name: Alex Morgan
+summary: 安全审计专家...
+version: "1.0"
+description: 审计安全漏洞
+model: claude-opus-4-6
+tags: [security, audit]
+triggers: [audit, sec]
+tools: [file_read, bash, grep]
+context: [pyproject.toml, src/]
+args:
+  - name: target
+    description: 审计目标
+    required: true
+  - name: severity
+    description: 最低严重等级
+    default: medium
+output:
+  format: markdown
+  filename: "audit-{date}.md"
+---
+
+正文为自然语言指令，支持变量替换。
+```
+
+### 变量替换 / Variable Substitution
+
+Prompt 正文支持以下变量：
+
+| 变量 | 说明 |
+|------|------|
+| `$target`, `$severity` | 命名参数值 |
+| `$1`, `$2` | 位置参数 |
+| `$ARGUMENTS`, `$@` | 所有参数拼接 |
+| `{date}` | 当前日期（YYYY-MM-DD） |
+| `{datetime}` | 当前日期时间 |
+| `{cwd}` | 当前工作目录 |
+| `{git_branch}` | 当前 Git 分支 |
+| `{name}` | 员工名称 |
+| `{project_type}` | 项目类型（python / nodejs / go / rust） |
+| `{framework}` | 框架（fastapi / react / express...） |
+| `{test_framework}` | 测试框架（pytest / jest / vitest...） |
+| `{package_manager}` | 包管理器（uv / npm / cargo...） |
+
+`tools` 和 `context` 是声明式提示，由 AI IDE 自行决定如何使用。
+
+### 智能上下文 / Smart Context
+
+`--smart-context` 自动检测项目类型并注入适配信息（无需子进程调用）：
+
+| 检测项 | 示例 |
+|--------|------|
+| 项目类型 | python, nodejs, go, rust, java |
+| 框架 | fastapi, django, flask, express, react, vue, nextjs |
+| 包管理器 | uv, pip, poetry, npm, yarn, pnpm, cargo, maven |
+| 测试框架 | pytest, unittest, jest, vitest, mocha, go test |
+| Lint 工具 | ruff, black, mypy, eslint, prettier, golangci-lint |
+| 关键文件 | pyproject.toml, package.json, go.mod, Cargo.toml |
+
+---
+
+## 流水线 / Pipelines
+
+多个员工按顺序串联执行，前一步的参数可传递给后续步骤：
+
+```bash
+knowlyr-crew pipeline list
+knowlyr-crew pipeline run review-test-pr --arg target=main
+```
+
+### 内置流水线
+
+| 名称 | 步骤 | 用途 |
+|------|------|------|
+| `review-test-pr` | code-reviewer → test-engineer → pr-creator | 审查 + 测试 + 创建 PR |
+| `full-review` | code-reviewer → refactor-guide → test-engineer | 完整代码审查 |
+
+### YAML 格式
+
+```yaml
+name: review-test-pr
+description: 审查代码、补充测试、创建 PR
+steps:
+  - employee: code-reviewer
+    args:
+      target: $target
+  - employee: test-engineer
+    args:
+      target: $target
+  - employee: pr-creator
+    args:
+      base: $target
+```
+
+发现路径：`builtin < project (.crew/pipelines/)`
 
 ---
 
 ## 讨论会 / Discussions
 
-多名数字员工围绕议题进行多轮结构化讨论，支持交叉挑战与辩论。
-
-Multiple employees discuss a topic in structured rounds, with cross-challenge and debate.
+多名数字员工围绕议题进行多轮结构化讨论，支持交叉挑战与辩论：
 
 ```bash
 knowlyr-crew discuss list
@@ -144,14 +362,14 @@ knowlyr-crew discuss run architecture-review --arg target=auth.py
 knowlyr-crew discuss run .crew/discussions/my-review.yaml
 ```
 
-### 内置讨论会 / Builtin Discussions
+### 内置讨论会
 
-| Name | Participants | Rounds | Purpose |
-|------|-------------|--------|---------|
-| `architecture-review` | 4 | 3 | Multi-role architecture review |
-| `feature-design` | 4 | 3 (custom) | Feature design from requirements to plan |
+| 名称 | 参与者 | 轮次 | 用途 |
+|------|--------|------|------|
+| `architecture-review` | 4 | 3 | 多角色架构评审 |
+| `feature-design` | 4 | 3 (custom) | 从需求到方案的功能设计 |
 
-### YAML 格式 / Format
+### YAML 格式
 
 ```yaml
 name: my-review
@@ -161,14 +379,14 @@ background_mode: auto                       # full / summary / minimal / auto
 participants:
   - employee: product-manager
     role: moderator                         # moderator / speaker / recorder
-    focus: Requirements completeness
+    focus: 需求完整性
   - employee: code-reviewer
     role: speaker
-    focus: Security
-rules:                                      # Optional, defaults provided
+    focus: 安全性
+rules:                                      # 可选，默认提供 6 条规则
   - Every participant must speak each round
   - Encourage constructive disagreement
-rounds:                                     # int (auto-generate) or list (custom)
+rounds:                                     # int（自动生成）或 list（自定义）
   - name: Initial Assessment
     instruction: Each role gives initial evaluation
     interaction: round-robin                # free / round-robin / challenge / response
@@ -182,143 +400,33 @@ rounds:                                     # int (auto-generate) or list (custo
 output_format: decision                     # decision / transcript / summary
 ```
 
-### 核心特性 / Key Features
+### 核心特性
 
-| Feature | Description |
-|---------|-------------|
-| **background_mode** | `auto` selects context depth by participant count (≤3 full, 4-6 summary, >6 minimal) |
-| **interaction modes** | `challenge` rounds auto-append challenge rules; `response` rounds require point-by-point replies |
-| **character_name** | Optional: if employees define `character_name`, discussions show persona names (e.g., `Alex·Code Reviewer`) |
-| **custom rules** | Define your own discussion rules, or omit for 6 defaults |
-| **3-layer discovery** | `builtin < global (~/.knowlyr/crew/discussions/) < project (.crew/discussions/)` |
-
----
-
-## 自定义技能 / Custom Skills
-
-### 四层发现 / 4-Layer Discovery
-
-| Priority | Location | Description |
-|----------|----------|-------------|
-| Highest | `.crew/<name>/` or `.crew/*.md` (project) | Project-specific skills |
-| High | `.claude/skills/<name>/SKILL.md` | Claude Code Skills format |
-| Medium | `~/.knowlyr/crew/<name>/` or `*.md` | Global custom skills |
-| Low | Package builtin | Default skills |
-
-每层同时支持目录格式和单文件格式，同名时目录格式优先 / Each layer supports both directory and single-file formats; directory format takes priority.
-
-高层同名技能覆盖低层 / Higher layers override lower layers by name.
-
-### 创建自定义技能 / Create Custom Skills
-
-```bash
-knowlyr-crew init
-knowlyr-crew init --employee security-auditor             # Single-file format
-knowlyr-crew init --employee security-auditor --dir-format # Directory format
-knowlyr-crew validate .crew/
-```
-
-### 目录格式 / Directory Format (Recommended)
-
-配置与提示词分离，支持工作流拆分和自动版本管理：
-
-```
-security-auditor/
-├── employee.yaml    # Config (metadata, args, tools, output)
-├── prompt.md        # Main prompt (role + instructions)
-├── workflows/       # Optional: split workflows by scope
-│   ├── scan.md
-│   └── report.md
-└── adaptors/        # Optional: per-project-type adaptation
-    ├── python.md
-    └── nodejs.md
-```
-
-**employee.yaml**:
-```yaml
-name: security-auditor
-display_name: Security Auditor
-version: "1.0"
-description: Audit security vulnerabilities
-tags: [security, audit]
-triggers: [audit, sec]
-tools: [file_read, bash, grep]
-context: [pyproject.toml, src/]
-args:
-  - name: target
-    description: Audit target
-    required: true
-  - name: severity
-    description: Minimum severity level
-    default: medium
-output:
-  format: markdown
-  filename: "audit-{date}.md"
-```
-
-**prompt.md** 和所有 `workflows/*.md` + `adaptors/*.md` 按字母序拼接为完整提示词。
-
-All `.md` files under `prompt.md`, `workflows/`, and `adaptors/` are concatenated alphabetically into the final prompt body.
-
-**自动版本管理 / Auto Versioning**: 可写层（global、project）的目录格式员工会自动跟踪内容哈希，当 prompt/workflow/adaptor 文件变更时 patch 版本自动递增。
-
-### EMPLOYEE.md 格式 / Single-File Format
-
-```yaml
----
-name: security-auditor          # Required, unique ID [a-z0-9-]
-display_name: Security Auditor  # Optional, human-readable name
-character_name: Alex Morgan     # Optional, persona name for discussions
-summary: Security expert...     # Optional, for discussion summary mode
-description: Audit security vulnerabilities  # Required, one-line description
-tags: [security, audit]         # Optional, categorization
-triggers: [audit, sec]          # Optional, shorthand aliases
-tools:                          # Optional, declare required tools
-  - file_read
-  - bash
-  - grep
-context:                        # Optional, files to pre-read
-  - pyproject.toml
-  - src/
-args:                           # Optional, typed parameters
-  - name: target
-    description: Audit target (file/directory/module)
-    required: true
-  - name: severity
-    description: Minimum severity level
-    default: medium
-output:                         # Optional, output configuration
-  format: markdown
-  filename: "audit-{date}.md"
----
-
-Body is natural language instructions with variable substitution:
-- $target, $severity — argument values
-- $1, $2 — positional
-- {date}, {cwd}, {git_branch} — environment variables
-```
-
-`tools` 和 `context` 是声明式提示，由 AI IDE 自行决定如何使用。
-
-`tools` and `context` are declarative hints — the AI IDE decides how to use them.
+| 特性 | 说明 |
+|------|------|
+| **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
+| **interaction** | `challenge` 轮次自动附加质疑规则；`response` 轮次要求逐点回应 |
+| **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
+| **自定义规则** | 定义自己的讨论规则，或省略使用默认 6 条 |
+| **三层发现** | `builtin < global (~/.knowlyr/crew/discussions/) < project (.crew/discussions/)` |
 
 ---
 
 ## Skills 互通 / Interoperability
 
-与 Claude Code 原生 Skills 双向转换 / Bidirectional conversion with Claude Code Skills:
+与 Claude Code 原生 Skills 双向转换：
 
-| EMPLOYEE.md | SKILL.md | Conversion |
-|-------------|----------|------------|
-| `tools: [file_read, git]` | `allowed-tools: Read Bash(git:*)` | Auto-mapped |
-| `args` (typed, required) | `argument-hint: <target> [mode]` | `<>` = required, `[]` = optional |
-| `$target`, `$focus` | `$0`, `$1` | Positional variable conversion |
-| `display_name`, `tags` etc. | HTML comments | Metadata round-trip |
+| Crew 格式 | SKILL.md 格式 | 转换方式 |
+|-----------|--------------|----------|
+| `tools: [file_read, git]` | `allowed-tools: Read Bash(git:*)` | 自动映射 |
+| `args`（类型化、必填） | `argument-hint: <target> [mode]` | `<>` = 必填，`[]` = 可选 |
+| `$target`, `$focus` | `$0`, `$1` | 位置变量转换 |
+| `display_name`, `tags` 等 | HTML 注释 | 元数据往返保持 |
 
 ```bash
 knowlyr-crew export code-reviewer      # → .claude/skills/code-reviewer/SKILL.md
-knowlyr-crew export-all                # Export all employees
-knowlyr-crew sync --clean              # Sync + clean orphans
+knowlyr-crew export-all                # 导出全部
+knowlyr-crew sync --clean              # 同步 + 清理孤立目录
 ```
 
 `.claude/skills/<name>/SKILL.md` 会被自动发现，参与四层优先级合并。
@@ -327,17 +435,17 @@ knowlyr-crew sync --clean              # Sync + clean orphans
 
 ## knowlyr-id 协作 / Integration
 
-与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——id 管身份，Crew 管技能。
+与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——id 管身份，Crew 管技能：
 
 ```
 knowlyr-crew run code-reviewer main --agent-id 3050
     │
-    ├─ 1. Discover skill definition
-    ├─ 2. Fetch Agent 3050 identity from knowlyr-id
+    ├─ 1. 发现技能定义
+    ├─ 2. 从 knowlyr-id 获取 Agent 3050 的身份信息
     │      → nickname, title, domains, memory
-    ├─ 3. Generate prompt (inject agent identity)
-    ├─ 4. Send heartbeat to knowlyr-id
-    └─ 5. Output prompt
+    ├─ 3. 生成 prompt（注入 agent 身份）
+    ├─ 4. 发送心跳到 knowlyr-id
+    └─ 5. 输出 prompt
 ```
 
 ```bash
