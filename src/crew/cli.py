@@ -13,7 +13,8 @@ from crew import sdk
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
-from datetime import datetime
+from datetime import datetime, timezone
+import subprocess
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
 from crew.template_manager import apply_template, discover_templates
 from crew.pipeline import load_pipeline, validate_pipeline
@@ -202,13 +203,14 @@ def _lint_targets(targets: list[Path]) -> list[str]:
     return errors
 
 
-def _scan_log_severity(log_dir: Path) -> tuple[dict[str, int], int]:
+def _scan_log_severity(log_dir: Path) -> tuple[dict[str, int], int, dict[str, dict[str, int]]]:
     import json as _json
 
     counts: dict[str, int] = {}
+    by_employee: dict[str, dict[str, int]] = {}
     entries = 0
     if not log_dir.is_dir():
-        return counts, entries
+        return counts, entries, by_employee
 
     for file in sorted(log_dir.glob("*.jsonl")):
         try:
@@ -225,8 +227,11 @@ def _scan_log_severity(log_dir: Path) -> tuple[dict[str, int], int]:
             severity = str(data.get("severity", "info"))
             counts[severity] = counts.get(severity, 0) + 1
             entries += 1
+            emp_name = str(data.get("employee_name", "")) or "unknown"
+            emp_counts = by_employee.setdefault(emp_name, {})
+            emp_counts[severity] = emp_counts.get(severity, 0) + 1
 
-    return counts, entries
+    return counts, entries, by_employee
 
 
 @main.command("lint")
@@ -257,7 +262,9 @@ def lint_cmd(paths: tuple[Path, ...]):
 @click.option("--no-logs", is_flag=True, default=False, help="跳过日志质量检查")
 @click.option("--json", "json_output", is_flag=True, help="JSON 输出")
 @click.option("--path", "lint_paths", multiple=True, type=click.Path(path_type=Path), help="要 lint 的路径（可多次指定）")
-def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple[Path, ...]):
+@click.option("--output-file", type=click.Path(path_type=Path), default=None, help="将 JSON 报告写入文件（默认 .crew/quality-report.json）")
+@click.option("--no-file", is_flag=True, help="不写入 JSON 报告")
+def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple[Path, ...], output_file: Path | None, no_file: bool):
     """执行 lint + 日志质量检查。"""
     report: dict[str, Any] = {}
     exit_code = 0
@@ -276,10 +283,12 @@ def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple
 
     if not no_logs:
         logger = WorkLogger()
-        counts, entries = _scan_log_severity(logger.log_dir)
-        report["logs"] = {"entries": entries, "severity": counts}
+        counts, entries, by_employee = _scan_log_severity(logger.log_dir)
+        report["logs"] = {"entries": entries, "severity": counts, "by_employee": by_employee}
         if counts.get("critical", 0) > 0:
             exit_code = 1
+
+    report.setdefault("metadata", {})["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     if json_output:
         click.echo(json.dumps(report, ensure_ascii=False, indent=2))
@@ -300,6 +309,19 @@ def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple
                 click.echo("Severity:")
                 for key, value in severity.items():
                     click.echo(f"  {key}: {value}")
+            by_emp = logs.get("by_employee", {})
+            if by_emp:
+                click.echo("按员工统计:")
+                for emp, sev in by_emp.items():
+                    summary = ", ".join(f"{k}:{v}" for k, v in sev.items())
+                    click.echo(f"  {emp}: {summary}")
+
+    if not no_logs and not no_file:
+        report_path = output_file or (Path.cwd() / ".crew" / "quality-report.json")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not json_output:
+            click.echo(f"已写入: {report_path}")
 
     if exit_code != 0:
         sys.exit(exit_code)
@@ -1431,6 +1453,94 @@ def discuss_view(meeting_id: str):
     click.echo(f"时间: {record.started_at}")
     click.echo()
     click.echo(content)
+
+
+# ── meetings 子命令组 ──
+
+
+@main.group()
+def meetings():
+    """会议记录与文稿导出."""
+    pass
+
+
+@meetings.command("list")
+@click.option("-n", "--limit", type=int, default=20, help="显示条数")
+def meetings_list(limit: int):
+    """列出会议历史（MeetingLogger)."""
+    from crew.meeting_log import MeetingLogger
+
+    logger = MeetingLogger()
+    records = logger.list(limit=limit)
+    if not records:
+        click.echo("暂无会议记录。")
+        return
+
+    for r in records:
+        click.echo(f"{r.meeting_id}  {r.name}  {r.topic[:40]}  ({r.mode})")
+
+
+@meetings.command("export")
+@click.option("--meeting-id", required=True, help="要导出的会议 ID")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None, help="输出文件（默认 .crew/meetings/<id>-summary.md）")
+@click.option("--with-meta", is_flag=True, help="在导出的 Markdown 中包含元信息")
+def meetings_export(meeting_id: str, output: Path | None, with_meta: bool):
+    """将会议记录导出为 Markdown 文件."""
+    from crew.meeting_log import MeetingLogger
+
+    logger = MeetingLogger()
+    result = logger.get(meeting_id)
+    if result is None:
+        click.echo(f"未找到会议: {meeting_id}", err=True)
+        sys.exit(1)
+
+    record, content = result
+    target = output or (Path.cwd() / ".crew" / "meetings" / f"{meeting_id}-summary.md")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = []
+    if with_meta:
+        lines.extend([
+            f"# 会议：{record.name}",
+            "",
+            f"- ID: {record.meeting_id}",
+            f"- 议题: {record.topic}",
+            f"- 参与者: {', '.join(record.participants)}",
+            f"- 模式: {record.mode}",
+            f"- 时间: {record.started_at}",
+            "",
+            "---",
+            "",
+        ])
+    lines.append(content)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    click.echo(f"已导出: {target}")
+
+
+# ── changelog ──
+
+
+@main.command("changelog")
+@click.option("--since", type=str, default=None, help="git log since (如 v0.1.0)")
+@click.option("-n", "--limit", type=int, default=10, help="返回最近 N 条")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default="CHANGELOG_DRAFT.md")
+def changelog_draft(since: str | None, limit: int, output: Path):
+    """根据 git log 生成 changelog 草稿."""
+    cmd = ["git", "log", f"-n", str(limit), "--pretty=format:%h %s"]
+    if since:
+        cmd = ["git", "log", f"{since}..HEAD", "--pretty=format:%h %s"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except Exception as exc:
+        lines = [f"(git log 失败: {exc})"]
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    content = [f"## {now} Changelog", ""]
+    for line in lines:
+        content.append(f"- {line}")
+    output.write_text("\n".join(content) + "\n", encoding="utf-8")
+    click.echo(f"已生成: {output}")
 
 
 # ── memory 子命令组 ──

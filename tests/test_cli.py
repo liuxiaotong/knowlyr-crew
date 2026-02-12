@@ -220,7 +220,7 @@ class TestCLI:
                     encoding="utf-8",
                 )
                 result = self.runner.invoke(main, ["check", "--json", "--no-logs", "--no-file"])
-                assert result.exit_code == 0
+                assert result.exit_code == 0, result.output
                 assert "\"lint\":" in result.output
             finally:
                 os.chdir(old_cwd)
@@ -241,7 +241,7 @@ class TestCLI:
                 session = logger.create_session("product-manager")
                 logger.add_entry(session, "action", severity="warning")
                 result = self.runner.invoke(main, ["check"])
-                assert result.exit_code == 0
+                assert result.exit_code == 0, result.output
                 report_path = Path(".crew/quality-report.json")
                 assert report_path.exists()
                 data = json.loads(report_path.read_text(encoding="utf-8"))

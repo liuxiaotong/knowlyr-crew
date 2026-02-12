@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-338_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-340_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -184,6 +184,10 @@ knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
 # ── 工作日志 ──
 knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志（severity/links）
 knowlyr-crew log show <session_id>                    # 查看会话详情
+
+# ── 质量雷达 ──
+knowlyr-crew check --json                             # 会输出 lint + 日志质量摘要
+knowlyr-crew check --output-file report.json          # 写入 JSON 报告（默认为 .crew/quality-report.json）
 
 # ── 头像生成 ──
 knowlyr-crew avatar <name>                             # 为员工生成头像（通义万相）
@@ -720,7 +724,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 338 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, and JSON Schema validation.
+**Tests**: 340 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, and changelog draft.
 
 ## License
 
