@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-219_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-238_passed-brightgreen.svg)](#开发--development)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [生态](#生态--ecosystem)
 
@@ -135,6 +135,10 @@ knowlyr-crew init                                     # 初始化 .crew/ 目录
 knowlyr-crew init --employee my-skill                 # 创建单文件员工模板
 knowlyr-crew init --employee my-skill --dir-format    # 创建目录格式员工模板
 knowlyr-crew validate .crew/                          # 校验员工定义
+# ── 模板与经验库 ──
+knowlyr-crew template list                            # 查看内置 + 自定义模板
+knowlyr-crew template apply advanced-employee \
+  --employee security-auditor --var "tags=['security']"  # 渲染模板
 
 # ── Skills 互通 ──
 knowlyr-crew export <name>                            # 导出为 SKILL.md
@@ -173,6 +177,7 @@ knowlyr-crew mcp                                      # 启动 MCP Server
 | `refactor-guide` | Refactor Guide | `refactor` | 分析代码结构，提出重构建议 |
 | `doc-writer` | Doc Writer | `doc`, `docs` | 生成或更新文档（README、API、注释、CHANGELOG） |
 | `pr-creator` | PR Creator | `pr`, `pull-request` | 分析变更，创建规范的 Pull Request |
+| `employee-generator` | 员工生成器 | `gen-employee`, `scaffold` | 将高层需求转化为 EMPLOYEE.md 草稿 |
 
 所有内置员工默认使用 `claude-opus-4-6` 模型，通过 `~/.knowlyr/crew/` 可覆盖或扩展。
 
@@ -200,6 +205,34 @@ knowlyr-crew init --employee security-auditor             # 单文件模板
 knowlyr-crew init --employee security-auditor --dir-format # 目录格式模板
 knowlyr-crew validate .crew/                              # 校验定义
 ```
+
+### 模板与经验库
+
+除基础 init 外，可利用模板系统快速复用成熟骨架：
+
+| 命令 | 说明 |
+|------|------|
+| `knowlyr-crew template list` | 查看所有模板（内置 / `~/.knowlyr/crew/templates/` / `.crew/templates/`），项目模板会覆盖同名内置 |
+| `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `.crew/foo.md` |
+| `knowlyr-crew template apply meta-prompt -o prompt.md --var name=安全审计师` | 生成参数化 Meta Prompt，交给 Claude/Cursor 填写 |
+
+- 内置模板位于 `src/crew/builtin_templates/`，包含“高级员工骨架”和“员工生成 Meta Prompt”。
+- 在 `.crew/templates/` 放置 Markdown 模板即可被自动发现，支持打造团队经验库。
+- 模板语法为 `{{var}}`，可通过 `--var key=value` 或 `--employee` 自动填充常用字段。
+
+### 自动化生成
+
+`employee-generator` 是内置的“员工生成器”员工，输入角色定位、参数需求、输出规范即可生成完整 EMPLOYEE.md：
+
+```bash
+knowlyr-crew run employee-generator "安全审计师" \
+  --arg capabilities="合规检查\n威胁建模" \
+  --arg parameters="target(required): 被审计系统; depth(optional, default=轻量): 深度" \
+  --arg output_expectation="Markdown, 输出风险矩阵 + 行动项" \
+  --arg context_hints="README.md, {project_type}, {framework}"
+```
+
+生成的结果可直接保存为 `.crew/<name>.md`，或结合模板系统继续加工，构建“需求 → 模板 → 上线”的自动化流程。
 
 ### 目录格式（推荐）
 

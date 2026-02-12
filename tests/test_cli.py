@@ -5,6 +5,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from crew import __version__
 from crew.cli import main
 
 
@@ -17,7 +18,7 @@ class TestCLI:
     def test_version(self):
         result = self.runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert __version__ in result.output
 
     def test_list(self):
         result = self.runner.invoke(main, ["list", "-f", "json"])
@@ -104,6 +105,41 @@ class TestCLI:
                 )
                 assert result.exit_code == 0
                 assert (Path(tmpdir) / ".crew" / "my-worker.md").exists()
+            finally:
+                os.chdir(old_cwd)
+
+    def test_template_list(self):
+        result = self.runner.invoke(main, ["template", "list"])
+        assert result.exit_code == 0
+        assert "advanced-employee" in result.output
+
+    def test_template_apply(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                result = self.runner.invoke(
+                    main,
+                    [
+                        "template",
+                        "apply",
+                        "advanced-employee",
+                        "--employee",
+                        "planner",
+                        "--var",
+                        "tags=['planning']",
+                        "--force",
+                    ],
+                    catch_exceptions=False,
+                )
+                assert result.exit_code == 0
+                out_file = Path(tmpdir) / ".crew" / "planner.md"
+                assert out_file.exists()
+                content = out_file.read_text(encoding="utf-8")
+                assert "planner" in content
+                assert "planning" in content
             finally:
                 os.chdir(old_cwd)
 

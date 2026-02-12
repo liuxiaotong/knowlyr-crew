@@ -11,6 +11,8 @@ from crew import __version__
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
+from crew.template_manager import apply_template, discover_templates
+from crew.template_manager import apply_template, discover_templates
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -453,6 +455,103 @@ output:
         click.echo(f"已初始化: {crew_dir}/")
         click.echo("使用 --employee <name> 创建员工模板。")
         click.echo("添加 --dir-format 使用目录格式。")
+
+
+# ── 模板命令 ──
+
+
+def _parse_variables(items: tuple[str, ...]) -> dict[str, str]:
+    """解析 key=value 形式的变量。"""
+    variables: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise click.BadParameter("变量格式应为 key=value")
+        key, value = item.split("=", 1)
+        variables[key] = value
+    return variables
+
+
+def _default_display_name(slug: str) -> str:
+    return slug.replace("-", " ").title()
+
+
+@main.group()
+def template():
+    """模板管理 — 快速复用员工骨架/提示."""
+    pass
+
+
+@template.command("list")
+def template_list():
+    """列出可用模板（内置 + 全局 + 项目）."""
+    templates = discover_templates()
+    if not templates:
+        click.echo("未找到模板。")
+        click.echo("在 .crew/templates/ 中放置自定义模板即可。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="模板库")
+        table.add_column("名称", style="cyan")
+        table.add_column("来源", style="green")
+        table.add_column("路径")
+        for record in templates.values():
+            table.add_row(record.name, record.layer, str(record.path))
+        console.print(table)
+    except ImportError:
+        for record in templates.values():
+            click.echo(f"{record.name} ({record.layer}) — {record.path}")
+
+
+@template.command("apply")
+@click.argument("template_name")
+@click.option("--employee", type=str, help="要生成的员工名称（会自动设置常用变量）")
+@click.option("--var", "variables", multiple=True, help="额外模板变量，格式 key=value")
+@click.option(
+    "-o", "--output", type=click.Path(), default=None,
+    help="输出文件路径（默认 .crew/<employee>.md）",
+)
+@click.option("--force", is_flag=True, help="如目标已存在则覆盖")
+def template_apply(template_name: str, employee: str | None, variables: tuple[str, ...],
+                   output: str | None, force: bool):
+    """渲染模板并输出到 .crew/ 目录."""
+    parsed_vars = _parse_variables(variables)
+
+    defaults: dict[str, str] = {}
+    if employee:
+        defaults["name"] = employee
+        defaults.setdefault("display_name", _default_display_name(employee))
+        defaults.setdefault("character_name", "")
+        defaults.setdefault("description", "请输入角色描述")
+        defaults.setdefault("tags", "[]")
+        defaults.setdefault("triggers", "[]")
+        defaults.setdefault("tools", "[]")
+        defaults.setdefault("context", "[]")
+
+    merged_vars = {**defaults, **parsed_vars}
+
+    target_path = Path(output) if output else None
+    if target_path is None:
+        filename = merged_vars.get("name") or template_name
+        target_path = Path.cwd() / ".crew" / f"{filename}.md"
+
+    try:
+        result_path = apply_template(
+            template_name,
+            variables=merged_vars,
+            output=Path(target_path),
+            overwrite=force,
+        )
+    except FileExistsError as e:
+        raise click.ClickException(str(e))
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(f"已写入: {result_path}")
 
 
 # ── Skills 导出命令 ──

@@ -63,6 +63,7 @@ artifacts = [
     "src/crew/employees/*.md",
     "src/crew/employees/pipelines/*.yaml",
     "src/crew/employees/discussions/*.yaml",
+    "src/crew/builtin_templates/*.md",
 ]
 
 [tool.ruff]
