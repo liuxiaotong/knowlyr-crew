@@ -1,0 +1,38 @@
+name: full-review
+description: 全员评审会——6 位数字员工多角度评审方案
+topic: 评审 $proposal 方案的可行性、风险和实施策略
+goal: 从产品、技术、架构、测试、文档、交付六个角度形成全面评审意见
+participants:
+  - employee: product-manager
+    role: moderator
+    focus: 用户价值、增长影响、产品定位
+  - employee: code-reviewer
+    role: speaker
+    focus: 数据模型、性能、安全性
+  - employee: refactor-guide
+    role: speaker
+    focus: 架构设计、模块分层、可维护性
+  - employee: test-engineer
+    role: speaker
+    focus: 边界情况、测试覆盖、并发风险
+  - employee: doc-writer
+    role: speaker
+    focus: 术语规范、用户引导、API 文档
+  - employee: pr-creator
+    role: recorder
+    focus: 交付拆分、上线顺序、回滚方案
+rounds:
+  - name: "各抒己见"
+    instruction: "主持人介绍方案背景，每位参会者从自身专业角度给出评审意见（支持/反对/有条件支持），列出要点。"
+    interaction: round-robin
+  - name: "质疑与挑战"
+    instruction: "针对第一轮的观点，互相提出质疑和补充。重点关注：遗漏的风险、矛盾的规则、模糊地带。"
+    interaction: challenge
+  - name: "回应与共识"
+    instruction: "回应质疑，总结共识和分歧，形成行动建议。记录员整理完整会议纪要。"
+    interaction: response
+output_format: decision
+output:
+  format: markdown
+  filename: "{date}-$proposal.md"
+  dir: ~/Desktop/meetings

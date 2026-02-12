@@ -1247,12 +1247,19 @@ def agents_sync_cmd(name: str):
     nickname = emp.display_name or emp.name
     title = emp.description[:100]
     domains = emp.tags[:5] if emp.tags else []
+    system_prompt = emp.body if emp.body else None
 
     avatar_b64 = _load_avatar_base64(emp)
 
     click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
+    click.echo(f"  nickname:      {nickname}", err=True)
+    click.echo(f"  title:         {title}", err=True)
+    if domains:
+        click.echo(f"  domains:       {', '.join(domains)}", err=True)
+    if system_prompt:
+        click.echo(f"  system_prompt: {len(system_prompt)} 字符", err=True)
     if avatar_b64:
-        click.echo("  avatar: ✓", err=True)
+        click.echo("  avatar:        ✓", err=True)
 
     ok = update_agent(
         agent_id=emp.agent_id,
@@ -1260,6 +1267,7 @@ def agents_sync_cmd(name: str):
         title=title,
         domains=domains,
         model=emp.model or None,
+        system_prompt=system_prompt,
         avatar_base64=avatar_b64,
     )
     if not ok:

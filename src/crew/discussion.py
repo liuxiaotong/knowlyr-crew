@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from crew.context_detector import ProjectInfo, detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
-from crew.models import Employee
+from crew.models import Employee, EmployeeOutput
 
 if TYPE_CHECKING:
     from crew.id_client import AgentIdentity
@@ -55,6 +55,9 @@ class Discussion(BaseModel):
     )
     output_format: Literal["decision", "transcript", "summary"] = Field(
         default="decision", description="输出格式"
+    )
+    output: EmployeeOutput | None = Field(
+        default=None, description="自动保存配置（filename/dir），为 None 时不自动保存"
     )
 
 
@@ -281,6 +284,53 @@ def _render_output(output_format: str) -> list[str]:
     return ["---", "", "## 输出格式", "", _OUTPUT_TEMPLATES[output_format]]
 
 
+def _render_auto_save(
+    output: EmployeeOutput, topic: str, initial_args: dict[str, str]
+) -> list[str]:
+    """渲染自动保存指令."""
+    from datetime import datetime
+
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+
+    # 替换 filename 模板中的变量
+    filename = output.filename
+    filename = filename.replace("{date}", date_str)
+    filename = filename.replace("{datetime}", now.strftime("%Y-%m-%d_%H%M%S"))
+
+    # 替换 $variable 参数（优先用原始参数值，更短更准确）
+    for k, v in initial_args.items():
+        filename = filename.replace(f"${k}", v)
+
+    # $topic 兜底：用完整 topic（截断后）
+    if "$topic" in filename:
+        safe_topic = topic.replace(" ", "-").replace("/", "-").replace("\\", "-")
+        if len(safe_topic) > 60:
+            safe_topic = safe_topic[:60]
+        filename = filename.replace("$topic", safe_topic)
+
+    # 展开 ~ 为绝对路径
+    save_dir = output.dir
+    if save_dir.startswith("~"):
+        save_dir = str(Path.home() / save_dir[2:])
+
+    parts = [
+        "",
+        "---",
+        "",
+        "## 自动保存",
+        "",
+        "**重要**：讨论结束后，你必须将完整的会议纪要保存为 Markdown 文件。",
+        "",
+        f"- 保存目录：`{save_dir}`（如目录不存在则自动创建）",
+        f"- 文件名：`{filename}`",
+        f"- 完整路径：`{save_dir}/{filename}`",
+        "",
+        "保存完成后，在回复中告知用户文件路径。",
+    ]
+    return parts
+
+
 # ── 主渲染入口 ──
 
 
@@ -334,6 +384,10 @@ def render_discussion(
     parts.extend(_render_rules(discussion))
     parts.extend(_render_rounds(discussion))
     parts.extend(_render_output(discussion.output_format))
+
+    # 自动保存指令
+    if discussion.output is not None and discussion.output.filename:
+        parts.extend(_render_auto_save(discussion.output, topic, initial_args))
 
     return "\n".join(parts)
 
