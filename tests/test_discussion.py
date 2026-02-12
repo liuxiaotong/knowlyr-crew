@@ -350,8 +350,8 @@ class TestRenderDiscussion:
             rounds=2,
         )
         prompt = render_discussion(d, initial_args={"target": "main"}, smart_context=False)
-        assert "Code Reviewer" in prompt
-        assert "Test Engineer" in prompt
+        assert "代码审查员" in prompt
+        assert "测试工程师" in prompt
         assert "讨论 main" in prompt
         assert "主持人" in prompt
         assert "发言人" in prompt
@@ -475,7 +475,7 @@ class TestRenderDiscussion:
         )
         prompt = render_discussion(d, smart_context=False)
         assert "未找到" in prompt
-        assert "Code Reviewer" in prompt
+        assert "代码审查员" in prompt
 
     def test_render_with_round_template(self):
         d = Discussion(
@@ -675,7 +675,7 @@ class TestAdhocDiscussion:
         )
         prompt = render_discussion(d, smart_context=False)
         assert "auth 模块代码质量" in prompt
-        assert "Code Reviewer" in prompt
+        assert "代码审查员" in prompt
 
 
 # ── 发现测试 ──

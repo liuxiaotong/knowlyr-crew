@@ -14,10 +14,10 @@ class TestSDK:
         text = sdk.generate_prompt_by_name(
             "code-reviewer", args={"target": "main"}, smart_context=False
         )
-        assert "Code Reviewer" in text
+        assert "代码审查员" in text
 
     def test_generate_prompt_raw(self):
         text = sdk.generate_prompt_by_name(
             "code-reviewer", args={"target": "main"}, raw=True
         )
-        assert "# Code Reviewer" not in text
+        assert "# 代码审查员" not in text

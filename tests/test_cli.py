@@ -34,8 +34,8 @@ class TestCLI:
         assert "refactor-guide" not in result.output
 
     def test_list_filter_layer(self):
-        # 全局层可能覆盖内置员工，测试两种 layer 都能正确过滤
-        for layer in ("builtin", "global"):
+        # 测试按层过滤（仅 builtin / skill / private）
+        for layer in ("builtin", "skill", "private"):
             result = self.runner.invoke(main, ["list", "--layer", layer, "-f", "json"])
             assert result.exit_code == 0
             if result.output.strip() and "未找到" not in result.output:
@@ -44,7 +44,7 @@ class TestCLI:
     def test_show(self):
         result = self.runner.invoke(main, ["show", "code-reviewer"])
         assert result.exit_code == 0
-        assert "Code Reviewer" in result.output
+        assert "代码审查员" in result.output
 
     def test_show_not_found(self):
         result = self.runner.invoke(main, ["show", "nonexistent"])
@@ -53,19 +53,19 @@ class TestCLI:
     def test_run(self):
         result = self.runner.invoke(main, ["run", "code-reviewer", "main"])
         assert result.exit_code == 0
-        assert "Code Reviewer" in result.output
+        assert "代码审查员" in result.output
         assert "main" in result.output
 
     def test_run_with_trigger(self):
         result = self.runner.invoke(main, ["run", "review", "main"])
         assert result.exit_code == 0
-        assert "Code Reviewer" in result.output
+        assert "代码审查员" in result.output
 
     def test_run_raw(self):
         result = self.runner.invoke(main, ["run", "code-reviewer", "main", "--raw"])
         assert result.exit_code == 0
         # raw 模式不含角色前言
-        assert "# Code Reviewer" not in result.output
+        assert "# 代码审查员" not in result.output
         assert "main" in result.output
 
     def test_run_missing_arg(self):
@@ -162,12 +162,33 @@ class TestCLI:
             assert result.exit_code == 1
             assert "unknown-emp" in result.output
 
+    def test_lint_schema_violation(self):
+        pipeline_yaml = """name: lint-demo\nsteps: invalid\n"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            schema_dir = Path(tmpdir) / "schemas"
+            schema_dir.mkdir()
+            (schema_dir / "pipeline.schema.json").write_text(
+                """{\n  \"type\": \"object\",\n  \"properties\": {\n    \"steps\": {\"type\": \"array\"}\n  }\n}\n""",
+                encoding="utf-8",
+            )
+            target = Path(tmpdir) / "demo.yaml"
+            target.write_text(pipeline_yaml, encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                import os
+                os.chdir(tmpdir)
+                result = self.runner.invoke(main, ["lint", str(target)])
+            finally:
+                os.chdir(old_cwd)
+            assert result.exit_code == 1
+            assert "schema 校验失败" in result.output
+
     def test_run_smart_context(self):
         result = self.runner.invoke(
             main, ["run", "code-reviewer", "main", "--smart-context"],
         )
         assert result.exit_code == 0
-        assert "Code Reviewer" in result.output
+        assert "代码审查员" in result.output
 
     def test_pipeline_list(self):
         result = self.runner.invoke(main, ["pipeline", "list"])

@@ -1,6 +1,7 @@
 """Crew CLI — 命令行界面."""
 
 import json
+import jsonschema
 import logging
 import sys
 from pathlib import Path
@@ -13,7 +14,6 @@ from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
-from crew.template_manager import apply_template, discover_templates
 from crew.template_manager import apply_template, discover_templates
 from crew.pipeline import load_pipeline, validate_pipeline
 from crew.discussion import load_discussion, validate_discussion
@@ -53,7 +53,7 @@ def main(ctx: click.Context, verbose: bool):
 @main.command("list")
 @click.option("--tag", type=str, default=None, help="按标签过滤")
 @click.option(
-    "--layer", type=click.Choice(["builtin", "global", "skill", "project"]),
+    "--layer", type=click.Choice(["builtin", "skill", "private"]),
     default=None, help="按来源层过滤",
 )
 @click.option(
@@ -145,17 +145,35 @@ def _lint_file(path: Path, project_dir: Path) -> list[str]:
     kind = "pipeline" if "steps" in data else "discussion" if "participants" in data else None
 
     if kind == "pipeline":
+        schema_path = Path.cwd() / "schemas" / "pipeline.schema.json"
+        if schema_path.exists():
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            try:
+                jsonschema.validate(instance=data, schema=schema)
+            except jsonschema.ValidationError as exc:
+                return [f"{path}: schema 校验失败 - {exc.message}"]
+
         try:
             pipeline = load_pipeline(path)
         except Exception as exc:
             return [f"{path}: 解析失败 ({exc})"]
-        errors = [f"{path}: {e}" for e in validate_pipeline(pipeline, project_dir=project_dir)]
+
+        errors.extend(f"{path}: {e}" for e in validate_pipeline(pipeline, project_dir=project_dir))
     elif kind == "discussion":
+        schema_path = Path.cwd() / "schemas" / "discussion.schema.json"
+        if schema_path.exists():
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            try:
+                jsonschema.validate(instance=data, schema=schema)
+            except jsonschema.ValidationError as exc:
+                return [f"{path}: schema 校验失败 - {exc.message}"]
+
         try:
             discussion = load_discussion(path)
         except Exception as exc:
             return [f"{path}: 解析失败 ({exc})"]
-        errors = [f"{path}: {e}" for e in validate_discussion(discussion, project_dir=project_dir)]
+
+        errors.extend(f"{path}: {e}" for e in validate_discussion(discussion, project_dir=project_dir))
     else:
         errors = [f"{path}: 未识别的 YAML 类型（缺少 steps/participants）"]
 

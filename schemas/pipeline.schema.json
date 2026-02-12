@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pipeline",
+  "type": "object",
+  "required": ["name", "steps"],
+  "properties": {
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["employee"],
+        "properties": {
+          "employee": {"type": "string"},
+          "args": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

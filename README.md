@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-337_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-338_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -241,6 +241,7 @@ knowlyr-crew lint .crew/pipelines                        # Lint 流水线 YAML
 knowlyr-crew check --json                                 # Lint + 日志质量检查
 knowlyr-crew catalog list --format json                 # 查看员工 Catalog 元数据
 knowlyr-crew catalog show product-manager --json        # 查看指定员工详情
+knowlyr-crew lint .crew/discussions                     # 使用 schemas/*.json 验证讨论会 YAML
 ```
 
 ### 模板与经验库
@@ -249,7 +250,7 @@ knowlyr-crew catalog show product-manager --json        # 查看指定员工详�
 
 | 命令 | 说明 |
 |------|------|
-| `knowlyr-crew template list` | 查看所有模板（内置 / `~/.knowlyr/crew/templates/` / `.crew/templates/`），项目模板会覆盖同名内置 |
+| `knowlyr-crew template list` | 查看所有模板（内置 / `~/.knowlyr/crew/templates/` / `private/templates/`），项目模板会覆盖同名内置 |
 | `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `private/employees/foo.md` |
 | `knowlyr-crew template apply meta-prompt -o prompt.md --var name=安全审计师` | 生成参数化 Meta Prompt，交给 Claude/Cursor 填写 |
 
@@ -719,7 +720,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 337 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, and auto versioning.
+**Tests**: 338 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, and JSON Schema validation.
 
 ## License
 

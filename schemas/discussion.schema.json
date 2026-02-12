@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Discussion",
+  "type": "object",
+  "required": ["name", "topic", "participants"],
+  "properties": {
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "topic": {"type": "string"},
+    "goal": {"type": "string"},
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["employee"],
+        "properties": {
+          "employee": {"type": "string"},
+          "role": {"type": "string"},
+          "focus": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "rounds": {
+      "anyOf": [
+        {"type": "integer", "minimum": 1},
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "instruction": {"type": "string"},
+              "interaction": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": true
+}
