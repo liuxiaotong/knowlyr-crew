@@ -1,7 +1,11 @@
 """Crew MCP Server — Model Context Protocol 服务."""
 
 import json
+import logging
+import time as _time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     from mcp.server import Server
@@ -26,6 +30,15 @@ from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
 from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
+
+
+def _get_version() -> str:
+    """读取包版本."""
+    try:
+        from importlib.metadata import version
+        return version("knowlyr-crew")
+    except Exception:
+        return "unknown"
 
 
 def create_server(project_dir: Path | None = None) -> "Server":
@@ -360,6 +373,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         """调用工具."""
+        logger.info("tool_call: %s", name)
+        try:
+            return await _handle_tool(name, arguments)
+        except Exception:
+            logger.exception("tool_call_error: %s", name)
+            return [TextContent(type="text", text=f"内部错误: {name}")]
+
+    async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "list_employees":
             result = discover_employees(project_dir=_project_dir)
             employees = list(result.employees.values())
@@ -787,6 +808,7 @@ async def serve_sse(
 
     server = create_server(project_dir=project_dir)
     sse = SseServerTransport("/messages/")
+    _start = _time.monotonic()
 
     async def handle_sse(request):
         async with sse.connect_sse(
@@ -797,7 +819,13 @@ async def serve_sse(
             )
 
     async def health(request):
-        return JSONResponse({"status": "ok"})
+        emp_count = len(discover_employees(project_dir=project_dir).employees)
+        return JSONResponse({
+            "status": "ok",
+            "version": _get_version(),
+            "employees": emp_count,
+            "uptime_seconds": round(_time.monotonic() - _start),
+        })
 
     app = Starlette(
         routes=[
@@ -832,12 +860,19 @@ async def serve_http(
 
     server = create_server(project_dir=project_dir)
     session_manager = StreamableHTTPSessionManager(app=server)
+    _start = _time.monotonic()
 
     async def handle_mcp(scope, receive, send):
         await session_manager.handle_request(scope, receive, send)
 
     async def health(request):
-        return JSONResponse({"status": "ok"})
+        emp_count = len(discover_employees(project_dir=project_dir).employees)
+        return JSONResponse({
+            "status": "ok",
+            "version": _get_version(),
+            "employees": emp_count,
+            "uptime_seconds": round(_time.monotonic() - _start),
+        })
 
     async def lifespan(app):
         async with session_manager.run():

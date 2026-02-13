@@ -1,8 +1,13 @@
 """项目类型检测器 — 从文件结构和依赖推断项目技术栈."""
 
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+# ── TTL 缓存 ──
+_cache: dict[str, tuple[float, "ProjectInfo"]] = {}
+_CACHE_TTL = 30.0  # seconds
 
 
 class ProjectInfo(BaseModel):
@@ -26,13 +31,34 @@ class ProjectInfo(BaseModel):
         return label
 
 
-def detect_project(project_dir: Path | None = None) -> ProjectInfo:
+def detect_project(project_dir: Path | None = None, *, cache_ttl: float | None = None) -> ProjectInfo:
     """从文件存在性 + 依赖内容快速检测项目类型.
 
+    带 TTL 缓存（默认 30s），cache_ttl=0 禁用。
     纯文件 I/O，不调用 subprocess。
     """
     from crew.paths import resolve_project_dir
     root = resolve_project_dir(project_dir)
+
+    ttl = cache_ttl if cache_ttl is not None else _CACHE_TTL
+    key = str(root)
+    now = time.monotonic()
+
+    if ttl > 0 and key in _cache:
+        ts, result = _cache[key]
+        if now - ts < ttl:
+            return result
+
+    info = _detect_project_uncached(root)
+
+    if ttl > 0:
+        _cache[key] = (now, info)
+
+    return info
+
+
+def _detect_project_uncached(root: Path) -> ProjectInfo:
+    """实际执行文件系统检测的内部函数."""
     info = ProjectInfo()
 
     # ── Python ──

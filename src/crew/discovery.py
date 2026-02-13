@@ -1,6 +1,7 @@
 """发现机制 — 内置 + .claude/skills + private/employees."""
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,10 @@ from crew.models import DiscoveryResult, Employee
 from crew.parser import parse_employee, parse_employee_dir, parse_skill, validate_employee
 
 logger = logging.getLogger(__name__)
+
+# ── TTL 缓存 ──
+_cache: dict[str, tuple[float, DiscoveryResult]] = {}
+_CACHE_TTL = 30.0  # seconds
 
 # Claude Code Skills 目录
 SKILLS_DIR_NAME = ".claude/skills"
@@ -170,23 +175,41 @@ def _merge_employee(
 
 def discover_employees(
     project_dir: Path | None = None,
+    *,
+    cache_ttl: float | None = None,
 ) -> DiscoveryResult:
     """执行员工发现（内置 + skills + private/employees）.
+
+    带 TTL 缓存（默认 30s），按 project_dir 分 key。
+    cache_ttl=0 禁用缓存（适合 CLI / 测试场景）。
 
     优先级（高覆盖低）:
     1. 内置层: 包内 employees/*.md
     2. 技能层: {project_dir}/.claude/skills/<name>/SKILL.md
     3. private 层: {project_dir}/private/employees/
-
-    Args:
-        project_dir: 项目根目录，默认为当前工作目录
-
-    Returns:
-        DiscoveryResult 包含去重后的员工映射和冲突记录
     """
     from crew.paths import resolve_project_dir
     root = resolve_project_dir(project_dir)
 
+    ttl = cache_ttl if cache_ttl is not None else _CACHE_TTL
+    key = str(root)
+    now = time.monotonic()
+
+    if ttl > 0 and key in _cache:
+        ts, result = _cache[key]
+        if now - ts < ttl:
+            return result
+
+    result = _discover_employees_uncached(root)
+
+    if ttl > 0:
+        _cache[key] = (now, result)
+
+    return result
+
+
+def _discover_employees_uncached(root: Path) -> DiscoveryResult:
+    """实际执行文件系统扫描的内部函数."""
     employees: dict[str, Employee] = {}
     trigger_map: dict[str, str] = {}
     conflicts: list[dict[str, Any]] = []
