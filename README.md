@@ -246,6 +246,8 @@ knowlyr-crew check --json                                 # Lint + 日志质量�
 knowlyr-crew catalog list --format json                 # 查看员工 Catalog 元数据
 knowlyr-crew catalog show product-manager --json        # 查看指定员工详情
 knowlyr-crew lint .crew/discussions                     # 使用 schemas/*.json 验证讨论会 YAML
+
+> **命名建议**：生成目录格式员工后，请将文件夹命名为 `character_name-agent_id`（未注册的 Agent 用 `0000`），并在 `employee.yaml` 中填入 `character_name` 与 `agent_id`。运行 `bash private/install.sh` 时会自动同步到 `.crew/global/`，确保本地与 knowlyr-id 一致。
 ```
 
 ### 模板与经验库
@@ -276,6 +278,30 @@ knowlyr-crew run employee-generator "安全审计师" \
 ```
 
 生成的结果可直接保存为 `private/employees/<name>.md`，或结合模板系统继续加工，构建“需求 → 模板 → 上线”的自动化流程。
+
+### 能力提升方法论
+
+为了让一组数字员工真正成为“协作团队”，推荐遵循以下流程：
+
+1. **标准化角色**：每个员工必须补齐 `summary/context/tools/args`，Prompt 中包含“输入参数 + 工作流程 + 输出要求”，并声明需要的上下文（例如 `pyproject.toml`、`README.md`、`{project_type}`）。
+2. **协作编排**：通过 `.crew/pipelines/` 与 `.crew/discussions/` 将多角色串联（如安全→性能→DevOps、需求→API→PR），配合 LaneLock/Sessions 自动记录执行轨迹。
+3. **记忆与评估闭环**：默认开启 `SessionRecorder`，使用 `SessionMemoryWriter` 写入 `.crew/memory/`，并用 `knowlyr-crew eval track/run` 跟踪关键决策，再将复盘结果同步到 knowlyr-id（`agents sync/status`）。
+4. **私有资源命名**：`private/employees/` 与 `.crew/global/` 目录统一使用 `character_name-agent_id`（无 ID 用 `0000`），`private/install.sh` 会自动根据 `employee.yaml` 更新，保证本地与 knowlyr-id 一一对应。
+5. **模板/Init 复用**：在 `.crew/templates/` 维护团队模板，新员工通过 `knowlyr-crew init --dir-format` 或模板生成后，立即运行 `bash private/install.sh` 安装到 global 层。
+
+该闭环可确保所有输出都可追溯、协作有序，远端 knowlyr-id 的记忆与本地同步，让数字员工持续进化。
+
+### 运行时沉淀工具
+
+`scripts/` 目录包含几类实用脚本，方便在真实运行时管理记忆与评估：
+
+| 脚本 | 用法 |
+|------|------|
+| `python scripts/session_digest.py -n 5` | 查看最近 N 次会话/流水线/讨论的简要摘要，便于手动复盘 |
+| `python scripts/memory_cleanup.py [--dry-run]` | 对 `.crew/memory/*.jsonl` 去重，保留最新的独特经验，保持记忆干净 |
+| `python scripts/eval_reminder.py [--max-age-hours 24]` | 读取 `.crew/evaluations/decisions.jsonl`，提醒仍处于 `pending` 状态的决策，督促尽快 `eval run` |
+
+与 `SessionRecorder`、`SessionMemoryWriter` 和 `knowlyr-crew eval track/run` 搭配，可形成“生成 → 记录 → 复盘”的日常沉淀流程。
 
 ### SDK 调用
 
