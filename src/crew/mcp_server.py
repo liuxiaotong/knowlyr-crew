@@ -773,6 +773,7 @@ async def serve_sse(
     project_dir: Path | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
+    api_token: str | None = None,
 ):
     """启动 MCP 服务器（SSE 传输 — 兼容 Claude Desktop / Cursor）."""
     if not HAS_MCP:
@@ -780,6 +781,7 @@ async def serve_sse(
 
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -794,12 +796,20 @@ async def serve_sse(
                 read_stream, write_stream, server.create_initialization_options(),
             )
 
+    async def health(request):
+        return JSONResponse({"status": "ok"})
+
     app = Starlette(
         routes=[
+            Route("/health", endpoint=health),
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
     )
+    if api_token:
+        from crew.auth import BearerTokenMiddleware
+        app.add_middleware(BearerTokenMiddleware, token=api_token)
+
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     await uvicorn.Server(config).serve()
 
@@ -808,6 +818,7 @@ async def serve_http(
     project_dir: Path | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
+    api_token: str | None = None,
 ):
     """启动 MCP 服务器（Streamable HTTP 传输 — MCP 最新规范）."""
     if not HAS_MCP:
@@ -815,7 +826,8 @@ async def serve_http(
 
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
-    from starlette.routing import Mount
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
     import uvicorn
 
     server = create_server(project_dir=project_dir)
@@ -824,14 +836,24 @@ async def serve_http(
     async def handle_mcp(scope, receive, send):
         await session_manager.handle_request(scope, receive, send)
 
+    async def health(request):
+        return JSONResponse({"status": "ok"})
+
     async def lifespan(app):
         async with session_manager.run():
             yield
 
     app = Starlette(
-        routes=[Mount("/mcp", app=handle_mcp)],
+        routes=[
+            Route("/health", endpoint=health),
+            Mount("/mcp", app=handle_mcp),
+        ],
         lifespan=lifespan,
     )
+    if api_token:
+        from crew.auth import BearerTokenMiddleware
+        app.add_middleware(BearerTokenMiddleware, token=api_token)
+
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     await uvicorn.Server(config).serve()
 
@@ -845,11 +867,12 @@ def main():
     project_dir = os.environ.get("KNOWLYR_CREW_PROJECT_DIR")
     host = os.environ.get("KNOWLYR_CREW_HOST", "127.0.0.1")
     port = int(os.environ.get("KNOWLYR_CREW_PORT", "8000"))
+    api_token = os.environ.get("KNOWLYR_CREW_API_TOKEN")
     pd = Path(project_dir) if project_dir else None
 
     if transport == "sse":
-        asyncio.run(serve_sse(pd, host, port))
+        asyncio.run(serve_sse(pd, host, port, api_token))
     elif transport == "http":
-        asyncio.run(serve_http(pd, host, port))
+        asyncio.run(serve_http(pd, host, port, api_token))
     else:
         asyncio.run(serve(pd))

@@ -2773,16 +2773,22 @@ def agents_sync_cmd(name: str):
     default=None,
     help="项目目录（默认当前目录）",
 )
-def mcp(transport, host, port, project_dir):
+@click.option(
+    "--api-token",
+    default=None,
+    envvar="KNOWLYR_CREW_API_TOKEN",
+    help="Bearer token（未设置则不启用认证）",
+)
+def mcp(transport, host, port, project_dir, api_token):
     """启动 MCP Server."""
     import asyncio
 
     if transport == "sse":
         from crew.mcp_server import serve_sse
-        asyncio.run(serve_sse(project_dir, host, port))
+        asyncio.run(serve_sse(project_dir, host, port, api_token))
     elif transport == "http":
         from crew.mcp_server import serve_http
-        asyncio.run(serve_http(project_dir, host, port))
+        asyncio.run(serve_http(project_dir, host, port, api_token))
     else:
         from crew.mcp_server import serve
         asyncio.run(serve(project_dir))
