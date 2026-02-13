@@ -2759,7 +2759,30 @@ def agents_sync_cmd(name: str):
 
 
 @main.command()
-def mcp():
-    """启动 MCP Server（stdio 模式）."""
-    from crew.mcp_server import main as mcp_main
-    mcp_main()
+@click.option(
+    "-t", "--transport",
+    type=click.Choice(["stdio", "sse", "http"]),
+    default="stdio",
+    help="传输协议: stdio（默认）/ sse / http",
+)
+@click.option("--host", default="127.0.0.1", help="监听地址（sse/http 模式）")
+@click.option("--port", default=8000, type=int, help="监听端口（sse/http 模式）")
+@click.option(
+    "-d", "--project-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="项目目录（默认当前目录）",
+)
+def mcp(transport, host, port, project_dir):
+    """启动 MCP Server."""
+    import asyncio
+
+    if transport == "sse":
+        from crew.mcp_server import serve_sse
+        asyncio.run(serve_sse(project_dir, host, port))
+    elif transport == "http":
+        from crew.mcp_server import serve_http
+        asyncio.run(serve_http(project_dir, host, port))
+    else:
+        from crew.mcp_server import serve
+        asyncio.run(serve(project_dir))

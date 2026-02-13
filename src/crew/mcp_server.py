@@ -760,7 +760,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
 
 async def serve(project_dir: Path | None = None):
-    """启动 MCP 服务器."""
+    """启动 MCP 服务器（stdio 传输）."""
     if not HAS_MCP:
         raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
 
@@ -769,9 +769,87 @@ async def serve(project_dir: Path | None = None):
         await server.run(read_stream, write_stream)
 
 
+async def serve_sse(
+    project_dir: Path | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+):
+    """启动 MCP 服务器（SSE 传输 — 兼容 Claude Desktop / Cursor）."""
+    if not HAS_MCP:
+        raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
+
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+    import uvicorn
+
+    server = create_server(project_dir=project_dir)
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send,
+        ) as (read_stream, write_stream):
+            await server.run(
+                read_stream, write_stream, server.create_initialization_options(),
+            )
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+        ],
+    )
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    await uvicorn.Server(config).serve()
+
+
+async def serve_http(
+    project_dir: Path | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+):
+    """启动 MCP 服务器（Streamable HTTP 传输 — MCP 最新规范）."""
+    if not HAS_MCP:
+        raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+    import uvicorn
+
+    server = create_server(project_dir=project_dir)
+    session_manager = StreamableHTTPSessionManager(app=server)
+
+    async def handle_mcp(scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+    async def lifespan(app):
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        routes=[Mount("/mcp", app=handle_mcp)],
+        lifespan=lifespan,
+    )
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    await uvicorn.Server(config).serve()
+
+
 def main():
     """CLI 入口: knowlyr-crew mcp."""
     import asyncio
     import os
+
+    transport = os.environ.get("KNOWLYR_CREW_TRANSPORT", "stdio")
     project_dir = os.environ.get("KNOWLYR_CREW_PROJECT_DIR")
-    asyncio.run(serve(Path(project_dir) if project_dir else None))
+    host = os.environ.get("KNOWLYR_CREW_HOST", "127.0.0.1")
+    port = int(os.environ.get("KNOWLYR_CREW_PORT", "8000"))
+    pd = Path(project_dir) if project_dir else None
+
+    if transport == "sse":
+        asyncio.run(serve_sse(pd, host, port))
+    elif transport == "http":
+        asyncio.run(serve_http(pd, host, port))
+    else:
+        asyncio.run(serve(pd))
