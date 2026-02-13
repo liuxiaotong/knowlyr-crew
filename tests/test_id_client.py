@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock, patch
 
 from crew.id_client import (
+    AGENT_MEMORY_LIMIT,
     AgentIdentity,
+    append_agent_memory,
     fetch_agent_identity,
     list_agents,
     register_agent,
@@ -197,6 +199,43 @@ class TestUpdateAgent:
         mock_httpx_fn.return_value = mock_httpx
 
         assert update_agent(3050, nickname="New Name", title="New Title") is True
+
+
+class TestAppendAgentMemory:
+    """测试 append_agent_memory 行为."""
+
+    @patch("crew.id_client.update_agent", return_value=True)
+    @patch("crew.id_client.fetch_agent_identity")
+    def test_append_basic(self, mock_fetch, mock_update):
+        identity = AgentIdentity(agent_id=1, nickname="emp", memory="旧摘要")
+        mock_fetch.return_value = identity
+        ok = append_agent_memory(1, "新的总结")
+        assert ok is True
+        mock_update.assert_called_once()
+        assert mock_update.call_args.kwargs["memory"] == "旧摘要\n\n新的总结"
+
+    @patch("crew.id_client.update_agent", return_value=True)
+    @patch("crew.id_client.fetch_agent_identity")
+    def test_append_trims_oldest_chunk(self, mock_fetch, mock_update):
+        identity = AgentIdentity(agent_id=1, nickname="emp", memory="第一条\n\n第二条")
+        mock_fetch.return_value = identity
+        with patch("crew.id_client.AGENT_MEMORY_LIMIT", 12):
+            append_agent_memory(1, "第三条很长")
+        sent = mock_update.call_args.kwargs["memory"]
+        assert "第一条" not in sent
+        assert sent.startswith("第二条")
+        assert "第三条" in sent
+
+    @patch("crew.id_client.update_agent", return_value=True)
+    @patch("crew.id_client.fetch_agent_identity")
+    def test_append_large_summary(self, mock_fetch, mock_update):
+        identity = AgentIdentity(agent_id=1, nickname="emp", memory="")
+        mock_fetch.return_value = identity
+        huge = "X" * (AGENT_MEMORY_LIMIT + 100)
+        append_agent_memory(1, huge)
+        sent = mock_update.call_args.kwargs["memory"]
+        assert len(sent) == AGENT_MEMORY_LIMIT
+        assert sent == huge[-AGENT_MEMORY_LIMIT:]
 
     @patch.dict("os.environ", {"AGENT_API_TOKEN": "test-token"})
     def test_update_nothing(self):

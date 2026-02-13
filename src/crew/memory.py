@@ -64,6 +64,22 @@ class MemoryStore:
             f.write(entry.model_dump_json() + "\n")
         return entry
 
+    def add_from_session(
+        self,
+        *,
+        employee: str,
+        session_id: str,
+        summary: str,
+        category: Literal["decision", "estimate", "finding", "correction"] = "finding",
+    ) -> MemoryEntry:
+        """根据会话摘要写入记忆."""
+        return self.add(
+            employee=employee,
+            category=category,
+            content=summary,
+            source_session=session_id,
+        )
+
     def query(
         self,
         employee: str,

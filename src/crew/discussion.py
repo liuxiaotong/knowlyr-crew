@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from crew.context_detector import ProjectInfo, detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
+from crew.paths import get_global_discussions_dir
 from crew.models import DiscussionPlan, Employee, EmployeeOutput, ParticipantPrompt, RoundPlan
 
 if TYPE_CHECKING:
@@ -978,7 +979,7 @@ def discover_discussions(project_dir: Path | None = None) -> dict[str, Path]:
 
     搜索顺序（低优先级 → 高优先级）：
     1. 内置（src/crew/employees/discussions/）
-    2. 全局（~/.knowlyr/crew/discussions/）
+    2. 全局（默认 .crew/global/discussions/，可用 KNOWLYR_CREW_GLOBAL_DIR 覆盖）
     3. 项目（.crew/discussions/）— 同名覆盖内置和全局
     """
     discussions: dict[str, Path] = {}
@@ -990,7 +991,7 @@ def discover_discussions(project_dir: Path | None = None) -> dict[str, Path]:
             discussions[f.stem] = f
 
     # 全局讨论会
-    global_dir = Path.home() / ".knowlyr" / "crew" / DISCUSSIONS_DIR_NAME
+    global_dir = get_global_discussions_dir()
     if global_dir.is_dir():
         for f in sorted(global_dir.glob("*.yaml")):
             discussions[f.stem] = f

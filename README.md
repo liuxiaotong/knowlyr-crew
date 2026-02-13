@@ -254,13 +254,14 @@ knowlyr-crew lint .crew/discussions                     # 使用 schemas/*.json 
 
 | 命令 | 说明 |
 |------|------|
-| `knowlyr-crew template list` | 查看所有模板（内置 / `~/.knowlyr/crew/templates/` / `private/templates/`），项目模板会覆盖同名内置 |
+| `knowlyr-crew template list` | 查看所有模板（内置 / `.crew/global/templates/`〔可由 `KNOWLYR_CREW_GLOBAL_DIR` 指定〕/ `private/templates/`），项目模板会覆盖同名内置 |
 | `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `private/employees/foo.md` |
 | `knowlyr-crew template apply meta-prompt -o prompt.md --var name=安全审计师` | 生成参数化 Meta Prompt，交给 Claude/Cursor 填写 |
 
 - 内置模板位于 `src/crew/builtin_templates/`，包含“高级员工骨架”和“员工生成 Meta Prompt”。
 - 在 `.crew/templates/` 放置 Markdown 模板即可被自动发现，支持打造团队经验库。
 - 模板语法为 `{{var}}`，可通过 `--var key=value` 或 `--employee` 自动填充常用字段。
+- 私有目录推荐使用 `character_name-agent_id` 的命名方式（未注册时可用 `0000` 占位），`private/install.sh` 会自动根据 `employee.yaml` 内的 `character_name/agent_id` 同步到 `.crew/global/`。
 
 ### 自动化生成
 
@@ -518,7 +519,7 @@ output:                                     # 可选，自动保存
 | **轮次模板** | `standard` / `brainstorm-to-decision` / `adversarial`，`round_template` 字段一键展开 |
 | **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
 | **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
-| **三层发现** | `builtin < global (~/.knowlyr/crew/discussions/) < project (.crew/discussions/)` |
+| **三层发现** | `builtin < global (.crew/global/discussions/，可由 KNOWLYR_CREW_GLOBAL_DIR 指定) < project (.crew/discussions/)` |
 
 ---
 

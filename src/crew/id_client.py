@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+AGENT_MEMORY_LIMIT = 2000
+
 
 def _get_config() -> tuple[str, str]:
     """读取环境配置."""
@@ -244,6 +246,43 @@ def update_agent(
     except Exception as e:
         logger.warning("Agent %s 更新失败: %s", agent_id, e)
         return False
+
+
+def _combine_agent_memory(existing: str, addition: str, limit: int | None = None) -> str:
+    """将新的摘要追加到已有记忆并在 limit 内裁剪."""
+    limit = limit or AGENT_MEMORY_LIMIT
+    existing = (existing or "").strip()
+    addition = (addition or "").strip()
+    chunks: list[str] = []
+    if existing:
+        pieces = [chunk.strip() for chunk in existing.split("\n\n") if chunk.strip()]
+        if pieces:
+            chunks.extend(pieces)
+        else:
+            chunks.append(existing)
+    if addition:
+        chunks.append(addition)
+    if not chunks:
+        return ""
+    trimmed = "\n\n".join(chunks)
+    removed = ""
+    while len(trimmed) > limit and chunks:
+        removed = chunks.pop(0)
+        trimmed = "\n\n".join(chunks)
+    if trimmed:
+        return trimmed
+    fallback = addition or removed
+    return fallback[-limit:]
+
+
+def append_agent_memory(agent_id: int, summary: str) -> bool:
+    """将新的摘要拼接到 knowlyr-id Agent 的 memory 字段."""
+    identity = fetch_agent_identity(agent_id)
+    if identity is None:
+        return False
+
+    combined = _combine_agent_memory(identity.memory, summary)
+    return update_agent(agent_id, memory=combined)
 
 
 def list_agents() -> list[dict] | None:

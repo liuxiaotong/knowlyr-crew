@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable
 
+from crew.paths import get_global_templates_dir
+
 BUILTIN_TEMPLATES_DIR = Path(__file__).parent / "builtin_templates"
-GLOBAL_TEMPLATES_DIR = Path.home() / ".knowlyr" / "crew" / "templates"
 PROJECT_TEMPLATES_SUBDIR = ".crew/templates"
 
 
@@ -38,7 +39,7 @@ def discover_templates(project_dir: Path | None = None) -> Dict[str, TemplateRec
 
     for layer, directory in (
         ("builtin", BUILTIN_TEMPLATES_DIR),
-        ("global", GLOBAL_TEMPLATES_DIR),
+        ("global", get_global_templates_dir()),
         ("project", root / PROJECT_TEMPLATES_SUBDIR),
     ):
         for record in _iter_template_files(directory, layer):

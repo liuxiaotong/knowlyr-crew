@@ -5,6 +5,7 @@ import jsonschema
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -13,12 +14,15 @@ from crew import sdk
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
+from crew.lanes import LaneLock, lane_lock
+from crew.session_recorder import SessionRecorder
 from datetime import datetime, timezone
 import subprocess
 from crew.parser import parse_employee, parse_employee_dir, validate_employee
 from crew.template_manager import apply_template, discover_templates
 from crew.pipeline import load_pipeline, validate_pipeline
 from crew.discussion import load_discussion, validate_discussion
+from crew.session_summary import SessionMemoryWriter
 
 EMPLOYEE_SUBDIR = Path("private") / "employees"
 
@@ -36,6 +40,87 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+
+
+def _start_transcript(
+    session_type: str,
+    subject: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[SessionRecorder | None, str | None]:
+    """尝试创建会话记录，失败时返回 (None, None)。"""
+    try:
+        recorder = SessionRecorder()
+        session_id = recorder.start(session_type, subject, metadata or {})
+        return recorder, session_id
+    except Exception:
+        return None, None
+
+
+def _record_transcript_event(
+    recorder: SessionRecorder | None,
+    session_id: str | None,
+    event: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if recorder is None or session_id is None:
+        return
+    try:
+        recorder.record_event(session_id, event, metadata)
+    except Exception:
+        pass
+
+
+def _record_transcript_message(
+    recorder: SessionRecorder | None,
+    session_id: str | None,
+    role: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if recorder is None or session_id is None:
+        return
+    try:
+        recorder.record_message(session_id, role, content, metadata)
+    except Exception:
+        pass
+
+
+def _finish_transcript(
+    recorder: SessionRecorder | None,
+    session_id: str | None,
+    *,
+    status: str,
+    detail: str,
+) -> None:
+    if recorder is None or session_id is None:
+        return
+    try:
+        recorder.finish(session_id, status=status, detail=detail)
+    except Exception:
+        pass
+
+
+def _record_session_summary(
+    *,
+    employee: str,
+    session_id: str | None,
+    agent_id: int | None = None,
+) -> None:
+    try:
+        summary = SessionMemoryWriter().capture(
+            employee=employee,
+            session_id=session_id,
+        )
+    except Exception:
+        summary = None
+
+    if summary and agent_id:
+        try:
+            from crew.id_client import append_agent_memory
+
+            append_agent_memory(agent_id, summary)
+        except Exception:
+            pass
 
 
 @click.group()
@@ -473,6 +558,7 @@ def show(name: str):
 @click.option("--raw", is_flag=True, help="输出原始渲染结果（不包裹 prompt 格式）")
 @click.option("--copy", "to_clipboard", is_flag=True, help="复制到剪贴板")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
+@click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 def run(
     name: str,
     positional_args: tuple[str, ...],
@@ -482,69 +568,133 @@ def run(
     raw: bool,
     to_clipboard: bool,
     output: str | None,
+    parallel: bool,
 ):
-    """加载员工并生成 prompt.
-
-    NAME 为员工名称或触发别名。后续参数作为位置参数传递。
-    """
+    """加载员工并生成 prompt."""
     emp = sdk.get_employee(name)
     if emp is None:
         click.echo(f"未找到员工: {name}", err=True)
         sys.exit(1)
 
+    lane_name = f"employee:{emp.name}"
+    with lane_lock(lane_name, enabled=not parallel):
+        _run_employee_job(
+            emp=emp,
+            positional_args=positional_args,
+            named_args=named_args,
+            agent_id=agent_id,
+            smart_context=smart_context,
+            raw=raw,
+            to_clipboard=to_clipboard,
+            output=output,
+        )
+
+
+def _run_employee_job(
+    *,
+    emp,
+    positional_args: tuple[str, ...],
+    named_args: tuple[str, ...],
+    agent_id: int | None,
+    smart_context: bool,
+    raw: bool,
+    to_clipboard: bool,
+    output: str | None,
+):
     engine = CrewEngine()
 
-    # 解析命名参数
     args_dict: dict[str, str] = {}
     for item in named_args:
         if "=" in item:
             k, v = item.split("=", 1)
             args_dict[k] = v
 
-    # 位置参数也填充到对应的 args.name
     for i, val in enumerate(positional_args):
         if i < len(emp.args):
             args_dict.setdefault(emp.args[i].name, val)
 
-    # 校验参数
     errors = engine.validate_args(emp, args=args_dict)
     if errors:
         for err in errors:
             click.echo(f"参数错误: {err}", err=True)
         sys.exit(1)
 
-    # 自动使用绑定的 agent_id
     if agent_id is None and emp.agent_id is not None:
         agent_id = emp.agent_id
 
-    # 获取 Agent 身份（可选）
     agent_identity = None
     if agent_id is not None:
         try:
             from crew.id_client import fetch_agent_identity
+
             agent_identity = fetch_agent_identity(agent_id)
             if agent_identity is None:
-                click.echo(f"Warning: 无法获取 Agent {agent_id} 身份，继续生成 prompt", err=True)
+                click.echo(
+                    f"Warning: 无法获取 Agent {agent_id} 身份，继续生成 prompt",
+                    err=True,
+                )
         except ImportError:
             click.echo("Warning: httpx 未安装，无法连接 knowlyr-id", err=True)
 
-    # 检测项目类型（可选）
     project_info = None
     if smart_context:
         from crew.context_detector import detect_project
+
         project_info = detect_project()
 
-    # 生成
-    text = sdk.generate_prompt(
-        emp,
-        args=args_dict,
-        positional=list(positional_args),
-        raw=raw,
-        agent_identity=agent_identity,
-        project_info=project_info,
+    transcript_recorder, transcript_id = _start_transcript(
+        "employee",
+        emp.name,
+        {
+            "args": args_dict,
+            "agent_id": agent_id,
+            "smart_context": bool(smart_context),
+            "source": "cli.run",
+            "employee": emp.name,
+        },
+    )
+    if project_info and transcript_recorder and transcript_id:
+        _record_transcript_event(
+            transcript_recorder,
+            transcript_id,
+            "project_info",
+            project_info.model_dump(),
+        )
+
+    try:
+        text = sdk.generate_prompt(
+            emp,
+            args=args_dict,
+            positional=list(positional_args),
+            raw=raw,
+            agent_identity=agent_identity,
+            project_info=project_info,
+        )
+    except SystemExit as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="failed",
+            detail="system_exit",
+        )
+        raise exc
+    except Exception as exc:  # pragma: no cover
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="error",
+            detail=str(exc)[:200],
+        )
+        raise
+
+    _record_transcript_message(
+        transcript_recorder,
+        transcript_id,
+        "prompt",
+        text,
+        {"raw": raw, "smart_context": bool(smart_context), "employee": emp.name},
     )
 
-    # 记录工作日志
     try:
         from crew.log import WorkLogger
 
@@ -552,30 +702,81 @@ def run(
         session_id = work_logger.create_session(emp.name, args=args_dict, agent_id=agent_id)
         work_logger.add_entry(session_id, "prompt_generated", f"via CLI, {len(text)} chars")
     except Exception:
-        pass  # 日志失败不影响主流程
+        pass
 
-    # 发送心跳（可选）
     if agent_id is not None:
         try:
             from crew.id_client import send_heartbeat
+
             send_heartbeat(agent_id, detail=f"employee={emp.name}")
         except Exception:
-            pass  # 心跳失败不影响主流程
+            pass
 
-    # 输出
-    if output:
-        Path(output).write_text(text, encoding="utf-8")
-        click.echo(f"已写入: {output}", err=True)
-    elif to_clipboard:
-        try:
-            import subprocess
-            proc = subprocess.run(["pbcopy"], input=text.encode(), check=True)
-            click.echo("已复制到剪贴板。", err=True)
-        except Exception:
+    try:
+        if output:
+            Path(output).write_text(text, encoding="utf-8")
+            click.echo(f"已写入: {output}", err=True)
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "output_file",
+                {"path": output},
+            )
+        elif to_clipboard:
+            try:
+                subprocess.run(["pbcopy"], input=text.encode(), check=True)
+                click.echo("已复制到剪贴板。", err=True)
+                _record_transcript_event(
+                    transcript_recorder,
+                    transcript_id,
+                    "copied_to_clipboard",
+                    None,
+                )
+            except Exception:
+                click.echo(text)
+                click.echo("（复制到剪贴板失败，已输出到终端）", err=True)
+                _record_transcript_event(
+                    transcript_recorder,
+                    transcript_id,
+                    "clipboard_failed",
+                    None,
+                )
+        else:
             click.echo(text)
-            click.echo("（复制到剪贴板失败，已输出到终端）", err=True)
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "stdout",
+                {"chars": len(text)},
+            )
+    except SystemExit as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="failed",
+            detail="system_exit",
+        )
+        raise exc
+    except Exception as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="error",
+            detail=str(exc)[:200],
+        )
+        raise
     else:
-        click.echo(text)
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="completed",
+            detail="prompt_generated",
+        )
+        _record_session_summary(
+            employee=emp.name,
+            session_id=transcript_id,
+            agent_id=agent_id,
+        )
 
 
 @main.command()
@@ -1025,6 +1226,86 @@ def log_show(session_id: str):
         click.echo(f"[{ts}] {action}: {detail}")
 
 
+# ── session 子命令组 ──
+
+
+@main.group(name="session")
+def session_group():
+    """会话记录管理 — JSONL 轨迹."""
+    pass
+
+
+@session_group.command("list")
+@click.option("--type", "session_type", type=str, default=None, help="按类型过滤 (employee/pipeline/discussion)")
+@click.option("--subject", type=str, default=None, help="按 subject 过滤 (员工/流水线名称)")
+@click.option("-n", "--limit", type=int, default=20, help="返回条数")
+@click.option("-f", "--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def session_list(session_type: str | None, subject: str | None, limit: int, output_format: str):
+    """列出最近的会话记录."""
+    recorder = SessionRecorder()
+    sessions = recorder.list_sessions(limit=limit, session_type=session_type, subject=subject)
+
+    if not sessions:
+        click.echo("暂无会话记录。")
+        return
+
+    if output_format == "json":
+        click.echo(json.dumps(sessions, ensure_ascii=False, indent=2))
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="会话记录")
+        table.add_column("Session ID", style="cyan")
+        table.add_column("类型")
+        table.add_column("Subject")
+        table.add_column("开始时间")
+
+        for item in sessions:
+            table.add_row(
+                item["session_id"],
+                item.get("session_type", ""),
+                item.get("subject", ""),
+                item.get("started_at", ""),
+            )
+
+        console.print(table)
+    except ImportError:
+        for item in sessions:
+            click.echo(
+                f"{item['session_id']}  {item.get('session_type','')}  {item.get('subject','')}  {item.get('started_at','')}"
+            )
+
+
+@session_group.command("show")
+@click.argument("session_id")
+def session_show(session_id: str):
+    """查看某次会话的完整轨迹."""
+    recorder = SessionRecorder()
+    entries = recorder.read_session(session_id)
+    if not entries:
+        click.echo(f"未找到 session: {session_id}", err=True)
+        sys.exit(1)
+
+    for entry in entries:
+        ts = entry.get("timestamp", "")
+        event = entry.get("event", "")
+        if event == "message":
+            role = entry.get("role", "")
+            click.echo(f"[{ts}] ({role})\n{entry.get('content', '')}\n")
+        else:
+            meta = entry.get("metadata") or {}
+            detail = entry.get("detail") or ""
+            status = entry.get("status")
+            meta_part = f" {json.dumps(meta, ensure_ascii=False)}" if meta else ""
+            status_part = f" status={status}" if status else ""
+            detail_part = f" detail={detail}" if detail else ""
+            click.echo(f"[{ts}] {event}{status_part}{detail_part}{meta_part}")
+
+
 # ── pipeline 子命令组 ──
 
 
@@ -1097,18 +1378,18 @@ def pipeline_show(name: str):
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
+@click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                 smart_context: bool, output: str | None):
+                 smart_context: bool, output: str | None, parallel: bool):
     """执行流水线.
 
     NAME_OR_PATH 可以是流水线名称或 YAML 文件路径。
     """
     from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline
 
-    # 解析流水线
-    path = Path(name_or_path)
-    if path.exists() and path.suffix in (".yaml", ".yml"):
-        p = load_pipeline(path)
+    path_obj = Path(name_or_path)
+    if path_obj.exists() and path_obj.suffix in (".yaml", ".yml"):
+        p = load_pipeline(path_obj)
     else:
         pipelines = discover_pipelines()
         if name_or_path not in pipelines:
@@ -1116,34 +1397,121 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
             sys.exit(1)
         p = load_pipeline(pipelines[name_or_path])
 
-    # 解析参数
     initial_args: dict[str, str] = {}
     for item in named_args:
         if "=" in item:
             k, v = item.split("=", 1)
             initial_args[k] = v
 
-    click.echo(f"执行流水线: {p.name} ({len(p.steps)} 步)", err=True)
+    lane = LaneLock(f"pipeline:{p.name}") if not parallel else None
+    if lane:
+        lane.acquire()
+    try:
+        click.echo(f"执行流水线: {p.name} ({len(p.steps)} 步)", err=True)
 
-    results = run_pipeline(
-        p, initial_args=initial_args,
-        agent_id=agent_id, smart_context=smart_context,
-    )
+        transcript_recorder, transcript_id = _start_transcript(
+            "pipeline",
+            p.name,
+            {
+                "steps": len(p.steps),
+                "agent_id": agent_id,
+                "initial_args": initial_args,
+                "smart_context": bool(smart_context),
+                "source": "cli.pipeline.run",
+            },
+        )
 
-    # 输出
-    parts = []
-    for i, r in enumerate(results, 1):
-        header = f"{'=' * 60}\n## 步骤 {i}: {r['employee']}\n{'=' * 60}"
-        parts.append(f"{header}\n\n{r['prompt']}")
-        click.echo(f"  ✓ 步骤 {i}: {r['employee']}", err=True)
+        try:
+            results = run_pipeline(
+                p, initial_args=initial_args,
+                agent_id=agent_id, smart_context=smart_context,
+            )
+        except SystemExit as exc:
+            _finish_transcript(
+                transcript_recorder,
+                transcript_id,
+                status="failed",
+                detail="system_exit",
+            )
+            raise exc
+        except Exception as exc:
+            _finish_transcript(
+                transcript_recorder,
+                transcript_id,
+                status="error",
+                detail=str(exc)[:200],
+            )
+            raise
 
-    combined = "\n\n".join(parts)
+        parts = []
+        for i, r in enumerate(results, 1):
+            header = f"{'=' * 60}\n## 步骤 {i}: {r['employee']}\n{'=' * 60}"
+            parts.append(f"{header}\n\n{r['prompt']}")
+            click.echo(f"  ✓ 步骤 {i}: {r['employee']}", err=True)
+            _record_transcript_message(
+                transcript_recorder,
+                transcript_id,
+                "step",
+                r.get("prompt", ""),
+                {
+                    "step_index": i,
+                    "employee": r.get("employee"),
+                    "args": r.get("args", {}),
+                    "error": r.get("error", False),
+                },
+            )
 
-    if output:
-        Path(output).write_text(combined, encoding="utf-8")
-        click.echo(f"\n已写入: {output}", err=True)
-    else:
-        click.echo(combined)
+        combined = "\n\n".join(parts)
+
+        try:
+            if output:
+                Path(output).write_text(combined, encoding="utf-8")
+                click.echo(f"\n已写入: {output}", err=True)
+                _record_transcript_event(
+                    transcript_recorder,
+                    transcript_id,
+                    "output_file",
+                    {"path": output},
+                )
+            else:
+                click.echo(combined)
+                _record_transcript_event(
+                    transcript_recorder,
+                    transcript_id,
+                    "stdout",
+                    {"chars": len(combined)},
+                )
+        except SystemExit as exc:
+            _finish_transcript(
+                transcript_recorder,
+                transcript_id,
+                status="failed",
+                detail="system_exit",
+            )
+            raise exc
+        except Exception as exc:
+            _finish_transcript(
+                transcript_recorder,
+                transcript_id,
+                status="error",
+                detail=str(exc)[:200],
+            )
+            raise
+        else:
+            _finish_transcript(
+                transcript_recorder,
+                transcript_id,
+                status="completed",
+                detail=f"{len(results)} steps",
+            )
+            _record_session_summary(
+                employee=f"pipeline:{p.name}",
+                session_id=transcript_id,
+                agent_id=agent_id,
+            )
+    finally:
+        if lane:
+            lane.release()
 
 
 # ── discuss 子命令组 ──
@@ -1232,8 +1600,10 @@ def discuss_show(name: str):
 @click.option("--orchestrated", is_flag=True, default=False,
               help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
+@click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                smart_context: bool, orchestrated: bool, output: str | None):
+                smart_context: bool, orchestrated: bool, output: str | None,
+                parallel: bool):
     """生成讨论会 prompt.
 
     NAME_OR_PATH 可以是讨论会名称或 YAML 文件路径。
@@ -1273,35 +1643,203 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
 
     rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
 
-    if orchestrated:
-        click.echo(
-            f"生成编排式讨论: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
-            err=True,
-        )
+    transcript_recorder, transcript_id = _start_transcript(
+        "discussion",
+        d.name,
+        {
+            "participants": len(d.participants),
+            "rounds": rounds_count,
+            "initial_args": initial_args,
+            "agent_id": agent_id,
+            "smart_context": bool(smart_context),
+            "mode": "plan" if orchestrated else "prompt",
+            "source": "cli.discuss.run",
+        },
+    )
+    memory_key = f"discussion:{d.name}"
+
+    with lane_lock(f"discussion:{d.name}", enabled=not parallel):
+        if orchestrated:
+            click.echo(
+                f"生成编排式讨论: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
+                err=True,
+            )
+            _run_discussion_plan(
+                discussion=d,
+                initial_args=initial_args,
+                agent_id=agent_id,
+                smart_context=smart_context,
+                output=output,
+                transcript_recorder=transcript_recorder,
+                transcript_id=transcript_id,
+                memory_key=memory_key,
+            )
+        else:
+            click.echo(
+                f"生成讨论会: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
+                err=True,
+            )
+            _run_discussion_prompt(
+                discussion=d,
+                initial_args=initial_args,
+                agent_id=agent_id,
+                smart_context=smart_context,
+                output=output,
+                transcript_recorder=transcript_recorder,
+                transcript_id=transcript_id,
+                memory_key=memory_key,
+            )
+
+
+def _run_discussion_plan(
+    *,
+    discussion,
+    initial_args: dict[str, str],
+    agent_id: int | None,
+    smart_context: bool,
+    output: str | None,
+    transcript_recorder,
+    transcript_id,
+    memory_key: str | None = None,
+):
+    from crew.discussion import render_discussion_plan
+
+    try:
         plan = render_discussion_plan(
-            d, initial_args=initial_args,
-            agent_id=agent_id, smart_context=smart_context,
+            discussion,
+            initial_args=initial_args,
+            agent_id=agent_id,
+            smart_context=smart_context,
         )
         result_text = plan.model_dump_json(indent=2)
+        _record_transcript_message(
+            transcript_recorder,
+            transcript_id,
+            "discussion_plan",
+            result_text,
+            None,
+        )
         if output:
             Path(output).write_text(result_text, encoding="utf-8")
             click.echo(f"\n已写入: {output}", err=True)
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "output_file",
+                {"path": output},
+            )
         else:
             click.echo(result_text)
-    else:
-        click.echo(
-            f"生成讨论会: {d.name} ({len(d.participants)} 人, {rounds_count} 轮)",
-            err=True,
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "stdout",
+                {"chars": len(result_text)},
+            )
+    except SystemExit as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="failed",
+            detail="system_exit",
         )
+        raise exc
+    except Exception as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="error",
+            detail=str(exc)[:200],
+        )
+        raise
+    else:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="completed",
+            detail="discussion_plan",
+        )
+        if memory_key:
+            _record_session_summary(
+                employee=memory_key,
+                session_id=transcript_id,
+                agent_id=agent_id,
+            )
+
+
+def _run_discussion_prompt(
+    *,
+    discussion,
+    initial_args: dict[str, str],
+    agent_id: int | None,
+    smart_context: bool,
+    output: str | None,
+    transcript_recorder,
+    transcript_id,
+    memory_key: str | None = None,
+):
+    from crew.discussion import render_discussion
+
+    try:
         prompt = render_discussion(
-            d, initial_args=initial_args,
-            agent_id=agent_id, smart_context=smart_context,
+            discussion,
+            initial_args=initial_args,
+            agent_id=agent_id,
+            smart_context=smart_context,
+        )
+        _record_transcript_message(
+            transcript_recorder,
+            transcript_id,
+            "prompt",
+            prompt,
+            None,
         )
         if output:
             Path(output).write_text(prompt, encoding="utf-8")
             click.echo(f"\n已写入: {output}", err=True)
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "output_file",
+                {"path": output},
+            )
         else:
             click.echo(prompt)
+            _record_transcript_event(
+                transcript_recorder,
+                transcript_id,
+                "stdout",
+                {"chars": len(prompt)},
+            )
+    except SystemExit as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="failed",
+            detail="system_exit",
+        )
+        raise exc
+    except Exception as exc:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="error",
+            detail=str(exc)[:200],
+        )
+        raise
+    else:
+        _finish_transcript(
+            transcript_recorder,
+            transcript_id,
+            status="completed",
+            detail="discussion_prompt",
+        )
+        if memory_key:
+            _record_session_summary(
+                employee=memory_key,
+                session_id=transcript_id,
+                agent_id=agent_id,
+            )
 
 
 @discuss.command("adhoc")
@@ -1318,10 +1856,11 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
 @click.option("--orchestrated", is_flag=True, default=False,
               help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
+@click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
                   round_template: str | None, output_format: str,
                   agent_id: int | None, smart_context: bool, orchestrated: bool,
-                  output: str | None):
+                  output: str | None, parallel: bool):
     """发起即席讨论（无需 YAML 定义）.
 
     示例:
@@ -1358,35 +1897,51 @@ def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
     mode_label = "1v1 会议" if d.effective_mode == "meeting" else "讨论会"
     rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
 
-    if orchestrated:
-        click.echo(
-            f"生成编排式{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
-            err=True,
-        )
-        plan = render_discussion_plan(
-            d, initial_args={},
-            agent_id=agent_id, smart_context=smart_context,
-        )
-        result_text = plan.model_dump_json(indent=2)
-        if output:
-            Path(output).write_text(result_text, encoding="utf-8")
-            click.echo(f"\n已写入: {output}", err=True)
+    transcript_recorder, transcript_id = _start_transcript(
+        "discussion",
+        f"adhoc:{topic}",
+        {
+            "participants": len(emp_list),
+            "rounds": rounds_count,
+            "agent_id": agent_id,
+            "smart_context": bool(smart_context),
+            "mode": "plan" if orchestrated else "prompt",
+            "source": "cli.discuss.adhoc",
+        },
+    )
+    memory_key = f"discussion:adhoc:{topic}"
+
+    with lane_lock(f"discussion:adhoc:{topic}", enabled=not parallel):
+        if orchestrated:
+            click.echo(
+                f"生成编排式{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
+                err=True,
+            )
+            _run_discussion_plan(
+                discussion=d,
+                initial_args={},
+                agent_id=agent_id,
+                smart_context=smart_context,
+                output=output,
+                transcript_recorder=transcript_recorder,
+                transcript_id=transcript_id,
+                memory_key=memory_key,
+            )
         else:
-            click.echo(result_text)
-    else:
-        click.echo(
-            f"生成即席{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
-            err=True,
-        )
-        prompt = render_discussion(
-            d, initial_args={},
-            agent_id=agent_id, smart_context=smart_context,
-        )
-        if output:
-            Path(output).write_text(prompt, encoding="utf-8")
-            click.echo(f"\n已写入: {output}", err=True)
-        else:
-            click.echo(prompt)
+            click.echo(
+                f"生成即席{mode_label}: {len(emp_list)} 人, {rounds_count} 轮",
+                err=True,
+            )
+            _run_discussion_prompt(
+                discussion=d,
+                initial_args={},
+                agent_id=agent_id,
+                smart_context=smart_context,
+                output=output,
+                transcript_recorder=transcript_recorder,
+                transcript_id=transcript_id,
+                memory_key=memory_key,
+            )
 
 
 @discuss.command("history")
@@ -1616,6 +2171,70 @@ def memory_correct(employee: str, old_id: str, content: str):
         click.echo(f"未找到记忆: {old_id}", err=True)
         sys.exit(1)
     click.echo(f"已纠正: [{new_entry.id}] {new_entry.content}")
+
+
+@memory.command("index")
+def memory_index_cmd():
+    """重建混合搜索索引."""
+    from crew.memory_index import MemorySearchIndex
+
+    index = MemorySearchIndex()
+    stats = index.rebuild()
+    click.echo(
+        f"索引完成: 记忆 {stats.memory_entries} 条, 会话 {stats.session_messages} 条"
+    )
+
+
+@memory.command("search")
+@click.argument("query")
+@click.option("--employee", type=str, default=None, help="按员工过滤")
+@click.option("--kind", type=click.Choice(["memory", "session"]), default=None,
+              help="数据类型过滤")
+@click.option("-n", "--limit", type=int, default=5, help="返回条数")
+@click.option("--json", "json_output", is_flag=True, help="JSON 输出")
+def memory_search(query: str, employee: str | None, kind: str | None,
+                  limit: int, json_output: bool):
+    """搜索持久记忆 + 会话记录."""
+    from crew.memory_index import MemorySearchIndex
+
+    index = MemorySearchIndex()
+    results = index.search(query, limit=limit, employee=employee, kind=kind)
+
+    if not results:
+        click.echo("未找到匹配项。")
+        return
+
+    if json_output:
+        click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="记忆搜索结果")
+        table.add_column("类型", style="cyan")
+        table.add_column("员工")
+        table.add_column("标题")
+        table.add_column("摘要")
+
+        for item in results:
+            snippet = item.get("snippet") or item.get("content", "")
+            table.add_row(
+                item.get("kind", ""),
+                item.get("employee", ""),
+                item.get("title", ""),
+                snippet[:120],
+            )
+
+        console.print(table)
+    except ImportError:
+        for item in results:
+            snippet = item.get("snippet") or item.get("content", "")
+            click.echo(
+                f"[{item.get('kind','')}] {item.get('employee','')} - {item.get('title','')}\n  {snippet}"
+            )
 
 
 # ── eval 子命令组 ──
@@ -1928,6 +2547,70 @@ def agents_list_cmd(output_format: str):
         )
 
     Console(stderr=True).print(table)
+
+
+@agents.command("status")
+@click.argument("target")
+@click.option("--employee", "by_employee", is_flag=True, help="target 为员工名称而非 agent_id")
+@click.option("--heartbeat", is_flag=True, help="额外发送一次心跳用于连通性检测")
+def agents_status_cmd(target: str, by_employee: bool, heartbeat: bool):
+    """检查 knowlyr-id Agent 状态."""
+    from crew.id_client import fetch_agent_identity, send_heartbeat
+
+    agent_id: int
+    employee_name: str | None = None
+
+    if by_employee:
+        result = discover_employees()
+        emp = result.get(target)
+        if not emp:
+            click.echo(f"未找到员工: {target}", err=True)
+            raise SystemExit(1)
+        if getattr(emp, "agent_id", None) is None:
+            click.echo(f"员工 '{emp.name}' 未绑定 Agent", err=True)
+            raise SystemExit(1)
+        agent_id = int(emp.agent_id)
+        employee_name = emp.name
+    else:
+        try:
+            agent_id = int(target)
+        except ValueError:
+            click.echo("请提供有效的 Agent ID（整数）", err=True)
+            raise SystemExit(1)
+
+    identity = fetch_agent_identity(agent_id)
+    if identity is None:
+        click.echo(
+            f"无法获取 Agent #{agent_id} 状态（检查 KNOWLYR_ID_URL / AGENT_API_TOKEN）",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    click.echo(f"Agent #{agent_id} 状态:")
+    if employee_name:
+        click.echo(f"  Employee:    {employee_name}")
+    click.echo(f"  Nickname:    {identity.nickname or '-'}")
+    click.echo(f"  Title:       {identity.title or '-'}")
+    click.echo(f"  Status:      {identity.agent_status or '-'}")
+    click.echo(f"  Model:       {identity.model or '-'}")
+    domains = ", ".join(identity.domains) if identity.domains else "-"
+    click.echo(f"  Domains:     {domains}")
+    mem = (identity.memory or "").strip()
+    click.echo(f"  Memory Size: {len(mem)} chars")
+    if mem:
+        preview = mem.splitlines()[0]
+        truncated = preview[:80]
+        suffix = "…" if len(preview) > len(truncated) or len(mem) > len(preview) else ""
+        click.echo(f"  Memory Peek: {truncated}{suffix}")
+
+    if heartbeat:
+        ok = send_heartbeat(agent_id, detail="cli.agents.status")
+        status = "OK" if ok else "FAILED"
+        line = f"  Heartbeat:  {status}"
+        if ok:
+            click.echo(line)
+        else:
+            click.echo(line, err=True)
 
 
 @agents.command("sync")

@@ -3,12 +3,14 @@
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
 from crew import __version__
 from crew.cli import main
 from crew.log import WorkLogger
+from crew.id_client import AgentIdentity
 
 
 class TestCLI:
@@ -191,11 +193,101 @@ class TestCLI:
         assert result.exit_code == 0
         assert "代码审查员" in result.output
 
+    def test_session_cli_roundtrip(self):
+        with self.runner.isolated_filesystem():
+            run_result = self.runner.invoke(main, ["run", "code-reviewer", "main"])
+            assert run_result.exit_code == 0
+
+            list_result = self.runner.invoke(main, ["session", "list", "-f", "json"])
+            assert list_result.exit_code == 0
+            data = json.loads(list_result.output)
+            assert len(data) == 1
+            session_id = data[0]["session_id"]
+
+            show_result = self.runner.invoke(main, ["session", "show", session_id])
+            assert show_result.exit_code == 0
+            assert "prompt" in show_result.output
+
+    def test_run_writes_memory(self):
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(main, ["run", "code-reviewer", "main"])
+            assert result.exit_code == 0
+            mem_file = Path(".crew/memory/code-reviewer.jsonl")
+            assert mem_file.exists()
+            content = mem_file.read_text(encoding="utf-8")
+            assert "main" in content or "参数" in content
+
     def test_pipeline_list(self):
         result = self.runner.invoke(main, ["pipeline", "list"])
         assert result.exit_code == 0
         assert "review-test-pr" in result.output
         assert "full-review" in result.output
+
+
+    def test_pipeline_run_parallel(self):
+        import tempfile
+        pipeline_yaml = """name: lane-demo
+description: test
+steps:
+  - employee: code-reviewer
+    args:
+      target: main
+"""
+        with tempfile.NamedTemporaryFile('w+', suffix='.yaml', delete=False) as tmp:
+            tmp.write(pipeline_yaml)
+            tmp_path = tmp.name
+        result = self.runner.invoke(
+            main,
+            ["pipeline", "run", tmp_path, "--parallel"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "步骤 1" in result.output
+    def test_discuss_run_parallel(self):
+        result = self.runner.invoke(
+            main,
+            ["discuss", "run", "full-review", "--parallel"],
+        )
+        assert result.exit_code == 0
+        assert "生成讨论会" in result.output
+
+    def test_discuss_adhoc_parallel(self):
+        result = self.runner.invoke(
+            main,
+            ["discuss", "adhoc", "-e", "code-reviewer", "-t", "API 设计", "--parallel"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "即席" in result.output
+
+    def test_agents_status_employee(self, monkeypatch):
+        dummy_emp = SimpleNamespace(name="code-reviewer", agent_id=123)
+
+        class DummyResult:
+            def get(self, name):
+                return dummy_emp if name == "code-reviewer" else None
+
+        monkeypatch.setattr("crew.cli.discover_employees", lambda: DummyResult())
+
+        identity = AgentIdentity(agent_id=123, nickname="Alice", title="Reviewer")
+        monkeypatch.setattr("crew.id_client.fetch_agent_identity", lambda _aid: identity)
+        monkeypatch.setattr("crew.id_client.send_heartbeat", lambda *args, **kwargs: True)
+
+        result = self.runner.invoke(
+            main,
+            ["agents", "status", "--employee", "code-reviewer"],
+        )
+        assert result.exit_code == 0
+        assert "Agent #123 状态" in result.output
+        assert "Nickname" in result.output
+
+    def test_agents_status_heartbeat_flag(self, monkeypatch):
+        identity = AgentIdentity(agent_id=42, nickname="Bob", title="Auditor", memory="one")
+        monkeypatch.setattr("crew.id_client.fetch_agent_identity", lambda _aid: identity)
+        monkeypatch.setattr("crew.id_client.send_heartbeat", lambda *_, **__: False)
+
+        result = self.runner.invoke(main, ["agents", "status", "42", "--heartbeat"])
+        assert result.exit_code == 0
+        assert "Heartbeat" in result.output
+
 
     def test_catalog_list_json(self):
         result = self.runner.invoke(main, ["catalog", "list", "--format", "json"])
