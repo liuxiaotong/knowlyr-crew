@@ -42,8 +42,9 @@ dependencies = [
 mcp = ["mcp>=1.0"]
 id = ["httpx>=0.25"]
 avatar = ["Pillow>=10.0"]
+execute = ["anthropic>=0.40"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
-all = ["knowlyr-crew[mcp,id,dev,avatar]"]
+all = ["knowlyr-crew[mcp,id,execute,dev,avatar]"]
 
 [project.scripts]
 knowlyr-crew = "crew.cli:main"

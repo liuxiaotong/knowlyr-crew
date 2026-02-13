@@ -559,6 +559,9 @@ def show(name: str):
 @click.option("--copy", "to_clipboard", is_flag=True, help="复制到剪贴板")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
+@click.option("--execute", "execute_mode", is_flag=True, help="执行 prompt（调用 LLM API）")
+@click.option("-m", "--message", "user_message", type=str, default=None, help="自定义 user message（--execute 模式）")
+@click.option("--no-stream", "no_stream", is_flag=True, help="禁用流式输出（--execute 模式）")
 def run(
     name: str,
     positional_args: tuple[str, ...],
@@ -569,6 +572,9 @@ def run(
     to_clipboard: bool,
     output: str | None,
     parallel: bool,
+    execute_mode: bool,
+    user_message: str | None,
+    no_stream: bool,
 ):
     """加载员工并生成 prompt."""
     emp = sdk.get_employee(name)
@@ -587,6 +593,9 @@ def run(
             raw=raw,
             to_clipboard=to_clipboard,
             output=output,
+            execute_mode=execute_mode,
+            user_message=user_message,
+            no_stream=no_stream,
         )
 
 
@@ -600,6 +609,9 @@ def _run_employee_job(
     raw: bool,
     to_clipboard: bool,
     output: str | None,
+    execute_mode: bool = False,
+    user_message: str | None = None,
+    no_stream: bool = False,
 ):
     engine = CrewEngine()
 
@@ -695,12 +707,89 @@ def _run_employee_job(
         {"raw": raw, "smart_context": bool(smart_context), "employee": emp.name},
     )
 
+    # --execute: 调用 LLM API 执行 prompt
+    already_streamed = False
+    if execute_mode:
+        if agent_identity is None or not agent_identity.api_key:
+            click.echo(
+                "Error: --execute 需要 Agent 身份且已配置 api_key。"
+                "请确认 --agent-id 并在 knowlyr-id 中设置 api_key。",
+                err=True,
+            )
+            _finish_transcript(
+                transcript_recorder, transcript_id,
+                status="failed", detail="missing_api_key",
+            )
+            sys.exit(1)
+
+        try:
+            from crew.executor import execute_prompt
+        except ImportError:
+            click.echo(
+                "Error: anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]",
+                err=True,
+            )
+            _finish_transcript(
+                transcript_recorder, transcript_id,
+                status="failed", detail="missing_anthropic",
+            )
+            sys.exit(1)
+
+        effective_model = agent_identity.model or emp.model or "claude-sonnet-4-20250514"
+        effective_message = user_message or "请开始执行上述任务。"
+        stream_enabled = not no_stream and not output and not to_clipboard
+
+        def _on_chunk(chunk: str) -> None:
+            click.echo(chunk, nl=False)
+
+        try:
+            result = execute_prompt(
+                system_prompt=text,
+                user_message=effective_message,
+                api_key=agent_identity.api_key,
+                model=effective_model,
+                temperature=agent_identity.temperature,
+                max_tokens=agent_identity.max_tokens,
+                stream=stream_enabled,
+                on_chunk=_on_chunk if stream_enabled else None,
+            )
+        except Exception as exc:
+            click.echo(f"\nLLM 执行失败: {exc}", err=True)
+            _finish_transcript(
+                transcript_recorder, transcript_id,
+                status="error", detail=f"execute_error: {str(exc)[:200]}",
+            )
+            sys.exit(1)
+
+        if stream_enabled:
+            click.echo()  # trailing newline
+            already_streamed = True
+
+        _record_transcript_message(
+            transcript_recorder, transcript_id,
+            "assistant", result.content,
+            {
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "stop_reason": result.stop_reason,
+            },
+        )
+
+        click.echo(
+            f"[{result.model}] {result.input_tokens} in / {result.output_tokens} out",
+            err=True,
+        )
+
+        text = result.content
+
     try:
         from crew.log import WorkLogger
 
         work_logger = WorkLogger()
         session_id = work_logger.create_session(emp.name, args=args_dict, agent_id=agent_id)
-        work_logger.add_entry(session_id, "prompt_generated", f"via CLI, {len(text)} chars")
+        detail_msg = f"executed, {len(text)} chars" if execute_mode else f"via CLI, {len(text)} chars"
+        work_logger.add_entry(session_id, "prompt_generated", detail_msg)
     except Exception:
         pass
 
@@ -741,7 +830,7 @@ def _run_employee_job(
                     "clipboard_failed",
                     None,
                 )
-        else:
+        elif not already_streamed:
             click.echo(text)
             _record_transcript_event(
                 transcript_recorder,
@@ -770,7 +859,7 @@ def _run_employee_job(
             transcript_recorder,
             transcript_id,
             status="completed",
-            detail="prompt_generated",
+            detail="executed" if execute_mode else "prompt_generated",
         )
         _record_session_summary(
             employee=emp.name,
