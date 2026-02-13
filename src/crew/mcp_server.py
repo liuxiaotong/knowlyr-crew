@@ -407,8 +407,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
             agent_identity = None
             if agent_id is not None:
                 try:
-                    from crew.id_client import fetch_agent_identity
-                    agent_identity = fetch_agent_identity(agent_id)
+                    from crew.id_client import afetch_agent_identity
+                    agent_identity = await afetch_agent_identity(agent_id)
                 except Exception:
                     pass
 
@@ -428,8 +428,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
             # 发送心跳（可选）
             if agent_id is not None:
                 try:
-                    from crew.id_client import send_heartbeat
-                    send_heartbeat(agent_id, detail=f"employee={emp.name}")
+                    from crew.id_client import asend_heartbeat
+                    await asend_heartbeat(agent_id, detail=f"employee={emp.name}")
                 except Exception:
                     pass
 

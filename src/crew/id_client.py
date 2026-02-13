@@ -28,6 +28,10 @@ def _get_httpx():
         return None
 
 
+def _headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 class AgentIdentity(BaseModel):
     """从 knowlyr-id 获取的 Agent 身份信息."""
 
@@ -67,33 +71,9 @@ def fetch_agent_identity(agent_id: int) -> AgentIdentity | None:
 
     url = f"{base_url}/api/agents/{agent_id}/config"
     try:
-        resp = httpx.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=5.0,
-        )
+        resp = httpx.get(url, headers=_headers(token), timeout=5.0)
         resp.raise_for_status()
-        data = resp.json()
-
-        if not data.get("configured", False):
-            logger.warning("Agent %s 尚未配置", agent_id)
-            return AgentIdentity(
-                agent_id=agent_id,
-                nickname=data.get("nickname", ""),
-            )
-
-        return AgentIdentity(
-            agent_id=agent_id,
-            nickname=data.get("nickname", ""),
-            title=data.get("title", ""),
-            bio=data.get("bio", ""),
-            domains=data.get("domains", []),
-            model=data.get("model", ""),
-            temperature=data.get("temperature"),
-            max_tokens=data.get("max_tokens"),
-            system_prompt=data.get("system_prompt", ""),
-            memory=data.get("memory", ""),
-        )
+        return _parse_identity(agent_id, resp.json())
     except Exception as e:
         logger.warning("获取 Agent %s 身份失败: %s", agent_id, e)
         return None
@@ -114,7 +94,7 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
     try:
         resp = httpx.post(
             url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_headers(token),
             timeout=5.0,
         )
         resp.raise_for_status()
@@ -166,7 +146,7 @@ def register_agent(
     try:
         resp = httpx.post(
             url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_headers(token),
             json=payload,
             timeout=10.0,
         )
@@ -237,7 +217,7 @@ def update_agent(
     try:
         resp = httpx.put(
             url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_headers(token),
             json=payload,
             timeout=10.0,
         )
@@ -305,11 +285,201 @@ def list_agents() -> list[dict] | None:
     try:
         resp = httpx.get(
             url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_headers(token),
             timeout=5.0,
         )
         resp.raise_for_status()
         return resp.json()
+    except Exception as e:
+        logger.warning("Agent 列表获取失败: %s", e)
+        return None
+
+
+# ── 异步版本（供 MCP server / async 上下文使用）──
+
+
+def _parse_identity(agent_id: int, data: dict) -> AgentIdentity:
+    """从 API 响应解析 AgentIdentity."""
+    if not data.get("configured", False):
+        logger.warning("Agent %s 尚未配置", agent_id)
+        return AgentIdentity(agent_id=agent_id, nickname=data.get("nickname", ""))
+    return AgentIdentity(
+        agent_id=agent_id,
+        nickname=data.get("nickname", ""),
+        title=data.get("title", ""),
+        bio=data.get("bio", ""),
+        domains=data.get("domains", []),
+        model=data.get("model", ""),
+        temperature=data.get("temperature"),
+        max_tokens=data.get("max_tokens"),
+        system_prompt=data.get("system_prompt", ""),
+        memory=data.get("memory", ""),
+    )
+
+
+async def afetch_agent_identity(agent_id: int) -> AgentIdentity | None:
+    """fetch_agent_identity 的异步版本."""
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法连接 knowlyr-id")
+        return None
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过身份获取")
+        return None
+    url = f"{base_url}/api/agents/{agent_id}/config"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=_headers(token), timeout=5.0)
+            resp.raise_for_status()
+            return _parse_identity(agent_id, resp.json())
+    except Exception as e:
+        logger.warning("获取 Agent %s 身份失败: %s", agent_id, e)
+        return None
+
+
+async def asend_heartbeat(agent_id: int, detail: str = "") -> bool:
+    """send_heartbeat 的异步版本."""
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return False
+    base_url, token = _get_config()
+    url = f"{base_url}/api/agents/{agent_id}/heartbeat"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=_headers(token), timeout=5.0)
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        logger.warning("Agent %s 心跳发送失败: %s", agent_id, e)
+        return False
+
+
+async def aregister_agent(
+    nickname: str,
+    title: str = "",
+    capabilities: str = "",
+    domains: list[str] | None = None,
+    model: str = "",
+    system_prompt: str = "",
+    avatar_base64: str | None = None,
+) -> int | None:
+    """register_agent 的异步版本."""
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法注册 Agent")
+        return None
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 注册")
+        return None
+    url = f"{base_url}/api/agents"
+    payload: dict = {"nickname": nickname}
+    if title:
+        payload["title"] = title[:100]
+    if capabilities:
+        payload["capabilities"] = capabilities
+    if domains:
+        payload["domains"] = domains[:5]
+    if model:
+        payload["model"] = model
+    if system_prompt:
+        payload["system_prompt"] = system_prompt
+    if avatar_base64 is not None:
+        payload["avatar_base64"] = avatar_base64
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=_headers(token), json=payload, timeout=10.0)
+            resp.raise_for_status()
+            return resp.json().get("agent_id")
+    except Exception as e:
+        logger.warning("Agent 注册失败: %s", e)
+        return None
+
+
+async def aupdate_agent(
+    agent_id: int,
+    nickname: str | None = None,
+    title: str | None = None,
+    capabilities: str | None = None,
+    domains: list[str] | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    memory: str | None = None,
+    avatar_base64: str | None = None,
+    api_key: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    agent_status: str | None = None,
+) -> bool:
+    """update_agent 的异步版本."""
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return False
+    base_url, token = _get_config()
+    url = f"{base_url}/api/agents/{agent_id}"
+    payload: dict = {}
+    if nickname is not None:
+        payload["nickname"] = nickname
+    if title is not None:
+        payload["title"] = title[:100]
+    if capabilities is not None:
+        payload["capabilities"] = capabilities
+    if domains is not None:
+        payload["domains"] = domains[:5]
+    if model is not None:
+        payload["model"] = model
+    if system_prompt is not None:
+        payload["system_prompt"] = system_prompt
+    if memory is not None:
+        payload["memory"] = memory
+    if avatar_base64 is not None:
+        payload["avatar_base64"] = avatar_base64
+    if api_key is not None:
+        payload["api_key"] = api_key
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if agent_status is not None:
+        payload["agent_status"] = agent_status
+    if not payload:
+        return True
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(url, headers=_headers(token), json=payload, timeout=10.0)
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        logger.warning("Agent %s 更新失败: %s", agent_id, e)
+        return False
+
+
+async def aappend_agent_memory(agent_id: int, summary: str) -> bool:
+    """append_agent_memory 的异步版本."""
+    identity = await afetch_agent_identity(agent_id)
+    if identity is None:
+        return False
+    combined = _combine_agent_memory(identity.memory, summary)
+    return await aupdate_agent(agent_id, memory=combined)
+
+
+async def alist_agents() -> list[dict] | None:
+    """list_agents 的异步版本."""
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法列出 Agent")
+        return None
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 列表")
+        return None
+    url = f"{base_url}/api/agents"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=_headers(token), timeout=5.0)
+            resp.raise_for_status()
+            return resp.json()
     except Exception as e:
         logger.warning("Agent 列表获取失败: %s", e)
         return None
