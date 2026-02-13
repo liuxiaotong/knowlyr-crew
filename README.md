@@ -128,7 +128,12 @@ knowlyr-crew mcp -t sse --port 9000 --api-token YOUR_SECRET
 KNOWLYR_CREW_API_TOKEN=YOUR_SECRET knowlyr-crew mcp -t sse --port 9000
 ```
 
-SSE/HTTP 模式自带 `/health` 端点（免认证），方便部署探活。
+SSE/HTTP 模式自带 `/health` 端点（免认证），返回版本、员工数量和运行时间：
+
+```bash
+curl http://127.0.0.1:9000/health
+# {"status":"ok","version":"0.1.1","employees":6,"uptime_seconds":42}
+```
 
 配置后 AI IDE 可直接：
 - 调用 `code-reviewer` prompt 审查代码
@@ -143,6 +148,18 @@ SSE/HTTP 模式自带 `/health` 端点（免认证），方便部署探活。
 ```bash
 pip install knowlyr-crew[mcp]
 ```
+
+### 服务端特性
+
+部署为 HTTP/SSE 服务时，内置以下生产级特性：
+
+| 特性 | 说明 |
+|------|------|
+| **Bearer 认证** | `--api-token` 或 `KNOWLYR_CREW_API_TOKEN`，未设置则免认证（开发模式） |
+| **健康检查** | `/health` 端点免认证，返回版本、员工数量、运行时间 |
+| **TTL 缓存** | 员工发现和项目检测结果缓存 30s，避免每请求重扫文件系统 |
+| **请求日志** | 每次 tool 调用自动记录日志，异常自动捕获并返回错误响应 |
+| **并发安全** | JSONL read-modify-write 操作加 `fcntl.flock` 文件锁，SQLite 启用 WAL 模式 |
 
 ---
 
@@ -781,7 +798,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 373 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
+**Tests**: 373 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
 
 ## License
 
