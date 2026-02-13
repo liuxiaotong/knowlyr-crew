@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-340_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-373_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -46,10 +46,13 @@ knowlyr-crew run test-engineer src/auth.py --smart-context
 
 ```mermaid
 graph LR
-    E["员工定义<br/>(目录 / Markdown)<br/>角色 + 工作流 + 参数 + 工具"] -->|MCP Prompts| IDE["Claude Code /<br/>Cursor / AI IDE"]
-    E -->|MCP Resources| IDE
-    E -->|MCP Tools| IDE
+    E["员工定义<br/>(目录 / Markdown)<br/>角色 + 工作流 + 参数 + 工具"] -->|MCP Prompts| S["MCP Server<br/>stdio / SSE / HTTP"]
+    E -->|MCP Resources| S
+    E -->|MCP Tools| S
+    S -->|stdio| IDE["本地 AI IDE"]
+    S -->|SSE / HTTP| Remote["远程客户端"]
     IDE -->|--agent-id| ID["knowlyr-id<br/>Agent Identity"]
+    Remote -->|Bearer token| S
     ID --> E
 ```
 
@@ -88,6 +91,8 @@ Crew 通过 MCP 协议暴露三种原语：
 
 ## MCP 集成 / MCP Integration
 
+### stdio 模式（本地 AI IDE）
+
 将以下内容添加到 MCP 配置文件：
 
 ```json
@@ -102,6 +107,28 @@ Crew 通过 MCP 协议暴露三种原语：
 ```
 
 > Claude Desktop: `claude_desktop_config.json` · Claude Code: `.mcp.json`
+
+### SSE / HTTP 模式（远程部署）
+
+支持三种传输协议，SSE 和 Streamable HTTP 适合部署到服务器供远程客户端连接：
+
+```bash
+# stdio（默认，本地 AI IDE 用）
+knowlyr-crew mcp
+
+# SSE（Claude Desktop / Cursor 远程连接）
+knowlyr-crew mcp -t sse --host 0.0.0.0 --port 9000
+
+# Streamable HTTP（MCP 最新规范）
+knowlyr-crew mcp -t http --host 0.0.0.0 --port 9001
+
+# 启用 Bearer token 认证（推荐生产环境使用）
+knowlyr-crew mcp -t sse --port 9000 --api-token YOUR_SECRET
+# 或通过环境变量
+KNOWLYR_CREW_API_TOKEN=YOUR_SECRET knowlyr-crew mcp -t sse --port 9000
+```
+
+SSE/HTTP 模式自带 `/health` 端点（免认证），方便部署探活。
 
 配置后 AI IDE 可直接：
 - 调用 `code-reviewer` prompt 审查代码
@@ -198,7 +225,10 @@ knowlyr-crew agents list                               # 列出已注册 Agent
 knowlyr-crew agents sync <name>                        # 同步元数据到 knowlyr-id
 
 # ── MCP 服务 ──
-knowlyr-crew mcp                                      # 启动 MCP Server
+knowlyr-crew mcp                                      # 启动 MCP Server（stdio）
+knowlyr-crew mcp -t sse --port 9000                   # SSE 传输（远程连接）
+knowlyr-crew mcp -t http --port 9001                  # Streamable HTTP 传输
+knowlyr-crew mcp -t sse --api-token SECRET            # 启用 Bearer 认证
 ```
 
 ---
@@ -751,7 +781,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 340 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server, Skills conversion, knowlyr-id client, project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, and changelog draft.
+**Tests**: 373 cases covering parsing (single-file + directory format), discovery, engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection, pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
 
 ## License
 
