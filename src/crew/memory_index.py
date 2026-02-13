@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from crew.memory import MemoryStore
+from crew.paths import resolve_project_dir
 
 
 def _prepare_index_text(text: str) -> str:
@@ -39,10 +40,13 @@ class MemorySearchIndex:
         db_path: Path | None = None,
         memory_dir: Path | None = None,
         session_dir: Path | None = None,
+        *,
+        project_dir: Path | None = None,
     ) -> None:
-        self.db_path = db_path or Path.cwd() / ".crew" / "memory-index.db"
-        self.memory_dir = memory_dir or Path.cwd() / ".crew" / "memory"
-        self.session_dir = session_dir or Path.cwd() / ".crew" / "sessions"
+        root = resolve_project_dir(project_dir)
+        self.db_path = db_path or root / ".crew" / "memory-index.db"
+        self.memory_dir = memory_dir or root / ".crew" / "memory"
+        self.session_dir = session_dir or root / ".crew" / "sessions"
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

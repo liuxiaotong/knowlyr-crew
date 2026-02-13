@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from crew.models import Employee, EmployeeOutput
+from crew.paths import resolve_project_dir
 
 
 def _get_git_branch() -> str:
@@ -28,6 +29,9 @@ class CrewEngine:
     2. prompt() — 生成完整的 system prompt（供 LLM 使用）
     3. validate_args() — 校验参数
     """
+
+    def __init__(self, project_dir: Path | None = None):
+        self.project_dir = resolve_project_dir(project_dir)
 
     def validate_args(
         self,
@@ -87,7 +91,7 @@ class CrewEngine:
         env_vars = {
             "{date}": now.strftime("%Y-%m-%d"),
             "{datetime}": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "{cwd}": str(Path.cwd()),
+            "{cwd}": str(self.project_dir),
             "{git_branch}": _get_git_branch(),
             "{name}": employee.name,
         }
@@ -167,7 +171,7 @@ class CrewEngine:
         # 本地持久化记忆
         try:
             from crew.memory import MemoryStore
-            memory_store = MemoryStore()
+            memory_store = MemoryStore(project_dir=self.project_dir)
             memory_text = memory_store.format_for_prompt(employee.name)
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])

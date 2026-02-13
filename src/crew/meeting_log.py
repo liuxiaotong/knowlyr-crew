@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from crew.paths import resolve_project_dir
+
 
 class MeetingRecord(BaseModel):
     """会议记录元数据."""
@@ -32,8 +34,8 @@ class MeetingLogger:
         {meeting_id}.md     — 完整会议 prompt
     """
 
-    def __init__(self, meetings_dir: Path | None = None):
-        self.meetings_dir = meetings_dir or Path.cwd() / ".crew" / "meetings"
+    def __init__(self, meetings_dir: Path | None = None, *, project_dir: Path | None = None):
+        self.meetings_dir = meetings_dir if meetings_dir is not None else resolve_project_dir(project_dir) / ".crew" / "meetings"
 
     def save(
         self,

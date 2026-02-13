@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from crew.models import WorkLogEntry
+from crew.paths import resolve_project_dir
 
 
 class WorkLogger:
@@ -15,13 +16,14 @@ class WorkLogger:
     每个 session 一个文件。
     """
 
-    def __init__(self, log_dir: Path | None = None):
+    def __init__(self, log_dir: Path | None = None, *, project_dir: Path | None = None):
         """初始化日志管理器.
 
         Args:
             log_dir: 日志目录，默认 .crew/logs
+            project_dir: 项目根目录，用于计算默认 log_dir
         """
-        self.log_dir = log_dir or Path.cwd() / ".crew" / "logs"
+        self.log_dir = log_dir if log_dir is not None else resolve_project_dir(project_dir) / ".crew" / "logs"
 
     def _ensure_dir(self) -> None:
         """确保日志目录存在."""

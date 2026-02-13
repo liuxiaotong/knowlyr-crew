@@ -184,7 +184,8 @@ def discover_employees(
     Returns:
         DiscoveryResult 包含去重后的员工映射和冲突记录
     """
-    root = Path(project_dir) if project_dir else Path.cwd()
+    from crew.paths import resolve_project_dir
+    root = resolve_project_dir(project_dir)
 
     employees: dict[str, Employee] = {}
     trigger_map: dict[str, str] = {}

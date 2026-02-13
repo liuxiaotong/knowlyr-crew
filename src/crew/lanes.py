@@ -7,6 +7,8 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Iterator
 
+from crew.paths import resolve_project_dir
+
 try:  # pragma: no cover - only used on POSIX
     import fcntl  # type: ignore
 except ImportError:  # pragma: no cover - Windows fallback
@@ -16,9 +18,10 @@ except ImportError:  # pragma: no cover - Windows fallback
 class LaneLock:
     """基于文件锁的 Lane."""
 
-    def __init__(self, lane_name: str, root: Path | None = None):
+    def __init__(self, lane_name: str, root: Path | None = None, *, project_dir: Path | None = None):
         sanitized = lane_name.replace("/", "_").replace(":", "_")
-        self.path = (root or Path.cwd() / ".crew" / "lanes") / f"{sanitized}.lock"
+        base = root if root is not None else resolve_project_dir(project_dir) / ".crew" / "lanes"
+        self.path = base / f"{sanitized}.lock"
         self._fh: "Any | None" = None
 
     def acquire(self) -> None:
@@ -47,13 +50,13 @@ class LaneLock:
 
 
 @contextmanager
-def lane_lock(lane_name: str, enabled: bool = True) -> Iterator[None]:
+def lane_lock(lane_name: str, enabled: bool = True, *, project_dir: Path | None = None) -> Iterator[None]:
     """按 lane_name 串行化执行."""
     if not enabled:
         with nullcontext():
             yield
         return
-    lock = LaneLock(lane_name)
+    lock = LaneLock(lane_name, project_dir=project_dir)
     with lock:
         yield
 

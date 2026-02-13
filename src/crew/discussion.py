@@ -477,13 +477,14 @@ def _render_1v1_meeting(
 
 
 def _log_meeting(
-    discussion: Discussion, prompt: str, initial_args: dict[str, str]
+    discussion: Discussion, prompt: str, initial_args: dict[str, str],
+    project_dir: Path | None = None,
 ) -> None:
     """尝试记录会议日志（静默失败）."""
     try:
         from crew.meeting_log import MeetingLogger
 
-        logger = MeetingLogger()
+        logger = MeetingLogger(project_dir=project_dir)
         logger.save(discussion, prompt, initial_args)
     except Exception:
         pass
@@ -502,7 +503,7 @@ def render_discussion(
     """渲染讨论会，生成完整的讨论指令 prompt."""
     initial_args = initial_args or {}
     result = discover_employees(project_dir=project_dir)
-    engine = CrewEngine()
+    engine = CrewEngine(project_dir=project_dir)
 
     project_info = detect_project(project_dir) if smart_context else None
 
@@ -535,7 +536,7 @@ def render_discussion(
             discussion, topic, goal, participants_info,
             engine, initial_args, project_info, agent_identity,
         )
-        _log_meeting(discussion, prompt, initial_args)
+        _log_meeting(discussion, prompt, initial_args, project_dir=project_dir)
         return prompt
 
     bg_mode = _resolve_background_mode(discussion)
@@ -557,7 +558,7 @@ def render_discussion(
         parts.extend(_render_auto_save(discussion.output, topic, initial_args))
 
     prompt = "\n".join(parts)
-    _log_meeting(discussion, prompt, initial_args)
+    _log_meeting(discussion, prompt, initial_args, project_dir=project_dir)
     return prompt
 
 
@@ -578,6 +579,7 @@ def _render_participant_prompt(
     initial_args: dict[str, str],
     project_info: ProjectInfo | None,
     is_first_round: bool,
+    project_dir: Path | None = None,
 ) -> str:
     """为单个参会者生成独立的 prompt."""
     role_label = ROLE_LABELS.get(participant.role, participant.role)
@@ -655,7 +657,7 @@ def _render_participant_prompt(
     # 历史经验（从持久化记忆注入）
     try:
         from crew.memory import MemoryStore
-        memory_store = MemoryStore()
+        memory_store = MemoryStore(project_dir=project_dir)
         memory_text = memory_store.format_for_prompt(emp.name, limit=5)
         if memory_text:
             parts.extend(["---", "", "## 你的历史经验", "", memory_text, ""])
@@ -766,7 +768,7 @@ def render_discussion_plan(
     """
     initial_args = initial_args or {}
     result = discover_employees(project_dir=project_dir)
-    engine = CrewEngine()
+    engine = CrewEngine(project_dir=project_dir)
 
     project_info = detect_project(project_dir) if smart_context else None
 
@@ -935,6 +937,7 @@ def render_discussion_plan(
                 initial_args=initial_args,
                 project_info=project_info,
                 is_first_round=is_first_round,
+                project_dir=project_dir,
             )
 
             participant_prompts.append(ParticipantPrompt(
@@ -964,7 +967,7 @@ def render_discussion_plan(
     )
 
     # 记录会议
-    _log_meeting(discussion, f"[orchestrated plan] {len(plan_rounds)} rounds", initial_args)
+    _log_meeting(discussion, f"[orchestrated plan] {len(plan_rounds)} rounds", initial_args, project_dir=project_dir)
 
     return plan
 
@@ -991,13 +994,14 @@ def discover_discussions(project_dir: Path | None = None) -> dict[str, Path]:
             discussions[f.stem] = f
 
     # 全局讨论会
-    global_dir = get_global_discussions_dir()
+    global_dir = get_global_discussions_dir(project_dir=project_dir)
     if global_dir.is_dir():
         for f in sorted(global_dir.glob("*.yaml")):
             discussions[f.stem] = f
 
     # 项目讨论会（覆盖同名内置和全局）
-    root = Path(project_dir) if project_dir else Path.cwd()
+    from crew.paths import resolve_project_dir
+    root = resolve_project_dir(project_dir)
     project_dir_path = root / ".crew" / DISCUSSIONS_DIR_NAME
     if project_dir_path.is_dir():
         for f in sorted(project_dir_path.glob("*.yaml")):

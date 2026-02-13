@@ -24,10 +24,12 @@ class SessionMemoryWriter:
         self,
         session_dir: Path | None = None,
         memory_dir: Path | None = None,
+        *,
+        project_dir: Path | None = None,
     ) -> None:
-        self.recorder = SessionRecorder(session_dir=session_dir)
-        self.store = MemoryStore(memory_dir=memory_dir)
-        self.index = MemorySearchIndex(memory_dir=memory_dir, session_dir=session_dir)
+        self.recorder = SessionRecorder(session_dir=session_dir, project_dir=project_dir)
+        self.store = MemoryStore(memory_dir=memory_dir, project_dir=project_dir)
+        self.index = MemorySearchIndex(memory_dir=memory_dir, session_dir=session_dir, project_dir=project_dir)
 
     def capture(self, *, employee: str, session_id: str | None) -> str | None:
         if not session_id:

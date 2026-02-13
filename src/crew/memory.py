@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from crew.paths import resolve_project_dir
+
 
 class MemoryEntry(BaseModel):
     """单条记忆."""
@@ -34,8 +36,8 @@ class MemoryStore:
         {employee_name}.jsonl   — 每个员工一个文件
     """
 
-    def __init__(self, memory_dir: Path | None = None):
-        self.memory_dir = memory_dir or Path.cwd() / ".crew" / "memory"
+    def __init__(self, memory_dir: Path | None = None, *, project_dir: Path | None = None):
+        self.memory_dir = memory_dir if memory_dir is not None else resolve_project_dir(project_dir) / ".crew" / "memory"
 
     def _ensure_dir(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)

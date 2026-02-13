@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from crew.paths import resolve_project_dir
+
 
 class Decision(BaseModel):
     """会议中产出的决策."""
@@ -36,8 +38,9 @@ class EvaluationEngine:
         decisions.jsonl  — 所有决策记录
     """
 
-    def __init__(self, eval_dir: Path | None = None):
-        self.eval_dir = eval_dir or Path.cwd() / ".crew" / "evaluations"
+    def __init__(self, eval_dir: Path | None = None, *, project_dir: Path | None = None):
+        self._project_dir = project_dir
+        self.eval_dir = eval_dir if eval_dir is not None else resolve_project_dir(project_dir) / ".crew" / "evaluations"
 
     def _ensure_dir(self) -> None:
         self.eval_dir.mkdir(parents=True, exist_ok=True)
@@ -130,7 +133,7 @@ class EvaluationEngine:
         # 将评估结论写入员工记忆
         try:
             from crew.memory import MemoryStore
-            store = MemoryStore()
+            store = MemoryStore(project_dir=self._project_dir)
             store.add(
                 employee=found_decision.employee,
                 category="correction",

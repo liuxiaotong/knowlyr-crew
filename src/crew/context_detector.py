@@ -31,7 +31,8 @@ def detect_project(project_dir: Path | None = None) -> ProjectInfo:
 
     纯文件 I/O，不调用 subprocess。
     """
-    root = Path(project_dir) if project_dir else Path.cwd()
+    from crew.paths import resolve_project_dir
+    root = resolve_project_dir(project_dir)
     info = ProjectInfo()
 
     # ── Python ──

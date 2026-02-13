@@ -36,9 +36,10 @@ def generate_prompt(
     raw: bool = False,
     agent_identity=None,
     project_info=None,
+    project_dir: Path | None = None,
 ) -> str:
     """Render prompt or body for a given employee."""
-    engine = CrewEngine()
+    engine = CrewEngine(project_dir=project_dir)
     if raw:
         return engine.render(employee, args=args, positional=list(positional or []))
     return engine.prompt(
@@ -81,6 +82,7 @@ def generate_prompt_by_name(
         raw=raw,
         agent_identity=agent_identity,
         project_info=project_info,
+        project_dir=project_dir,
     )
 
 
@@ -113,6 +115,7 @@ def run_pipeline_steps(
                 raw=False,
                 agent_identity=agent_identity,
                 project_info=project_info,
+                project_dir=project_dir,
             )
         )
     return prompts

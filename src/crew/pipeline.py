@@ -61,7 +61,7 @@ def run_pipeline(
     """
     initial_args = initial_args or {}
     result = discover_employees(project_dir=project_dir)
-    engine = CrewEngine()
+    engine = CrewEngine(project_dir=project_dir)
 
     # 检测项目类型
     project_info = detect_project(project_dir) if smart_context else None
@@ -133,7 +133,8 @@ def discover_pipelines(project_dir: Path | None = None) -> dict[str, Path]:
             pipelines[f.stem] = f
 
     # 项目流水线（覆盖同名内置）
-    root = Path(project_dir) if project_dir else Path.cwd()
+    from crew.paths import resolve_project_dir
+    root = resolve_project_dir(project_dir)
     project_pipeline_dir = root / ".crew" / PIPELINES_DIR_NAME
     if project_pipeline_dir.is_dir():
         for f in sorted(project_pipeline_dir.glob("*.yaml")):
