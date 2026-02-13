@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from crew.paths import resolve_project_dir
+from crew.paths import file_lock, resolve_project_dir
 
 
 class MemoryEntry(BaseModel):
@@ -151,48 +151,50 @@ class MemoryStore:
         if not path.exists():
             return None
 
-        # 读取所有条目
-        lines = path.read_text(encoding="utf-8").splitlines()
-        found = False
-        new_lines: list[str] = []
-        new_entry: MemoryEntry | None = None
+        with file_lock(path):
+            # 读取所有条目
+            lines = path.read_text(encoding="utf-8").splitlines()
+            found = False
+            new_lines: list[str] = []
+            new_entry: MemoryEntry | None = None
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = MemoryEntry(**json.loads(line))
-            except Exception:
-                new_lines.append(line)
-                continue
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(line))
+                except Exception:
+                    new_lines.append(line)
+                    continue
 
-            if entry.id == old_id:
-                found = True
-                # 创建纠正记忆
-                new_entry = MemoryEntry(
-                    employee=employee,
-                    category="correction",
-                    content=new_content,
-                    source_session=source_session,
-                    confidence=1.0,
-                )
-                # 标记旧记忆
-                entry.superseded_by = new_entry.id
-                entry.confidence = 0.0
-                new_lines.append(entry.model_dump_json())
-            else:
-                new_lines.append(line)
+                if entry.id == old_id:
+                    found = True
+                    # 创建纠正记忆
+                    new_entry = MemoryEntry(
+                        employee=employee,
+                        category="correction",
+                        content=new_content,
+                        source_session=source_session,
+                        confidence=1.0,
+                    )
+                    # 标记旧记忆
+                    entry.superseded_by = new_entry.id
+                    entry.confidence = 0.0
+                    new_lines.append(entry.model_dump_json())
+                else:
+                    new_lines.append(line)
 
-        if not found:
-            return None
+            if not found:
+                return None
 
-        # 追加新记忆
-        assert new_entry is not None
-        new_lines.append(new_entry.model_dump_json())
+            # 追加新记忆
+            assert new_entry is not None
+            new_lines.append(new_entry.model_dump_json())
 
-        # 重写文件
-        path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            # 重写文件
+            path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
         return new_entry
 
     def format_for_prompt(

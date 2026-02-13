@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from crew.paths import resolve_project_dir
+from crew.paths import file_lock, resolve_project_dir
 
 
 class Decision(BaseModel):
@@ -102,35 +102,36 @@ class EvaluationEngine:
         if not path.exists():
             return None
 
-        lines = path.read_text(encoding="utf-8").splitlines()
-        found_decision: Decision | None = None
-        new_lines: list[str] = []
+        with file_lock(path):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            found_decision: Decision | None = None
+            new_lines: list[str] = []
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                decision = Decision(**json.loads(line))
-            except Exception:
-                new_lines.append(line)
-                continue
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    decision = Decision(**json.loads(line))
+                except Exception:
+                    new_lines.append(line)
+                    continue
 
-            if decision.id == decision_id:
-                decision.actual_outcome = actual_outcome
-                decision.evaluation = evaluation or f"预期: {decision.expected_outcome}; 实际: {actual_outcome}"
-                decision.status = "evaluated"
-                found_decision = decision
+                if decision.id == decision_id:
+                    decision.actual_outcome = actual_outcome
+                    decision.evaluation = evaluation or f"预期: {decision.expected_outcome}; 实际: {actual_outcome}"
+                    decision.status = "evaluated"
+                    found_decision = decision
 
-            new_lines.append(decision.model_dump_json())
+                new_lines.append(decision.model_dump_json())
 
-        if found_decision is None:
-            return None
+            if found_decision is None:
+                return None
 
-        # 重写决策文件
-        path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            # 重写决策文件
+            path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
-        # 将评估结论写入员工记忆
+        # 将评估结论写入员工记忆（锁外执行，避免死锁）
         try:
             from crew.memory import MemoryStore
             store = MemoryStore(project_dir=self._project_dir)

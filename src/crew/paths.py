@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
+
+try:  # pragma: no cover - only used on POSIX
+    import fcntl  # type: ignore
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore
 
 _GLOBAL_ENV_VAR = "KNOWLYR_CREW_GLOBAL_DIR"
 
@@ -33,9 +40,30 @@ def get_global_discussions_dir(project_dir: Path | None = None) -> Path:
     return get_global_dir(project_dir) / "discussions"
 
 
+@contextmanager
+def file_lock(path: Path) -> Iterator[None]:
+    """对文件加排他锁（跨进程安全，POSIX only）.
+
+    在目标文件旁创建 .lock 文件，用 fcntl.flock 加排他锁。
+    Windows 下退化为无锁（与 lanes.py 行为一致）。
+    """
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+")
+    try:
+        if fcntl:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
+
+
 __all__ = [
     "resolve_project_dir",
     "get_global_dir",
     "get_global_templates_dir",
     "get_global_discussions_dir",
+    "file_lock",
 ]
