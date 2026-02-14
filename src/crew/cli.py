@@ -4,6 +4,8 @@ import json
 import jsonschema
 import logging
 import sys
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 
@@ -75,8 +77,8 @@ def _record_transcript_event(
         return
     try:
         recorder.record_event(session_id, event, metadata)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("记录 transcript 事件失败: %s", e)
 
 
 def _record_transcript_message(
@@ -90,8 +92,8 @@ def _record_transcript_message(
         return
     try:
         recorder.record_message(session_id, role, content, metadata)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("记录 transcript 消息失败: %s", e)
 
 
 def _finish_transcript(
@@ -105,8 +107,8 @@ def _finish_transcript(
         return
     try:
         recorder.finish(session_id, status=status, detail=detail)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("结束 transcript 失败: %s", e)
 
 
 def _record_session_summary(
@@ -120,7 +122,8 @@ def _record_session_summary(
             employee=employee,
             session_id=session_id,
         )
-    except Exception:
+    except Exception as e:
+        logger.debug("采集 session 摘要失败: %s", e)
         summary = None
 
     if summary and agent_id:
@@ -128,8 +131,8 @@ def _record_session_summary(
             from crew.id_client import append_agent_memory
 
             append_agent_memory(agent_id, summary)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("写入 agent 记忆失败: %s", e)
 
 
 @click.group()
@@ -843,7 +846,13 @@ def _run_employee_job(
             )
         elif to_clipboard:
             try:
-                subprocess.run(["pbcopy"], input=text.encode(), check=True)
+                if sys.platform == "darwin":
+                    clip_cmd = ["pbcopy"]
+                elif sys.platform == "win32":
+                    clip_cmd = ["clip"]
+                else:
+                    clip_cmd = ["xclip", "-selection", "clipboard"]
+                subprocess.run(clip_cmd, input=text.encode(), check=True)
                 click.echo("已复制到剪贴板。", err=True)
                 _record_transcript_event(
                     transcript_recorder,

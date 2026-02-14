@@ -157,6 +157,23 @@ class TestLoadWebhookConfig:
         assert len(config.routes) == 1
         assert config.routes[0].target.name == "full-review"
 
+    def test_empty_yaml_returns_default(self, tmp_path):
+        """空 YAML 文件应返回默认配置."""
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        (crew_dir / "webhook.yaml").write_text("")
+        config = load_webhook_config(tmp_path)
+        assert config.routes == []
+
+    def test_non_dict_yaml_returns_default(self, tmp_path):
+        """YAML 内容为列表时应返回默认配置."""
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        (crew_dir / "webhook.yaml").write_text("- item1\n- item2\n")
+        config = load_webhook_config(tmp_path)
+        assert config.routes == []
+        assert config.github_secret == ""
+
 
 # ── TaskRegistry 测试 ──
 

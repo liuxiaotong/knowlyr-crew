@@ -102,3 +102,21 @@ class TestCheckAndBump:
         version, bumped = check_and_bump(tmp_path)
         assert version == "1.0"
         assert bumped is False
+
+    def test_empty_yaml_returns_default(self, tmp_path):
+        """空 employee.yaml 应返回默认版本."""
+        emp_dir = tmp_path / "worker"
+        emp_dir.mkdir()
+        (emp_dir / "employee.yaml").write_text("")
+        version, bumped = check_and_bump(emp_dir)
+        assert version == "1.0"
+        assert bumped is False
+
+    def test_non_dict_yaml_returns_default(self, tmp_path):
+        """YAML 内容不是 dict 时应返回默认版本."""
+        emp_dir = tmp_path / "worker"
+        emp_dir.mkdir()
+        (emp_dir / "employee.yaml").write_text("- item1\n- item2\n")
+        version, bumped = check_and_bump(emp_dir)
+        assert version == "1.0"
+        assert bumped is False

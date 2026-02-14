@@ -161,3 +161,41 @@ class TestDetectProject:
         (tmp_path / "package.json").write_text('{"name":"x"}')
         info = detect_project(tmp_path)
         assert info.project_type == "python"
+
+
+class TestCacheThreadSafety:
+    """缓存线程安全测试."""
+
+    def test_concurrent_detect(self, tmp_path):
+        """多线程并发检测不应崩溃."""
+        import threading
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
+        errors = []
+
+        def _detect():
+            try:
+                for _ in range(20):
+                    info = detect_project(tmp_path, cache_ttl=0.01)
+                    assert info.project_type == "python"
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_detect) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+
+    def test_cache_ttl_zero_no_cache(self, tmp_path):
+        """cache_ttl=0 应每次重新检测."""
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        info1 = detect_project(tmp_path, cache_ttl=0)
+        assert info1.project_type == "python"
+        # 修改后重新检测应反映变化
+        (tmp_path / "pyproject.toml").unlink()
+        (tmp_path / "package.json").write_text('{"name":"x"}')
+        info2 = detect_project(tmp_path, cache_ttl=0)
+        assert info2.project_type == "nodejs"

@@ -53,10 +53,12 @@ def file_lock(path: Path) -> Iterator[None]:
     try:
         if fcntl:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        yield
+        try:
+            yield
+        finally:
+            if fcntl:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
-        if fcntl:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         fh.close()
 
 

@@ -43,7 +43,7 @@ def load_webhook_config(project_dir: Path | None = None) -> WebhookConfig:
     if not config_path.exists():
         return WebhookConfig()
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if not data:
+    if not isinstance(data, dict):
         return WebhookConfig()
     return WebhookConfig(**data)
 

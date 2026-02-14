@@ -73,6 +73,8 @@ def check_and_bump(dir_path: Path) -> tuple[str, bool]:
         return ("1.0", False)
 
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        return ("1.0", False)
     version = str(config.get("version", "1.0"))
     stored_hash = config.get("_content_hash", "")
 

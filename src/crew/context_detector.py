@@ -1,12 +1,14 @@
 """项目类型检测器 — 从文件结构和依赖推断项目技术栈."""
 
+import threading
 import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-# ── TTL 缓存 ──
+# ── TTL 缓存（线程安全）──
 _cache: dict[str, tuple[float, "ProjectInfo"]] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL = 30.0  # seconds
 
 
@@ -44,15 +46,17 @@ def detect_project(project_dir: Path | None = None, *, cache_ttl: float | None =
     key = str(root)
     now = time.monotonic()
 
-    if ttl > 0 and key in _cache:
-        ts, result = _cache[key]
-        if now - ts < ttl:
-            return result
+    with _cache_lock:
+        if ttl > 0 and key in _cache:
+            ts, result = _cache[key]
+            if now - ts < ttl:
+                return result
 
     info = _detect_project_uncached(root)
 
     if ttl > 0:
-        _cache[key] = (now, info)
+        with _cache_lock:
+            _cache[key] = (now, info)
 
     return info
 
