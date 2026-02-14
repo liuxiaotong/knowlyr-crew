@@ -170,6 +170,7 @@ pip install knowlyr-crew[mcp]
 | **链路追踪** | 每个任务分配唯一 trace_id，贯穿日志全链路 |
 | **断路器** | knowlyr-id 连续 3 次失败后暂停请求 30 秒，自动恢复 |
 | **运行时指标** | `/metrics` 端点提供调用/延迟/token/错误统计，按员工和提供商分类 |
+| **周期心跳** | HeartbeatManager 每 60s 向 knowlyr-id 发送心跳，Agent 状态实时在线 |
 
 ---
 
@@ -1078,7 +1079,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 700+ cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI (fuzzy matching, debug-context, checkpoint), MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async, circuit breaker), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough, request size limit, rate limiting, trace-id logging), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring, embedding timeout), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, custom exception hierarchy, Bearer token auth middleware (timing-safe), file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot/Gemini/Zhipu/Qwen), API key auto-resolution, fallback model, latency metrics, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
+**Tests**: 786 cases covering parsing (single-file + directory format), discovery (TTL cache + thread-safe concurrent access), engine, CLI (fuzzy matching, debug-context, checkpoint), MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async, circuit breaker), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough, request size limit, rate limiting, trace-id logging), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring, embedding timeout, connection safety), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, custom exception hierarchy, Bearer token auth middleware (timing-safe), file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot/Gemini/Zhipu/Qwen), API key auto-resolution, fallback model, latency metrics, knowlyr-id bidirectional sync (push/pull/register/disable/dry-run), heartbeat manager, error recovery resilience (silent-exception elimination, resource leak prevention, defensive attribute access), and thread-safety guards on global caches.
 
 ## License
 
