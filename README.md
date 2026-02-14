@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-515_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-529_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -245,7 +245,13 @@ knowlyr-crew avatar <name>                             # 为员工生成头像�
 # ── Agent 管理 ──
 knowlyr-crew register <name> [--dry-run]               # 注册员工到 knowlyr-id
 knowlyr-crew agents list                               # 列出已注册 Agent
-knowlyr-crew agents sync <name>                        # 同步元数据到 knowlyr-id
+knowlyr-crew agents status <id> [--heartbeat]          # 查看 Agent 状态
+knowlyr-crew agents sync <name>                        # 同步单个员工到 knowlyr-id
+knowlyr-crew agents sync-all [--dir DIR]               # 批量双向同步所有员工
+knowlyr-crew agents sync-all --dry-run                 # 预览同步操作
+knowlyr-crew agents sync-all --push-only               # 仅推送（不拉取）
+knowlyr-crew agents sync-all --pull-only               # 仅拉取（不推送）
+knowlyr-crew agents sync-all --force                   # 强制推送（忽略缓存）
 
 # ── Webhook + Cron 服务器 ──
 knowlyr-crew serve --port 8765 --token SECRET         # 启动 Webhook + Cron 服务器
@@ -891,16 +897,58 @@ pip install knowlyr-crew[id]
 
 不带 `--agent-id` 时行为完全一致，knowlyr-id 连接是可选的。
 
+### 双向同步 / Bidirectional Sync
+
+`agents sync-all` 命令实现本地员工目录与 knowlyr-id 之间的批量双向同步：
+
+```bash
+# 批量同步所有员工（默认扫描 .crew/global/）
+knowlyr-crew agents sync-all
+
+# 指定目录 + 预览
+knowlyr-crew agents sync-all --dir private/employees/ --dry-run
+
+# 仅推送本地变更到 id
+knowlyr-crew agents sync-all --push-only --force
+```
+
+**Push（本地 → id）：**
+- 元数据：character_name → nickname, display_name → title, bio → bio, description → capabilities, tags → domains
+- 渲染后的完整 prompt → system_prompt（包含角色前言、变量替换、记忆注入）
+- avatar.webp → avatar_base64
+- 新员工（无 agent_id）自动注册，agent_id 回写到 employee.yaml
+- 本地已删除的员工 → 远端设为 inactive
+
+**Pull（id → 本地）：**
+- 运行时积累的 memory → memory-id.md（保留对话中学到的经验）
+- model / temperature → employee.yaml（运行时调整的模型配置同步回来）
+
+**内容哈希优化：** 利用 `_content_hash` 字段，prompt 未变时跳过 prompt/avatar 推送，仅同步 metadata。`--force` 可强制全量推送。
+
+### 部署集成
+
+`deploy/deploy.sh` 自动在数据同步后触发 id 同步：
+
+```bash
+bash deploy/deploy.sh sync      # rsync 数据 → 重启服务 → 同步 knowlyr-id
+bash deploy/deploy.sh id-sync   # 仅同步到 knowlyr-id
+bash deploy/deploy.sh all       # 引擎 + 数据 + 重启 + ID 同步
+```
+
 ### 字段映射 / Field Mapping
 
-| Crew Employee | knowlyr-id | 说明 |
-|---|---|---|
-| `character_name` | `nickname` | 人名 |
-| `display_name` | `title` | 头衔 |
-| `description` | `capabilities` | 能力介绍 |
-| `tags` | `domains` | 能力领域 |
-| `body` | `system_prompt` | 系统提示词 |
-| `avatar.webp` | `avatar_url` | 头像 |
+| Crew Employee | knowlyr-id | 方向 | 说明 |
+|---|---|---|---|
+| `character_name` | `nickname` | push → | 人名 |
+| `display_name` | `title` | push → | 头衔 |
+| `bio` | `bio` | push → | 一句话简介 |
+| `description` | `capabilities` | push → | 能力介绍 |
+| `tags` | `domains` | push → | 能力领域 |
+| rendered prompt | `system_prompt` | push → | 完整系统提示词 |
+| `avatar.webp` | `avatar_base64` | push → | 头像 |
+| `memory-id.md` | `memory` | ← pull | 运行时积累的记忆 |
+| `model` | `model` | ← pull | 模型配置 |
+| `temperature` | `temperature` | ← pull | 温度参数 |
 
 ---
 
@@ -984,7 +1032,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 515 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek), and API key auto-resolution.
+**Tests**: 529 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot), API key auto-resolution, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
 
 ## License
 
