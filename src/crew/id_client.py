@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 AGENT_MEMORY_LIMIT = 2000
 
 
+class WorkLogResult(BaseModel):
+    """POST /api/work 的返回结果."""
+
+    work_log_id: int
+    is_exemplar: bool = False
+
+
 class _CircuitBreaker:
     """Simple circuit breaker: after N consecutive failures, skip calls for cooldown_seconds."""
 
@@ -81,6 +88,7 @@ class AgentIdentity(BaseModel):
     agent_status: str = "active"
     system_prompt: str = ""
     memory: str = ""
+    crew_name: str = ""
 
 
 def fetch_agent_identity(agent_id: int) -> AgentIdentity | None:
@@ -374,10 +382,12 @@ def _parse_identity(agent_id: int, data: dict) -> AgentIdentity:
         bio=data.get("bio", ""),
         domains=data.get("domains", []),
         model=data.get("model", ""),
+        api_key=data.get("api_key", ""),
         temperature=data.get("temperature"),
         max_tokens=data.get("max_tokens"),
         system_prompt=data.get("system_prompt", ""),
         memory=data.get("memory", ""),
+        crew_name=data.get("crew_name", ""),
     )
 
 
@@ -571,4 +581,132 @@ async def alist_agents() -> list[dict] | None:
     except Exception as e:
         _breaker.record_failure()
         logger.warning("Agent 列表获取失败: %s", e)
+        return None
+
+
+# ── 工作记录提交 ──
+
+
+def _build_work_payload(
+    agent_id: int,
+    task_type: str,
+    task_input: str,
+    task_output: str,
+    auto_score: float | None,
+    crew_task_id: str,
+    tokens_used: int,
+    model_used: str,
+    execution_ms: int,
+    error: str,
+) -> dict:
+    payload: dict = {"agent_id": agent_id, "task_type": task_type}
+    if task_input:
+        payload["task_input"] = task_input[:10000]
+    if task_output:
+        payload["task_output"] = task_output[:10000]
+    if auto_score is not None:
+        payload["auto_score"] = auto_score
+    if crew_task_id:
+        payload["crew_task_id"] = crew_task_id
+    if tokens_used:
+        payload["tokens_used"] = tokens_used
+    if model_used:
+        payload["model_used"] = model_used
+    if execution_ms:
+        payload["execution_ms"] = execution_ms
+    if error:
+        payload["error"] = error[:2000]
+    return payload
+
+
+def log_work(
+    agent_id: int,
+    task_type: str,
+    task_input: str = "",
+    task_output: str = "",
+    auto_score: float | None = None,
+    crew_task_id: str = "",
+    tokens_used: int = 0,
+    model_used: str = "",
+    execution_ms: int = 0,
+    error: str = "",
+) -> WorkLogResult | None:
+    """向 knowlyr-id 提交工作记录.
+
+    Returns:
+        WorkLogResult（成功）或 None（失败，不抛异常）
+    """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法提交工作记录")
+        return None
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过工作记录提交")
+        return None
+    url = f"{base_url}/api/work"
+    payload = _build_work_payload(
+        agent_id, task_type, task_input, task_output,
+        auto_score, crew_task_id, tokens_used, model_used, execution_ms, error,
+    )
+    try:
+        resp = httpx.post(url, headers=_headers(token), json=payload, timeout=10.0)
+        resp.raise_for_status()
+        _breaker.record_success()
+        data = resp.json()
+        return WorkLogResult(
+            work_log_id=data["work_log_id"],
+            is_exemplar=data.get("is_exemplar", False),
+        )
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 工作记录提交失败: %s", agent_id, e)
+        return None
+
+
+async def alog_work(
+    agent_id: int,
+    task_type: str,
+    task_input: str = "",
+    task_output: str = "",
+    auto_score: float | None = None,
+    crew_task_id: str = "",
+    tokens_used: int = 0,
+    model_used: str = "",
+    execution_ms: int = 0,
+    error: str = "",
+) -> WorkLogResult | None:
+    """log_work 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
+    httpx = _get_httpx()
+    if httpx is None:
+        logger.warning("httpx 未安装，无法提交工作记录")
+        return None
+    base_url, token = _get_config()
+    if not token:
+        logger.warning("AGENT_API_TOKEN 未设置，跳过工作记录提交")
+        return None
+    url = f"{base_url}/api/work"
+    payload = _build_work_payload(
+        agent_id, task_type, task_input, task_output,
+        auto_score, crew_task_id, tokens_used, model_used, execution_ms, error,
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=_headers(token), json=payload, timeout=10.0)
+            resp.raise_for_status()
+            _breaker.record_success()
+            data = resp.json()
+            return WorkLogResult(
+                work_log_id=data["work_log_id"],
+                is_exemplar=data.get("is_exemplar", False),
+            )
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 工作记录提交失败: %s", agent_id, e)
         return None
