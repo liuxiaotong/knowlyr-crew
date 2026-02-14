@@ -53,7 +53,8 @@ sync_data() {
 
 sync_id() {
     echo "=== 同步到 knowlyr-id ==="
-    ssh "$SERVER" "$VENV/bin/knowlyr-crew agents sync-all \
+    ssh "$SERVER" "set -a && source $REMOTE_DIR/.env && set +a && \
+        $VENV/bin/knowlyr-crew agents sync-all \
         --dir $PROJECT/private/employees/ --force"
     echo "    ID 同步完成"
 }
