@@ -1,4 +1,4 @@
-"""测试语义记忆搜索."""
+"""测试语义记忆搜索（混合搜索 + 多后端）."""
 
 import math
 from pathlib import Path
@@ -9,9 +9,11 @@ import pytest
 from crew.memory import MemoryEntry, MemoryStore
 from crew.memory_search import (
     SemanticMemoryIndex,
+    _GeminiEmbedder,
     _TfIdfEmbedder,
     _cosine_similarity,
     _create_embedder,
+    _keyword_score,
     _tokenize,
 )
 
@@ -62,6 +64,26 @@ class TestTokenize:
 
     def test_empty(self):
         assert _tokenize("") == []
+
+
+class TestKeywordScore:
+    """关键词匹配分数."""
+
+    def test_full_match(self):
+        score = _keyword_score({"api", "设"}, {"api", "设", "计"})
+        assert score == 1.0
+
+    def test_partial_match(self):
+        score = _keyword_score({"api", "数", "据"}, {"api", "接", "口"})
+        assert abs(score - 1.0 / 3) < 1e-6
+
+    def test_no_match(self):
+        score = _keyword_score({"hello"}, {"world"})
+        assert score == 0.0
+
+    def test_empty_query(self):
+        score = _keyword_score(set(), {"hello"})
+        assert score == 0.0
 
 
 # ── TF-IDF Embedder ──
@@ -160,7 +182,6 @@ class TestSemanticMemoryIndex:
         entry = MemoryEntry(id="1", employee="bot", category="finding", content="test")
         index.index(entry)
         index.close()
-        # 关闭后 _conn 为 None
         assert index._conn is None
 
     def test_different_employees(self, tmp_path):
@@ -175,6 +196,53 @@ class TestSemanticMemoryIndex:
         assert len(results_bob) == 1
         assert results_alice[0][0] == "1"
         assert results_bob[0][0] == "2"
+
+
+# ── Hybrid Search ──
+
+
+class TestHybridSearch:
+    """混合搜索：向量 + 关键词."""
+
+    def test_keyword_boost(self, tmp_path):
+        """精确术语通过关键词匹配获得加分."""
+        index = SemanticMemoryIndex(tmp_path / "memory")
+
+        entries = [
+            MemoryEntry(id="1", employee="bot", category="finding", content="用户偏好暗色主题"),
+            MemoryEntry(id="2", employee="bot", category="decision", content="数据库选用 PostgreSQL"),
+            MemoryEntry(id="3", employee="bot", category="finding", content="后端框架用 FastAPI"),
+        ]
+        for e in entries:
+            index.index(e)
+
+        # 搜索精确术语 "PostgreSQL"
+        results = index.search("bot", "PostgreSQL", limit=3)
+        assert len(results) == 3
+        # 包含 PostgreSQL 的应该排第一
+        assert results[0][0] == "2"
+
+    def test_hybrid_weights(self, tmp_path):
+        """验证混合权重生效."""
+        index = SemanticMemoryIndex(tmp_path / "memory")
+
+        entries = [
+            MemoryEntry(id="1", employee="bot", category="finding", content="API 接口鉴权设计"),
+            MemoryEntry(id="2", employee="bot", category="finding", content="API 文档编写规范"),
+        ]
+        for e in entries:
+            index.index(e)
+
+        # 搜索 "API 鉴权" — 两条都含 API，但只有 id=1 含"鉴"和"权"
+        results = index.search("bot", "API 鉴权", limit=2)
+        assert len(results) == 2
+        assert results[0][0] == "1"  # 关键词匹配更好
+
+    def test_vec_weight_and_kw_weight(self):
+        """验证权重常量."""
+        assert SemanticMemoryIndex.VEC_WEIGHT == 0.7
+        assert SemanticMemoryIndex.KW_WEIGHT == 0.3
+        assert abs(SemanticMemoryIndex.VEC_WEIGHT + SemanticMemoryIndex.KW_WEIGHT - 1.0) < 1e-6
 
 
 # ── MemoryStore 语义搜索集成 ──
@@ -199,14 +267,12 @@ class TestMemoryStoreSemanticIntegration:
         # 使用语义搜索
         result = store.format_for_prompt("bot", query="界面主题颜色", limit=2)
         assert result  # 非空
-        # 应该包含关于主题的记忆
         assert "暗色主题" in result
 
     def test_format_for_prompt_without_query(self, tmp_path):
         store = MemoryStore(memory_dir=tmp_path)
         store.add("bot", "finding", "some finding")
 
-        # 不传 query，使用原始逻辑
         result = store.format_for_prompt("bot")
         assert "finding" in result.lower() or "发现" in result
 
@@ -216,22 +282,45 @@ class TestMemoryStoreSemanticIntegration:
 
         # 传 query 但无索引，降级到原始逻辑
         result = store.format_for_prompt("bot", query="anything")
-        assert "发现" in result  # 原始格式包含类别标签
+        assert "发现" in result
 
 
 # ── _create_embedder ──
 
 
 class TestCreateEmbedder:
-    """Embedder 创建."""
+    """Embedder 创建链路: OpenAI → Gemini → TF-IDF."""
 
     def test_no_api_key(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": ""}, clear=False):
             embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
 
-    def test_with_api_key_but_import_fails(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False), \
+    def test_openai_key_but_import_fails(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
              patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("no openai")):
             embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
+
+    def test_gemini_key_selected(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False), \
+             patch("crew.memory_search._GeminiEmbedder") as mock_cls:
+            mock_cls.return_value = MagicMock(spec=_GeminiEmbedder)
+            embedder = _create_embedder()
+        mock_cls.assert_called_once()
+
+    def test_gemini_key_but_import_fails(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False), \
+             patch("crew.memory_search._GeminiEmbedder", side_effect=Exception("no genai")):
+            embedder = _create_embedder()
+        assert isinstance(embedder, _TfIdfEmbedder)
+
+    def test_openai_preferred_over_gemini(self):
+        """两个 key 都有时优先 OpenAI."""
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "oai-key", "GOOGLE_API_KEY": "goog-key"}, clear=False), \
+             patch("crew.memory_search._OpenAIEmbedder") as mock_oai, \
+             patch("crew.memory_search._GeminiEmbedder") as mock_gem:
+            mock_oai.return_value = MagicMock()
+            embedder = _create_embedder()
+        mock_oai.assert_called_once()
+        mock_gem.assert_not_called()

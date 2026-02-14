@@ -1,8 +1,7 @@
-"""语义记忆搜索 — 基于 embedding 的相关记忆检索."""
+"""语义记忆搜索 — 基于 embedding 的相关记忆检索（混合搜索 + 多后端）."""
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import sqlite3
@@ -14,9 +13,6 @@ if TYPE_CHECKING:
     from crew.memory import MemoryEntry
 
 logger = logging.getLogger(__name__)
-
-# embedding 维度
-EMBEDDING_DIM = 1536  # text-embedding-3-small
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -40,12 +36,25 @@ def _unpack_embedding(data: bytes) -> list[float]:
     return list(struct.unpack(f"{n}f", data))
 
 
-class SemanticMemoryIndex:
-    """基于 embedding 的语义记忆索引.
+def _keyword_score(query_tokens: set[str], content_tokens: set[str]) -> float:
+    """关键词匹配分数：交集 / query token 数."""
+    if not query_tokens:
+        return 0.0
+    overlap = query_tokens & content_tokens
+    return len(overlap) / len(query_tokens)
 
+
+class SemanticMemoryIndex:
+    """基于 embedding 的语义记忆索引（混合搜索）.
+
+    搜索策略：向量余弦相似度 + 关键词匹配，加权合并。
     存储: SQLite 文件（{memory_dir}/embeddings.db）
-    Embedding: OpenAI text-embedding-3-small 或 TF-IDF 降级
+    Embedding: OpenAI > Gemini > TF-IDF 降级
     """
+
+    # 混合搜索权重
+    VEC_WEIGHT = 0.7
+    KW_WEIGHT = 0.3
 
     def __init__(self, memory_dir: Path):
         self.memory_dir = memory_dir
@@ -96,16 +105,11 @@ class SemanticMemoryIndex:
         return True
 
     def search(self, employee: str, query: str, limit: int = 10) -> list[tuple[str, str, float]]:
-        """语义搜索：返回与 query 最相关的 N 条记忆.
+        """混合搜索：向量相似度 + 关键词匹配，加权合并.
 
         Returns:
-            [(id, content, score), ...] 按相似度降序排列.
+            [(id, content, score), ...] 按综合分数降序排列.
         """
-        embedder = self._get_embedder()
-        query_embedding = embedder.embed(query)
-        if query_embedding is None:
-            return []
-
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT id, embedding, content FROM memory_vectors WHERE employee = ?",
@@ -115,11 +119,33 @@ class SemanticMemoryIndex:
         if not rows:
             return []
 
+        # 向量搜索
+        embedder = self._get_embedder()
+        query_embedding = embedder.embed(query)
+
+        # 关键词搜索
+        query_tokens = set(_tokenize(query))
+
         scored: list[tuple[str, str, float]] = []
         for row_id, emb_bytes, content in rows:
-            emb = _unpack_embedding(emb_bytes)
-            score = _cosine_similarity(query_embedding, emb)
-            scored.append((row_id, content, score))
+            # 向量分数
+            vec_score = 0.0
+            if query_embedding is not None:
+                emb = _unpack_embedding(emb_bytes)
+                vec_score = _cosine_similarity(query_embedding, emb)
+
+            # 关键词分数
+            content_tokens = set(_tokenize(content))
+            kw_score = _keyword_score(query_tokens, content_tokens)
+
+            # 加权合并
+            if query_embedding is not None:
+                final_score = self.VEC_WEIGHT * vec_score + self.KW_WEIGHT * kw_score
+            else:
+                # embedding 失败时完全依赖关键词
+                final_score = kw_score
+
+            scored.append((row_id, content, final_score))
 
         scored.sort(key=lambda x: x[2], reverse=True)
         return scored[:limit]
@@ -185,14 +211,33 @@ class _OpenAIEmbedder(_Embedder):
             return None
 
 
+class _GeminiEmbedder(_Embedder):
+    """Google Gemini text-embedding-004."""
+
+    def __init__(self):
+        import google.generativeai as genai
+        genai.configure()
+
+    def embed(self, text: str) -> list[float] | None:
+        try:
+            import google.generativeai as genai
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+            )
+            return result["embedding"]
+        except Exception as e:
+            logger.warning("Gemini embedding 失败: %s", e)
+            return None
+
+
 class _TfIdfEmbedder(_Embedder):
     """TF-IDF 关键词匹配降级方案（无外部依赖）.
 
-    使用简单的词频向量 + 余弦相似度，维度固定为 vocab 大小。
-    为了与 OpenAI embedding 兼容，使用固定维度的哈希桶。
+    使用简单的词频向量 + 余弦相似度，维度固定为哈希桶数。
     """
 
-    DIM = 256  # 哈希桶数
+    DIM = 256
 
     def embed(self, text: str) -> list[float] | None:
         tokens = _tokenize(text)
@@ -227,13 +272,21 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _create_embedder() -> _Embedder:
-    """创建 embedder：优先 OpenAI，降级 TF-IDF."""
+    """创建 embedder：优先 OpenAI → Gemini → TF-IDF."""
     import os
 
     if os.environ.get("OPENAI_API_KEY"):
         try:
             embedder = _OpenAIEmbedder()
             logger.info("使用 OpenAI embedding")
+            return embedder
+        except Exception:
+            pass
+
+    if os.environ.get("GOOGLE_API_KEY"):
+        try:
+            embedder = _GeminiEmbedder()
+            logger.info("使用 Gemini embedding")
             return embedder
         except Exception:
             pass
