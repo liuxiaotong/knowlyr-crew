@@ -24,6 +24,7 @@ class TaskRecord(BaseModel):
     completed_at: datetime | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
+    checkpoint: dict[str, Any] | None = Field(default=None, description="Pipeline 断点数据")
 
 
 class TaskRegistry:
@@ -142,6 +143,14 @@ class TaskRegistry:
                 event.set()
         self._persist(record)
         return record
+
+    def update_checkpoint(self, task_id: str, checkpoint: dict[str, Any]) -> None:
+        """更新任务的断点数据."""
+        record = self._tasks.get(task_id)
+        if record is None:
+            return
+        record.checkpoint = checkpoint
+        self._persist(record)
 
     def get(self, task_id: str) -> TaskRecord | None:
         """查询任务."""

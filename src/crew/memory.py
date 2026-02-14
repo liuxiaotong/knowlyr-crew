@@ -201,16 +201,34 @@ class MemoryStore:
         self,
         employee: str,
         limit: int = 10,
+        query: str = "",
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
         Args:
             employee: 员工名称
             limit: 最大条数
+            query: 查询上下文（有值时使用语义搜索优先返回相关记忆）
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
         """
+        # 尝试语义搜索
+        if query:
+            try:
+                from crew.memory_search import SemanticMemoryIndex
+
+                index = SemanticMemoryIndex(self.memory_dir)
+                if index.has_index(employee):
+                    results = index.search(employee, query, limit=limit)
+                    if results:
+                        lines = []
+                        for _id, content, score in results:
+                            lines.append(f"- {content}")
+                        return "\n".join(lines)
+            except Exception:
+                pass  # 降级到原逻辑
+
         entries = self.query(employee, limit=limit)
         if not entries:
             return ""

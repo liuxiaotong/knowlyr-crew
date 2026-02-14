@@ -45,6 +45,32 @@ class TestCronScheduleModel:
         )
         assert s.args == {"target": "main"}
 
+    def test_with_delivery(self):
+        s = CronSchedule(
+            name="with-delivery",
+            cron="0 9 * * *",
+            target_type="pipeline",
+            target_name="full-review",
+            delivery=[
+                {"type": "webhook", "url": "https://hooks.slack.com/xxx"},
+                {"type": "email", "to": "team@example.com", "subject": "Review: {name}"},
+            ],
+        )
+        assert len(s.delivery) == 2
+        assert s.delivery[0].type == "webhook"
+        assert s.delivery[0].url == "https://hooks.slack.com/xxx"
+        assert s.delivery[1].type == "email"
+        assert s.delivery[1].to == "team@example.com"
+
+    def test_no_delivery(self):
+        s = CronSchedule(
+            name="no-delivery",
+            cron="0 9 * * *",
+            target_type="pipeline",
+            target_name="full-review",
+        )
+        assert s.delivery == []
+
 
 class TestCronConfig:
     """Cron 配置模型."""
@@ -105,6 +131,29 @@ class TestLoadCronConfig:
         assert config.schedules[0].name == "daily-review"
         assert config.schedules[0].args == {"target": "main"}
         assert config.schedules[1].name == "weekly-summary"
+
+    def test_config_with_delivery(self, tmp_path):
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        data = {
+            "schedules": [
+                {
+                    "name": "daily-review",
+                    "cron": "0 9 * * *",
+                    "target_type": "pipeline",
+                    "target_name": "full-review",
+                    "delivery": [
+                        {"type": "webhook", "url": "https://hooks.slack.com/xxx"},
+                        {"type": "email", "to": "team@example.com", "subject": "Review: {name}"},
+                    ],
+                },
+            ],
+        }
+        (crew_dir / "cron.yaml").write_text(yaml.dump(data, allow_unicode=True))
+        config = load_cron_config(tmp_path)
+        assert len(config.schedules[0].delivery) == 2
+        assert config.schedules[0].delivery[0].type == "webhook"
+        assert config.schedules[0].delivery[1].to == "team@example.com"
 
 
 class TestValidateCronConfig:

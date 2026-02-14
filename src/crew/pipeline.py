@@ -376,8 +376,14 @@ async def arun_pipeline(
     execute: bool = False,
     api_key: str | None = None,
     model: str | None = None,
+    on_step_complete: Callable[[StepResult, dict], None] | None = None,
 ) -> PipelineResult:
-    """异步执行流水线 — 并行组使用 asyncio.gather."""
+    """异步执行流水线 — 并行组使用 asyncio.gather.
+
+    Args:
+        on_step_complete: 每步完成后的回调 (step_result, checkpoint_data).
+            checkpoint_data 包含恢复所需的完整状态。
+    """
     import asyncio
 
     initial_args = initial_args or {}
@@ -394,7 +400,7 @@ async def arun_pipeline(
     flat_index = 0
     t0 = time.monotonic()
 
-    for item in pipeline.steps:
+    for step_i, item in enumerate(pipeline.steps):
         if isinstance(item, ParallelGroup):
             if execute:
                 tasks = []
@@ -431,6 +437,13 @@ async def arun_pipeline(
                 outputs_by_index[r.step_index] = r.output
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
+
+            if on_step_complete:
+                checkpoint = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                )
+                for r in group_results:
+                    on_step_complete(r, checkpoint)
         else:
             if execute:
                 r = await _aexecute_single_step(
@@ -453,11 +466,131 @@ async def arun_pipeline(
             step_results.append(r)
             prev_output = r.output
 
+            if on_step_complete:
+                checkpoint = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                )
+                on_step_complete(r, checkpoint)
+
     total_ms = int((time.monotonic() - t0) * 1000)
     all_results = _flatten_results(step_results)
     return PipelineResult(
         pipeline_name=pipeline.name,
         mode="execute" if execute else "prompt",
+        steps=step_results,
+        total_duration_ms=total_ms,
+        total_input_tokens=sum(r.input_tokens for r in all_results),
+        total_output_tokens=sum(r.output_tokens for r in all_results),
+    )
+
+
+async def aresume_pipeline(
+    pipeline: Pipeline,
+    checkpoint: dict,
+    initial_args: dict[str, str] | None = None,
+    project_dir: Path | None = None,
+    agent_id: int | None = None,
+    smart_context: bool = True,
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    on_step_complete: Callable[[StepResult, dict], None] | None = None,
+) -> PipelineResult:
+    """从断点恢复执行流水线 — 跳过已完成步骤.
+
+    Args:
+        pipeline: 流水线定义.
+        checkpoint: 上次保存的断点数据.
+        on_step_complete: 每步完成后的回调.
+    """
+    import asyncio
+
+    initial_args = initial_args or {}
+    employees = discover_employees(project_dir=project_dir)
+    engine = CrewEngine(project_dir=project_dir)
+    project_info = detect_project(project_dir) if smart_context else None
+    agent_identity = _resolve_agent_identity(agent_id)
+
+    # 从 checkpoint 恢复状态
+    completed_steps_data = checkpoint.get("completed_steps", [])
+    outputs_by_id: dict[str, str] = {k: v for k, v in checkpoint.get("outputs_by_id", {}).items()}
+    outputs_by_index: dict[int, str] = {int(k): v for k, v in checkpoint.get("outputs_by_index", {}).items()}
+    next_flat_index: int = checkpoint.get("next_flat_index", 0)
+    next_step_i: int = checkpoint.get("next_step_i", 0)
+
+    # 重建已完成的 step_results
+    step_results: list[StepResult | list[StepResult]] = []
+    for item in completed_steps_data:
+        if isinstance(item, list):
+            step_results.append([StepResult(**s) for s in item])
+        else:
+            step_results.append(StepResult(**item))
+
+    # 计算 prev_output
+    flat_all = _flatten_results(step_results)
+    prev_output = flat_all[-1].output if flat_all else ""
+
+    flat_index = next_flat_index
+    t0 = time.monotonic()
+
+    # 从 next_step_i 开始继续执行
+    for step_i in range(next_step_i, len(pipeline.steps)):
+        item = pipeline.steps[step_i]
+
+        if isinstance(item, ParallelGroup):
+            tasks = []
+            for sub in item.parallel:
+                idx = flat_index
+                tasks.append(
+                    _aexecute_single_step(
+                        sub, idx, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        api_key, model,
+                    )
+                )
+                flat_index += 1
+            group_results = list(await asyncio.gather(*tasks))
+            group_results.sort(key=lambda r: r.step_index)
+
+            for r in group_results:
+                if r.step_id:
+                    outputs_by_id[r.step_id] = r.output
+                outputs_by_index[r.step_index] = r.output
+            step_results.append(group_results)
+            prev_output = "\n\n---\n\n".join(r.output for r in group_results)
+
+            if on_step_complete:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                )
+                for r in group_results:
+                    on_step_complete(r, cp)
+        else:
+            r = await _aexecute_single_step(
+                item, flat_index, engine, employees, initial_args,
+                outputs_by_id, outputs_by_index, prev_output,
+                agent_identity, project_info,
+                api_key, model,
+            )
+            if r.step_id:
+                outputs_by_id[r.step_id] = r.output
+            outputs_by_index[flat_index] = r.output
+            flat_index += 1
+            step_results.append(r)
+            prev_output = r.output
+
+            if on_step_complete:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                )
+                on_step_complete(r, cp)
+
+    total_ms = int((time.monotonic() - t0) * 1000)
+    all_results = _flatten_results(step_results)
+    return PipelineResult(
+        pipeline_name=pipeline.name,
+        mode="execute",
         steps=step_results,
         total_duration_ms=total_ms,
         total_input_tokens=sum(r.input_tokens for r in all_results),
@@ -543,6 +676,31 @@ def _flatten_results(
         else:
             flat.append(item)
     return flat
+
+
+def _build_checkpoint(
+    pipeline_name: str,
+    step_results: list[StepResult | list[StepResult]],
+    outputs_by_id: dict[str, str],
+    outputs_by_index: dict[int, str],
+    next_flat_index: int,
+    next_step_i: int,
+) -> dict:
+    """构建断点数据 — 包含恢复所需的完整状态."""
+    completed = []
+    for item in step_results:
+        if isinstance(item, list):
+            completed.append([r.model_dump(mode="json") for r in item])
+        else:
+            completed.append(item.model_dump(mode="json"))
+    return {
+        "pipeline_name": pipeline_name,
+        "completed_steps": completed,
+        "outputs_by_id": dict(outputs_by_id),
+        "outputs_by_index": {str(k): v for k, v in outputs_by_index.items()},
+        "next_flat_index": next_flat_index,
+        "next_step_i": next_step_i,
+    }
 
 
 # ── 内置流水线发现 ──

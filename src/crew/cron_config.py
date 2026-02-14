@@ -11,6 +11,16 @@ from pydantic import BaseModel, Field
 from crew.paths import resolve_project_dir
 
 
+class DeliveryTarget(BaseModel):
+    """投递目标（嵌入 cron 配置）."""
+
+    type: Literal["webhook", "email"] = Field(description="投递类型")
+    url: str = Field(default="", description="Webhook URL")
+    headers: dict[str, str] = Field(default_factory=dict, description="自定义请求头")
+    to: str = Field(default="", description="收件人邮箱")
+    subject: str = Field(default="", description="邮件主题（支持 {name} 占位符）")
+
+
 class CronSchedule(BaseModel):
     """单条定时任务."""
 
@@ -19,6 +29,7 @@ class CronSchedule(BaseModel):
     target_type: Literal["pipeline", "employee"] = Field(description="目标类型")
     target_name: str = Field(description="pipeline 或 employee 名称")
     args: dict[str, str] = Field(default_factory=dict, description="参数")
+    delivery: list[DeliveryTarget] = Field(default_factory=list, description="投递目标")
 
 
 class CronConfig(BaseModel):

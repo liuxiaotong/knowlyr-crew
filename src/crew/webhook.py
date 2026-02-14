@@ -72,6 +72,25 @@ def create_webhook_app(
             )
             await _execute_task(ctx, record.task_id)
 
+            # 投递结果到配置的渠道
+            if schedule.delivery:
+                record = ctx.registry.get(record.task_id)
+                try:
+                    from crew.delivery import deliver, DeliveryTarget as DT
+
+                    targets = [DT(**t.model_dump()) for t in schedule.delivery]
+                    results = await deliver(
+                        targets,
+                        task_name=schedule.name,
+                        task_result=record.result if record else None,
+                        task_error=record.error if record else None,
+                    )
+                    for r in results:
+                        if not r.success:
+                            logger.warning("投递失败 [%s → %s]: %s", schedule.name, r.target_type, r.detail)
+                except Exception as e:
+                    logger.warning("投递异常 [%s]: %s", schedule.name, e)
+
         scheduler = CronScheduler(config=cron_config, execute_fn=_cron_execute)
         ctx.scheduler = scheduler
 
@@ -89,6 +108,8 @@ def create_webhook_app(
     async def on_startup():
         if scheduler:
             await scheduler.start()
+        # 恢复未完成的 pipeline 任务
+        asyncio.create_task(_resume_incomplete_pipelines(ctx))
 
     async def on_shutdown():
         if scheduler:
@@ -342,7 +363,7 @@ async def _execute_task(
     try:
         if record.target_type == "pipeline":
             result = await _execute_pipeline(
-                ctx, record.target_name, record.args, agent_id=agent_id,
+                ctx, record.target_name, record.args, agent_id=agent_id, task_id=task_id,
             )
         elif record.target_type == "employee":
             result = await _execute_employee(
@@ -363,6 +384,7 @@ async def _execute_pipeline(
     name: str,
     args: dict[str, str],
     agent_id: int | None = None,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """执行 pipeline."""
     from crew.pipeline import arun_pipeline, discover_pipelines, load_pipeline
@@ -373,6 +395,12 @@ async def _execute_pipeline(
 
     pipeline = load_pipeline(pipelines[name])
 
+    # 构建 checkpoint 回调
+    on_step_complete = None
+    if task_id:
+        def on_step_complete(step_result, checkpoint_data):
+            ctx.registry.update_checkpoint(task_id, checkpoint_data)
+
     result = await arun_pipeline(
         pipeline,
         initial_args=args,
@@ -380,6 +408,7 @@ async def _execute_pipeline(
         execute=True,
         api_key=None,
         agent_id=agent_id,
+        on_step_complete=on_step_complete,
     )
     return result.model_dump(mode="json")
 
@@ -499,6 +528,45 @@ async def _stream_employee(
             yield f"event: error\ndata: {_json.dumps({'error': str(exc)[:500]})}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+async def _resume_incomplete_pipelines(ctx: _AppContext) -> None:
+    """恢复未完成的 pipeline 任务（服务重启后）."""
+    for record in ctx.registry.list_recent(n=100):
+        if record.status != "running" or record.target_type != "pipeline" or not record.checkpoint:
+            continue
+
+        checkpoint = record.checkpoint
+        pipeline_name = checkpoint.get("pipeline_name", record.target_name)
+        logger.info("恢复 pipeline 任务: %s (task=%s)", pipeline_name, record.task_id)
+
+        try:
+            from crew.pipeline import aresume_pipeline, discover_pipelines, load_pipeline
+
+            pipelines = discover_pipelines(project_dir=ctx.project_dir)
+            if pipeline_name not in pipelines:
+                ctx.registry.update(record.task_id, "failed", error=f"恢复失败: 未找到 pipeline {pipeline_name}")
+                continue
+
+            pipeline = load_pipeline(pipelines[pipeline_name])
+
+            def _make_callback(tid):
+                def cb(step_result, checkpoint_data):
+                    ctx.registry.update_checkpoint(tid, checkpoint_data)
+                return cb
+
+            result = await aresume_pipeline(
+                pipeline,
+                checkpoint=checkpoint,
+                initial_args=record.args,
+                project_dir=ctx.project_dir,
+                api_key=None,
+                on_step_complete=_make_callback(record.task_id),
+            )
+            ctx.registry.update(record.task_id, "completed", result=result.model_dump(mode="json"))
+        except Exception as e:
+            logger.exception("恢复任务失败: %s", record.task_id)
+            ctx.registry.update(record.task_id, "failed", error=f"恢复失败: {e}")
 
 
 def serve_webhook(

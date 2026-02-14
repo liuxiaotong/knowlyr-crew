@@ -1,5 +1,6 @@
 """测试流水线引擎."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,12 +10,19 @@ import yaml
 from crew.models import ParallelGroup, PipelineStep, StepResult
 from crew.pipeline import (
     Pipeline,
+    _build_checkpoint,
     _resolve_output_refs,
+    aresume_pipeline,
+    arun_pipeline,
     discover_pipelines,
     load_pipeline,
     run_pipeline,
     validate_pipeline,
 )
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 class TestPipelineModels:
@@ -371,3 +379,156 @@ class TestDiscoverPipelines:
         pl = load_pipeline(pipelines["full-review"])
         assert pl.description == "自定义"
         assert len(pl.steps) == 1
+
+
+class TestBuildCheckpoint:
+    """测试断点数据构建."""
+
+    def test_basic(self):
+        r1 = StepResult(employee="a", step_index=0, args={}, prompt="p1", output="out1")
+        checkpoint = _build_checkpoint(
+            "test-pl", [r1], {"a": "out1"}, {0: "out1"}, 1, 1,
+        )
+        assert checkpoint["pipeline_name"] == "test-pl"
+        assert len(checkpoint["completed_steps"]) == 1
+        assert checkpoint["next_flat_index"] == 1
+        assert checkpoint["next_step_i"] == 1
+        assert checkpoint["outputs_by_id"]["a"] == "out1"
+
+    def test_with_parallel(self):
+        r1 = StepResult(employee="a", step_index=0, args={}, prompt="p1", output="o1")
+        r2 = StepResult(employee="b", step_index=1, args={}, prompt="p2", output="o2")
+        checkpoint = _build_checkpoint(
+            "test", [[r1, r2]], {}, {0: "o1", 1: "o2"}, 2, 1,
+        )
+        assert len(checkpoint["completed_steps"]) == 1
+        assert isinstance(checkpoint["completed_steps"][0], list)
+        assert len(checkpoint["completed_steps"][0]) == 2
+
+
+class TestAsyncPipelineCheckpoint:
+    """测试异步 pipeline 的 checkpoint 回调."""
+
+    def test_on_step_complete_called(self):
+        pl = Pipeline(
+            name="cb-test",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        callbacks = []
+
+        def on_complete(step_result, checkpoint):
+            callbacks.append((step_result.employee, checkpoint))
+
+        result = _run(arun_pipeline(pl, smart_context=False, on_step_complete=on_complete))
+        assert len(callbacks) == 2
+        # 第一次回调的 checkpoint
+        assert callbacks[0][1]["next_step_i"] == 1
+        assert callbacks[0][1]["next_flat_index"] == 1
+        # 第二次回调的 checkpoint
+        assert callbacks[1][1]["next_step_i"] == 2
+        assert callbacks[1][1]["next_flat_index"] == 2
+
+    def test_checkpoint_has_completed_steps(self):
+        pl = Pipeline(
+            name="cp-test",
+            steps=[
+                PipelineStep(employee="code-reviewer", id="review", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        last_checkpoint = {}
+
+        def on_complete(step_result, checkpoint):
+            nonlocal last_checkpoint
+            last_checkpoint = checkpoint
+
+        _run(arun_pipeline(pl, smart_context=False, on_step_complete=on_complete))
+        assert len(last_checkpoint["completed_steps"]) == 2
+        assert "review" in last_checkpoint["outputs_by_id"]
+
+
+class TestResumePipeline:
+    """测试断点恢复."""
+
+    def test_resume_from_checkpoint(self):
+        """从第 1 步的 checkpoint 恢复，跳过第 0 步."""
+        # 模拟 checkpoint: 第 0 步已完成
+        r0 = StepResult(
+            employee="code-reviewer", step_id="review", step_index=0,
+            args={"target": "main"}, prompt="prompt0", output="review output",
+        )
+        checkpoint = _build_checkpoint(
+            "test-pl", [r0], {"review": "review output"}, {0: "review output"}, 1, 1,
+        )
+
+        pl = Pipeline(
+            name="test-pl",
+            steps=[
+                PipelineStep(employee="code-reviewer", id="review", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+
+        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False))
+        assert result.pipeline_name == "test-pl"
+        assert result.mode == "execute"
+        # 应该有 2 步结果（1 恢复 + 1 新执行）
+        assert len(result.steps) == 2
+        # 第 0 步是从 checkpoint 恢复的
+        assert result.steps[0].employee == "code-reviewer"
+        assert result.steps[0].output == "review output"
+        # 第 1 步是新执行的（prompt-only，因为没有 executor）
+        assert result.steps[1].employee == "test-engineer"
+
+    def test_resume_all_completed(self):
+        """所有步骤都已完成，恢复无操作."""
+        r0 = StepResult(
+            employee="code-reviewer", step_index=0,
+            args={"target": "main"}, prompt="p0", output="o0",
+        )
+        r1 = StepResult(
+            employee="test-engineer", step_index=1,
+            args={"target": "main"}, prompt="p1", output="o1",
+        )
+        checkpoint = _build_checkpoint(
+            "test-pl", [r0, r1], {}, {0: "o0", 1: "o1"}, 2, 2,
+        )
+
+        pl = Pipeline(
+            name="test-pl",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+
+        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False))
+        assert len(result.steps) == 2
+        # 没有新执行的步骤，全部从 checkpoint 恢复
+        assert result.steps[0].output == "o0"
+        assert result.steps[1].output == "o1"
+
+    def test_resume_empty_checkpoint(self):
+        """空 checkpoint 等于从头执行."""
+        checkpoint = {
+            "pipeline_name": "test",
+            "completed_steps": [],
+            "outputs_by_id": {},
+            "outputs_by_index": {},
+            "next_flat_index": 0,
+            "next_step_i": 0,
+        }
+
+        pl = Pipeline(
+            name="test",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+            ],
+        )
+
+        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False))
+        assert len(result.steps) == 1
+        assert result.steps[0].employee == "code-reviewer"

@@ -168,11 +168,11 @@ class CrewEngine:
         if agent_identity and agent_identity.memory:
             parts.extend(["", "---", "", "## Agent 记忆", "", agent_identity.memory])
 
-        # 本地持久化记忆
+        # 本地持久化记忆（有 rendered body 时使用语义搜索）
         try:
             from crew.memory import MemoryStore
             memory_store = MemoryStore(project_dir=self.project_dir)
-            memory_text = memory_store.format_for_prompt(employee.name)
+            memory_text = memory_store.format_for_prompt(employee.name, query=rendered)
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])
         except Exception:
