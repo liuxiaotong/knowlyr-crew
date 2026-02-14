@@ -65,19 +65,24 @@ class SemanticMemoryIndex:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self.memory_dir.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._db_path))
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS memory_vectors (
-                    id TEXT PRIMARY KEY,
-                    employee TEXT NOT NULL,
-                    embedding BLOB NOT NULL,
-                    content TEXT NOT NULL
-                )
-            """)
-            self._conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_employee ON memory_vectors(employee)
-            """)
-            self._conn.commit()
+            conn = sqlite3.connect(str(self._db_path))
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS memory_vectors (
+                        id TEXT PRIMARY KEY,
+                        employee TEXT NOT NULL,
+                        embedding BLOB NOT NULL,
+                        content TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_employee ON memory_vectors(employee)
+                """)
+                conn.commit()
+            except Exception:
+                conn.close()
+                raise
+            self._conn = conn
         return self._conn
 
     def _get_embedder(self) -> "_Embedder":
@@ -194,7 +199,7 @@ class SemanticMemoryIndex:
 
     def __del__(self) -> None:
         if getattr(self, "_conn", None) is not None:
-            logger.warning("SemanticMemoryIndex 未显式关闭，请使用 with 语句或调用 close()")
+            logger.debug("SemanticMemoryIndex 未显式关闭，自动清理连接")
             self.close()
 
     def close(self) -> None:
@@ -228,6 +233,8 @@ class _OpenAIEmbedder(_Embedder):
                 input=text,
                 timeout=5.0,
             )
+            if not resp.data:
+                return None
             return resp.data[0].embedding
         except Exception as e:
             logger.warning("OpenAI embedding 失败: %s", e)
@@ -253,7 +260,7 @@ class _GeminiEmbedder(_Embedder):
                     content=text,
                 )
                 result = future.result(timeout=5.0)
-            return result["embedding"]
+            return result.get("embedding") if isinstance(result, dict) else None
         except Exception as e:
             logger.warning("Gemini embedding 失败: %s", e)
             return None
@@ -308,16 +315,16 @@ def _create_embedder() -> _Embedder:
             embedder = _OpenAIEmbedder()
             logger.info("使用 OpenAI embedding")
             return embedder
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("OpenAI embedding 不可用: %s", e)
 
     if os.environ.get("GOOGLE_API_KEY"):
         try:
             embedder = _GeminiEmbedder()
             logger.info("使用 Gemini embedding")
             return embedder
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Gemini embedding 不可用: %s", e)
 
     logger.info("使用 TF-IDF 降级 embedding")
     return _TfIdfEmbedder()

@@ -137,7 +137,7 @@ def generate_avatar(
         status = data.get("output", {}).get("task_status", "")
 
         if status == "SUCCEEDED":
-            results = data["output"].get("results", [])
+            results = data.get("output", {}).get("results", [])
             if not results:
                 logger.error("任务成功但无结果")
                 return None
@@ -162,7 +162,7 @@ def generate_avatar(
                 return None
 
         elif status == "FAILED":
-            msg = data["output"].get("message", "未知错误")
+            msg = data.get("output", {}).get("message", "未知错误")
             logger.error("生成失败: %s", msg)
             return None
 

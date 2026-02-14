@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+WEBHOOK_TIMEOUT = 30.0  # httpx POST 超时（秒）
+SMTP_TIMEOUT = 10  # SMTP 连接超时（秒）
+
 
 class DeliveryTarget(BaseModel):
     """单个投递目标."""
@@ -118,7 +121,7 @@ async def _deliver_webhook(
     headers.update(target.headers)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
             resp = await client.post(target.url, json=payload, headers=headers)
         if resp.status_code < 400:
             return DeliveryResult(target_type="webhook", success=True, detail=f"HTTP {resp.status_code}")
@@ -202,7 +205,7 @@ async def _deliver_email(
 
 def _send_smtp(host: str, port: int, user: str, password: str, msg: MIMEText) -> None:
     """同步 SMTP 发送."""
-    with smtplib.SMTP(host, port, timeout=10) as server:
+    with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as server:
         server.starttls()
         if user and password:
             server.login(user, password)

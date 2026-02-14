@@ -457,3 +457,47 @@ class TestSearchTimeout:
         assert len(results) == 1
         assert results[0][0] == "1"
         index.close()
+
+
+class TestConnectionSafety:
+    """SQLite 连接安全."""
+
+    def test_get_conn_closes_on_schema_error(self, tmp_path):
+        """_get_conn() 在 schema 创建失败时关闭连接."""
+        import sqlite3
+
+        index = SemanticMemoryIndex(tmp_path / "memory")
+
+        with patch("crew.memory_search.sqlite3.connect") as mock_connect:
+            mock_conn = MagicMock()
+            mock_conn.execute.side_effect = sqlite3.OperationalError("disk error")
+            mock_connect.return_value = mock_conn
+
+            with pytest.raises(sqlite3.OperationalError):
+                index._get_conn()
+
+            mock_conn.close.assert_called_once()
+            assert index._conn is None
+
+    def test_del_downgrades_to_debug(self, tmp_path, caplog):
+        """__del__ 使用 debug 级别日志."""
+        import logging
+
+        index = SemanticMemoryIndex(tmp_path / "memory")
+        entry = MemoryEntry(id="1", employee="bot", category="finding", content="test")
+        index.index(entry)
+
+        with caplog.at_level(logging.DEBUG, logger="crew.memory_search"):
+            index.__del__()
+        assert index._conn is None
+
+    def test_create_embedder_failure_logged(self, caplog):
+        """_create_embedder() 失败时记录 debug 日志."""
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="crew.memory_search"):
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "key", "GOOGLE_API_KEY": ""}, clear=False), \
+                 patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("init failed")):
+                embedder = _create_embedder()
+        assert isinstance(embedder, _TfIdfEmbedder)
+        assert "OpenAI embedding 不可用" in caplog.text

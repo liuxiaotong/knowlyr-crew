@@ -9,6 +9,8 @@ import pytest
 from crew.delivery import (
     DeliveryResult,
     DeliveryTarget,
+    WEBHOOK_TIMEOUT,
+    SMTP_TIMEOUT,
     deliver,
     _deliver_email,
     _deliver_webhook,
@@ -318,3 +320,13 @@ class TestSmtpValidation:
 
         assert result.success is False
         assert "超时" in result.detail
+
+
+class TestTimeoutConstants:
+    """超时常量定义."""
+
+    def test_webhook_timeout(self):
+        assert WEBHOOK_TIMEOUT == 30.0
+
+    def test_smtp_timeout(self):
+        assert SMTP_TIMEOUT == 10
