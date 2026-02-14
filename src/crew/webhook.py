@@ -256,9 +256,10 @@ async def _handle_run_employee(request: Request, ctx: _AppContext):
     sync = payload.get("sync", False)
     stream = payload.get("stream", False)
     agent_id = payload.get("agent_id")
+    model = payload.get("model")
 
     if stream:
-        return await _stream_employee(ctx, name, args, agent_id=agent_id)
+        return await _stream_employee(ctx, name, args, agent_id=agent_id, model=model)
 
     return await _dispatch_task(
         ctx,
@@ -268,6 +269,7 @@ async def _handle_run_employee(request: Request, ctx: _AppContext):
         args=args,
         sync=sync,
         agent_id=agent_id,
+        model=model,
     )
 
 
@@ -302,6 +304,7 @@ async def _dispatch_task(
     args: dict[str, str],
     sync: bool = False,
     agent_id: int | None = None,
+    model: str | None = None,
 ) -> JSONResponse:
     """创建任务并调度执行."""
     record = ctx.registry.create(
@@ -312,11 +315,11 @@ async def _dispatch_task(
     )
 
     if sync:
-        await _execute_task(ctx, record.task_id, agent_id=agent_id)
+        await _execute_task(ctx, record.task_id, agent_id=agent_id, model=model)
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id, model=model))
     return JSONResponse(
         {"task_id": record.task_id, "status": "pending"},
         status_code=202,
@@ -324,7 +327,10 @@ async def _dispatch_task(
 
 
 async def _execute_task(
-    ctx: _AppContext, task_id: str, agent_id: int | None = None,
+    ctx: _AppContext,
+    task_id: str,
+    agent_id: int | None = None,
+    model: str | None = None,
 ) -> None:
     """执行任务."""
     record = ctx.registry.get(task_id)
@@ -340,7 +346,7 @@ async def _execute_task(
             )
         elif record.target_type == "employee":
             result = await _execute_employee(
-                ctx, record.target_name, record.args, agent_id=agent_id,
+                ctx, record.target_name, record.args, agent_id=agent_id, model=model,
             )
         else:
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
@@ -383,6 +389,7 @@ async def _execute_employee(
     name: str,
     args: dict[str, str],
     agent_id: int | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
     from crew.discovery import discover_employees
@@ -410,7 +417,7 @@ async def _execute_employee(
     try:
         from crew.executor import aexecute_prompt
 
-        use_model = match.model or "claude-sonnet-4-20250514"
+        use_model = model or match.model or "claude-sonnet-4-20250514"
         result = await aexecute_prompt(
             system_prompt=prompt,
             api_key=None,
@@ -438,6 +445,7 @@ async def _stream_employee(
     name: str,
     args: dict[str, str],
     agent_id: int | None = None,
+    model: str | None = None,
 ) -> StreamingResponse:
     """SSE 流式执行单个员工."""
     import json as _json
@@ -470,7 +478,7 @@ async def _stream_employee(
         try:
             from crew.executor import aexecute_prompt
 
-            use_model = match.model or "claude-sonnet-4-20250514"
+            use_model = model or match.model or "claude-sonnet-4-20250514"
             stream_iter = await aexecute_prompt(
                 system_prompt=prompt,
                 api_key=None,
