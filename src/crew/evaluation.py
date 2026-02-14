@@ -136,12 +136,12 @@ class EvaluationEngine:
             # 原子重写决策文件
             content = "\n".join(new_lines) + "\n"
             fd, tmp_path = tempfile.mkstemp(
-                dir=str(path.parent), suffix=".tmp",
+                dir=path.parent, suffix=".tmp",
             )
             try:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
-                os.replace(tmp_path, str(path))
+                os.replace(tmp_path, path)
             except Exception:
                 os.close(fd)
                 if Path(tmp_path).exists():

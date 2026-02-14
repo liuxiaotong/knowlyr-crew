@@ -111,7 +111,7 @@ class TaskRegistry:
             lines = [r.model_dump_json() for r in keep]
             content = "\n".join(lines) + "\n"
             fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._persist_path.parent),
+                dir=self._persist_path.parent,
                 suffix=".tmp",
             )
             fd_closed = False
@@ -119,7 +119,7 @@ class TaskRegistry:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
                 fd_closed = True
-                os.replace(tmp_path, str(self._persist_path))
+                os.replace(tmp_path, self._persist_path)
             except Exception:
                 if not fd_closed:
                     os.close(fd)

@@ -537,6 +537,9 @@ async def _stream_employee(
     """SSE 流式执行单个员工."""
     import json as _json
 
+    def _dumps(obj: Any) -> str:
+        return _json.dumps(obj, ensure_ascii=False)
+
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
@@ -545,7 +548,7 @@ async def _stream_employee(
 
     if match is None:
         async def _error():
-            yield f"event: error\ndata: {_json.dumps({'error': f'未找到员工: {name}'})}\n\n"
+            yield f"event: error\ndata: {_dumps({'error': f'未找到员工: {name}'})}\n\n"
         return StreamingResponse(_error(), media_type="text/event-stream")
 
     # 获取 agent 身份
@@ -578,24 +581,24 @@ async def _stream_employee(
             )
 
             async for chunk in stream_iter:
-                yield f"data: {_json.dumps({'token': chunk})}\n\n"
+                yield f"data: {_dumps({'token': chunk})}\n\n"
 
             # 流结束后发送完整的 result
             result = getattr(stream_iter, "result", None)
             if result:
-                yield f"event: done\ndata: {_json.dumps({'employee': name, 'model': result.model, 'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens})}\n\n"
+                yield f"event: done\ndata: {_dumps({'employee': name, 'model': result.model, 'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens})}\n\n"
             else:
-                yield f"event: done\ndata: {_json.dumps({'employee': name})}\n\n"
+                yield f"event: done\ndata: {_dumps({'employee': name})}\n\n"
             done_sent = True
         except asyncio.TimeoutError:
-            yield f"event: error\ndata: {_json.dumps({'error': 'stream timeout (300s)'})}\n\n"
+            yield f"event: error\ndata: {_dumps({'error': 'stream timeout (300s)'})}\n\n"
             done_sent = True
         except Exception as exc:
-            yield f"event: error\ndata: {_json.dumps({'error': str(exc)[:500]})}\n\n"
+            yield f"event: error\ndata: {_dumps({'error': str(exc)[:500]})}\n\n"
             done_sent = True
         finally:
             if not done_sent:
-                yield f"event: error\ndata: {_json.dumps({'error': 'stream interrupted'})}\n\n"
+                yield f"event: error\ndata: {_dumps({'error': 'stream interrupted'})}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
 

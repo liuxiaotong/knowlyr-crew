@@ -65,7 +65,7 @@ class SemanticMemoryIndex:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self.memory_dir.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self._db_path))
+            conn = sqlite3.connect(self._db_path)
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS memory_vectors (
