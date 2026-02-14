@@ -203,6 +203,21 @@ def _resolve_agent_identity(agent_id: int | None) -> "AgentIdentity | None":
         return None
 
 
+class AgentDisabledError(RuntimeError):
+    """Agent 已停用，拒绝执行."""
+
+
+def _check_agent_active(agent_identity: "AgentIdentity | None", agent_id: int | None) -> None:
+    """如果 agent 已停用则抛出异常."""
+    if agent_identity is None:
+        return
+    status = agent_identity.agent_status
+    if status and status != "active":
+        raise AgentDisabledError(
+            f"Agent {agent_id} 状态为 '{status}'，拒绝执行"
+        )
+
+
 def _resolve_exemplars(agent_id: int | None, employee_name: str) -> str:
     """获取 agent 的 few-shot 范例提示文本（可选）."""
     if agent_id is None:
@@ -341,6 +356,7 @@ def run_pipeline(
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
     agent_identity = _resolve_agent_identity(agent_id)
+    _check_agent_active(agent_identity, agent_id)
 
     # 输出注册表
     outputs_by_id: dict[str, str] = {}
@@ -461,6 +477,7 @@ async def arun_pipeline(
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
     agent_identity = _resolve_agent_identity(agent_id)
+    _check_agent_active(agent_identity, agent_id)
 
     outputs_by_id: dict[str, str] = {}
     outputs_by_index: dict[int, str] = {}
@@ -583,6 +600,7 @@ async def aresume_pipeline(
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
     agent_identity = _resolve_agent_identity(agent_id)
+    _check_agent_active(agent_identity, agent_id)
 
     # 从 checkpoint 恢复状态
     completed_steps_data = checkpoint.get("completed_steps", [])
