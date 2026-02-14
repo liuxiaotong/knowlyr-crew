@@ -202,16 +202,6 @@ def _execute_single_step(
     error_message = ""
 
     if execute:
-        if not api_key:
-            return StepResult(
-                employee=step.employee,
-                step_id=step.id,
-                step_index=index,
-                args=resolved_args,
-                prompt=prompt,
-                error=True,
-                error_message="execute 模式需要 api_key",
-            )
         try:
             from crew.executor import execute_prompt
 
@@ -512,13 +502,6 @@ async def _aexecute_single_step(
         emp, args=resolved_args,
         agent_identity=agent_identity, project_info=project_info,
     )
-
-    if not api_key:
-        return StepResult(
-            employee=step.employee, step_id=step.id, step_index=index,
-            args=resolved_args, prompt=prompt,
-            error=True, error_message="execute 模式需要 api_key",
-        )
 
     try:
         from crew.executor import aexecute_prompt

@@ -43,9 +43,10 @@ mcp = ["mcp>=1.0"]
 id = ["httpx>=0.25"]
 avatar = ["Pillow>=10.0"]
 execute = ["anthropic>=0.40"]
+openai = ["openai>=1.0"]
 webhook = ["starlette>=0.27", "uvicorn>=0.20", "croniter>=2.0"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
-all = ["knowlyr-crew[mcp,id,execute,dev,avatar,webhook]"]
+all = ["knowlyr-crew[mcp,id,execute,openai,dev,avatar,webhook]"]
 
 [project.scripts]
 knowlyr-crew = "crew.cli:main"

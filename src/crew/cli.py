@@ -710,32 +710,40 @@ def _run_employee_job(
     # --execute: 调用 LLM API 执行 prompt
     already_streamed = False
     if execute_mode:
-        if agent_identity is None or not agent_identity.api_key:
-            click.echo(
-                "Error: --execute 需要 Agent 身份且已配置 api_key。"
-                "请确认 --agent-id 并在 knowlyr-id 中设置 api_key。",
-                err=True,
-            )
-            _finish_transcript(
-                transcript_recorder, transcript_id,
-                status="failed", detail="missing_api_key",
-            )
-            sys.exit(1)
+        effective_model = (
+            (agent_identity.model if agent_identity else None)
+            or emp.model
+            or "claude-sonnet-4-20250514"
+        )
+
+        # 解析 API key: agent_identity 优先，否则从环境变量自动检测
+        exec_api_key = agent_identity.api_key if agent_identity else None
+        if not exec_api_key:
+            from crew.providers import detect_provider, resolve_api_key
+            try:
+                _provider = detect_provider(effective_model)
+                exec_api_key = resolve_api_key(_provider)
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                _finish_transcript(
+                    transcript_recorder, transcript_id,
+                    status="failed", detail="missing_api_key",
+                )
+                sys.exit(1)
 
         try:
             from crew.executor import execute_prompt
         except ImportError:
             click.echo(
-                "Error: anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]",
+                "Error: LLM SDK 未安装。请运行: pip install knowlyr-crew[execute] 或 pip install knowlyr-crew[openai]",
                 err=True,
             )
             _finish_transcript(
                 transcript_recorder, transcript_id,
-                status="failed", detail="missing_anthropic",
+                status="failed", detail="missing_sdk",
             )
             sys.exit(1)
 
-        effective_model = agent_identity.model or emp.model or "claude-sonnet-4-20250514"
         effective_message = user_message or "请开始执行上述任务。"
         stream_enabled = not no_stream and not output and not to_clipboard
 
@@ -746,7 +754,7 @@ def _run_employee_job(
             result = execute_prompt(
                 system_prompt=text,
                 user_message=effective_message,
-                api_key=agent_identity.api_key,
+                api_key=exec_api_key,
                 model=effective_model,
                 temperature=agent_identity.temperature,
                 max_tokens=agent_identity.max_tokens,
@@ -1509,10 +1517,13 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
     # execute 模式需要 API key
     api_key = None
     if execute:
-        import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            click.echo("错误: --execute 模式需要 ANTHROPIC_API_KEY 环境变量", err=True)
+        from crew.providers import detect_provider, resolve_api_key, API_KEY_ENV_VARS
+        effective_model = model or "claude-sonnet-4-20250514"
+        try:
+            provider = detect_provider(effective_model)
+            api_key = resolve_api_key(provider)
+        except ValueError as e:
+            click.echo(f"错误: {e}", err=True)
             sys.exit(1)
 
     lane = LaneLock(f"pipeline:{p.name}") if not parallel else None

@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-457_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-498_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -493,9 +493,11 @@ Prompt 正文支持以下变量：
 knowlyr-crew pipeline list
 knowlyr-crew pipeline run review-test-pr --arg target=main
 
-# Execute 模式：自动调用 LLM 串联执行（需要 ANTHROPIC_API_KEY）
+# Execute 模式：自动调用 LLM 串联执行（多模型支持）
 knowlyr-crew pipeline run full-review --arg target=main --execute
 knowlyr-crew pipeline run full-review --arg target=main --execute --model claude-opus-4-6
+knowlyr-crew pipeline run full-review --arg target=main --execute --model gpt-4o
+knowlyr-crew pipeline run full-review --arg target=main --execute --model deepseek-chat
 ```
 
 ### 内置流水线
@@ -545,9 +547,30 @@ steps:
 | 模式 | 说明 |
 |------|------|
 | **Prompt-only**（默认） | 生成各步骤 prompt，占位符保留原样，由调用方填充 |
-| **Execute**（`--execute`） | 自动调用 Anthropic API 串联执行，输出传递实际生效 |
+| **Execute**（`--execute`） | 自动调用 LLM API 串联执行，输出传递实际生效（支持多模型） |
 
 并行组在 Execute 模式下使用 `asyncio.gather` 并发执行，Prompt 模式下顺序生成。
+
+### 多模型支持
+
+Execute 模式支持三家 LLM 提供商，根据模型名前缀自动检测：
+
+| 提供商 | 模型前缀 | 环境变量 | 安装 |
+|--------|---------|---------|------|
+| **Anthropic** | `claude-*` | `ANTHROPIC_API_KEY` | `pip install knowlyr-crew[execute]` |
+| **OpenAI** | `gpt-*`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*` | `OPENAI_API_KEY` | `pip install knowlyr-crew[openai]` |
+| **DeepSeek** | `deepseek-*` | `DEEPSEEK_API_KEY` | `pip install knowlyr-crew[openai]` |
+
+> DeepSeek 使用 OpenAI 兼容 API，共用 `openai` 依赖，无需额外安装。
+
+员工定义中的 `model` 字段直接决定使用哪个提供商：
+
+```yaml
+# employee.yaml
+model: gpt-4o          # → 自动使用 OpenAI
+model: deepseek-chat   # → 自动使用 DeepSeek
+model: claude-opus-4-6 # → 自动使用 Anthropic（默认）
+```
 
 发现路径：`builtin < project (.crew/pipelines/)`
 
@@ -949,7 +972,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 457 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
+**Tests**: 498 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek), and API key auto-resolution.
 
 ## License
 

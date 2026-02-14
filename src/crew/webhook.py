@@ -334,14 +334,13 @@ async def _execute_pipeline(
         raise ValueError(f"未找到 pipeline: {name}")
 
     pipeline = load_pipeline(pipelines[name])
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     result = await arun_pipeline(
         pipeline,
         initial_args=args,
         project_dir=ctx.project_dir,
-        execute=bool(api_key),
-        api_key=api_key or None,
+        execute=True,
+        api_key=None,
     )
     return result.model_dump(mode="json")
 
@@ -368,16 +367,21 @@ async def _execute_employee(
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args)
 
-    # 如果有 API key，执行 LLM 调用
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
+    # 尝试执行 LLM 调用（executor 自动从环境变量解析 API key）
+    try:
         from crew.executor import aexecute_prompt
 
+        use_model = match.model or "claude-sonnet-4-20250514"
         result = await aexecute_prompt(
             system_prompt=prompt,
-            api_key=api_key,
+            api_key=None,
+            model=use_model,
             stream=False,
         )
+    except (ValueError, ImportError):
+        result = None
+
+    if result is not None:
         return {
             "employee": name,
             "prompt": prompt,

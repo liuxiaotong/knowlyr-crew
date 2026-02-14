@@ -521,13 +521,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if errors:
                 return [TextContent(type="text", text=f"流水线校验失败: {'; '.join(errors)}")]
 
-            # execute 模式需要 API key
+            # execute 模式需要 API key（自动从环境变量解析）
             api_key = None
             if execute:
-                import os
-                api_key = os.environ.get("ANTHROPIC_API_KEY")
-                if not api_key:
-                    return [TextContent(type="text", text="错误: execute 模式需要 ANTHROPIC_API_KEY 环境变量")]
+                from crew.providers import detect_provider, resolve_api_key
+                eff_model = pl_model or "claude-sonnet-4-20250514"
+                try:
+                    _prov = detect_provider(eff_model)
+                    api_key = resolve_api_key(_prov)
+                except ValueError as e:
+                    return [TextContent(type="text", text=f"错误: {e}")]
 
             result = await arun_pipeline(
                 pipeline,
