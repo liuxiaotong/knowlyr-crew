@@ -1,0 +1,14 @@
+.venv/
+.uv-cache/
+.git/
+.pytest_cache/
+.claude/
+.crew/
+private/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.DS_Store
+*.swp
