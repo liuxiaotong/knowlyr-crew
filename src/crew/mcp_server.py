@@ -861,6 +861,21 @@ async def serve_sse(
         from crew.metrics import get_collector
         return JSONResponse(get_collector().snapshot())
 
+    _heartbeat_mgr = None
+
+    async def sse_lifespan(app):
+        nonlocal _heartbeat_mgr
+        try:
+            from crew.id_client import HeartbeatManager
+
+            _heartbeat_mgr = HeartbeatManager(interval=60.0)
+            await _heartbeat_mgr.start()
+        except ImportError:
+            pass
+        yield
+        if _heartbeat_mgr:
+            await _heartbeat_mgr.stop()
+
     app = Starlette(
         routes=[
             Route("/health", endpoint=health),
@@ -868,6 +883,7 @@ async def serve_sse(
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
+        lifespan=sse_lifespan,
     )
     if api_token:
         from crew.auth import BearerTokenMiddleware
@@ -914,8 +930,18 @@ async def serve_http(
         return JSONResponse(get_collector().snapshot())
 
     async def lifespan(app):
+        _hb_mgr = None
+        try:
+            from crew.id_client import HeartbeatManager
+
+            _hb_mgr = HeartbeatManager(interval=60.0)
+            await _hb_mgr.start()
+        except ImportError:
+            pass
         async with session_manager.run():
             yield
+        if _hb_mgr:
+            await _hb_mgr.stop()
 
     app = Starlette(
         routes=[

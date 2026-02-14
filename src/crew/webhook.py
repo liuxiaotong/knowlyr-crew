@@ -111,12 +111,22 @@ def create_webhook_app(
     async def on_startup():
         if scheduler:
             await scheduler.start()
+        # 启动周期心跳
+        try:
+            from crew.id_client import HeartbeatManager
+
+            ctx.heartbeat_mgr = HeartbeatManager(interval=60.0)
+            await ctx.heartbeat_mgr.start()
+        except ImportError:
+            pass
         # 恢复未完成的 pipeline 任务
         asyncio.create_task(_resume_incomplete_pipelines(ctx))
 
     async def on_shutdown():
         if scheduler:
             await scheduler.stop()
+        if ctx.heartbeat_mgr:
+            await ctx.heartbeat_mgr.stop()
 
     app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 
@@ -164,6 +174,7 @@ class _AppContext:
         self.config = config
         self.registry = registry
         self.scheduler = None  # CronScheduler, set by create_webhook_app
+        self.heartbeat_mgr = None  # HeartbeatManager, set by create_webhook_app
 
 
 def _make_handler(ctx: _AppContext, handler):
@@ -551,15 +562,19 @@ async def _stream_employee(
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
 
     async def _generate():
+        done_sent = False
         try:
             from crew.executor import aexecute_prompt
 
             use_model = model or match.model or "claude-sonnet-4-20250514"
-            stream_iter = await aexecute_prompt(
-                system_prompt=prompt,
-                api_key=None,
-                model=use_model,
-                stream=True,
+            stream_iter = await asyncio.wait_for(
+                aexecute_prompt(
+                    system_prompt=prompt,
+                    api_key=None,
+                    model=use_model,
+                    stream=True,
+                ),
+                timeout=300,
             )
 
             async for chunk in stream_iter:
@@ -571,8 +586,16 @@ async def _stream_employee(
                 yield f"event: done\ndata: {_json.dumps({'employee': name, 'model': result.model, 'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens})}\n\n"
             else:
                 yield f"event: done\ndata: {_json.dumps({'employee': name})}\n\n"
+            done_sent = True
+        except asyncio.TimeoutError:
+            yield f"event: error\ndata: {_json.dumps({'error': 'stream timeout (300s)'})}\n\n"
+            done_sent = True
         except Exception as exc:
             yield f"event: error\ndata: {_json.dumps({'error': str(exc)[:500]})}\n\n"
+            done_sent = True
+        finally:
+            if not done_sent:
+                yield f"event: error\ndata: {_json.dumps({'error': 'stream interrupted'})}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
