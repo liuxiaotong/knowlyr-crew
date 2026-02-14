@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 try:
     from starlette.applications import Starlette
     from starlette.requests import Request
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, StreamingResponse
     from starlette.routing import Route
 
     HAS_STARLETTE = True
@@ -28,6 +28,7 @@ def create_webhook_app(
     token: str | None = None,
     config: "WebhookConfig | None" = None,
     cron_config: "CronConfig | None" = None,
+    cors_origins: list[str] | None = None,
 ) -> "Starlette":
     """创建 webhook Starlette 应用.
 
@@ -36,6 +37,7 @@ def create_webhook_app(
         token: Bearer token（可选，为空则不启用认证）.
         config: Webhook 配置.
         cron_config: Cron 调度配置（可选）.
+        cors_origins: 允许的 CORS 来源列表（可选，为空则不启用 CORS）.
     """
     if not HAS_STARLETTE:
         raise ImportError("starlette 未安装。请运行: pip install knowlyr-crew[webhook]")
@@ -45,7 +47,11 @@ def create_webhook_app(
     if config is None:
         config = WebhookConfig()
 
-    registry = TaskRegistry()
+    # 任务持久化：project_dir/.crew/tasks.jsonl
+    persist_path = None
+    if project_dir:
+        persist_path = project_dir / ".crew" / "tasks.jsonl"
+    registry = TaskRegistry(persist_path=persist_path)
     ctx = _AppContext(
         project_dir=project_dir,
         config=config,
@@ -97,6 +103,18 @@ def create_webhook_app(
         skip_paths = ["/health", "/webhook/github"]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
 
+    # 添加 CORS 中间件（后添加 = 先执行，确保 OPTIONS 预检不被认证拦截）
+    if cors_origins:
+        from starlette.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Content-Type", "Authorization"],
+        )
+
     return app
 
 
@@ -117,7 +135,7 @@ class _AppContext:
 
 def _make_handler(ctx: _AppContext, handler):
     """包装 handler，注入 context."""
-    async def wrapper(request: Request) -> JSONResponse:
+    async def wrapper(request: Request):
         return await handler(request, ctx)
     return wrapper
 
@@ -217,6 +235,7 @@ async def _handle_run_pipeline(request: Request, ctx: _AppContext) -> JSONRespon
     payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+    agent_id = payload.get("agent_id")
 
     return await _dispatch_task(
         ctx,
@@ -225,15 +244,21 @@ async def _handle_run_pipeline(request: Request, ctx: _AppContext) -> JSONRespon
         target_name=name,
         args=args,
         sync=sync,
+        agent_id=agent_id,
     )
 
 
-async def _handle_run_employee(request: Request, ctx: _AppContext) -> JSONResponse:
-    """直接触发员工."""
+async def _handle_run_employee(request: Request, ctx: _AppContext):
+    """直接触发员工（支持 SSE 流式输出）."""
     name = request.path_params["name"]
     payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+    stream = payload.get("stream", False)
+    agent_id = payload.get("agent_id")
+
+    if stream:
+        return await _stream_employee(ctx, name, args, agent_id=agent_id)
 
     return await _dispatch_task(
         ctx,
@@ -242,6 +267,7 @@ async def _handle_run_employee(request: Request, ctx: _AppContext) -> JSONRespon
         target_name=name,
         args=args,
         sync=sync,
+        agent_id=agent_id,
     )
 
 
@@ -275,6 +301,7 @@ async def _dispatch_task(
     target_name: str,
     args: dict[str, str],
     sync: bool = False,
+    agent_id: int | None = None,
 ) -> JSONResponse:
     """创建任务并调度执行."""
     record = ctx.registry.create(
@@ -285,20 +312,20 @@ async def _dispatch_task(
     )
 
     if sync:
-        # 同步模式：等待执行完成
-        await _execute_task(ctx, record.task_id)
+        await _execute_task(ctx, record.task_id, agent_id=agent_id)
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
-    # 异步模式：后台执行，立即返回 task_id
-    asyncio.create_task(_execute_task(ctx, record.task_id))
+    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
     return JSONResponse(
         {"task_id": record.task_id, "status": "pending"},
         status_code=202,
     )
 
 
-async def _execute_task(ctx: _AppContext, task_id: str) -> None:
+async def _execute_task(
+    ctx: _AppContext, task_id: str, agent_id: int | None = None,
+) -> None:
     """执行任务."""
     record = ctx.registry.get(task_id)
     if record is None:
@@ -308,9 +335,13 @@ async def _execute_task(ctx: _AppContext, task_id: str) -> None:
 
     try:
         if record.target_type == "pipeline":
-            result = await _execute_pipeline(ctx, record.target_name, record.args)
+            result = await _execute_pipeline(
+                ctx, record.target_name, record.args, agent_id=agent_id,
+            )
         elif record.target_type == "employee":
-            result = await _execute_employee(ctx, record.target_name, record.args)
+            result = await _execute_employee(
+                ctx, record.target_name, record.args, agent_id=agent_id,
+            )
         else:
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
             return
@@ -325,6 +356,7 @@ async def _execute_pipeline(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
+    agent_id: int | None = None,
 ) -> dict[str, Any]:
     """执行 pipeline."""
     from crew.pipeline import arun_pipeline, discover_pipelines, load_pipeline
@@ -341,6 +373,7 @@ async def _execute_pipeline(
         project_dir=ctx.project_dir,
         execute=True,
         api_key=None,
+        agent_id=agent_id,
     )
     return result.model_dump(mode="json")
 
@@ -349,6 +382,7 @@ async def _execute_employee(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
+    agent_id: int | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
     from crew.discovery import discover_employees
@@ -364,8 +398,17 @@ async def _execute_employee(
     if match is None:
         raise ValueError(f"未找到员工: {name}")
 
+    # 获取 agent 身份
+    agent_identity = None
+    if agent_id:
+        try:
+            from crew.id_client import afetch_agent_identity
+            agent_identity = await afetch_agent_identity(agent_id)
+        except Exception:
+            pass
+
     engine = CrewEngine(project_dir=ctx.project_dir)
-    prompt = engine.prompt(match, args=args)
+    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
 
     # 尝试执行 LLM 调用（executor 自动从环境变量解析 API key）
     try:
@@ -394,12 +437,77 @@ async def _execute_employee(
     return {"employee": name, "prompt": prompt, "output": ""}
 
 
+async def _stream_employee(
+    ctx: _AppContext,
+    name: str,
+    args: dict[str, str],
+    agent_id: int | None = None,
+) -> StreamingResponse:
+    """SSE 流式执行单个员工."""
+    import json as _json
+
+    from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
+
+    employees = discover_employees(project_dir=ctx.project_dir)
+    match = None
+    for emp in employees:
+        if emp.name == name:
+            match = emp
+            break
+
+    if match is None:
+        async def _error():
+            yield f"event: error\ndata: {_json.dumps({'error': f'未找到员工: {name}'})}\n\n"
+        return StreamingResponse(_error(), media_type="text/event-stream")
+
+    # 获取 agent 身份
+    agent_identity = None
+    if agent_id:
+        try:
+            from crew.id_client import afetch_agent_identity
+
+            agent_identity = await afetch_agent_identity(agent_id)
+        except Exception:
+            pass
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
+
+    async def _generate():
+        try:
+            from crew.executor import aexecute_prompt
+
+            use_model = match.model or "claude-sonnet-4-20250514"
+            stream_iter = await aexecute_prompt(
+                system_prompt=prompt,
+                api_key=None,
+                model=use_model,
+                stream=True,
+            )
+
+            async for chunk in stream_iter:
+                yield f"data: {_json.dumps({'token': chunk})}\n\n"
+
+            # 流结束后发送完整的 result
+            result = getattr(stream_iter, "result", None)
+            if result:
+                yield f"event: done\ndata: {_json.dumps({'employee': name, 'model': result.model, 'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens})}\n\n"
+            else:
+                yield f"event: done\ndata: {_json.dumps({'employee': name})}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {_json.dumps({'error': str(exc)[:500]})}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
 def serve_webhook(
     host: str = "0.0.0.0",
     port: int = 8765,
     project_dir: Path | None = None,
     token: str | None = None,
     enable_cron: bool = True,
+    cors_origins: list[str] | None = None,
 ) -> None:
     """启动 webhook 服务器."""
     try:
@@ -421,6 +529,7 @@ def serve_webhook(
         token=token,
         config=config,
         cron_config=cron_config,
+        cors_origins=cors_origins,
     )
 
     logger.info("启动 Webhook 服务器: %s:%d", host, port)

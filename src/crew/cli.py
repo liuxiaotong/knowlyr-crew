@@ -2830,13 +2830,19 @@ def agents_sync_cmd(name: str):
     help="项目目录（默认当前目录）",
 )
 @click.option("--no-cron", is_flag=True, help="禁用 cron 调度器")
-def serve(host, port, token, project_dir, no_cron):
+@click.option(
+    "--cors-origin", multiple=True,
+    envvar="CREW_CORS_ORIGINS",
+    help="允许的 CORS 来源（可多次指定，如 --cors-origin https://antgather.knowlyr.com）",
+)
+def serve(host, port, token, project_dir, no_cron, cors_origin):
     """启动 Webhook 服务器（含 Cron 调度）."""
     from crew.webhook import serve_webhook
 
     serve_webhook(
         host=host, port=port, project_dir=project_dir,
         token=token, enable_cron=not no_cron,
+        cors_origins=list(cors_origin) if cors_origin else None,
     )
 
 

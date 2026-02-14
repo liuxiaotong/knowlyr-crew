@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-498_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-515_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -157,6 +157,10 @@ pip install knowlyr-crew[mcp]
 |------|------|
 | **Bearer 认证** | `--api-token` 或 `KNOWLYR_CREW_API_TOKEN`，未设置则免认证（开发模式） |
 | **健康检查** | `/health` 端点免认证，返回版本、员工数量、运行时间 |
+| **CORS 跨域** | `--cors-origin` 或 `CREW_CORS_ORIGINS`，支持多 origin，OPTIONS 预检免认证 |
+| **SSE 流式** | `/run/employee` 支持 `stream: true`，返回 `text/event-stream` 实时 token 输出 |
+| **任务持久化** | 任务记录自动写入 `.crew/tasks.jsonl`，重启恢复，超限自动压缩 |
+| **身份透传** | `agent_id` 参数自动从 knowlyr-id 获取 Agent 身份，注入 prompt |
 | **TTL 缓存** | 员工发现和项目检测结果缓存 30s，避免每请求重扫文件系统 |
 | **请求日志** | 每次 tool 调用自动记录日志，异常自动捕获并返回错误响应 |
 | **并发安全** | JSONL read-modify-write 操作加 `fcntl.flock` 文件锁，SQLite 启用 WAL 模式 |
@@ -586,6 +590,13 @@ pip install knowlyr-crew[webhook]
 # 启动服务器（Webhook + Cron 一体化）
 knowlyr-crew serve --port 8765 --token YOUR_SECRET
 
+# 启用 CORS（前端跨域调用）
+knowlyr-crew serve --port 8765 --token YOUR_SECRET \
+  --cors-origin https://antgather.knowlyr.com \
+  --cors-origin http://localhost:3000
+# 或通过环境变量
+CREW_CORS_ORIGINS=https://antgather.knowlyr.com,http://localhost:3000 knowlyr-crew serve
+
 # 禁用 cron 调度
 knowlyr-crew serve --port 8765 --token YOUR_SECRET --no-cron
 ```
@@ -610,7 +621,7 @@ graph TB
     subgraph "执行目标"
         PL["Pipeline Engine<br/>多步骤编排"]
         EM["Employee Engine<br/>单员工执行"]
-        LLM["Anthropic API<br/>LLM 调用"]
+        LLM["Multi-LLM<br/>Anthropic / OpenAI / DeepSeek"]
     end
 
     GH -->|X-Hub-Signature-256| WH
@@ -635,13 +646,14 @@ graph TB
 | `/webhook/openclaw` | POST | Bearer | OpenClaw 消息事件 |
 | `/webhook` | POST | Bearer | 通用 JSON webhook |
 | `/run/pipeline/{name}` | POST | Bearer | 直接触发 pipeline |
-| `/run/employee/{name}` | POST | Bearer | 直接触发员工 |
+| `/run/employee/{name}` | POST | Bearer | 直接触发员工（支持 SSE 流式） |
 | `/tasks/{task_id}` | GET | Bearer | 查询任务状态和结果 |
 | `/cron/status` | GET | Bearer | 查询 cron 调度器状态 |
 
-所有执行端点支持两种模式：
+所有执行端点支持三种模式：
 - **异步模式**（默认）：立即返回 `task_id`（HTTP 202），后台执行，通过 `/tasks/{task_id}` 轮询结果
 - **同步模式**（`"sync": true`）：等待执行完成后返回结果
+- **SSE 流式**（`/run/employee` + `"stream": true`）：返回 `text/event-stream`，实时输出 token
 
 ### Webhook 配置
 
@@ -972,7 +984,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 498 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek), and API key auto-resolution.
+**Tests**: 515 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek), and API key auto-resolution.
 
 ## License
 

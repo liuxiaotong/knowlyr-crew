@@ -202,6 +202,64 @@ class TestTaskRegistry:
         assert reg.update("nonexistent", "running") is None
 
 
+class TestTaskPersistence:
+    """任务持久化到 JSONL."""
+
+    def test_persist_and_recover(self, tmp_path):
+        """创建任务后重启应恢复."""
+        jsonl = tmp_path / "tasks.jsonl"
+        reg = TaskRegistry(persist_path=jsonl)
+        r1 = reg.create("direct", "employee", "test-emp")
+        reg.update(r1.task_id, "completed", result={"output": "ok"})
+        r2 = reg.create("cron", "pipeline", "daily-review")
+
+        # 模拟重启
+        reg2 = TaskRegistry(persist_path=jsonl)
+        assert reg2.get(r1.task_id) is not None
+        assert reg2.get(r1.task_id).status == "completed"
+        assert reg2.get(r2.task_id) is not None
+        assert reg2.get(r2.task_id).status == "pending"
+
+    def test_no_persist_without_path(self):
+        """不传 persist_path 时不写文件."""
+        reg = TaskRegistry()
+        reg.create("direct", "employee", "test")
+        # 不报错即可
+
+    def test_compact_history(self, tmp_path):
+        """超过 max_history 应截断旧记录."""
+        jsonl = tmp_path / "tasks.jsonl"
+        reg = TaskRegistry(persist_path=jsonl, max_history=5)
+        ids = []
+        for i in range(8):
+            r = reg.create("direct", "employee", f"emp-{i}")
+            ids.append(r.task_id)
+
+        # 内存中应只保留最新 5 条
+        assert len(reg._tasks) == 5
+        # 旧的 3 条被清理
+        assert reg.get(ids[0]) is None
+        assert reg.get(ids[1]) is None
+        assert reg.get(ids[2]) is None
+        # 新的 5 条存在
+        assert reg.get(ids[7]) is not None
+
+    def test_list_recent(self):
+        """list_recent 返回最近的任务."""
+        reg = TaskRegistry()
+        for i in range(5):
+            reg.create("direct", "employee", f"emp-{i}")
+        recent = reg.list_recent(3)
+        assert len(recent) == 3
+
+    def test_corrupt_jsonl_recovery(self, tmp_path):
+        """损坏的 JSONL 行应被跳过."""
+        jsonl = tmp_path / "tasks.jsonl"
+        jsonl.write_text('{"invalid": "json"}\n{"also": "bad\n', encoding="utf-8")
+        reg = TaskRegistry(persist_path=jsonl)
+        assert len(reg._tasks) == 0  # 损坏行全部跳过，不崩溃
+
+
 # ── Webhook App 端点测试 ──
 
 
@@ -231,6 +289,88 @@ class TestHealthEndpoint:
         client = _make_client()
         resp = client.get("/health", headers={"Authorization": f"Bearer {TOKEN}"})
         assert resp.status_code == 200
+
+
+class TestCORS:
+    """CORS 中间件测试."""
+
+    def test_cors_preflight(self):
+        """OPTIONS 预检请求应返回 CORS 头."""
+        app = create_webhook_app(
+            project_dir=Path("/tmp/test"),
+            token=TOKEN,
+            cors_origins=["https://antgather.knowlyr.com"],
+        )
+        client = TestClient(app)
+        resp = client.options(
+            "/run/employee/test",
+            headers={
+                "Origin": "https://antgather.knowlyr.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Authorization,Content-Type",
+            },
+        )
+        assert resp.status_code == 200
+        assert "https://antgather.knowlyr.com" in resp.headers.get(
+            "access-control-allow-origin", ""
+        )
+        assert "POST" in resp.headers.get("access-control-allow-methods", "")
+
+    def test_cors_actual_request(self):
+        """带 Origin 的实际请求应包含 CORS 头."""
+        app = create_webhook_app(
+            project_dir=Path("/tmp/test"),
+            token=TOKEN,
+            cors_origins=["https://antgather.knowlyr.com"],
+        )
+        client = TestClient(app)
+        resp = client.get(
+            "/health",
+            headers={"Origin": "https://antgather.knowlyr.com"},
+        )
+        assert resp.status_code == 200
+        assert "https://antgather.knowlyr.com" in resp.headers.get(
+            "access-control-allow-origin", ""
+        )
+
+    def test_cors_disallowed_origin(self):
+        """不在白名单中的 origin 不应返回 CORS 头."""
+        app = create_webhook_app(
+            project_dir=Path("/tmp/test"),
+            token=TOKEN,
+            cors_origins=["https://antgather.knowlyr.com"],
+        )
+        client = TestClient(app)
+        resp = client.get(
+            "/health",
+            headers={"Origin": "https://evil.com"},
+        )
+        assert resp.status_code == 200
+        assert "evil.com" not in resp.headers.get("access-control-allow-origin", "")
+
+    def test_no_cors_by_default(self):
+        """不配置 cors_origins 时不启用 CORS."""
+        client = _make_client()
+        resp = client.get(
+            "/health",
+            headers={"Origin": "https://antgather.knowlyr.com"},
+        )
+        assert resp.status_code == 200
+        assert "access-control-allow-origin" not in resp.headers
+
+    def test_multiple_origins(self):
+        """支持多个 origin."""
+        app = create_webhook_app(
+            project_dir=Path("/tmp/test"),
+            token=TOKEN,
+            cors_origins=["https://antgather.knowlyr.com", "http://localhost:3000"],
+        )
+        client = TestClient(app)
+        resp = client.get(
+            "/health",
+            headers={"Origin": "http://localhost:3000"},
+        )
+        assert "localhost:3000" in resp.headers.get("access-control-allow-origin", "")
 
 
 class TestGithubWebhook:
@@ -388,6 +528,72 @@ class TestRunEmployee:
         assert "task_id" in resp.json()
 
 
+class TestStreamEmployee:
+    """SSE 流式执行员工."""
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.engine.CrewEngine")
+    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
+    def test_stream_returns_sse(self, mock_exec, mock_engine_cls, mock_discover):
+        """stream=true 应返回 text/event-stream."""
+        from crew.models import Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="", body="")
+        mock_discover.return_value = [emp]
+        mock_engine = MagicMock()
+        mock_engine.prompt.return_value = "test prompt"
+        mock_engine_cls.return_value = mock_engine
+
+        # 模拟 async iterator
+        async def _fake_stream():
+            yield "Hello"
+            yield " world"
+        _fake_stream.result = MagicMock(
+            model="gpt-4o", input_tokens=10, output_tokens=5,
+        )
+        mock_exec.return_value = _fake_stream()
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/test-emp",
+            json={"args": {}, "stream": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = resp.text
+        assert 'data: {"token": "Hello"}' in body
+        assert 'data: {"token": " world"}' in body
+        assert "event: done" in body
+
+    @patch("crew.discovery.discover_employees")
+    def test_stream_unknown_employee(self, mock_discover):
+        """流式请求未知员工应返回 error 事件."""
+        mock_discover.return_value = []
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/nonexistent",
+            json={"args": {}, "stream": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        assert "event: error" in resp.text
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_no_stream_fallback(self, mock_execute):
+        """stream=false 应走原有异步模式."""
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/code-reviewer",
+            json={"args": {"target": "main"}, "stream": False},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 202
+        assert "task_id" in resp.json()
+
+
 class TestTaskStatus:
     """任务状态查询."""
 
@@ -463,6 +669,86 @@ class TestSyncExecution:
         data = resp.json()
         assert data["status"] == "failed"
         assert "员工不存在" in data["error"]
+
+
+class TestIdentityPassthrough:
+    """agent_id 身份透传."""
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_employee_passes_agent_id(self, mock_execute):
+        """run/employee 应传递 agent_id 到 _execute_task."""
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/code-reviewer",
+            json={"args": {"target": "main"}, "agent_id": 42},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 202
+        # _execute_task 应收到 agent_id
+        mock_execute.assert_called_once()
+        call_kwargs = mock_execute.call_args
+        assert call_kwargs.kwargs.get("agent_id") == 42
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_pipeline_passes_agent_id(self, mock_execute):
+        """run/pipeline 应传递 agent_id 到 _execute_task."""
+        client = _make_client()
+        resp = client.post(
+            "/run/pipeline/full-review",
+            json={"args": {"target": "main"}, "agent_id": 99},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 202
+        mock_execute.assert_called_once()
+        call_kwargs = mock_execute.call_args
+        assert call_kwargs.kwargs.get("agent_id") == 99
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_no_agent_id_defaults_none(self, mock_execute):
+        """不传 agent_id 时默认 None."""
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/code-reviewer",
+            json={"args": {}},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 202
+        mock_execute.assert_called_once()
+        call_kwargs = mock_execute.call_args
+        assert call_kwargs.kwargs.get("agent_id") is None
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.engine.CrewEngine")
+    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
+    @patch("crew.id_client.afetch_agent_identity", new_callable=AsyncMock)
+    def test_stream_with_agent_id(self, mock_identity, mock_exec, mock_engine_cls, mock_discover):
+        """stream + agent_id 应获取身份并传给 prompt."""
+        from crew.models import Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="", body="")
+        mock_discover.return_value = [emp]
+        mock_identity.return_value = {"name": "测试代理", "id": 42}
+        mock_engine = MagicMock()
+        mock_engine.prompt.return_value = "test prompt"
+        mock_engine_cls.return_value = mock_engine
+
+        async def _fake_stream():
+            yield "Hello"
+        mock_exec.return_value = _fake_stream()
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/test-emp",
+            json={"args": {}, "stream": True, "agent_id": 42},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        # 应调用了 afetch_agent_identity
+        mock_identity.assert_called_once_with(42)
+        # engine.prompt 应收到 agent_identity
+        mock_engine.prompt.assert_called_once()
+        call_kwargs = mock_engine.prompt.call_args
+        assert call_kwargs.kwargs.get("agent_identity") == {"name": "测试代理", "id": 42}
 
 
 class TestNoAuth:

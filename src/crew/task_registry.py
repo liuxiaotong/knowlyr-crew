@@ -1,10 +1,11 @@
-"""任务注册表 — 追踪 webhook 触发的异步任务."""
+"""任务注册表 — 追踪 webhook 触发的异步任务，支持 JSONL 持久化."""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ class TaskRecord(BaseModel):
 
     task_id: str = Field(description="任务唯一标识")
     status: Literal["pending", "running", "completed", "failed"] = "pending"
-    trigger: str = Field(description="触发来源: github / openclaw / generic / direct")
+    trigger: str = Field(description="触发来源: github / openclaw / generic / direct / cron")
     target_type: str = Field(description="目标类型: pipeline / employee")
     target_name: str = Field(description="目标名称")
     args: dict[str, str] = Field(default_factory=dict)
@@ -26,11 +27,75 @@ class TaskRecord(BaseModel):
 
 
 class TaskRegistry:
-    """内存任务注册表，支持 asyncio.Event 同步等待."""
+    """任务注册表，内存缓存 + JSONL 持久化.
 
-    def __init__(self) -> None:
+    Args:
+        persist_path: JSONL 持久化文件路径（None 则仅内存模式）.
+        max_history: 持久化保留的最大记录数（默认 500，超出时截断旧记录）.
+    """
+
+    def __init__(
+        self,
+        persist_path: Path | None = None,
+        max_history: int = 500,
+    ) -> None:
         self._tasks: dict[str, TaskRecord] = {}
         self._events: dict[str, asyncio.Event] = {}
+        self._persist_path = persist_path
+        self._max_history = max_history
+
+        if persist_path:
+            self._load_history()
+
+    def _load_history(self) -> None:
+        """从 JSONL 加载历史任务."""
+        if self._persist_path is None or not self._persist_path.exists():
+            return
+        try:
+            for line in self._persist_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = TaskRecord.model_validate_json(line)
+                    self._tasks[record.task_id] = record
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _persist(self, record: TaskRecord) -> None:
+        """追加写入 JSONL."""
+        if self._persist_path is None:
+            return
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._persist_path, "a", encoding="utf-8") as f:
+                f.write(record.model_dump_json() + "\n")
+        except Exception:
+            pass
+
+    def _compact_if_needed(self) -> None:
+        """如果记录过多，截断旧记录."""
+        if self._persist_path is None:
+            return
+        if len(self._tasks) <= self._max_history:
+            return
+        # 按创建时间排序，保留最新的
+        sorted_records = sorted(
+            self._tasks.values(),
+            key=lambda r: r.created_at,
+        )
+        to_remove = sorted_records[: len(sorted_records) - self._max_history]
+        for r in to_remove:
+            del self._tasks[r.task_id]
+            self._events.pop(r.task_id, None)
+        # 重写文件
+        try:
+            lines = [r.model_dump_json() for r in sorted_records[len(to_remove) :]]
+            self._persist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
 
     def create(
         self,
@@ -50,6 +115,8 @@ class TaskRegistry:
         )
         self._tasks[task_id] = record
         self._events[task_id] = asyncio.Event()
+        self._persist(record)
+        self._compact_if_needed()
         return record
 
     def update(
@@ -73,11 +140,21 @@ class TaskRegistry:
             event = self._events.get(task_id)
             if event:
                 event.set()
+        self._persist(record)
         return record
 
     def get(self, task_id: str) -> TaskRecord | None:
         """查询任务."""
         return self._tasks.get(task_id)
+
+    def list_recent(self, n: int = 20) -> list[TaskRecord]:
+        """列出最近 n 条任务."""
+        sorted_records = sorted(
+            self._tasks.values(),
+            key=lambda r: r.created_at,
+            reverse=True,
+        )
+        return sorted_records[:n]
 
     async def wait(self, task_id: str, timeout: float = 300) -> TaskRecord | None:
         """等待任务完成（同步模式）."""
