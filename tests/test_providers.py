@@ -10,6 +10,8 @@ from crew.providers import (
     DEFAULT_MODELS,
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
+    ZHIPU_BASE_URL,
+    QWEN_BASE_URL,
     Provider,
     detect_provider,
     resolve_api_key,
@@ -128,3 +130,45 @@ class TestConstants:
 
     def test_moonshot_base_url(self):
         assert "moonshot" in MOONSHOT_BASE_URL
+
+    def test_zhipu_base_url(self):
+        assert "bigmodel" in ZHIPU_BASE_URL
+
+    def test_qwen_base_url(self):
+        assert "dashscope" in QWEN_BASE_URL
+
+
+class TestGeminiProvider:
+    @pytest.mark.parametrize("model,expected", [
+        ("gemini-2.0-flash", Provider.GEMINI),
+        ("gemini-1.5-pro", Provider.GEMINI),
+    ])
+    def test_gemini(self, model, expected):
+        assert detect_provider(model) == expected
+
+
+class TestZhipuProvider:
+    @pytest.mark.parametrize("model,expected", [
+        ("glm-4-flash", Provider.ZHIPU),
+        ("glm-4", Provider.ZHIPU),
+    ])
+    def test_zhipu(self, model, expected):
+        assert detect_provider(model) == expected
+
+    def test_zhipu_api_key(self):
+        with patch.dict(os.environ, {"ZHIPUAI_API_KEY": "sk-zhipu"}):
+            assert resolve_api_key(Provider.ZHIPU) == "sk-zhipu"
+
+
+class TestQwenProvider:
+    @pytest.mark.parametrize("model,expected", [
+        ("qwen-turbo", Provider.QWEN),
+        ("qwen-max", Provider.QWEN),
+        ("qwen-plus", Provider.QWEN),
+    ])
+    def test_qwen(self, model, expected):
+        assert detect_provider(model) == expected
+
+    def test_qwen_api_key(self):
+        with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "sk-dash"}):
+            assert resolve_api_key(Provider.QWEN) == "sk-dash"

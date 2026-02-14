@@ -1479,6 +1479,28 @@ def pipeline_show(name: str):
             click.echo(f"  {i}. {item.employee}{id_str}" + (f" ({args_str})" if args_str else ""))
 
 
+@pipeline.command("graph")
+@click.argument("name")
+@click.option("-o", "--output", type=click.Path(), help="输出到文件")
+def pipeline_graph(name: str, output: str | None):
+    """生成流水线 Mermaid 流程图."""
+    from crew.pipeline import discover_pipelines, load_pipeline, pipeline_to_mermaid
+
+    pipelines = discover_pipelines()
+    if name not in pipelines:
+        click.echo(f"未找到流水线: {name}", err=True)
+        sys.exit(1)
+
+    p = load_pipeline(pipelines[name])
+    mermaid = pipeline_to_mermaid(p)
+
+    if output:
+        Path(output).write_text(mermaid, encoding="utf-8")
+        click.echo(f"已保存到 {output}")
+    else:
+        click.echo(mermaid)
+
+
 @pipeline.command("run")
 @click.argument("name_or_path")
 @click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
@@ -2895,6 +2917,103 @@ def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
 
     total = len(report.pushed) + len(report.pulled) + len(report.registered) + len(report.disabled)
     click.echo(f"\n✓ 同步完成 (推送:{len(report.pushed)} 拉取:{len(report.pulled)} 注册:{len(report.registered)} 禁用:{len(report.disabled)})", err=True)
+
+
+# ── cron 命令 ──
+
+
+@main.group(name="cron")
+def cron_group():
+    """Cron 调度管理 — 查看和预览定时任务."""
+
+
+@cron_group.command("list")
+@click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
+def cron_list(project_dir):
+    """列出所有 cron 计划任务."""
+    from crew.cron_config import load_cron_config
+
+    config = load_cron_config(project_dir)
+    if not config.schedules:
+        click.echo("未配置 cron 计划任务。")
+        click.echo("在 .crew/cron.yaml 中添加 schedules 配置。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="Cron 计划任务")
+        table.add_column("名称", style="cyan")
+        table.add_column("Cron 表达式", style="green")
+        table.add_column("目标类型")
+        table.add_column("目标名称", style="bold")
+        table.add_column("参数")
+
+        for s in config.schedules:
+            args_str = ", ".join(f"{k}={v}" for k, v in s.args.items()) if s.args else "-"
+            table.add_row(s.name, s.cron, s.target_type, s.target_name, args_str)
+
+        console.print(table)
+    except ImportError:
+        for s in config.schedules:
+            click.echo(f"  {s.name}: {s.cron} → {s.target_type}/{s.target_name}")
+
+
+@cron_group.command("preview")
+@click.option("-n", "--next", "count", default=5, type=int, help="显示未来 N 次触发")
+@click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
+def cron_preview(count, project_dir):
+    """预览未来 N 次 cron 触发时间."""
+    from crew.cron_config import load_cron_config
+
+    config = load_cron_config(project_dir)
+    if not config.schedules:
+        click.echo("未配置 cron 计划任务。")
+        return
+
+    try:
+        from croniter import croniter
+    except ImportError:
+        click.echo("croniter 未安装。请运行: pip install knowlyr-crew[webhook]", err=True)
+        sys.exit(1)
+
+    from datetime import datetime
+
+    now = datetime.now()
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title=f"未来 {count} 次触发时间")
+        table.add_column("任务名称", style="cyan")
+        table.add_column("Cron", style="green")
+        table.add_column("目标", style="bold")
+        for i in range(1, count + 1):
+            table.add_column(f"#{i}")
+
+        for s in config.schedules:
+            try:
+                cron = croniter(s.cron, now)
+                times = [cron.get_next(datetime).strftime("%m-%d %H:%M") for _ in range(count)]
+            except Exception:
+                times = ["[无效表达式]"] * count
+            table.add_row(s.name, s.cron, f"{s.target_type}/{s.target_name}", *times)
+
+        console.print(table)
+    except ImportError:
+        for s in config.schedules:
+            try:
+                cron = croniter(s.cron, now)
+                times = [cron.get_next(datetime).strftime("%Y-%m-%d %H:%M") for _ in range(count)]
+                click.echo(f"  {s.name} ({s.cron}):")
+                for i, t in enumerate(times, 1):
+                    click.echo(f"    #{i}: {t}")
+            except Exception:
+                click.echo(f"  {s.name}: 无效 cron 表达式 '{s.cron}'")
 
 
 # ── serve 命令（Webhook 服务器）──

@@ -96,12 +96,14 @@ def create_webhook_app(
 
     routes = [
         Route("/health", endpoint=_health, methods=["GET"]),
+        Route("/metrics", endpoint=_metrics, methods=["GET"]),
         Route("/webhook/github", endpoint=_make_handler(ctx, _handle_github), methods=["POST"]),
         Route("/webhook/openclaw", endpoint=_make_handler(ctx, _handle_openclaw), methods=["POST"]),
         Route("/webhook", endpoint=_make_handler(ctx, _handle_generic), methods=["POST"]),
         Route("/run/pipeline/{name}", endpoint=_make_handler(ctx, _handle_run_pipeline), methods=["POST"]),
         Route("/run/employee/{name}", endpoint=_make_handler(ctx, _handle_run_employee), methods=["POST"]),
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
+        Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
     ]
 
@@ -167,6 +169,12 @@ def _make_handler(ctx: _AppContext, handler):
 async def _health(request: Request) -> JSONResponse:
     """健康检查."""
     return JSONResponse({"status": "ok", "service": "crew-webhook"})
+
+
+async def _metrics(request: Request) -> JSONResponse:
+    """运行时指标."""
+    from crew.metrics import get_collector
+    return JSONResponse(get_collector().snapshot())
 
 
 async def _handle_github(request: Request, ctx: _AppContext) -> JSONResponse:
@@ -301,6 +309,26 @@ async def _handle_task_status(request: Request, ctx: _AppContext) -> JSONRespons
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
     return JSONResponse(record.model_dump(mode="json"))
+
+
+async def _handle_task_replay(request: Request, ctx: _AppContext) -> JSONResponse:
+    """重放已完成/失败的任务."""
+    task_id = request.path_params["task_id"]
+    record = ctx.registry.get(task_id)
+    if record is None:
+        return JSONResponse({"error": "task not found"}, status_code=404)
+
+    if record.status not in ("completed", "failed"):
+        return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
+
+    return await _dispatch_task(
+        ctx,
+        trigger="replay",
+        target_type=record.target_type,
+        target_name=record.target_name,
+        args=record.args,
+        sync=False,
+    )
 
 
 async def _handle_cron_status(request: Request, ctx: _AppContext) -> JSONResponse:

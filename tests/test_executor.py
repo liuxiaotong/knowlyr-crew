@@ -516,3 +516,211 @@ class TestAsyncOpenAI:
         assert result.content == "async ds"
         client_call = mock_openai.AsyncOpenAI.call_args[1]
         assert "deepseek" in client_call["base_url"]
+
+
+class TestRetry:
+    """测试 LLM 重试机制."""
+
+    @patch("crew.executor.time")
+    @patch("crew.executor._get_anthropic")
+    def test_retry_on_rate_limit(self, mock_get, mock_time):
+        """429 触发重试."""
+        rate_limit_err = Exception("rate limited")
+        rate_limit_err.status_code = 429
+
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="ok")]
+        mock_msg.model = "claude-sonnet-4-20250514"
+        mock_msg.usage.input_tokens = 10
+        mock_msg.usage.output_tokens = 5
+        mock_msg.stop_reason = "end_turn"
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = [rate_limit_err, mock_msg]
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        result = execute_prompt(system_prompt="test", api_key="key", stream=False)
+        assert result.content == "ok"
+        assert mock_client.messages.create.call_count == 2
+        mock_time.sleep.assert_called_once()
+
+    @patch("crew.executor.time")
+    @patch("crew.executor._get_anthropic")
+    def test_retry_on_server_error(self, mock_get, mock_time):
+        """5xx 触发重试."""
+        server_err = Exception("internal error")
+        server_err.status_code = 500
+
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="ok")]
+        mock_msg.model = "claude-sonnet-4-20250514"
+        mock_msg.usage.input_tokens = 10
+        mock_msg.usage.output_tokens = 5
+        mock_msg.stop_reason = "end_turn"
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = [server_err, mock_msg]
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        result = execute_prompt(system_prompt="test", api_key="key", stream=False)
+        assert result.content == "ok"
+
+    @patch("crew.executor._get_anthropic")
+    def test_no_retry_on_auth_error(self, mock_get):
+        """401 不重试."""
+        auth_err = Exception("unauthorized")
+        auth_err.status_code = 401
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = auth_err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        with pytest.raises(Exception, match="unauthorized"):
+            execute_prompt(system_prompt="test", api_key="key", stream=False)
+        assert mock_client.messages.create.call_count == 1
+
+    @patch("crew.executor.time")
+    @patch("crew.executor._get_anthropic")
+    def test_max_retries_exceeded(self, mock_get, mock_time):
+        """超过最大重试次数."""
+        rate_err = Exception("rate limited")
+        rate_err.status_code = 429
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = rate_err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        with pytest.raises(Exception, match="rate limited"):
+            execute_prompt(system_prompt="test", api_key="key", stream=False)
+        # 1 initial + 3 retries = 4 total
+        assert mock_client.messages.create.call_count == 4
+
+    def test_is_retryable_connection_error(self):
+        from crew.executor import _is_retryable
+        assert _is_retryable(ConnectionError("reset"))
+        assert _is_retryable(TimeoutError("timed out"))
+
+    def test_is_retryable_status_codes(self):
+        from crew.executor import _is_retryable
+
+        err_429 = Exception()
+        err_429.status_code = 429
+        assert _is_retryable(err_429)
+
+        err_500 = Exception()
+        err_500.status_code = 500
+        assert _is_retryable(err_500)
+
+        err_503 = Exception()
+        err_503.status_code = 503
+        assert _is_retryable(err_503)
+
+        err_400 = Exception()
+        err_400.status_code = 400
+        assert not _is_retryable(err_400)
+
+        err_401 = Exception()
+        err_401.status_code = 401
+        assert not _is_retryable(err_401)
+
+    def test_retry_delay(self):
+        from crew.executor import _retry_delay
+        assert _retry_delay(0) == 1
+        assert _retry_delay(1) == 2
+        assert _retry_delay(2) == 4
+
+
+class TestGeminiExecute:
+    """测试 Gemini 执行路径."""
+
+    @patch("crew.executor._get_genai")
+    def test_non_streaming(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.text = "Gemini result"
+        mock_response.usage_metadata.prompt_token_count = 50
+        mock_response.usage_metadata.candidates_token_count = 10
+
+        mock_model = MagicMock()
+        mock_model.generate_content.return_value = mock_response
+
+        mock_genai = MagicMock()
+        mock_genai.GenerativeModel.return_value = mock_model
+        mock_get.return_value = mock_genai
+
+        result = execute_prompt(
+            system_prompt="test", api_key="key", model="gemini-2.0-flash", stream=False,
+        )
+        assert result.content == "Gemini result"
+        assert result.input_tokens == 50
+        mock_genai.configure.assert_called_once_with(api_key="key")
+
+    def test_missing_sdk(self):
+        with patch("crew.executor._get_genai", return_value=None):
+            with pytest.raises(ImportError, match="google-generativeai"):
+                execute_prompt(system_prompt="test", api_key="key", model="gemini-2.0-flash", stream=False)
+
+
+class TestZhipuExecute:
+    """测试 Zhipu 执行路径（OpenAI 兼容）."""
+
+    @patch("crew.executor._get_openai")
+    def test_uses_zhipu_base_url(self, mock_get):
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Zhipu result"
+        mock_choice.finish_reason = "stop"
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.model = "glm-4-flash"
+        mock_resp.usage.prompt_tokens = 30
+        mock_resp.usage.completion_tokens = 10
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        mock_openai = MagicMock()
+        mock_openai.OpenAI.return_value = mock_client
+        mock_get.return_value = mock_openai
+
+        result = execute_prompt(
+            system_prompt="test", api_key="key", model="glm-4-flash", stream=False,
+        )
+        assert result.content == "Zhipu result"
+        client_call = mock_openai.OpenAI.call_args[1]
+        assert "bigmodel" in client_call["base_url"]
+
+
+class TestQwenExecute:
+    """测试 Qwen 执行路径（OpenAI 兼容）."""
+
+    @patch("crew.executor._get_openai")
+    def test_uses_qwen_base_url(self, mock_get):
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Qwen result"
+        mock_choice.finish_reason = "stop"
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.model = "qwen-turbo"
+        mock_resp.usage.prompt_tokens = 40
+        mock_resp.usage.completion_tokens = 12
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        mock_openai = MagicMock()
+        mock_openai.OpenAI.return_value = mock_client
+        mock_get.return_value = mock_openai
+
+        result = execute_prompt(
+            system_prompt="test", api_key="key", model="qwen-turbo", stream=False,
+        )
+        assert result.content == "Qwen result"
+        client_call = mock_openai.OpenAI.call_args[1]
+        assert "dashscope" in client_call["base_url"]

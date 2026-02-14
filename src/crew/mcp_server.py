@@ -856,9 +856,14 @@ async def serve_sse(
             "uptime_seconds": round(_time.monotonic() - _start),
         })
 
+    async def metrics(request):
+        from crew.metrics import get_collector
+        return JSONResponse(get_collector().snapshot())
+
     app = Starlette(
         routes=[
             Route("/health", endpoint=health),
+            Route("/metrics", endpoint=metrics),
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
@@ -903,6 +908,10 @@ async def serve_http(
             "uptime_seconds": round(_time.monotonic() - _start),
         })
 
+    async def metrics(request):
+        from crew.metrics import get_collector
+        return JSONResponse(get_collector().snapshot())
+
     async def lifespan(app):
         async with session_manager.run():
             yield
@@ -910,6 +919,7 @@ async def serve_http(
     app = Starlette(
         routes=[
             Route("/health", endpoint=health),
+            Route("/metrics", endpoint=metrics),
             Mount("/mcp", app=handle_mcp),
         ],
         lifespan=lifespan,

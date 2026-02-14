@@ -16,6 +16,7 @@ from crew.pipeline import (
     arun_pipeline,
     discover_pipelines,
     load_pipeline,
+    pipeline_to_mermaid,
     run_pipeline,
     validate_pipeline,
 )
@@ -532,3 +533,85 @@ class TestResumePipeline:
         result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False))
         assert len(result.steps) == 1
         assert result.steps[0].employee == "code-reviewer"
+
+
+class TestPipelineToMermaid:
+    """pipeline_to_mermaid 流程图生成."""
+
+    def test_single_step(self):
+        pl = Pipeline(
+            name="simple",
+            steps=[PipelineStep(employee="code-reviewer", args={})],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "graph LR" in mermaid
+        assert '开始' in mermaid
+        assert '结束' in mermaid
+        assert '"code-reviewer"' in mermaid
+
+    def test_multiple_steps(self):
+        pl = Pipeline(
+            name="multi",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={}),
+                PipelineStep(employee="test-engineer", args={}),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert '"code-reviewer"' in mermaid
+        assert '"test-engineer"' in mermaid
+        # 应有 S → s0 → s1 → E 的连接
+        assert "S --> s0" in mermaid
+        assert "s0 --> s1" in mermaid
+        assert "s1 --> E" in mermaid
+
+    def test_parallel_group(self):
+        pl = Pipeline(
+            name="parallel",
+            steps=[
+                ParallelGroup(parallel=[
+                    PipelineStep(employee="test-engineer", args={}),
+                    PipelineStep(employee="refactor-guide", args={}),
+                ]),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "并行" in mermaid
+        assert "合并" in mermaid
+        assert '"test-engineer"' in mermaid
+        assert '"refactor-guide"' in mermaid
+
+    def test_with_custom_ids(self):
+        pl = Pipeline(
+            name="ids",
+            steps=[
+                PipelineStep(employee="code-reviewer", id="review", args={}),
+                PipelineStep(employee="test-engineer", id="test", args={}),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert 'review["code-reviewer"]' in mermaid
+        assert 'test["test-engineer"]' in mermaid
+        assert "S --> review" in mermaid
+        assert "review --> test" in mermaid
+        assert "test --> E" in mermaid
+
+    def test_mixed_sequential_and_parallel(self):
+        pl = Pipeline(
+            name="mixed",
+            steps=[
+                PipelineStep(employee="code-reviewer", id="review", args={}),
+                ParallelGroup(parallel=[
+                    PipelineStep(employee="test-engineer", args={}),
+                    PipelineStep(employee="refactor-guide", args={}),
+                ]),
+                PipelineStep(employee="pr-creator", id="pr", args={}),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        # review → fork → parallel tasks → join → pr → end
+        assert "review --> F1" in mermaid
+        assert "J1" in mermaid
+        assert 'pr["pr-creator"]' in mermaid
+        assert "J1 --> pr" in mermaid
+        assert "pr --> E" in mermaid

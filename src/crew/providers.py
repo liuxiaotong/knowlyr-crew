@@ -1,4 +1,4 @@
-"""LLM Provider 检测与 API Key 解析 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot."""
+"""LLM Provider 检测与 API Key 解析 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot / Gemini / Zhipu / Qwen."""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ class Provider(Enum):
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
     MOONSHOT = "moonshot"
+    GEMINI = "gemini"
+    ZHIPU = "zhipu"
+    QWEN = "qwen"
 
 
 # ── 模型前缀 → Provider 映射 ──
@@ -24,6 +27,9 @@ _MODEL_PREFIXES: list[tuple[str, Provider]] = [
     ("chatgpt-", Provider.OPENAI),
     ("deepseek-", Provider.DEEPSEEK),
     ("moonshot-", Provider.MOONSHOT),
+    ("gemini-", Provider.GEMINI),
+    ("glm-", Provider.ZHIPU),
+    ("qwen-", Provider.QWEN),
 ]
 
 DEFAULT_MODELS: dict[Provider, str] = {
@@ -31,6 +37,9 @@ DEFAULT_MODELS: dict[Provider, str] = {
     Provider.OPENAI: "gpt-4o",
     Provider.DEEPSEEK: "deepseek-chat",
     Provider.MOONSHOT: "moonshot-v1-128k",
+    Provider.GEMINI: "gemini-2.0-flash",
+    Provider.ZHIPU: "glm-4-flash",
+    Provider.QWEN: "qwen-turbo",
 }
 
 API_KEY_ENV_VARS: dict[Provider, str] = {
@@ -38,10 +47,15 @@ API_KEY_ENV_VARS: dict[Provider, str] = {
     Provider.OPENAI: "OPENAI_API_KEY",
     Provider.DEEPSEEK: "DEEPSEEK_API_KEY",
     Provider.MOONSHOT: "MOONSHOT_API_KEY",
+    Provider.GEMINI: "GOOGLE_API_KEY",
+    Provider.ZHIPU: "ZHIPUAI_API_KEY",
+    Provider.QWEN: "DASHSCOPE_API_KEY",
 }
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 MOONSHOT_BASE_URL = "https://api.moonshot.cn/v1"
+ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 def detect_provider(model: str) -> Provider:

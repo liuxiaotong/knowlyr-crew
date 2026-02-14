@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import yaml
 from click.testing import CliRunner
 
 from crew import __version__
@@ -356,7 +357,6 @@ steps:
         assert result.exit_code == 1
 
     def test_pipeline_run(self, tmp_path):
-        import yaml
         data = {
             "name": "test-run",
             "steps": [
@@ -372,3 +372,98 @@ steps:
         assert result.exit_code == 0
         assert "code-reviewer" in result.output
         assert "test-engineer" in result.output
+
+    def test_pipeline_graph(self, tmp_path, monkeypatch):
+        pl_dir = tmp_path / ".crew" / "pipelines"
+        pl_dir.mkdir(parents=True)
+        data = {
+            "name": "test-graph",
+            "steps": [
+                {"employee": "code-reviewer"},
+                {"employee": "test-engineer"},
+            ],
+        }
+        (pl_dir / "test-graph.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "graph", "test-graph"])
+        assert result.exit_code == 0
+        assert "graph LR" in result.output
+        assert "code-reviewer" in result.output
+        assert "test-engineer" in result.output
+
+    def test_pipeline_graph_not_found(self):
+        result = self.runner.invoke(main, ["pipeline", "graph", "nonexistent"])
+        assert result.exit_code == 1
+
+    def test_pipeline_graph_with_parallel(self, tmp_path, monkeypatch):
+        pl_dir = tmp_path / ".crew" / "pipelines"
+        pl_dir.mkdir(parents=True)
+        data = {
+            "name": "test-par",
+            "steps": [
+                {"employee": "code-reviewer"},
+                {"parallel": [
+                    {"employee": "test-engineer"},
+                    {"employee": "refactor-guide"},
+                ]},
+                {"employee": "pr-creator"},
+            ],
+        }
+        (pl_dir / "test-par.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "graph", "test-par"])
+        assert result.exit_code == 0
+        assert "并行" in result.output
+        assert "合并" in result.output
+
+    def test_cron_list_empty(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["cron", "list", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "未配置" in result.output
+
+    def test_cron_list_with_schedules(self, tmp_path, monkeypatch):
+        cron_dir = tmp_path / ".crew"
+        cron_dir.mkdir(parents=True)
+        data = {
+            "schedules": [
+                {
+                    "name": "daily-review",
+                    "cron": "0 9 * * *",
+                    "target_type": "pipeline",
+                    "target_name": "code-review",
+                    "args": {"target": "main"},
+                },
+            ],
+        }
+        (cron_dir / "cron.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["cron", "list", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "daily-review" in result.output
+
+    def test_cron_preview_empty(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["cron", "preview", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "未配置" in result.output
+
+    def test_cron_preview_with_schedules(self, tmp_path, monkeypatch):
+        cron_dir = tmp_path / ".crew"
+        cron_dir.mkdir(parents=True)
+        data = {
+            "schedules": [
+                {
+                    "name": "hourly",
+                    "cron": "0 * * * *",
+                    "target_type": "employee",
+                    "target_name": "test-engineer",
+                },
+            ],
+        }
+        (cron_dir / "cron.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["cron", "preview", "-n", "3", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        # Rich table 可能截断名称，检查有输出且无报错
+        assert "触发时间" in result.output or "hourly" in result.output

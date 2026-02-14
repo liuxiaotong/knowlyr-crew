@@ -91,6 +91,53 @@ def validate_pipeline(
     return errors
 
 
+def pipeline_to_mermaid(pipeline: Pipeline) -> str:
+    """将流水线定义转换为 Mermaid 流程图.
+
+    Returns:
+        Mermaid markdown 文本.
+    """
+    lines = ["graph LR"]
+    lines.append('  S(["开始"])')
+
+    prev_nodes: list[str] = ["S"]
+    parallel_count = 0
+
+    for i, item in enumerate(pipeline.steps):
+        if isinstance(item, ParallelGroup):
+            parallel_count += 1
+            fork = f"F{parallel_count}"
+            join = f"J{parallel_count}"
+            lines.append(f'  {fork}{{"并行"}}')
+            lines.append(f'  {join}{{"合并"}}')
+
+            for prev in prev_nodes:
+                lines.append(f"  {prev} --> {fork}")
+
+            sub_nodes = []
+            for j, sub in enumerate(item.parallel):
+                node_id = sub.id or f"s{i}_{j}"
+                lines.append(f'  {node_id}["{sub.employee}"]')
+                lines.append(f"  {fork} --> {node_id}")
+                lines.append(f"  {node_id} --> {join}")
+                sub_nodes.append(node_id)
+
+            prev_nodes = [join]
+        else:
+            node_id = item.id or f"s{i}"
+            lines.append(f'  {node_id}["{item.employee}"]')
+            for prev in prev_nodes:
+                lines.append(f"  {prev} --> {node_id}")
+            prev_nodes = [node_id]
+
+    # 终止节点
+    lines.append('  E(["结束"])')
+    for prev in prev_nodes:
+        lines.append(f"  {prev} --> E")
+
+    return "\n".join(lines)
+
+
 # ── 输出引用解析 ──
 
 

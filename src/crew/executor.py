@@ -1,8 +1,10 @@
-"""LLM 执行器 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot."""
+"""LLM 执行器 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot / Gemini / Zhipu / Qwen."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import Callable
@@ -10,12 +12,31 @@ from typing import Callable
 from crew.providers import (
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
+    ZHIPU_BASE_URL,
+    QWEN_BASE_URL,
     Provider,
     detect_provider,
     resolve_api_key,
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """判断异常是否可重试."""
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        return status == 429 or status >= 500
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    return False
+
+
+def _retry_delay(attempt: int) -> float:
+    """指数退避延迟（秒）: 1, 2, 4."""
+    return float(2 ** attempt)
 
 
 # ── Lazy SDK imports ──
@@ -37,6 +58,16 @@ def _get_openai():
         import openai
 
         return openai
+    except ImportError:
+        return None
+
+
+def _get_genai():
+    """Lazy import google.generativeai SDK."""
+    try:
+        import google.generativeai as genai
+
+        return genai
     except ImportError:
         return None
 
@@ -290,6 +321,119 @@ async def _openai_aexecute(
     )
 
 
+# ── Gemini 实现 ──
+
+
+def _gemini_execute(
+    system_prompt: str,
+    user_message: str,
+    api_key: str,
+    model: str,
+    temperature: float | None,
+    max_tokens: int | None,
+    stream: bool,
+    on_chunk: Callable[[str], None] | None,
+) -> ExecutionResult:
+    genai = _get_genai()
+    if genai is None:
+        raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
+
+    genai.configure(api_key=api_key)
+    gen_config = {}
+    if temperature is not None:
+        gen_config["temperature"] = temperature
+    if max_tokens is not None:
+        gen_config["max_output_tokens"] = max_tokens
+
+    client = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=system_prompt,
+        generation_config=gen_config or None,
+    )
+
+    if stream and on_chunk:
+        response = client.generate_content(user_message, stream=True)
+        collected = []
+        for chunk in response:
+            if chunk.text:
+                collected.append(chunk.text)
+                on_chunk(chunk.text)
+        # Get usage from final response
+        usage = getattr(response, "usage_metadata", None)
+        return ExecutionResult(
+            content="".join(collected),
+            model=model,
+            input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+            output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+            stop_reason="stop",
+        )
+
+    response = client.generate_content(user_message)
+    usage = getattr(response, "usage_metadata", None)
+    return ExecutionResult(
+        content=response.text or "",
+        model=model,
+        input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+        output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+        stop_reason="stop",
+    )
+
+
+async def _gemini_aexecute(
+    system_prompt: str,
+    user_message: str,
+    api_key: str,
+    model: str,
+    temperature: float | None,
+    max_tokens: int | None,
+    stream: bool,
+) -> ExecutionResult | AsyncIterator[str]:
+    genai = _get_genai()
+    if genai is None:
+        raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
+
+    genai.configure(api_key=api_key)
+    gen_config = {}
+    if temperature is not None:
+        gen_config["temperature"] = temperature
+    if max_tokens is not None:
+        gen_config["max_output_tokens"] = max_tokens
+
+    client = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=system_prompt,
+        generation_config=gen_config or None,
+    )
+
+    if stream:
+        async def _stream() -> AsyncIterator[str]:
+            response = await client.generate_content_async(user_message, stream=True)
+            collected = []
+            async for chunk in response:
+                if chunk.text:
+                    collected.append(chunk.text)
+                    yield chunk.text
+            usage = getattr(response, "usage_metadata", None)
+            _stream.result = ExecutionResult(
+                content="".join(collected),
+                model=model,
+                input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+                output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+                stop_reason="stop",
+            )
+        return _stream()
+
+    response = await client.generate_content_async(user_message)
+    usage = getattr(response, "usage_metadata", None)
+    return ExecutionResult(
+        content=response.text or "",
+        model=model,
+        input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+        output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
+        stop_reason="stop",
+    )
+
+
 # ── 公开 API ──
 
 
@@ -322,22 +466,45 @@ def execute_prompt(
     provider = detect_provider(model)
     resolved_key = resolve_api_key(provider, api_key)
 
-    if provider == Provider.ANTHROPIC:
-        return _anthropic_execute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream, on_chunk,
-        )
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            if provider == Provider.ANTHROPIC:
+                return _anthropic_execute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream, on_chunk,
+                )
 
-    base_url = {
-        Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
-        Provider.MOONSHOT: MOONSHOT_BASE_URL,
-    }.get(provider)
+            if provider == Provider.GEMINI:
+                return _gemini_execute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream, on_chunk,
+                )
 
-    return _openai_execute(
-        system_prompt, user_message, resolved_key, model,
-        temperature, max_tokens, stream, on_chunk,
-        base_url=base_url,
-    )
+            base_url = {
+                Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                Provider.ZHIPU: ZHIPU_BASE_URL,
+                Provider.QWEN: QWEN_BASE_URL,
+            }.get(provider)
+
+            return _openai_execute(
+                system_prompt, user_message, resolved_key, model,
+                temperature, max_tokens, stream, on_chunk,
+                base_url=base_url,
+            )
+        except Exception as e:
+            if attempt < MAX_RETRIES and _is_retryable(e):
+                delay = _retry_delay(attempt)
+                logger.warning(
+                    "LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
+                    attempt + 1, MAX_RETRIES, delay, e,
+                )
+                time.sleep(delay)
+                last_exc = e
+            else:
+                raise
+    raise last_exc  # type: ignore[misc]  # should not reach here
 
 
 async def aexecute_prompt(
@@ -359,19 +526,42 @@ async def aexecute_prompt(
     provider = detect_provider(model)
     resolved_key = resolve_api_key(provider, api_key)
 
-    if provider == Provider.ANTHROPIC:
-        return await _anthropic_aexecute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream,
-        )
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            if provider == Provider.ANTHROPIC:
+                return await _anthropic_aexecute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream,
+                )
 
-    base_url = {
-        Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
-        Provider.MOONSHOT: MOONSHOT_BASE_URL,
-    }.get(provider)
+            if provider == Provider.GEMINI:
+                return await _gemini_aexecute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream,
+                )
 
-    return await _openai_aexecute(
-        system_prompt, user_message, resolved_key, model,
-        temperature, max_tokens, stream,
-        base_url=base_url,
-    )
+            base_url = {
+                Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                Provider.ZHIPU: ZHIPU_BASE_URL,
+                Provider.QWEN: QWEN_BASE_URL,
+            }.get(provider)
+
+            return await _openai_aexecute(
+                system_prompt, user_message, resolved_key, model,
+                temperature, max_tokens, stream,
+                base_url=base_url,
+            )
+        except Exception as e:
+            if attempt < MAX_RETRIES and _is_retryable(e):
+                delay = _retry_delay(attempt)
+                logger.warning(
+                    "LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
+                    attempt + 1, MAX_RETRIES, delay, e,
+                )
+                await asyncio.sleep(delay)
+                last_exc = e
+            else:
+                raise
+    raise last_exc  # type: ignore[misc]  # should not reach here

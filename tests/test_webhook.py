@@ -755,6 +755,75 @@ class TestIdentityPassthrough:
         assert call_kwargs.kwargs.get("agent_identity") == {"name": "测试代理", "id": 42}
 
 
+class TestTaskReplay:
+    """任务重放."""
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_replay_completed_task(self, mock_execute):
+        client = _make_client()
+        # 创建一个任务并通过 execute mock 让它保持 pending
+        resp = client.post(
+            "/run/pipeline/test",
+            json={"args": {"target": "main"}, "sync": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        task_id = resp.json()["task_id"]
+        # _execute_task 是 mock 的，任务实际状态仍为 completed (sync mode 会更新)
+        # 直接 mock registry.get 返回 completed 记录
+        mock_record = MagicMock()
+        mock_record.status = "completed"
+        mock_record.target_type = "pipeline"
+        mock_record.target_name = "test-pipe"
+        mock_record.args = {"target": "main"}
+
+        with patch.object(TaskRegistry, "get", return_value=mock_record):
+            resp = client.post(
+                f"/tasks/{task_id}/replay",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+        assert resp.status_code == 202
+
+    def test_replay_not_found(self):
+        client = _make_client()
+        resp = client.post(
+            "/tasks/nonexistent/replay",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 404
+
+    @patch("crew.webhook._execute_task", new_callable=AsyncMock)
+    def test_replay_running_task_rejected(self, mock_execute):
+        client = _make_client()
+        # 创建一个任务（状态 pending）
+        resp = client.post(
+            "/run/pipeline/test",
+            json={"args": {}},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        task_id = resp.json()["task_id"]
+
+        # 尝试重放 pending 任务 → 应该 400
+        resp = client.post(
+            f"/tasks/{task_id}/replay",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 400
+        assert "只能重放" in resp.json()["error"]
+
+
+class TestMetricsEndpoint:
+    """指标端点."""
+
+    def test_metrics_returns_json(self):
+        client = _make_client(token=None)
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "calls" in data
+        assert "tokens" in data
+        assert "uptime_seconds" in data
+
+
 class TestNoAuth:
     """不启用认证."""
 
