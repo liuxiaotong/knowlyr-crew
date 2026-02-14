@@ -78,14 +78,13 @@ class CronScheduler:
                 delay = next_time - time.time()
                 if delay > 0:
                     await asyncio.sleep(delay)
-                elif delay < -60:
-                    self._missed_counts[schedule.name] = self._missed_counts.get(schedule.name, 0) + 1
-                    logger.warning(
-                        "Cron 漏执行 [%s]: 延迟 %.0fs (累计 %d 次)",
-                        schedule.name, -delay, self._missed_counts[schedule.name],
-                    )
-                    await asyncio.sleep(0)
                 else:
+                    if delay < -60:
+                        self._missed_counts[schedule.name] = self._missed_counts.get(schedule.name, 0) + 1
+                        logger.warning(
+                            "Cron 漏执行 [%s]: 延迟 %.0fs (累计 %d 次)",
+                            schedule.name, -delay, self._missed_counts[schedule.name],
+                        )
                     await asyncio.sleep(0)  # 让出事件循环
                 if not self._running:
                     break

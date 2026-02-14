@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 from typing import Any
 
 from crew.memory import MemoryStore
 from crew.memory_index import MemorySearchIndex
 from crew.session_recorder import SessionRecorder
+
+logger = logging.getLogger(__name__)
 
 
 def _truncate(text: str, length: int = 120) -> str:

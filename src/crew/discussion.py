@@ -4,10 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
-_TOPIC_FILENAME_MAX_LENGTH = 60
 from typing import Literal, TYPE_CHECKING
 
 import yaml
@@ -21,6 +17,10 @@ from crew.models import DiscussionPlan, Employee, EmployeeOutput, ParticipantPro
 
 if TYPE_CHECKING:
     from crew.id_client import AgentIdentity
+
+logger = logging.getLogger(__name__)
+
+_TOPIC_FILENAME_MAX_LENGTH = 60
 
 
 # ── 数据模型 ──

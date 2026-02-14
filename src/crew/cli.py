@@ -3,9 +3,9 @@
 import json
 import jsonschema
 import logging
+import subprocess
 import sys
-
-logger = logging.getLogger(__name__)
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,17 +14,17 @@ import click
 from crew import __version__
 from crew import sdk
 from crew.discovery import discover_employees
-from crew.engine import CrewEngine
-from crew.log import WorkLogger
-from crew.lanes import LaneLock, lane_lock
-from crew.session_recorder import SessionRecorder
-from datetime import datetime, timezone
-import subprocess
-from crew.parser import parse_employee, parse_employee_dir, validate_employee
-from crew.template_manager import apply_template, discover_templates
-from crew.pipeline import load_pipeline, validate_pipeline
 from crew.discussion import load_discussion, validate_discussion
+from crew.engine import CrewEngine
+from crew.lanes import LaneLock, lane_lock
+from crew.log import WorkLogger
+from crew.parser import parse_employee, parse_employee_dir, validate_employee
+from crew.pipeline import load_pipeline, validate_pipeline
+from crew.session_recorder import SessionRecorder
 from crew.session_summary import SessionMemoryWriter
+from crew.template_manager import apply_template, discover_templates
+
+logger = logging.getLogger(__name__)
 
 EMPLOYEE_SUBDIR = Path("private") / "employees"
 
