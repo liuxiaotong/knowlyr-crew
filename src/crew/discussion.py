@@ -670,7 +670,7 @@ def _render_participant_prompt(
         logger.debug("加载员工 %s 历史经验失败: %s", emp.name, e)
 
     # 预研发现（如果有 research round，第一轮注入）
-    if is_first_round and emp.research_instructions or (is_first_round and emp.tools):
+    if is_first_round and (emp.research_instructions or emp.tools):
         parts.extend(["---", "", "## 你的预研发现", ""])
         parts.append("{research_findings}")
         parts.append("")
