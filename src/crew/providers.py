@@ -1,4 +1,4 @@
-"""LLM Provider 检测与 API Key 解析 — 支持 Anthropic / OpenAI / DeepSeek."""
+"""LLM Provider 检测与 API Key 解析 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ class Provider(Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
+    MOONSHOT = "moonshot"
 
 
 # ── 模型前缀 → Provider 映射 ──
@@ -22,21 +23,25 @@ _MODEL_PREFIXES: list[tuple[str, Provider]] = [
     ("o4-", Provider.OPENAI),
     ("chatgpt-", Provider.OPENAI),
     ("deepseek-", Provider.DEEPSEEK),
+    ("moonshot-", Provider.MOONSHOT),
 ]
 
 DEFAULT_MODELS: dict[Provider, str] = {
     Provider.ANTHROPIC: "claude-sonnet-4-20250514",
     Provider.OPENAI: "gpt-4o",
     Provider.DEEPSEEK: "deepseek-chat",
+    Provider.MOONSHOT: "moonshot-v1-128k",
 }
 
 API_KEY_ENV_VARS: dict[Provider, str] = {
     Provider.ANTHROPIC: "ANTHROPIC_API_KEY",
     Provider.OPENAI: "OPENAI_API_KEY",
     Provider.DEEPSEEK: "DEEPSEEK_API_KEY",
+    Provider.MOONSHOT: "MOONSHOT_API_KEY",
 }
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+MOONSHOT_BASE_URL = "https://api.moonshot.cn/v1"
 
 
 def detect_provider(model: str) -> Provider:

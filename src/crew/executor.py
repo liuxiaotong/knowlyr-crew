@@ -1,4 +1,4 @@
-"""LLM 执行器 — 支持 Anthropic / OpenAI / DeepSeek."""
+"""LLM 执行器 — 支持 Anthropic / OpenAI / DeepSeek / Moonshot."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import Callable
 
-from crew.providers import Provider, detect_provider, resolve_api_key, DEEPSEEK_BASE_URL
+from crew.providers import (
+    DEEPSEEK_BASE_URL,
+    MOONSHOT_BASE_URL,
+    Provider,
+    detect_provider,
+    resolve_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -321,17 +327,17 @@ def execute_prompt(
             system_prompt, user_message, resolved_key, model,
             temperature, max_tokens, stream, on_chunk,
         )
-    elif provider == Provider.DEEPSEEK:
-        return _openai_execute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream, on_chunk,
-            base_url=DEEPSEEK_BASE_URL,
-        )
-    else:
-        return _openai_execute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream, on_chunk,
-        )
+
+    base_url = {
+        Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+        Provider.MOONSHOT: MOONSHOT_BASE_URL,
+    }.get(provider)
+
+    return _openai_execute(
+        system_prompt, user_message, resolved_key, model,
+        temperature, max_tokens, stream, on_chunk,
+        base_url=base_url,
+    )
 
 
 async def aexecute_prompt(
@@ -358,14 +364,14 @@ async def aexecute_prompt(
             system_prompt, user_message, resolved_key, model,
             temperature, max_tokens, stream,
         )
-    elif provider == Provider.DEEPSEEK:
-        return await _openai_aexecute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream,
-            base_url=DEEPSEEK_BASE_URL,
-        )
-    else:
-        return await _openai_aexecute(
-            system_prompt, user_message, resolved_key, model,
-            temperature, max_tokens, stream,
-        )
+
+    base_url = {
+        Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+        Provider.MOONSHOT: MOONSHOT_BASE_URL,
+    }.get(provider)
+
+    return await _openai_aexecute(
+        system_prompt, user_message, resolved_key, model,
+        temperature, max_tokens, stream,
+        base_url=base_url,
+    )
