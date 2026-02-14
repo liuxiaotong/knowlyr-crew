@@ -27,6 +27,7 @@ def create_webhook_app(
     project_dir: Path | None = None,
     token: str | None = None,
     config: "WebhookConfig | None" = None,
+    cron_config: "CronConfig | None" = None,
 ) -> "Starlette":
     """创建 webhook Starlette 应用.
 
@@ -34,6 +35,7 @@ def create_webhook_app(
         project_dir: 项目目录.
         token: Bearer token（可选，为空则不启用认证）.
         config: Webhook 配置.
+        cron_config: Cron 调度配置（可选）.
     """
     if not HAS_STARLETTE:
         raise ImportError("starlette 未安装。请运行: pip install knowlyr-crew[webhook]")
@@ -50,6 +52,23 @@ def create_webhook_app(
         registry=registry,
     )
 
+    # 初始化 cron 调度器
+    scheduler = None
+    if cron_config and cron_config.schedules:
+        from crew.cron_scheduler import CronScheduler
+
+        async def _cron_execute(schedule):
+            record = ctx.registry.create(
+                trigger="cron",
+                target_type=schedule.target_type,
+                target_name=schedule.target_name,
+                args=schedule.args,
+            )
+            await _execute_task(ctx, record.task_id)
+
+        scheduler = CronScheduler(config=cron_config, execute_fn=_cron_execute)
+        ctx.scheduler = scheduler
+
     routes = [
         Route("/health", endpoint=_health, methods=["GET"]),
         Route("/webhook/github", endpoint=_make_handler(ctx, _handle_github), methods=["POST"]),
@@ -58,9 +77,18 @@ def create_webhook_app(
         Route("/run/pipeline/{name}", endpoint=_make_handler(ctx, _handle_run_pipeline), methods=["POST"]),
         Route("/run/employee/{name}", endpoint=_make_handler(ctx, _handle_run_employee), methods=["POST"]),
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
+        Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
     ]
 
-    app = Starlette(routes=routes)
+    async def on_startup():
+        if scheduler:
+            await scheduler.start()
+
+    async def on_shutdown():
+        if scheduler:
+            await scheduler.stop()
+
+    app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 
     # 添加认证中间件
     if token:
@@ -84,6 +112,7 @@ class _AppContext:
         self.project_dir = project_dir
         self.config = config
         self.registry = registry
+        self.scheduler = None  # CronScheduler, set by create_webhook_app
 
 
 def _make_handler(ctx: _AppContext, handler):
@@ -225,6 +254,17 @@ async def _handle_task_status(request: Request, ctx: _AppContext) -> JSONRespons
     return JSONResponse(record.model_dump(mode="json"))
 
 
+async def _handle_cron_status(request: Request, ctx: _AppContext) -> JSONResponse:
+    """查询 cron 调度器状态."""
+    if ctx.scheduler is None:
+        return JSONResponse({"enabled": False, "schedules": []})
+    return JSONResponse({
+        "enabled": True,
+        "running": ctx.scheduler.running,
+        "schedules": ctx.scheduler.get_next_runs(),
+    })
+
+
 # ── 任务调度 ──
 
 
@@ -355,6 +395,7 @@ def serve_webhook(
     port: int = 8765,
     project_dir: Path | None = None,
     token: str | None = None,
+    enable_cron: bool = True,
 ) -> None:
     """启动 webhook 服务器."""
     try:
@@ -365,7 +406,18 @@ def serve_webhook(
     from crew.webhook_config import load_webhook_config
 
     config = load_webhook_config(project_dir)
-    app = create_webhook_app(project_dir=project_dir, token=token, config=config)
+
+    cron_config = None
+    if enable_cron:
+        from crew.cron_config import load_cron_config
+        cron_config = load_cron_config(project_dir)
+
+    app = create_webhook_app(
+        project_dir=project_dir,
+        token=token,
+        config=config,
+        cron_config=cron_config,
+    )
 
     logger.info("启动 Webhook 服务器: %s:%d", host, port)
     uvicorn.run(app, host=host, port=port)

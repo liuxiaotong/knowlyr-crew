@@ -2818,11 +2818,15 @@ def agents_sync_cmd(name: str):
     default=None,
     help="项目目录（默认当前目录）",
 )
-def serve(host, port, token, project_dir):
-    """启动 Webhook 服务器."""
+@click.option("--no-cron", is_flag=True, help="禁用 cron 调度器")
+def serve(host, port, token, project_dir, no_cron):
+    """启动 Webhook 服务器（含 Cron 调度）."""
     from crew.webhook import serve_webhook
 
-    serve_webhook(host=host, port=port, project_dir=project_dir, token=token)
+    serve_webhook(
+        host=host, port=port, project_dir=project_dir,
+        token=token, enable_cron=not no_cron,
+    )
 
 
 # ── mcp 命令 ──
