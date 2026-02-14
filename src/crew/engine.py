@@ -107,6 +107,7 @@ class CrewEngine:
         positional: list[str] | None = None,
         agent_identity: "AgentIdentity | None" = None,
         project_info: "ProjectInfo | None" = None,
+        exemplar_prompt: str = "",
     ) -> str:
         """生成完整的 system prompt.
 
@@ -167,6 +168,10 @@ class CrewEngine:
         # Agent memory（持久记忆/上下文）
         if agent_identity and agent_identity.memory:
             parts.extend(["", "---", "", "## Agent 记忆", "", agent_identity.memory])
+
+        # Few-shot 范例（来自 knowlyr-id 的高分输出）
+        if exemplar_prompt:
+            parts.extend(["", "---", "", exemplar_prompt])
 
         # 本地持久化记忆（有 rendered body 时使用语义搜索）
         try:

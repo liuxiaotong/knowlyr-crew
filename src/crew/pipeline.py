@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from crew.context_detector import detect_project
 from crew.discovery import discover_employees
@@ -174,8 +177,12 @@ def _resolve_output_refs(
             return outputs_by_id[ref]
         try:
             idx = int(ref)
-            return outputs_by_index.get(idx, m.group(0))
+            result = outputs_by_index.get(idx, m.group(0))
+            if result == m.group(0):
+                logger.warning("未解析输出引用: %s", m.group(0))
+            return result
         except ValueError:
+            logger.warning("未解析输出引用: %s", m.group(0))
             return m.group(0)
 
     value = re.sub(r"\{steps\.([^.]+)\.output\}", _replace_ref, value)
@@ -196,6 +203,17 @@ def _resolve_agent_identity(agent_id: int | None) -> "AgentIdentity | None":
         return None
 
 
+def _resolve_exemplars(agent_id: int | None, employee_name: str) -> str:
+    """获取 agent 的 few-shot 范例提示文本（可选）."""
+    if agent_id is None:
+        return ""
+    try:
+        from crew.id_client import fetch_exemplars
+        return fetch_exemplars(agent_id, employee_name)
+    except Exception:
+        return ""
+
+
 def _execute_single_step(
     step: PipelineStep,
     index: int,
@@ -210,6 +228,7 @@ def _execute_single_step(
     execute: bool,
     api_key: str | None,
     model: str | None,
+    exemplar_prompt: str = "",
 ) -> StepResult:
     """执行单个步骤：解析参数 → 生成 prompt → 可选 LLM 调用."""
     emp = employees.get(step.employee)
@@ -237,6 +256,7 @@ def _execute_single_step(
         args=resolved_args,
         agent_identity=agent_identity,
         project_info=project_info,
+        exemplar_prompt=exemplar_prompt,
     )
 
     # 3. 可选 LLM 执行
@@ -341,12 +361,13 @@ def run_pipeline(
                     futures = {}
                     for sub in item.parallel:
                         idx = flat_index
+                        ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                         future = pool.submit(
                             _execute_single_step,
                             sub, idx, engine, employees, initial_args,
                             outputs_by_id, outputs_by_index, prev_output,
                             agent_identity, project_info,
-                            execute, api_key, model,
+                            execute, api_key, model, ex_prompt,
                         )
                         futures[future] = (sub, idx)
                         flat_index += 1
@@ -362,11 +383,12 @@ def run_pipeline(
             else:
                 # prompt-only 模式顺序生成
                 for sub in item.parallel:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     r = _execute_single_step(
                         sub, flat_index, engine, employees, initial_args,
                         outputs_by_id, outputs_by_index, prev_output,
                         agent_identity, project_info,
-                        execute, api_key, model,
+                        execute, api_key, model, ex_prompt,
                     )
                     group_results.append(r)
                     if r.step_id:
@@ -381,11 +403,12 @@ def run_pipeline(
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
         else:
+            ex_prompt = _resolve_exemplars(agent_id, item.employee)
             r = _execute_single_step(
                 item, flat_index, engine, employees, initial_args,
                 outputs_by_id, outputs_by_index, prev_output,
                 agent_identity, project_info,
-                execute, api_key, model,
+                execute, api_key, model, ex_prompt,
             )
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
@@ -455,12 +478,13 @@ async def arun_pipeline(
                 for sub in item.parallel:
                     idx = flat_index
                     indices.append(idx)
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     tasks.append(
                         _aexecute_single_step(
                             sub, idx, engine, employees, initial_args,
                             outputs_by_id, outputs_by_index, prev_output,
                             agent_identity, project_info,
-                            api_key, model,
+                            api_key, model, ex_prompt,
                         )
                     )
                     flat_index += 1
@@ -468,11 +492,12 @@ async def arun_pipeline(
             else:
                 group_results = []
                 for sub in item.parallel:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     r = _execute_single_step(
                         sub, flat_index, engine, employees, initial_args,
                         outputs_by_id, outputs_by_index, prev_output,
                         agent_identity, project_info,
-                        False, None, None,
+                        False, None, None, ex_prompt,
                     )
                     group_results.append(r)
                     flat_index += 1
@@ -492,19 +517,20 @@ async def arun_pipeline(
                 for r in group_results:
                     on_step_complete(r, checkpoint)
         else:
+            ex_prompt = _resolve_exemplars(agent_id, item.employee)
             if execute:
                 r = await _aexecute_single_step(
                     item, flat_index, engine, employees, initial_args,
                     outputs_by_id, outputs_by_index, prev_output,
                     agent_identity, project_info,
-                    api_key, model,
+                    api_key, model, ex_prompt,
                 )
             else:
                 r = _execute_single_step(
                     item, flat_index, engine, employees, initial_args,
                     outputs_by_id, outputs_by_index, prev_output,
                     agent_identity, project_info,
-                    False, None, None,
+                    False, None, None, ex_prompt,
                 )
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
@@ -588,12 +614,13 @@ async def aresume_pipeline(
             tasks = []
             for sub in item.parallel:
                 idx = flat_index
+                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                 tasks.append(
                     _aexecute_single_step(
                         sub, idx, engine, employees, initial_args,
                         outputs_by_id, outputs_by_index, prev_output,
                         agent_identity, project_info,
-                        api_key, model,
+                        api_key, model, ex_prompt,
                     )
                 )
                 flat_index += 1
@@ -614,11 +641,12 @@ async def aresume_pipeline(
                 for r in group_results:
                     on_step_complete(r, cp)
         else:
+            ex_prompt = _resolve_exemplars(agent_id, item.employee)
             r = await _aexecute_single_step(
                 item, flat_index, engine, employees, initial_args,
                 outputs_by_id, outputs_by_index, prev_output,
                 agent_identity, project_info,
-                api_key, model,
+                api_key, model, ex_prompt,
             )
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
@@ -658,6 +686,7 @@ async def _aexecute_single_step(
     project_info: "ProjectInfo | None",
     api_key: str | None,
     model: str | None,
+    exemplar_prompt: str = "",
 ) -> StepResult:
     """异步执行单个步骤."""
     emp = employees.get(step.employee)
@@ -681,6 +710,7 @@ async def _aexecute_single_step(
     prompt = engine.prompt(
         emp, args=resolved_args,
         agent_identity=agent_identity, project_info=project_info,
+        exemplar_prompt=exemplar_prompt,
     )
 
     try:

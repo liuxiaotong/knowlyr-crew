@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -584,6 +585,64 @@ async def alist_agents() -> list[dict] | None:
         return None
 
 
+# ── 范例获取 ──
+
+
+def fetch_exemplars(agent_id: int, task_type: str, limit: int = 2) -> str:
+    """从 knowlyr-id 获取 few-shot 范例提示文本.
+
+    Returns:
+        格式化的 markdown 字符串，无范例时返回空字符串
+    """
+    if _breaker.is_open():
+        return ""
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return ""
+    base_url, token = _get_config()
+    url = f"{base_url}/api/work/exemplars"
+    try:
+        resp = httpx.get(
+            url,
+            headers=_headers(token),
+            params={"agent_id": agent_id, "task_type": task_type, "limit": limit},
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        _breaker.record_success()
+        return resp.json().get("prompt", "")
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 范例获取失败: %s", agent_id, e)
+        return ""
+
+
+async def afetch_exemplars(agent_id: int, task_type: str, limit: int = 2) -> str:
+    """fetch_exemplars 的异步版本."""
+    if _breaker.is_open():
+        return ""
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return ""
+    base_url, token = _get_config()
+    url = f"{base_url}/api/work/exemplars"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                headers=_headers(token),
+                params={"agent_id": agent_id, "task_type": task_type, "limit": limit},
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            _breaker.record_success()
+            return resp.json().get("prompt", "")
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 范例获取失败: %s", agent_id, e)
+        return ""
+
+
 # ── 工作记录提交 ──
 
 
@@ -710,3 +769,54 @@ async def alog_work(
         _breaker.record_failure()
         logger.warning("Agent %s 工作记录提交失败: %s", agent_id, e)
         return None
+
+
+# ── 周期性心跳管理器 ──
+
+
+class HeartbeatManager:
+    """后台周期性心跳管理器，为所有 active agent 定期发送心跳."""
+
+    def __init__(self, interval: float = 60.0):
+        self._interval = interval
+        self._task: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        """启动心跳循环。仅在 AGENT_API_TOKEN 存在时生效."""
+        if not os.environ.get("AGENT_API_TOKEN"):
+            logger.info("AGENT_API_TOKEN 未设置，心跳管理器未启动")
+            return
+        self._task = asyncio.create_task(self._loop(), name="heartbeat-manager")
+        logger.info("心跳管理器已启动 (间隔 %.0fs)", self._interval)
+
+    async def stop(self) -> None:
+        """停止心跳循环."""
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+            logger.info("心跳管理器已停止")
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                agents = await alist_agents()
+                if agents:
+                    for agent in agents:
+                        aid = agent.get("id")
+                        status = agent.get("agent_status", "active")
+                        if aid and status == "active":
+                            await asend_heartbeat(aid, detail="periodic")
+                            await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("周期心跳失败: %s", e)
+            await asyncio.sleep(self._interval)
