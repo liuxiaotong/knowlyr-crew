@@ -93,31 +93,36 @@ class TaskRegistry:
         """如果记录过多，截断旧记录（原子写入）."""
         if self._persist_path is None:
             return
-        if len(self._tasks) <= self._max_history:
-            return
-        # 按创建时间排序，保留最新的
-        sorted_records = sorted(
-            self._tasks.values(),
-            key=lambda r: r.created_at,
-        )
-        to_remove = sorted_records[: len(sorted_records) - self._max_history]
-        for r in to_remove:
-            del self._tasks[r.task_id]
-            self._events.pop(r.task_id, None)
-        # 原子写入：先写临时文件再 rename
+        with self._lock:
+            if len(self._tasks) <= self._max_history:
+                return
+            # 按创建时间排序，保留最新的
+            sorted_records = sorted(
+                self._tasks.values(),
+                key=lambda r: r.created_at,
+            )
+            to_remove = sorted_records[: len(sorted_records) - self._max_history]
+            for r in to_remove:
+                del self._tasks[r.task_id]
+                self._events.pop(r.task_id, None)
+            keep = sorted_records[len(to_remove):]
+        # 原子写入：先写临时文件再 rename（锁外执行 I/O）
         try:
-            lines = [r.model_dump_json() for r in sorted_records[len(to_remove) :]]
+            lines = [r.model_dump_json() for r in keep]
             content = "\n".join(lines) + "\n"
             fd, tmp_path = tempfile.mkstemp(
                 dir=str(self._persist_path.parent),
                 suffix=".tmp",
             )
+            fd_closed = False
             try:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
+                fd_closed = True
                 os.replace(tmp_path, str(self._persist_path))
             except Exception:
-                os.close(fd) if not os.get_inheritable(fd) else None
+                if not fd_closed:
+                    os.close(fd)
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 raise

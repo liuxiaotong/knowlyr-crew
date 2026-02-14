@@ -681,3 +681,41 @@ class TestOutputRefWarning:
         assert isinstance(group, list)
         # 第二步应该存在（prompt-only 模式）
         assert result.steps[1].employee == "doc-writer"
+
+
+class TestParallelStepErrorLogging:
+    """并行步骤失败时产生 warning 日志."""
+
+    def test_parallel_error_logged(self, caplog):
+        """并行组中的步骤失败应记录 warning."""
+        import logging
+
+        # 使用不存在的员工触发 error
+        pl = Pipeline(
+            name="error-log-test",
+            steps=[
+                ParallelGroup(parallel=[
+                    PipelineStep(employee="nonexistent-employee", args={}),
+                    PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                ]),
+            ],
+        )
+        with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
+            result = run_pipeline(pl, smart_context=False)
+
+        group = result.steps[0]
+        assert isinstance(group, list)
+        # 至少有一个错误步骤
+        error_steps = [r for r in group if r.error]
+        assert len(error_steps) >= 1
+        assert "并行步骤" in caplog.text
+
+
+class TestAsyncGatherTimeout:
+    """异步 gather 超时保护."""
+
+    def test_timeout_constant_exists(self):
+        """超时常量应该有合理的值."""
+        from crew.pipeline import _ASYNC_STEP_TIMEOUT
+        assert _ASYNC_STEP_TIMEOUT > 0
+        assert _ASYNC_STEP_TIMEOUT <= 3600  # 不超过 1 小时

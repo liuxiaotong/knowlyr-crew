@@ -39,11 +39,18 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self.max_bytes:
-            return JSONResponse(
-                {"error": "request too large"},
-                status_code=413,
-            )
+        if content_length:
+            try:
+                if int(content_length) > self.max_bytes:
+                    return JSONResponse(
+                        {"error": "request too large"},
+                        status_code=413,
+                    )
+            except ValueError:
+                return JSONResponse(
+                    {"error": "invalid content-length"},
+                    status_code=400,
+                )
         return await call_next(request)
 
 
@@ -89,4 +96,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         self._buckets[client_ip].append(now)
+
+        # 周期性清理空桶，防止内存泄漏
+        if len(self._buckets) > 1000:
+            stale = [ip for ip, ts in self._buckets.items() if not ts]
+            for ip in stale:
+                del self._buckets[ip]
+
         return await call_next(request)

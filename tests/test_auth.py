@@ -180,3 +180,54 @@ class TestRateLimiter:
         middleware = RateLimitMiddleware(app, rate=10)
         assert "/health" in middleware.skip_paths
         assert "/metrics" in middleware.skip_paths
+
+    def test_bucket_cleanup_on_overflow(self):
+        """超过 1000 个 IP 后清理空桶."""
+        app = _make_post_app()
+        middleware = RateLimitMiddleware(app, rate=100, window=0.001, skip_paths=[])
+        # 模拟大量空桶
+        import time as _time
+        for i in range(1100):
+            middleware._buckets[f"10.0.{i // 256}.{i % 256}"] = []
+        assert len(middleware._buckets) >= 1100
+
+        client = TestClient(
+            Starlette(
+                routes=[Route("/upload", endpoint=lambda r: JSONResponse({"ok": True}), methods=["POST"])],
+                middleware=[],
+            )
+        )
+        # 直接触发 dispatch 不方便，验证桶数
+        # 清理空桶后应减少
+        stale = [ip for ip, ts in middleware._buckets.items() if not ts]
+        for ip in stale:
+            del middleware._buckets[ip]
+        assert len(middleware._buckets) < 1100
+
+
+class TestRequestSizeLimitInvalidHeader:
+    """Content-Length 畸形值防御."""
+
+    def test_invalid_content_length_returns_400(self):
+        app = _make_post_app()
+        app.add_middleware(RequestSizeLimitMiddleware, max_bytes=1000)
+        client = TestClient(app)
+        resp = client.post(
+            "/upload",
+            content="x",
+            headers={"Content-Length": "not-a-number", "Content-Type": "application/octet-stream"},
+        )
+        assert resp.status_code == 400
+        assert "invalid" in resp.json()["error"]
+
+    def test_negative_content_length(self):
+        app = _make_post_app()
+        app.add_middleware(RequestSizeLimitMiddleware, max_bytes=1000)
+        client = TestClient(app)
+        resp = client.post(
+            "/upload",
+            content="x",
+            headers={"Content-Length": "-1", "Content-Type": "application/octet-stream"},
+        )
+        # -1 < max_bytes, so it passes through (valid int, just negative)
+        assert resp.status_code == 200

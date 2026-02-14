@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -9,6 +10,9 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+# 异步并行步骤的超时（秒）
+_ASYNC_STEP_TIMEOUT = 600
 
 import yaml
 from pydantic import BaseModel, Field
@@ -390,6 +394,11 @@ def run_pipeline(
 
                     for future in as_completed(futures):
                         r = future.result()
+                        if r.error:
+                            logger.warning(
+                                "并行步骤 %s (#%d) 失败: %s",
+                                r.employee, r.step_index, r.error_message,
+                            )
                         group_results.append(r)
                         if r.step_id:
                             outputs_by_id[r.step_id] = r.output
@@ -406,6 +415,11 @@ def run_pipeline(
                         agent_identity, project_info,
                         execute, api_key, model, ex_prompt,
                     )
+                    if r.error:
+                        logger.warning(
+                            "并行步骤 %s (#%d) 失败: %s",
+                            r.employee, r.step_index, r.error_message,
+                        )
                     group_results.append(r)
                     if r.step_id:
                         outputs_by_id[r.step_id] = r.output
@@ -470,8 +484,6 @@ async def arun_pipeline(
         on_step_complete: 每步完成后的回调 (step_result, checkpoint_data).
             checkpoint_data 包含恢复所需的完整状态。
     """
-    import asyncio
-
     initial_args = initial_args or {}
     employees = discover_employees(project_dir=project_dir)
     engine = CrewEngine(project_dir=project_dir)
@@ -505,7 +517,18 @@ async def arun_pipeline(
                         )
                     )
                     flat_index += 1
-                group_results = list(await asyncio.gather(*tasks))
+                group_results = list(
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks),
+                        timeout=_ASYNC_STEP_TIMEOUT,
+                    )
+                )
+                for r in group_results:
+                    if r.error:
+                        logger.warning(
+                            "并行步骤 %s (#%d) 失败: %s",
+                            r.employee, r.step_index, r.error_message,
+                        )
             else:
                 group_results = []
                 for sub in item.parallel:
@@ -593,8 +616,6 @@ async def aresume_pipeline(
         checkpoint: 上次保存的断点数据.
         on_step_complete: 每步完成后的回调.
     """
-    import asyncio
-
     initial_args = initial_args or {}
     employees = discover_employees(project_dir=project_dir)
     engine = CrewEngine(project_dir=project_dir)
@@ -642,7 +663,12 @@ async def aresume_pipeline(
                     )
                 )
                 flat_index += 1
-            group_results = list(await asyncio.gather(*tasks))
+            group_results = list(
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks),
+                    timeout=_ASYNC_STEP_TIMEOUT,
+                )
+            )
             group_results.sort(key=lambda r: r.step_index)
 
             for r in group_results:

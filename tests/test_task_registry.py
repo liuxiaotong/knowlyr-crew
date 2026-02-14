@@ -239,3 +239,47 @@ class TestTaskRegistryPersistence:
         # r1 应该被压缩掉
         assert registry.get(r1.task_id) is None
         assert r1.task_id not in registry._events
+
+    def test_compact_thread_safe(self, tmp_path):
+        """并发创建任务时压缩不会竞态."""
+        import threading
+
+        path = tmp_path / "tasks.jsonl"
+        registry = TaskRegistry(persist_path=path, max_history=5)
+        errors = []
+
+        def _create(n):
+            try:
+                for i in range(n):
+                    registry.create(trigger="direct", target_type="employee", target_name=f"e-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_create, args=(10,)) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        # 应保留不超过 max_history 条
+        assert len(registry.list_recent(n=100)) <= 5
+
+    def test_compact_fd_close_on_error(self, tmp_path):
+        """原子写入异常时 fd 正确关闭."""
+        import os
+        from unittest.mock import patch
+
+        path = tmp_path / "tasks.jsonl"
+        registry = TaskRegistry(persist_path=path, max_history=2)
+
+        # 创建超过 max_history 的记录
+        for i in range(4):
+            registry.create(trigger="direct", target_type="employee", target_name=f"e-{i}")
+
+        # os.replace 失败时不应泄漏 fd
+        with patch("os.replace", side_effect=OSError("mock error")):
+            registry.create(trigger="direct", target_type="employee", target_name="trigger-compact")
+
+        # 不应抛异常，文件仍可读
+        assert path.exists()
