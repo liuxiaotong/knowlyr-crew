@@ -27,11 +27,15 @@ class LaneLock:
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fh = open(self.path, "a+")
-        if fcntl:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        fh.write(f"pid={os.getpid()}\n")
-        fh.flush()
-        self._fh = fh
+        try:
+            if fcntl:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            fh.write(f"pid={os.getpid()}\n")
+            fh.flush()
+            self._fh = fh
+        except Exception:
+            fh.close()
+            raise
 
     def release(self) -> None:
         if self._fh is None:

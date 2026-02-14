@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -97,7 +100,8 @@ class MeetingLogger:
                     if keyword.lower() not in text.lower():
                         continue
                 records.append(record)
-            except Exception:
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug("跳过无效会议记录: %s", e)
                 continue
 
         records.reverse()
@@ -119,7 +123,8 @@ class MeetingLogger:
                 if data.get("meeting_id") == meeting_id:
                     record = MeetingRecord(**data)
                     break
-            except Exception:
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug("跳过无效会议记录: %s", e)
                 continue
 
         if record is None:

@@ -1,5 +1,6 @@
 """执行引擎 — 变量替换 + prompt 生成."""
 
+import logging
 import re
 import subprocess
 from datetime import datetime
@@ -7,6 +8,8 @@ from pathlib import Path
 
 from crew.models import Employee, EmployeeOutput
 from crew.paths import resolve_project_dir
+
+logger = logging.getLogger(__name__)
 
 
 def _get_git_branch() -> str:
@@ -17,7 +20,8 @@ def _get_git_branch() -> str:
             capture_output=True, text=True, timeout=5,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.debug("获取 git 分支失败: %s", e)
         return ""
 
 
@@ -180,8 +184,8 @@ class CrewEngine:
             memory_text = memory_store.format_for_prompt(employee.name, query=rendered)
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])
-        except Exception:
-            pass  # 记忆加载失败不影响主流程
+        except Exception as e:
+            logger.debug("记忆加载失败: %s", e)
 
         parts.extend(["", "---", "", rendered])
 

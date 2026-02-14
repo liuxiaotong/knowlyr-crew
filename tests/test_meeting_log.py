@@ -172,3 +172,51 @@ class TestMeetingLogger:
 
         records = logger.list()
         assert records[0].mode == "meeting"
+
+    def test_list_skips_corrupted_lines(self, tmp_path):
+        """index.jsonl 含损坏行时跳过，不影响其它记录."""
+        meetings_dir = tmp_path / "meetings"
+        meetings_dir.mkdir(parents=True)
+        index = meetings_dir / "index.jsonl"
+
+        # 写入一条有效记录 + 一条损坏记录
+        valid = json.dumps({
+            "meeting_id": "20260214_100000",
+            "name": "valid-meeting",
+            "topic": "有效议题",
+            "participants": ["code-reviewer"],
+            "mode": "discussion",
+            "rounds": 2,
+            "output_format": "summary",
+            "started_at": "2026-02-14T10:00:00",
+        })
+        index.write_text(f"{{bad json\n{valid}\n", encoding="utf-8")
+
+        ml = MeetingLogger(meetings_dir=meetings_dir)
+        records = ml.list()
+        assert len(records) == 1
+        assert records[0].name == "valid-meeting"
+
+    def test_get_skips_corrupted_lines(self, tmp_path):
+        """get() 遇到损坏行时跳过."""
+        meetings_dir = tmp_path / "meetings"
+        meetings_dir.mkdir(parents=True)
+        index = meetings_dir / "index.jsonl"
+
+        valid = json.dumps({
+            "meeting_id": "20260214_110000",
+            "name": "target",
+            "topic": "目标",
+            "participants": ["code-reviewer"],
+            "mode": "meeting",
+            "rounds": 1,
+            "output_format": "summary",
+            "started_at": "2026-02-14T11:00:00",
+        })
+        index.write_text(f"not-json\n{valid}\n", encoding="utf-8")
+        (meetings_dir / "20260214_110000.md").write_text("# content")
+
+        ml = MeetingLogger(meetings_dir=meetings_dir)
+        result = ml.get("20260214_110000")
+        assert result is not None
+        assert result[0].name == "target"

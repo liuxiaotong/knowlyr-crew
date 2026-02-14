@@ -179,6 +179,7 @@ def _push_employee(
     name = config.get("name", emp_dir.name)
 
     # 跳过优化：content_hash 未变且非 force
+    prompt_changed = True
     if not force:
         stored_hash = config.get("_content_hash", "")
         current_hash = compute_content_hash(emp_dir)

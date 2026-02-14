@@ -341,3 +341,27 @@ class TestSyncReport:
         assert len(report.pushed) == 0
         assert len(report.pulled) == 1
         assert len(update_calls) == 0
+
+
+class TestSyncForcePromptChanged:
+    """force=True 时 prompt_changed 正确初始化."""
+
+    def test_force_push_renders_prompt(self, tmp_path):
+        """force=True 时始终渲染 prompt（验证 prompt_changed 初始化）."""
+        _make_employee_dir(tmp_path, "force-worker", agent_id=3095)
+
+        update_calls = []
+
+        def mock_update(agent_id, **kwargs):
+            update_calls.append((agent_id, kwargs))
+            return True
+
+        with patch("crew.sync.list_agents", return_value=[{"id": 3095, "status": "active"}]), \
+             patch("crew.sync.update_agent", mock_update), \
+             patch("crew.sync.fetch_agent_identity", return_value=None):
+            report = sync_all(tmp_path, push=True, pull=False, force=True)
+
+        assert len(report.pushed) == 1
+        assert len(update_calls) == 1
+        # force=True 应该渲染 prompt（system_prompt 非 None）
+        assert update_calls[0][1]["system_prompt"] is not None

@@ -145,3 +145,28 @@ class TestCrewEngine:
             project_info=None,
         )
         assert "**项目类型**" not in result
+
+    def test_git_branch_failure_returns_empty(self):
+        """_get_git_branch 在 subprocess 失败时返回空串."""
+        from crew.engine import _get_git_branch
+        from unittest.mock import patch
+
+        with patch("crew.engine.subprocess.run", side_effect=FileNotFoundError):
+            assert _get_git_branch() == ""
+
+        with patch("crew.engine.subprocess.run", side_effect=OSError("err")):
+            assert _get_git_branch() == ""
+
+    def test_prompt_memory_failure_logged(self, caplog):
+        """MemoryStore 加载失败时不影响 prompt 生成."""
+        import logging
+        from unittest.mock import patch
+
+        with caplog.at_level(logging.DEBUG, logger="crew.engine"):
+            with patch("crew.memory.MemoryStore", side_effect=Exception("db error")):
+                result = self.engine.prompt(
+                    self.employee,
+                    args={"target": "test"},
+                )
+        assert "测试员工" in result  # prompt 仍正常生成
+        assert "历史经验" not in result  # 记忆段未注入

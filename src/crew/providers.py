@@ -64,8 +64,10 @@ def detect_provider(model: str) -> Provider:
     """根据模型名前缀检测 LLM 提供商.
 
     Raises:
-        ValueError: 无法识别的模型前缀.
+        ProviderError: 无法识别的模型前缀或无效输入.
     """
+    if not model or not isinstance(model, str):
+        raise ProviderError(f"无效的模型名: 期望非空字符串，得到 {type(model).__name__}")
     model_lower = model.lower()
     for prefix, provider in _MODEL_PREFIXES:
         if model_lower.startswith(prefix):

@@ -76,8 +76,16 @@ class TestDetectProvider:
             detect_provider("llama-3-70b")
 
     def test_empty_model(self):
-        with pytest.raises(ValueError, match="无法识别模型"):
+        with pytest.raises(ValueError, match="无效的模型名"):
             detect_provider("")
+
+    def test_none_model(self):
+        with pytest.raises(ValueError, match="无效的模型名"):
+            detect_provider(None)
+
+    def test_non_string_model(self):
+        with pytest.raises(ValueError, match="无效的模型名"):
+            detect_provider(123)
 
 
 class TestResolveApiKey:

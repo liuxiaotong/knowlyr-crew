@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
 from crew.memory import MemoryStore
@@ -48,8 +51,8 @@ class SessionMemoryWriter:
         if entry:
             try:
                 self.index.rebuild()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("重建记忆索引失败: %s", e)
             return summary
         return None
 

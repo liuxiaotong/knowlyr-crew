@@ -26,3 +26,23 @@ class TestLanes:
         lane.acquire()
         assert lane.path.exists()
         lane.release()
+
+    def test_acquire_closes_fh_on_error(self):
+        """acquire() 在写入失败时关闭文件句柄."""
+        from unittest.mock import patch, MagicMock
+
+        root = Path(tempfile.mkdtemp())
+        lane = LaneLock("error:test", root=root)
+        lane.path.parent.mkdir(parents=True, exist_ok=True)
+
+        mock_fh = MagicMock()
+        mock_fh.write.side_effect = OSError("disk full")
+        mock_fh.fileno.return_value = 3
+
+        with patch("crew.lanes.open", return_value=mock_fh, create=True):
+            try:
+                lane.acquire()
+            except OSError:
+                pass
+
+        mock_fh.close.assert_called_once()
