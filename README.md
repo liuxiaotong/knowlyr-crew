@@ -62,10 +62,10 @@ Crew 通过 MCP 协议暴露三种原语：
 |----------|------|------|
 | **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 列出/查看/运行员工、讨论会、流水线、记忆、评估、日志、项目检测、会议历史 | 15 |
+| **Tools** | 列出/查看/运行员工、讨论会、流水线、记忆、评估、日志、项目检测、会议历史、反馈、状态 | 17 |
 
 <details>
-<summary>15 个 MCP Tools 详情</summary>
+<summary>17 个 MCP Tools 详情</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -84,6 +84,8 @@ Crew 通过 MCP 协议暴露三种原语：
 | `evaluate_decision` | 评估决策并将经验写入员工记忆 |
 | `list_meeting_history` | 查看讨论会历史记录 |
 | `get_meeting_detail` | 获取某次讨论会的完整记录 |
+| `crew_feedback` | 提交工作反馈到 knowlyr-id（评分 + 日志） |
+| `crew_status` | 查询 Agent 状态（单个详情或全部列表） |
 
 </details>
 
