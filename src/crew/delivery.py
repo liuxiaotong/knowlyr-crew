@@ -128,6 +128,27 @@ async def _deliver_webhook(
         return DeliveryResult(target_type="webhook", success=False, detail=str(e))
 
 
+def _validate_smtp_config(
+    host: str, port_str: str, to: str,
+) -> tuple[bool, str]:
+    """校验 SMTP 配置.
+
+    Returns:
+        (ok, error_message) 元组.
+    """
+    if not host:
+        return False, "SMTP_HOST 未配置"
+    try:
+        port = int(port_str)
+    except (ValueError, TypeError):
+        return False, f"SMTP_PORT 无效: {port_str}"
+    if port < 1 or port > 65535:
+        return False, f"SMTP_PORT 超出范围: {port}"
+    if "@" not in to:
+        return False, f"收件人地址无效 (缺少 @): {to}"
+    return True, ""
+
+
 async def _deliver_email(
     target: DeliveryTarget,
     *,
@@ -140,13 +161,16 @@ async def _deliver_email(
         return DeliveryResult(target_type="email", success=False, detail="收件人为空")
 
     smtp_host = os.environ.get("SMTP_HOST", "")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_port_str = os.environ.get("SMTP_PORT", "587")
     smtp_user = os.environ.get("SMTP_USER", "")
     smtp_pass = os.environ.get("SMTP_PASS", "")
     smtp_from = os.environ.get("SMTP_FROM", smtp_user)
 
-    if not smtp_host:
-        return DeliveryResult(target_type="email", success=False, detail="SMTP_HOST 未配置")
+    ok, err = _validate_smtp_config(smtp_host, smtp_port_str, target.to)
+    if not ok:
+        return DeliveryResult(target_type="email", success=False, detail=err)
+
+    smtp_port = int(smtp_port_str)
 
     subject = target.subject.format(name=task_name) if target.subject else f"任务完成: {task_name}"
 
@@ -178,7 +202,7 @@ async def _deliver_email(
 
 def _send_smtp(host: str, port: int, user: str, password: str, msg: MIMEText) -> None:
     """同步 SMTP 发送."""
-    with smtplib.SMTP(host, port) as server:
+    with smtplib.SMTP(host, port, timeout=10) as server:
         server.starttls()
         if user and password:
             server.login(user, password)

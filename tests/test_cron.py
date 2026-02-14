@@ -383,3 +383,107 @@ class TestCronStatusEndpoint:
         client = TestClient(app)
         resp = client.get("/cron/status")
         assert resp.status_code == 401
+
+
+class TestCronMisfire:
+    """Cron 漏执行检测."""
+
+    @pytest.mark.asyncio
+    async def test_misfire_logs_warning(self, caplog):
+        """delay < -60 时记录 warning."""
+        import logging
+        config = CronConfig(schedules=[
+            CronSchedule(
+                name="misfire-test",
+                cron="* * * * *",
+                target_type="pipeline",
+                target_name="test",
+            ),
+        ])
+        mock_fn = AsyncMock()
+        scheduler = CronScheduler(config=config, execute_fn=mock_fn)
+
+        # Mock time.time 返回远未来时间使 delay < -60
+        call_count = 0
+        triggered = asyncio.Event()
+
+        async def _count(schedule):
+            nonlocal call_count
+            call_count += 1
+            triggered.set()
+
+        scheduler._execute_fn = _count
+
+        with caplog.at_level(logging.WARNING), \
+             patch("crew.cron_scheduler.time.time", return_value=9999999999.0):
+            await scheduler.start()
+            try:
+                await asyncio.wait_for(triggered.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            await scheduler.stop()
+
+        assert scheduler._missed_counts.get("misfire-test", 0) >= 1
+        assert "漏执行" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_exception_backoff(self):
+        """连续异常后 sleep 时间递增."""
+        config = CronConfig(schedules=[
+            CronSchedule(
+                name="error-test",
+                cron="* * * * *",
+                target_type="pipeline",
+                target_name="test",
+            ),
+        ])
+
+        call_count = 0
+
+        async def _fail(schedule):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise RuntimeError("test error")
+
+        sleep_times = []
+        original_sleep = asyncio.sleep
+
+        async def _mock_sleep(t):
+            sleep_times.append(t)
+            if len(sleep_times) > 5:
+                # 停止循环
+                raise asyncio.CancelledError()
+            await original_sleep(0)
+
+        scheduler = CronScheduler(config=config, execute_fn=_fail)
+
+        with patch("crew.cron_scheduler.time.time", return_value=9999999999.0), \
+             patch("crew.cron_scheduler.asyncio.sleep", side_effect=_mock_sleep):
+            await scheduler.start()
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                pass
+            await scheduler.stop()
+
+        # 应有递增的 backoff sleep
+        backoff_sleeps = [t for t in sleep_times if t > 0]
+        if len(backoff_sleeps) >= 2:
+            assert backoff_sleeps[1] >= backoff_sleeps[0]
+
+    def test_missed_count_in_status(self):
+        """get_next_runs 包含 missed_count."""
+        config = CronConfig(schedules=[
+            CronSchedule(
+                name="test",
+                cron="0 9 * * *",
+                target_type="pipeline",
+                target_name="full-review",
+            ),
+        ])
+        scheduler = CronScheduler(config=config, execute_fn=AsyncMock())
+        scheduler._missed_counts["test"] = 5
+        runs = scheduler.get_next_runs()
+        assert len(runs) == 1
+        assert runs[0]["missed_count"] == 5

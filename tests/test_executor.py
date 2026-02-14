@@ -845,3 +845,216 @@ class TestMetricsRecording:
         assert snap["calls"]["total"] >= 1
         assert snap["calls"]["success"] >= 1
         assert snap["tokens"]["input"] >= 100
+
+
+class _FakeAsyncStream:
+    """Async iterator with a settable .result attribute for testing."""
+
+    def __init__(self, items, result=None):
+        self._items = iter(items)
+        self.result = result
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._items)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+class _FakeAsyncStreamWithError:
+    """Async iterator that yields items then raises an error."""
+
+    def __init__(self, items, error, result=None):
+        self._items = iter(items)
+        self._error = error
+        self.result = result
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._items)
+        except StopIteration:
+            raise self._error
+
+
+class TestStreamingMetrics:
+    """测试流式模式自动记录指标."""
+
+    @patch("crew.executor._get_anthropic")
+    def test_async_streaming_records_metrics(self, mock_get):
+        """流消费完毕后自动记录指标."""
+        import asyncio
+        from crew.metrics import get_collector
+
+        mock_client = MagicMock()
+
+        # 模拟 streaming response
+        async def _fake_stream(**kwargs):
+            async def _gen():
+                yield "hello"
+                yield " world"
+            gen = _gen()
+            gen.result = MagicMock(
+                content="hello world",
+                model="claude-sonnet-4-20250514",
+                input_tokens=50,
+                output_tokens=10,
+                stop_reason="end_turn",
+            )
+            return gen
+
+        mock_client.messages.stream = MagicMock()
+
+        # 我们直接测试 _MetricsStreamWrapper
+        from crew.executor import _MetricsStreamWrapper, ExecutionResult
+
+        mock_result = ExecutionResult(
+            content="hello world", model="test", input_tokens=50,
+            output_tokens=10, stop_reason="end_turn",
+        )
+
+        inner = _FakeAsyncStream(["hello", " world"], result=mock_result)
+
+        collector = get_collector()
+        collector.reset()
+
+        wrapper = _MetricsStreamWrapper(inner, "anthropic", __import__("time").monotonic())
+
+        async def _consume():
+            chunks = []
+            async for chunk in wrapper:
+                chunks.append(chunk)
+            return chunks
+
+        chunks = asyncio.run(_consume())
+        assert chunks == ["hello", " world"]
+        assert wrapper.result is mock_result
+
+        snap = collector.snapshot()
+        assert snap["calls"]["success"] >= 1
+        assert snap["tokens"]["input"] >= 50
+
+    def test_streaming_wrapper_exposes_result(self):
+        """wrapper.result 透传 inner.result."""
+        import asyncio
+        from crew.executor import _MetricsStreamWrapper, ExecutionResult
+
+        mock_result = ExecutionResult(
+            content="ok", model="test", input_tokens=1,
+            output_tokens=1, stop_reason="stop",
+        )
+
+        inner = _FakeAsyncStream(["ok"], result=mock_result)
+
+        wrapper = _MetricsStreamWrapper(inner, "test", 0)
+        assert wrapper.result is mock_result
+
+    def test_streaming_wrapper_handles_error(self):
+        """流中异常不影响 wrapper."""
+        import asyncio
+        from crew.executor import _MetricsStreamWrapper
+
+        inner = _FakeAsyncStreamWithError(
+            ["part"], RuntimeError("boom"), result=None,
+        )
+        wrapper = _MetricsStreamWrapper(inner, "test", 0)
+
+        async def _consume():
+            chunks = []
+            try:
+                async for chunk in wrapper:
+                    chunks.append(chunk)
+            except RuntimeError:
+                pass
+            return chunks
+
+        chunks = asyncio.run(_consume())
+        assert chunks == ["part"]
+
+
+class TestFallbackModelExtended:
+    """Fallback 模型扩展测试."""
+
+    @patch("crew.executor._get_openai")
+    @patch("crew.executor._get_anthropic")
+    def test_both_models_fail_raises_original(self, mock_ant_get, mock_oai_get):
+        """主 + fallback 都失败时抛出主异常."""
+        # 主模型失败
+        primary_err = Exception("primary failure")
+        primary_err.status_code = 500
+        mock_ant_client = MagicMock()
+        mock_ant_client.messages.create.side_effect = primary_err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_ant_client
+        mock_ant_get.return_value = mock_anthropic
+
+        # Fallback 也失败
+        fallback_err = Exception("fallback failure")
+        mock_oai_client = MagicMock()
+        mock_oai_client.chat.completions.create.side_effect = fallback_err
+        mock_openai = MagicMock()
+        mock_openai.OpenAI.return_value = mock_oai_client
+        mock_oai_get.return_value = mock_openai
+
+        with pytest.raises(Exception, match="primary failure"):
+            execute_prompt(
+                system_prompt="test", api_key="key", stream=False,
+                fallback_model="gpt-4o",
+            )
+
+    @patch("crew.executor._get_anthropic")
+    def test_no_fallback_without_param(self, mock_get):
+        """fallback_model=None 时不触发 fallback."""
+        err = Exception("fail")
+        err.status_code = 401
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        with pytest.raises(Exception, match="fail"):
+            execute_prompt(system_prompt="test", api_key="key", stream=False)
+
+    @patch("crew.executor.time")
+    @patch("crew.executor._get_openai")
+    @patch("crew.executor._get_anthropic")
+    def test_async_fallback_on_failure(self, mock_ant_get, mock_oai_get, mock_time):
+        """异步版本 fallback 生效."""
+        import asyncio
+
+        # 主模型失败
+        primary_err = Exception("primary fail")
+        primary_err.status_code = 429
+        mock_ant_aclient = MagicMock()
+        mock_ant_aclient.messages.create = AsyncMock(side_effect=primary_err)
+        mock_anthropic = MagicMock()
+        mock_anthropic.AsyncAnthropic.return_value = mock_ant_aclient
+        mock_ant_get.return_value = mock_anthropic
+
+        # Fallback 成功
+        mock_choice = MagicMock()
+        mock_choice.message.content = "async fallback ok"
+        mock_choice.finish_reason = "stop"
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.model = "gpt-4o"
+        mock_resp.usage.prompt_tokens = 10
+        mock_resp.usage.completion_tokens = 5
+        mock_oai_aclient = MagicMock()
+        mock_oai_aclient.chat.completions.create = AsyncMock(return_value=mock_resp)
+        mock_openai = MagicMock()
+        mock_openai.AsyncOpenAI.return_value = mock_oai_aclient
+        mock_oai_get.return_value = mock_openai
+
+        from crew.executor import aexecute_prompt
+        result = asyncio.run(aexecute_prompt(
+            system_prompt="test", api_key="key", stream=False,
+            fallback_model="gpt-4o",
+        ))
+        assert result.content == "async fallback ok"

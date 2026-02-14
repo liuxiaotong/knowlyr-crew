@@ -29,6 +29,8 @@ class CronScheduler:
         self._execute_fn = execute_fn  # async fn(schedule) -> None
         self._tasks: list[asyncio.Task] = []
         self._running = False
+        self._missed_counts: dict[str, int] = {}
+        self._error_counts: dict[str, int] = {}
 
     async def start(self) -> None:
         """启动所有 schedule 的后台 task."""
@@ -69,23 +71,35 @@ class CronScheduler:
             schedule.name, schedule.cron, schedule.target_type, schedule.target_name,
         )
 
+        consecutive_errors = 0
         while self._running:
             try:
                 next_time = cron.get_next(float)
                 delay = next_time - time.time()
                 if delay > 0:
                     await asyncio.sleep(delay)
+                elif delay < -60:
+                    self._missed_counts[schedule.name] = self._missed_counts.get(schedule.name, 0) + 1
+                    logger.warning(
+                        "Cron 漏执行 [%s]: 延迟 %.0fs (累计 %d 次)",
+                        schedule.name, -delay, self._missed_counts[schedule.name],
+                    )
+                    await asyncio.sleep(0)
                 else:
                     await asyncio.sleep(0)  # 让出事件循环
                 if not self._running:
                     break
                 logger.info("Cron 触发: [%s]", schedule.name)
                 await self._execute_fn(schedule)
+                consecutive_errors = 0
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Cron 任务执行异常: [%s]", schedule.name)
-                await asyncio.sleep(0)  # 异常后也让出事件循环
+                consecutive_errors += 1
+                self._error_counts[schedule.name] = self._error_counts.get(schedule.name, 0) + 1
+                backoff = min(2 ** consecutive_errors, 60)
+                logger.exception("Cron 任务执行异常: [%s], %.0fs 后重试", schedule.name, backoff)
+                await asyncio.sleep(backoff)
 
     @property
     def schedules(self) -> list[CronSchedule]:
@@ -116,6 +130,7 @@ class CronScheduler:
                     "target_type": schedule.target_type,
                     "target_name": schedule.target_name,
                     "next_run": next_dt.isoformat(),
+                    "missed_count": self._missed_counts.get(schedule.name, 0),
                 })
             except Exception:
                 result.append({

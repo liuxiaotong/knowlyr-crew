@@ -475,6 +475,31 @@ def _record_failure(provider_name: str, exc: Exception) -> None:
         pass
 
 
+class _MetricsStreamWrapper:
+    """包装异步流式迭代器，在流消费完毕后自动记录指标."""
+
+    def __init__(self, inner: AsyncIterator[str], provider_name: str, t0: float):
+        self._inner = inner
+        self._provider_name = provider_name
+        self._t0 = t0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            return await self._inner.__anext__()
+        except StopAsyncIteration:
+            result = getattr(self._inner, "result", None)
+            if result is not None:
+                _record_metrics(self._provider_name, result, time.monotonic() - self._t0)
+            raise
+
+    @property
+    def result(self):
+        return getattr(self._inner, "result", None)
+
+
 # ── 公开 API ──
 
 
@@ -617,9 +642,10 @@ async def aexecute_prompt(
                     temperature, max_tokens, stream,
                     base_url=base_url,
                 )
-            # 流式模式下不记录指标（调用方消费完再记录）
             if not stream and isinstance(result, ExecutionResult):
                 _record_metrics(provider.value, result, time.monotonic() - t0)
+            elif stream:
+                result = _MetricsStreamWrapper(result, provider.value, t0)
             return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):

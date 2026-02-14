@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +50,7 @@ class TaskRegistry:
         self._events: dict[str, asyncio.Event] = {}
         self._persist_path = persist_path
         self._max_history = max_history
+        self._lock = threading.Lock()
 
         if persist_path:
             self._load_history()
@@ -63,6 +67,11 @@ class TaskRegistry:
                 try:
                     record = TaskRecord.model_validate_json(line)
                     self._tasks[record.task_id] = record
+                    # 为已完成的任务创建已设置的 Event
+                    evt = asyncio.Event()
+                    if record.status in ("completed", "failed"):
+                        evt.set()
+                    self._events[record.task_id] = evt
                 except Exception as e:
                     logger.warning("跳过无效的任务记录: %s", e)
                     continue
@@ -81,7 +90,7 @@ class TaskRegistry:
             logger.warning("持久化任务记录失败 [%s]: %s", record.task_id, e)
 
     def _compact_if_needed(self) -> None:
-        """如果记录过多，截断旧记录."""
+        """如果记录过多，截断旧记录（原子写入）."""
         if self._persist_path is None:
             return
         if len(self._tasks) <= self._max_history:
@@ -95,10 +104,23 @@ class TaskRegistry:
         for r in to_remove:
             del self._tasks[r.task_id]
             self._events.pop(r.task_id, None)
-        # 重写文件
+        # 原子写入：先写临时文件再 rename
         try:
             lines = [r.model_dump_json() for r in sorted_records[len(to_remove) :]]
-            self._persist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            content = "\n".join(lines) + "\n"
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._persist_path.parent),
+                suffix=".tmp",
+            )
+            try:
+                os.write(fd, content.encode("utf-8"))
+                os.close(fd)
+                os.replace(tmp_path, str(self._persist_path))
+            except Exception:
+                os.close(fd) if not os.get_inheritable(fd) else None
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
         except Exception as e:
             logger.warning("任务记录压缩失败: %s", e)
 
@@ -118,8 +140,9 @@ class TaskRegistry:
             target_name=target_name,
             args=args or {},
         )
-        self._tasks[task_id] = record
-        self._events[task_id] = asyncio.Event()
+        with self._lock:
+            self._tasks[task_id] = record
+            self._events[task_id] = asyncio.Event()
         self._persist(record)
         self._compact_if_needed()
         return record
@@ -132,28 +155,30 @@ class TaskRegistry:
         error: str | None = None,
     ) -> TaskRecord | None:
         """更新任务状态."""
-        record = self._tasks.get(task_id)
-        if record is None:
-            return None
-        record.status = status
-        if result is not None:
-            record.result = result
-        if error is not None:
-            record.error = error
-        if status in ("completed", "failed"):
-            record.completed_at = datetime.now()
-            event = self._events.get(task_id)
-            if event:
-                event.set()
+        with self._lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                return None
+            record.status = status
+            if result is not None:
+                record.result = result
+            if error is not None:
+                record.error = error
+            if status in ("completed", "failed"):
+                record.completed_at = datetime.now()
+                event = self._events.get(task_id)
+                if event:
+                    event.set()
         self._persist(record)
         return record
 
     def update_checkpoint(self, task_id: str, checkpoint: dict[str, Any]) -> None:
         """更新任务的断点数据."""
-        record = self._tasks.get(task_id)
-        if record is None:
-            return
-        record.checkpoint = checkpoint
+        with self._lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                return
+            record.checkpoint = checkpoint
         self._persist(record)
 
     def get(self, task_id: str) -> TaskRecord | None:

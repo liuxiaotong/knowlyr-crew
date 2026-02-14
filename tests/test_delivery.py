@@ -266,3 +266,55 @@ class TestDeliveryTargetModel:
         assert t.headers == {}
         assert t.to == ""
         assert t.subject == ""
+
+
+class TestSmtpValidation:
+    """SMTP 配置校验."""
+
+    def test_invalid_smtp_port(self):
+        """非数字端口返回错误."""
+        from crew.delivery import _validate_smtp_config
+        ok, err = _validate_smtp_config("smtp.example.com", "abc", "user@example.com")
+        assert ok is False
+        assert "无效" in err
+
+    def test_smtp_port_out_of_range(self):
+        """端口 >65535 返回错误."""
+        from crew.delivery import _validate_smtp_config
+        ok, err = _validate_smtp_config("smtp.example.com", "99999", "user@example.com")
+        assert ok is False
+        assert "超出范围" in err
+
+    def test_invalid_email_format(self):
+        """无 @ 返回错误."""
+        from crew.delivery import _validate_smtp_config
+        ok, err = _validate_smtp_config("smtp.example.com", "587", "no-at-sign")
+        assert ok is False
+        assert "@" in err
+
+    def test_valid_config(self):
+        """合法配置返回 ok."""
+        from crew.delivery import _validate_smtp_config
+        ok, err = _validate_smtp_config("smtp.example.com", "587", "user@example.com")
+        assert ok is True
+        assert err == ""
+
+    def test_smtp_timeout(self):
+        """连接超时返回错误."""
+        target = DeliveryTarget(type="email", to="team@example.com")
+        env = {
+            "SMTP_HOST": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USER": "bot@example.com",
+            "SMTP_PASS": "secret",
+        }
+
+        with patch.dict(os.environ, env, clear=False), \
+             patch("crew.delivery._send_smtp", side_effect=TimeoutError("连接超时")):
+            result = _run(_deliver_email(
+                target, task_name="test",
+                task_result=None, task_error=None,
+            ))
+
+        assert result.success is False
+        assert "超时" in result.detail

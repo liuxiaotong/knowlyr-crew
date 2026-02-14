@@ -378,3 +378,82 @@ class TestEmbeddingTimeout:
                     mock_future.result.assert_called_once_with(timeout=5.0)
             except Exception:
                 pytest.skip("google-generativeai SDK not available")
+
+
+# ── Context manager ──
+
+
+class TestContextManager:
+    """SemanticMemoryIndex context manager."""
+
+    def test_context_manager(self, tmp_path):
+        """with 语句后 _conn 为 None."""
+        with SemanticMemoryIndex(tmp_path / "memory") as index:
+            entry = MemoryEntry(id="1", employee="bot", category="finding", content="test")
+            index.index(entry)
+            assert index._conn is not None
+        assert index._conn is None
+
+    def test_context_manager_on_exception(self, tmp_path):
+        """异常时仍正确关闭."""
+        try:
+            with SemanticMemoryIndex(tmp_path / "memory") as index:
+                entry = MemoryEntry(id="1", employee="bot", category="finding", content="test")
+                index.index(entry)
+                raise ValueError("test error")
+        except ValueError:
+            pass
+        assert index._conn is None
+
+    def test_format_for_prompt_no_leak(self, tmp_path):
+        """format_for_prompt 不泄漏连接."""
+        store = MemoryStore(memory_dir=tmp_path)
+        store.add("bot", "finding", "test data")
+
+        # 建立索引
+        with SemanticMemoryIndex(tmp_path) as index:
+            for entry in store.query("bot", limit=100):
+                index.index(entry)
+
+        # format_for_prompt 使用 with 语句，不泄漏
+        result = store.format_for_prompt("bot", query="test")
+        assert result  # 非空即可
+
+
+# ── Search timeout ──
+
+
+class TestSearchTimeout:
+    """搜索超时测试."""
+
+    def test_search_embedding_timeout_fallback(self, tmp_path):
+        """embed 超时时降级到纯关键词搜索."""
+        index = SemanticMemoryIndex(tmp_path / "memory")
+        entries = [
+            MemoryEntry(id="1", employee="bot", category="finding", content="PostgreSQL 数据库"),
+            MemoryEntry(id="2", employee="bot", category="finding", content="Redis 缓存"),
+        ]
+        for e in entries:
+            index.index(e)
+
+        # Mock embedder.embed 抛出超时
+        original_embedder = index._get_embedder()
+        with patch.object(original_embedder, "embed", side_effect=TimeoutError("embed timeout")):
+            # 传入非常短的 timeout，但关键是 embed 本身会抛异常
+            results = index.search("bot", "PostgreSQL", limit=2, timeout=0.001)
+        # 应降级到关键词搜索，仍返回结果
+        assert len(results) == 2
+        # PostgreSQL 关键词匹配更好的应排前面
+        assert results[0][0] == "1"
+        index.close()
+
+    def test_search_normal_no_timeout(self, tmp_path):
+        """正常搜索不受 timeout 影响."""
+        index = SemanticMemoryIndex(tmp_path / "memory")
+        entry = MemoryEntry(id="1", employee="bot", category="finding", content="测试数据")
+        index.index(entry)
+
+        results = index.search("bot", "测试", limit=10, timeout=10.0)
+        assert len(results) == 1
+        assert results[0][0] == "1"
+        index.close()

@@ -104,8 +104,11 @@ class SemanticMemoryIndex:
         conn.commit()
         return True
 
-    def search(self, employee: str, query: str, limit: int = 10) -> list[tuple[str, str, float]]:
+    def search(self, employee: str, query: str, limit: int = 10, timeout: float = 10.0) -> list[tuple[str, str, float]]:
         """混合搜索：向量相似度 + 关键词匹配，加权合并.
+
+        Args:
+            timeout: embedding 超时秒数，超时后降级为纯关键词搜索.
 
         Returns:
             [(id, content, score), ...] 按综合分数降序排列.
@@ -119,9 +122,17 @@ class SemanticMemoryIndex:
         if not rows:
             return []
 
-        # 向量搜索
+        # 向量搜索（带超时保护）
         embedder = self._get_embedder()
-        query_embedding = embedder.embed(query)
+        try:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(embedder.embed, query)
+                query_embedding = future.result(timeout=timeout)
+        except (FuturesTimeout, Exception) as e:
+            logger.warning("Embedding 超时或失败，降级为关键词搜索: %s", e)
+            query_embedding = None
 
         # 关键词搜索
         query_tokens = set(_tokenize(query))
@@ -174,6 +185,17 @@ class SemanticMemoryIndex:
             (employee,),
         ).fetchone()
         return row[0] > 0 if row else False
+
+    def __enter__(self) -> "SemanticMemoryIndex":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        if getattr(self, "_conn", None) is not None:
+            logger.warning("SemanticMemoryIndex 未显式关闭，请使用 with 语句或调用 close()")
+            self.close()
 
     def close(self) -> None:
         """关闭数据库连接."""

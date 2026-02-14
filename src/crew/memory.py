@@ -218,14 +218,14 @@ class MemoryStore:
             try:
                 from crew.memory_search import SemanticMemoryIndex
 
-                index = SemanticMemoryIndex(self.memory_dir)
-                if index.has_index(employee):
-                    results = index.search(employee, query, limit=limit)
-                    if results:
-                        lines = []
-                        for _id, content, score in results:
-                            lines.append(f"- {content}")
-                        return "\n".join(lines)
+                with SemanticMemoryIndex(self.memory_dir) as index:
+                    if index.has_index(employee):
+                        results = index.search(employee, query, limit=limit)
+                        if results:
+                            lines = []
+                            for _id, content, score in results:
+                                lines.append(f"- {content}")
+                            return "\n".join(lines)
             except Exception:
                 pass  # 降级到原逻辑
 

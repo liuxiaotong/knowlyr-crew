@@ -615,3 +615,69 @@ class TestPipelineToMermaid:
         assert 'pr["pr-creator"]' in mermaid
         assert "J1 --> pr" in mermaid
         assert "pr --> E" in mermaid
+
+
+class TestOutputRefWarning:
+    """输出引用解析 warning 日志."""
+
+    def test_unresolved_ref_warns(self, caplog):
+        """未解析的引用应产生 warning 日志."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
+            result = _resolve_output_refs(
+                "{steps.missing.output}",
+                {},
+                {},
+                "",
+                execute=True,
+            )
+        assert result == "{steps.missing.output}"
+        assert "未解析输出引用" in caplog.text
+
+    def test_unresolved_index_ref_warns(self, caplog):
+        """未解析的索引引用应产生 warning 日志."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
+            result = _resolve_output_refs(
+                "{steps.99.output}",
+                {},
+                {},
+                "",
+                execute=True,
+            )
+        assert result == "{steps.99.output}"
+        assert "未解析输出引用" in caplog.text
+
+    def test_resolved_ref_no_warning(self, caplog):
+        """已解析的引用不应产生 warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
+            result = _resolve_output_refs(
+                "{steps.review.output}",
+                {"review": "good code"},
+                {},
+                "",
+                execute=True,
+            )
+        assert result == "good code"
+        assert "未解析输出引用" not in caplog.text
+
+    def test_parallel_prev_contains_all(self):
+        """并行组后 {prev} 应包含所有子步骤输出（通过 run_pipeline）."""
+        pl = Pipeline(
+            name="par-prev",
+            steps=[
+                ParallelGroup(parallel=[
+                    PipelineStep(employee="code-reviewer", id="a", args={"target": "main"}),
+                    PipelineStep(employee="test-engineer", id="b", args={"target": "main"}),
+                ]),
+                PipelineStep(employee="doc-writer", args={"target": "main"}),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        assert len(result.steps) == 2
+        # 并行组结果
+        group = result.steps[0]
+        assert isinstance(group, list)
+        # 第二步应该存在（prompt-only 模式）
+        assert result.steps[1].employee == "doc-writer"

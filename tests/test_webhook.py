@@ -1,5 +1,6 @@
 """测试 Webhook 服务器."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -844,3 +845,93 @@ class TestNoAuth:
             json={"target_type": "pipeline", "target_name": "test"},
         )
         assert resp.status_code == 202
+
+
+class TestStreamErrorHandling:
+    """SSE 流式错误处理."""
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.engine.CrewEngine")
+    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
+    def test_stream_timeout(self, mock_exec, mock_engine_cls, mock_discover):
+        """aexecute_prompt 超时应返回 error event."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="", body="")
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+        mock_engine = MagicMock()
+        mock_engine.prompt.return_value = "test prompt"
+        mock_engine_cls.return_value = mock_engine
+
+        # 模拟超时
+        mock_exec.side_effect = asyncio.TimeoutError()
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/test-emp",
+            json={"args": {}, "stream": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert "event: error" in resp.text
+        assert "timeout" in resp.text.lower()
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.engine.CrewEngine")
+    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
+    def test_stream_mid_error(self, mock_exec, mock_engine_cls, mock_discover):
+        """流中异常应返回 error event."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="", body="")
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+        mock_engine = MagicMock()
+        mock_engine.prompt.return_value = "test prompt"
+        mock_engine_cls.return_value = mock_engine
+
+        # 模拟流中途异常
+        async def _failing_stream():
+            yield "part"
+            raise RuntimeError("LLM connection lost")
+
+        mock_exec.return_value = _failing_stream()
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/test-emp",
+            json={"args": {}, "stream": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        # 应有部分 token 和 error event
+        assert "event: error" in body
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.engine.CrewEngine")
+    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
+    def test_stream_cleanup_on_disconnect(self, mock_exec, mock_engine_cls, mock_discover):
+        """流正常完成后有 done event."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="", body="")
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+        mock_engine = MagicMock()
+        mock_engine.prompt.return_value = "test prompt"
+        mock_engine_cls.return_value = mock_engine
+
+        async def _normal_stream():
+            yield "Hello"
+        _normal_stream.result = MagicMock(
+            model="gpt-4o", input_tokens=10, output_tokens=5,
+        )
+        mock_exec.return_value = _normal_stream()
+
+        client = _make_client()
+        resp = client.post(
+            "/run/employee/test-emp",
+            json={"args": {}, "stream": True},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert "event: done" in resp.text
