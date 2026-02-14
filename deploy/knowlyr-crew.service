@@ -1,0 +1,52 @@
+# systemd service — knowlyr-crew webhook + cron
+# 放到 /etc/systemd/system/knowlyr-crew.service
+#
+# 用法:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable knowlyr-crew
+#   sudo systemctl start knowlyr-crew
+#   sudo journalctl -u knowlyr-crew -f    # 查看日志
+
+[Unit]
+Description=Knowlyr Crew — AI Skill Loader Webhook Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/home/deploy/knowlyr-crew-private
+
+# 环境变量文件
+EnvironmentFile=/home/deploy/knowlyr-crew-private/.env
+
+# 启动命令
+ExecStart=/home/deploy/.local/bin/knowlyr-crew serve \
+    --port 8765 \
+    --project-dir /home/deploy/knowlyr-crew-private
+
+# 自动重启
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# 优雅关闭（等待 30s）
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/deploy/knowlyr-crew-private/.crew
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=knowlyr-crew
+
+[Install]
+WantedBy=multi-user.target
