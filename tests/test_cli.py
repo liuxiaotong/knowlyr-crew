@@ -555,3 +555,18 @@ steps:
         result = self.runner.invoke(main, ["memory", "index", "--repair"])
         assert result.exit_code == 0
         assert "修复完成" in result.output
+
+    def test_changelog_draft_subprocess_has_timeout(self):
+        """changelog_draft 的 subprocess.run 应带 timeout 参数."""
+        import subprocess
+        from unittest.mock import patch, MagicMock
+
+        mock_result = MagicMock()
+        mock_result.stdout = "abc1234 test commit\n"
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = self.runner.invoke(main, ["changelog-draft", "-n", "1"])
+            if mock_run.called:
+                _, kwargs = mock_run.call_args
+                assert "timeout" in kwargs, "subprocess.run 应设置 timeout"

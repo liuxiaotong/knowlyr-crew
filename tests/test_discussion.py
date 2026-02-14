@@ -942,3 +942,11 @@ class TestRenderDiscussionPlan:
         discussion_rounds = [r for r in plan.rounds if r.round_number > 0]
         assert "安全性" in discussion_rounds[0].participant_prompts[0].prompt
         assert "覆盖率" in discussion_rounds[0].participant_prompts[1].prompt
+
+
+class TestTopicFilenameTruncation:
+    """topic 文件名截断常量."""
+
+    def test_topic_filename_max_length_constant(self):
+        from crew.discussion import _TOPIC_FILENAME_MAX_LENGTH
+        assert _TOPIC_FILENAME_MAX_LENGTH == 60

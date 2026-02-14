@@ -231,3 +231,14 @@ class TestRequestSizeLimitInvalidHeader:
         )
         # -1 < max_bytes, so it passes through (valid int, just negative)
         assert resp.status_code == 200
+
+
+class TestMagicNumberConstants:
+    """魔法数字提取为命名常量."""
+
+    def test_default_max_request_bytes(self):
+        assert RequestSizeLimitMiddleware.DEFAULT_MAX_REQUEST_BYTES == 1_048_576
+
+    def test_bucket_cleanup_threshold(self):
+        from crew.auth import RateLimitMiddleware
+        assert RateLimitMiddleware._BUCKET_CLEANUP_THRESHOLD == 1000

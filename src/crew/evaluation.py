@@ -144,7 +144,7 @@ class EvaluationEngine:
                 os.replace(tmp_path, str(path))
             except Exception:
                 os.close(fd)
-                if os.path.exists(tmp_path):
+                if Path(tmp_path).exists():
                     os.unlink(tmp_path)
                 raise
 

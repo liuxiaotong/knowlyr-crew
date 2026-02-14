@@ -123,7 +123,7 @@ class TaskRegistry:
             except Exception:
                 if not fd_closed:
                     os.close(fd)
-                if os.path.exists(tmp_path):
+                if Path(tmp_path).exists():
                     os.unlink(tmp_path)
                 raise
         except Exception as e:

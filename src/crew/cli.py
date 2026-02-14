@@ -852,7 +852,7 @@ def _run_employee_job(
                     clip_cmd = ["clip"]
                 else:
                     clip_cmd = ["xclip", "-selection", "clipboard"]
-                subprocess.run(clip_cmd, input=text.encode(), check=True)
+                subprocess.run(clip_cmd, input=text.encode(), check=True, timeout=10)
                 click.echo("已复制到剪贴板。", err=True)
                 _record_transcript_event(
                     transcript_recorder,
@@ -2386,7 +2386,7 @@ def changelog_draft(since: str | None, limit: int, output: Path):
     if since:
         cmd = ["git", "log", f"{since}..HEAD", "--pretty=format:%h %s"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     except Exception as exc:
         lines = [f"(git log 失败: {exc})"]

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_TIMEOUT = 30.0  # httpx POST 超时（秒）
 SMTP_TIMEOUT = 10  # SMTP 连接超时（秒）
+EMAIL_BODY_MAX_LENGTH = 2000  # 邮件正文截断长度
 
 
 class DeliveryTarget(BaseModel):
@@ -183,8 +184,8 @@ async def _deliver_email(
     elif task_result:
         # 提取关键信息
         output = task_result.get("output", "")
-        if isinstance(output, str) and len(output) > 2000:
-            output = output[:2000] + "\n...(已截断)"
+        if isinstance(output, str) and len(output) > EMAIL_BODY_MAX_LENGTH:
+            output = output[:EMAIL_BODY_MAX_LENGTH] + "\n...(已截断)"
         body = f"任务 {task_name} 执行完成。\n\n结果:\n{output}"
     else:
         body = f"任务 {task_name} 执行完成。"

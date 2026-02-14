@@ -33,7 +33,9 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     """拒绝超过大小限制的请求（默认 1MB）."""
 
-    def __init__(self, app, *, max_bytes: int = 1_048_576):
+    DEFAULT_MAX_REQUEST_BYTES = 1_048_576  # 1 MB
+
+    def __init__(self, app, *, max_bytes: int = DEFAULT_MAX_REQUEST_BYTES):
         super().__init__(app)
         self.max_bytes = max_bytes
 
@@ -62,6 +64,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window: 窗口大小（秒）.
         skip_paths: 跳过限制的路径列表.
     """
+
+    _BUCKET_CLEANUP_THRESHOLD = 1000
 
     def __init__(
         self,
@@ -98,7 +102,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._buckets[client_ip].append(now)
 
         # 周期性清理空桶，防止内存泄漏
-        if len(self._buckets) > 1000:
+        if len(self._buckets) > self._BUCKET_CLEANUP_THRESHOLD:
             stale = [ip for ip, ts in self._buckets.items() if not ts]
             for ip in stale:
                 del self._buckets[ip]

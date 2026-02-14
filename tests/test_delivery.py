@@ -330,3 +330,7 @@ class TestTimeoutConstants:
 
     def test_smtp_timeout(self):
         assert SMTP_TIMEOUT == 10
+
+    def test_email_body_max_length(self):
+        from crew.delivery import EMAIL_BODY_MAX_LENGTH
+        assert EMAIL_BODY_MAX_LENGTH == 2000

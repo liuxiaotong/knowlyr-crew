@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_TOPIC_FILENAME_MAX_LENGTH = 60
 from typing import Literal, TYPE_CHECKING
 
 import yaml
@@ -375,8 +377,8 @@ def _render_auto_save(
     # $topic 兜底：用完整 topic（截断后）
     if "$topic" in filename:
         safe_topic = topic.replace(" ", "-").replace("/", "-").replace("\\", "-")
-        if len(safe_topic) > 60:
-            safe_topic = safe_topic[:60]
+        if len(safe_topic) > _TOPIC_FILENAME_MAX_LENGTH:
+            safe_topic = safe_topic[:_TOPIC_FILENAME_MAX_LENGTH]
         filename = filename.replace("$topic", safe_topic)
 
     # 展开 ~ 为绝对路径
