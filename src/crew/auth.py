@@ -10,13 +10,13 @@ from starlette.responses import JSONResponse
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """校验 Authorization: Bearer <token>."""
 
-    def __init__(self, app, *, token: str):
+    def __init__(self, app, *, token: str, skip_paths: list[str] | None = None):
         super().__init__(app)
         self.token = token
+        self.skip_paths = skip_paths or ["/health"]
 
     async def dispatch(self, request: Request, call_next):
-        # /health 免验证（部署探活）
-        if request.url.path == "/health":
+        if request.url.path in self.skip_paths:
             return await call_next(request)
 
         auth = request.headers.get("authorization", "")

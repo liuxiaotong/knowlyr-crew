@@ -2800,6 +2800,31 @@ def agents_sync_cmd(name: str):
     click.echo("✓ 同步完成", err=True)
 
 
+# ── serve 命令（Webhook 服务器）──
+
+
+@main.command()
+@click.option("--host", default="0.0.0.0", help="监听地址")
+@click.option("--port", default=8765, type=int, help="监听端口")
+@click.option(
+    "--token",
+    default=None,
+    envvar="CREW_API_TOKEN",
+    help="Bearer token（未设置则不启用认证）",
+)
+@click.option(
+    "-d", "--project-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="项目目录（默认当前目录）",
+)
+def serve(host, port, token, project_dir):
+    """启动 Webhook 服务器."""
+    from crew.webhook import serve_webhook
+
+    serve_webhook(host=host, port=port, project_dir=project_dir, token=token)
+
+
 # ── mcp 命令 ──
 
 
