@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-529_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-597_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -811,12 +811,20 @@ knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天
 | 特性 | 说明 |
 |------|------|
 | **自动注入** | `run_employee` 和讨论会 prompt 自动包含该员工的历史记忆 |
+| **语义搜索** | 混合搜索：向量余弦相似度 (0.7) + 关键词匹配 (0.3) 加权排序，精确术语不遗漏 |
+| **多 Embedding 后端** | OpenAI `text-embedding-3-small` → Gemini `text-embedding-004` → TF-IDF 降级，无 API key 也可用 |
 | **四种类别** | `decision`（决策）、`estimate`（估算）、`finding`（发现）、`correction`（纠正） |
 | **置信度** | 每条记忆带 `confidence` 权重，查询时可按最低置信度过滤 |
 | **纠正机制** | `correct` 命令标记旧记忆为 superseded，创建新 correction 条目 |
 | **MCP Tools** | `add_memory` / `query_memory`，AI IDE 可在工作中自主积累经验 |
 
-存储路径：`.crew/memory/{employee_name}.jsonl`
+```bash
+# 安装 Embedding 后端（可选，无则自动降级 TF-IDF）
+pip install knowlyr-crew[openai]   # OpenAI embedding（推荐）
+pip install knowlyr-crew[gemini]   # Gemini embedding（免费额度大）
+```
+
+存储路径：`.crew/memory/{employee_name}.jsonl`（记忆）、`.crew/memory/embeddings.db`（向量索引）
 
 ---
 
@@ -1032,7 +1040,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 529 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot), API key auto-resolution, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
+**Tests**: 597 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot), API key auto-resolution, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
 
 ## License
 
