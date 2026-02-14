@@ -8,10 +8,10 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-373_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://img.shields.io/badge/tests-457_passed-brightgreen.svg)](#开发--development)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
-[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
+[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
 
 </div>
 
@@ -224,6 +224,8 @@ knowlyr-crew eval prompt <decision_id>                # 生成评估 prompt
 knowlyr-crew pipeline list                            # 列出流水线
 knowlyr-crew pipeline show <name>                     # 查看详情
 knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
+knowlyr-crew pipeline run <name> --execute            # Execute 模式（调用 LLM）
+knowlyr-crew pipeline run <name> --execute --model claude-opus-4-6
 
 # ── 工作日志 ──
 knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志（severity/links）
@@ -240,6 +242,10 @@ knowlyr-crew avatar <name>                             # 为员工生成头像�
 knowlyr-crew register <name> [--dry-run]               # 注册员工到 knowlyr-id
 knowlyr-crew agents list                               # 列出已注册 Agent
 knowlyr-crew agents sync <name>                        # 同步元数据到 knowlyr-id
+
+# ── Webhook + Cron 服务器 ──
+knowlyr-crew serve --port 8765 --token SECRET         # 启动 Webhook + Cron 服务器
+knowlyr-crew serve --port 8765 --no-cron              # 仅 Webhook，禁用 Cron
 
 # ── MCP 服务 ──
 knowlyr-crew mcp                                      # 启动 MCP Server（stdio）
@@ -481,11 +487,15 @@ Prompt 正文支持以下变量：
 
 ## 流水线 / Pipelines
 
-多个员工按顺序串联执行，前一步的参数可传递给后续步骤：
+多个员工按顺序/并行串联执行，支持步骤间输出传递和 LLM 自动执行：
 
 ```bash
 knowlyr-crew pipeline list
 knowlyr-crew pipeline run review-test-pr --arg target=main
+
+# Execute 模式：自动调用 LLM 串联执行（需要 ANTHROPIC_API_KEY）
+knowlyr-crew pipeline run full-review --arg target=main --execute
+knowlyr-crew pipeline run full-review --arg target=main --execute --model claude-opus-4-6
 ```
 
 ### 内置流水线
@@ -502,17 +512,158 @@ name: review-test-pr
 description: 审查代码、补充测试、创建 PR
 steps:
   - employee: code-reviewer
+    id: review                              # 可选，用于输出引用
     args:
       target: $target
-  - employee: test-engineer
-    args:
-      target: $target
+  - parallel:                               # 并行执行
+    - employee: test-engineer
+      id: test
+      args:
+        target: $target
+    - employee: refactor-guide
+      id: refactor
+      args:
+        target: $target
   - employee: pr-creator
     args:
-      base: $target
+      review: "{steps.review.output}"       # 按 ID 引用
+      context: "{prev}"                     # 引用上一步输出
 ```
 
+### 输出引用
+
+步骤之间可以传递输出，前一步的 LLM 结果作为后续步骤的输入：
+
+| 语法 | 含义 |
+|------|------|
+| `{prev}` | 上一步输出（并行组 = 所有子步骤输出合并） |
+| `{steps.<id>.output}` | 按步骤 ID 引用 |
+| `{steps.<N>.output}` | 按 flat index (0-based) 引用 |
+
+### 执行模式
+
+| 模式 | 说明 |
+|------|------|
+| **Prompt-only**（默认） | 生成各步骤 prompt，占位符保留原样，由调用方填充 |
+| **Execute**（`--execute`） | 自动调用 Anthropic API 串联执行，输出传递实际生效 |
+
+并行组在 Execute 模式下使用 `asyncio.gather` 并发执行，Prompt 模式下顺序生成。
+
 发现路径：`builtin < project (.crew/pipelines/)`
+
+---
+
+## 服务器模式 / Server Mode
+
+Crew 可作为 HTTP 服务器运行，接收外部事件并自动触发 pipeline / 员工执行：
+
+```bash
+pip install knowlyr-crew[webhook]
+
+# 启动服务器（Webhook + Cron 一体化）
+knowlyr-crew serve --port 8765 --token YOUR_SECRET
+
+# 禁用 cron 调度
+knowlyr-crew serve --port 8765 --token YOUR_SECRET --no-cron
+```
+
+### 架构总览
+
+```mermaid
+graph TB
+    subgraph "外部事件源"
+        GH["GitHub<br/>push / PR"]
+        OC["OpenClaw<br/>消息事件"]
+        API["REST API<br/>直接调用"]
+        CRON["Cron 调度器<br/>定时触发"]
+    end
+
+    subgraph "Crew Server (knowlyr-crew serve)"
+        WH["Webhook Router<br/>签名验证 + 事件路由"]
+        TR["Task Registry<br/>任务追踪"]
+        EX["执行引擎"]
+    end
+
+    subgraph "执行目标"
+        PL["Pipeline Engine<br/>多步骤编排"]
+        EM["Employee Engine<br/>单员工执行"]
+        LLM["Anthropic API<br/>LLM 调用"]
+    end
+
+    GH -->|X-Hub-Signature-256| WH
+    OC -->|Bearer token| WH
+    API -->|Bearer token| WH
+    CRON -->|内部触发| TR
+
+    WH --> TR
+    TR --> EX
+    EX --> PL
+    EX --> EM
+    PL --> LLM
+    EM --> LLM
+```
+
+### API 端点
+
+| 路径 | 方法 | 认证 | 说明 |
+|------|------|------|------|
+| `/health` | GET | 无 | 健康检查 |
+| `/webhook/github` | POST | GitHub signature | GitHub webhook，按配置路由到 pipeline/员工 |
+| `/webhook/openclaw` | POST | Bearer | OpenClaw 消息事件 |
+| `/webhook` | POST | Bearer | 通用 JSON webhook |
+| `/run/pipeline/{name}` | POST | Bearer | 直接触发 pipeline |
+| `/run/employee/{name}` | POST | Bearer | 直接触发员工 |
+| `/tasks/{task_id}` | GET | Bearer | 查询任务状态和结果 |
+| `/cron/status` | GET | Bearer | 查询 cron 调度器状态 |
+
+所有执行端点支持两种模式：
+- **异步模式**（默认）：立即返回 `task_id`（HTTP 202），后台执行，通过 `/tasks/{task_id}` 轮询结果
+- **同步模式**（`"sync": true`）：等待执行完成后返回结果
+
+### Webhook 配置
+
+`.crew/webhook.yaml` 定义事件路由规则：
+
+```yaml
+github_secret: "whsec_xxx"
+routes:
+  - event: "pull_request"
+    target:
+      type: pipeline
+      name: full-review
+      args:
+        target: "{{pull_request.head.ref}}"   # 从 payload 解析
+  - event: "push"
+    target:
+      type: employee
+      name: code-reviewer
+      args:
+        target: "{{ref}}"
+```
+
+GitHub webhook 使用 HMAC-SHA256 签名验证，`{{dotted.path}}` 语法从 JSON payload 中提取参数。
+
+### Cron 调度
+
+`.crew/cron.yaml` 定义定时任务：
+
+```yaml
+schedules:
+  - name: daily-review
+    cron: "0 9 * * *"                         # 每天 9:00
+    target_type: pipeline
+    target_name: full-review
+    args:
+      target: main
+  - name: weekly-summary
+    cron: "0 0 * * 0"                         # 每周日 0:00
+    target_type: employee
+    target_name: doc-writer
+    args:
+      scope: weekly
+```
+
+Cron 调度器随 `serve` 命令自动启动，使用 `croniter` 解析 cron 表达式，每个任务独立 asyncio 后台协程。通过 `/cron/status` 可查询各任务的下次触发时间。
 
 ---
 
@@ -798,7 +949,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 373 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines, discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
+**Tests**: 457 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode), webhook server (GitHub signature, event routing, async/sync execution), cron scheduler (config validation, trigger execution), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory, evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, and file-lock concurrency safety.
 
 ## License
 
