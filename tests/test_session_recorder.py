@@ -41,3 +41,19 @@ class TestSessionRecorder:
         # list on empty dir should be []
         empty_recorder = SessionRecorder(session_dir=self.tmpdir / "nested")
         assert empty_recorder.list_sessions() == []
+
+    def test_list_sessions_skips_corrupted_file(self):
+        """损坏的 JSONL 文件被跳过，不影响其它 session."""
+        # 正常 session
+        sid = self.recorder.start("employee", "good-worker")
+        self.recorder.finish(sid)
+
+        # 写入损坏文件
+        bad_path = self.tmpdir / "zzz-bad.jsonl"
+        bad_path.write_text("{bad json", encoding="utf-8")
+
+        sessions = self.recorder.list_sessions()
+        # 应该只包含正常的 session
+        names = [s["session_id"] for s in sessions]
+        assert sid in names
+        assert "zzz-bad" not in names

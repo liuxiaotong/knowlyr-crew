@@ -120,3 +120,44 @@ class TestMemoryStore:
         high_conf = store.query("code-reviewer", min_confidence=0.5)
         assert len(high_conf) == 1
         assert high_conf[0].content == "高置信度"
+
+    def test_query_skips_corrupted_entries(self, tmp_path):
+        """损坏的 JSON 行被跳过，不影响其它条目."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("code-reviewer", "finding", "正常条目")
+
+        # 追加损坏行
+        path = tmp_path / "memory" / "code-reviewer.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write("{broken json\n")
+
+        entries = store.query("code-reviewer")
+        assert len(entries) == 1
+        assert entries[0].content == "正常条目"
+
+    def test_correct_skips_corrupted_entries(self, tmp_path):
+        """correct() 中损坏行被保留原文."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        entry = store.add("code-reviewer", "finding", "待纠正")
+
+        # 追加损坏行
+        path = tmp_path / "memory" / "code-reviewer.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write("not-json-line\n")
+
+        result = store.correct("code-reviewer", entry.id, "已纠正")
+        assert result is not None
+        assert result.content == "已纠正"
+
+        # 验证损坏行保留
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+        assert any("not-json-line" in l for l in lines)
+
+    def test_format_for_prompt_semantic_fallback(self, tmp_path):
+        """语义搜索失败时降级到普通查询."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("code-reviewer", "finding", "安全审查经验")
+
+        # 语义搜索不可用时应降级
+        text = store.format_for_prompt("code-reviewer", query="安全")
+        assert "安全审查经验" in text

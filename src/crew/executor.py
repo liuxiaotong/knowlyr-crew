@@ -451,8 +451,8 @@ def _record_metrics(provider_name: str, result: ExecutionResult, elapsed: float)
             success=True,
         )
         collector.record_latency(elapsed * 1000, provider=provider_name)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("记录指标失败: %s", e)
 
 
 def _record_failure(provider_name: str, exc: Exception) -> None:
@@ -471,8 +471,8 @@ def _record_failure(provider_name: str, exc: Exception) -> None:
             success=False,
             error_type=error_type,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("记录失败指标失败: %s", e)
 
 
 class _MetricsStreamWrapper:
@@ -590,8 +590,8 @@ def execute_prompt(
                 stream=stream,
                 on_chunk=on_chunk,
             )
-        except Exception:
-            pass  # fallback 也失败，抛原始异常
+        except Exception as e:
+            logger.debug("Fallback 模型也失败: %s", e)
 
     raise last_exc  # type: ignore[misc]
 
@@ -674,7 +674,7 @@ async def aexecute_prompt(
                 max_tokens=max_tokens,
                 stream=stream,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Async fallback 模型也失败: %s", e)
 
     raise last_exc  # type: ignore[misc]

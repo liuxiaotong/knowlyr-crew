@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from crew.paths import resolve_project_dir
+
+logger = logging.getLogger(__name__)
 
 
 class SessionRecorder:
@@ -119,7 +122,8 @@ class SessionRecorder:
             try:
                 first_line = path.read_text(encoding="utf-8").splitlines()[0]
                 data = json.loads(first_line)
-            except Exception:
+            except (json.JSONDecodeError, IndexError, OSError) as e:
+                logger.debug("跳过损坏的 session 文件 %s: %s", path.name, e)
                 continue
 
             if session_type and data.get("session_type") != session_type:

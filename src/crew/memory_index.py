@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 
 from crew.memory import MemoryStore
 from crew.paths import resolve_project_dir
+
+logger = logging.getLogger(__name__)
 
 
 def _prepare_index_text(text: str) -> str:
@@ -158,7 +161,8 @@ class MemorySearchIndex:
             session_id = path.stem
             try:
                 lines = path.read_text(encoding="utf-8").splitlines()
-            except OSError:
+            except OSError as e:
+                logger.debug("读取 session 文件失败 %s: %s", path.name, e)
                 continue
             session_subject = ""
             start_metadata: dict[str, Any] = {}

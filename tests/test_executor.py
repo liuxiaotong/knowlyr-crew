@@ -1058,3 +1058,31 @@ class TestFallbackModelExtended:
             fallback_model="gpt-4o",
         ))
         assert result.content == "async fallback ok"
+
+
+class TestMetricsLogging:
+    """指标记录失败时有日志."""
+
+    def test_record_metrics_failure_logged(self, caplog):
+        """_record_metrics 失败时记录 debug 日志."""
+        import logging
+        from crew.executor import _record_metrics, ExecutionResult
+
+        result = ExecutionResult(
+            content="test", model="test", input_tokens=10,
+            output_tokens=5, stop_reason="stop",
+        )
+        with caplog.at_level(logging.DEBUG, logger="crew.executor"):
+            with patch("crew.metrics.get_collector", side_effect=Exception("no collector")):
+                _record_metrics("test", result, 1.0)
+        assert "记录指标失败" in caplog.text
+
+    def test_record_failure_logged(self, caplog):
+        """_record_failure 失败时记录 debug 日志."""
+        import logging
+        from crew.executor import _record_failure
+
+        with caplog.at_level(logging.DEBUG, logger="crew.executor"):
+            with patch("crew.metrics.get_collector", side_effect=Exception("no collector")):
+                _record_failure("test", RuntimeError("api error"))
+        assert "记录失败指标失败" in caplog.text

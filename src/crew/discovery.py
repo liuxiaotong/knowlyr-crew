@@ -55,8 +55,8 @@ def _scan_directory(
                 try:
                     from crew.versioning import check_and_bump
                     check_and_bump(item)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("版本检查失败 %s: %s", item.name, e)
 
             emp = parse_employee_dir(item, source_layer=layer)
 

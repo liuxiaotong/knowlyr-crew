@@ -1,6 +1,7 @@
 """持久化记忆 — 每个员工独立的经验存储."""
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from crew.paths import file_lock, resolve_project_dir
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryEntry(BaseModel):
@@ -111,7 +114,8 @@ class MemoryStore:
                 continue
             try:
                 entry = MemoryEntry(**json.loads(line))
-            except Exception:
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug("跳过损坏的记忆条目: %s", e)
                 continue
 
             # 跳过已被覆盖的
@@ -164,7 +168,8 @@ class MemoryStore:
                     continue
                 try:
                     entry = MemoryEntry(**json.loads(line))
-                except Exception:
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug("跳过损坏的条目（纠正模式）: %s", e)
                     new_lines.append(line)
                     continue
 
@@ -226,8 +231,8 @@ class MemoryStore:
                             for _id, content, score in results:
                                 lines.append(f"- {content}")
                             return "\n".join(lines)
-            except Exception:
-                pass  # 降级到原逻辑
+            except Exception as e:
+                logger.debug("语义搜索降级: %s", e)
 
         entries = self.query(employee, limit=limit)
         if not entries:
