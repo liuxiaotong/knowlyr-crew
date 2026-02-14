@@ -86,6 +86,8 @@ class TestGenerateAvatar:
         submit_resp.read.return_value = json.dumps(
             {"output": {"task_id": "task-123"}}
         ).encode()
+        submit_resp.__enter__ = MagicMock(return_value=submit_resp)
+        submit_resp.__exit__ = MagicMock(return_value=False)
 
         # Poll response - succeeded
         poll_resp = MagicMock()
@@ -97,6 +99,8 @@ class TestGenerateAvatar:
                 }
             }
         ).encode()
+        poll_resp.__enter__ = MagicMock(return_value=poll_resp)
+        poll_resp.__exit__ = MagicMock(return_value=False)
 
         mock_urlopen.side_effect = [submit_resp, poll_resp]
 
@@ -126,6 +130,8 @@ class TestGenerateAvatar:
     def test_no_task_id(self, mock_key, mock_urlopen):
         resp = MagicMock()
         resp.read.return_value = json.dumps({"output": {}}).encode()
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = resp
         result = generate_avatar(display_name="Test")
         assert result is None
@@ -137,11 +143,15 @@ class TestGenerateAvatar:
         submit.read.return_value = json.dumps(
             {"output": {"task_id": "t1"}}
         ).encode()
+        submit.__enter__ = MagicMock(return_value=submit)
+        submit.__exit__ = MagicMock(return_value=False)
 
         poll = MagicMock()
         poll.read.return_value = json.dumps(
             {"output": {"task_status": "FAILED", "message": "bad prompt"}}
         ).encode()
+        poll.__enter__ = MagicMock(return_value=poll)
+        poll.__exit__ = MagicMock(return_value=False)
 
         mock_urlopen.side_effect = [submit, poll]
 
@@ -157,11 +167,15 @@ class TestGenerateAvatar:
         submit.read.return_value = json.dumps(
             {"output": {"task_id": "t1"}}
         ).encode()
+        submit.__enter__ = MagicMock(return_value=submit)
+        submit.__exit__ = MagicMock(return_value=False)
 
         pending = MagicMock()
         pending.read.return_value = json.dumps(
             {"output": {"task_status": "RUNNING"}}
         ).encode()
+        pending.__enter__ = MagicMock(return_value=pending)
+        pending.__exit__ = MagicMock(return_value=False)
 
         mock_urlopen.side_effect = [submit, pending, pending]
 
@@ -263,3 +277,27 @@ class TestCompressAvatar:
 
         out = Image.open(result)
         assert out.size == (AVATAR_SIZE, AVATAR_SIZE)
+
+
+class TestGenerateAvatarSafety:
+    """generate_avatar 安全性测试."""
+
+    def test_no_api_key(self, tmp_path):
+        """无 API key 应返回 None."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"DASHSCOPE_API_KEY": ""}, clear=False):
+            result = generate_avatar(
+                display_name="Test",
+                output_dir=tmp_path,
+            )
+            assert result is None
+
+    def test_download_empty_file_cleanup(self, tmp_path):
+        """下载空文件应被清理."""
+        output_path = tmp_path / "avatar_raw.png"
+        output_path.write_bytes(b"")
+        assert output_path.stat().st_size == 0
+        output_path.unlink(missing_ok=True)
+        assert not output_path.exists()

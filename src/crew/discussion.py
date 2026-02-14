@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Literal, TYPE_CHECKING
 
 import yaml
@@ -484,10 +487,10 @@ def _log_meeting(
     try:
         from crew.meeting_log import MeetingLogger
 
-        logger = MeetingLogger(project_dir=project_dir)
-        logger.save(discussion, prompt, initial_args)
-    except Exception:
-        pass
+        ml = MeetingLogger(project_dir=project_dir)
+        ml.save(discussion, prompt, initial_args)
+    except Exception as e:
+        logger.debug("记录会议日志失败: %s", e)
 
 
 # ── 主渲染入口 ──
@@ -661,8 +664,8 @@ def _render_participant_prompt(
         memory_text = memory_store.format_for_prompt(emp.name, limit=5)
         if memory_text:
             parts.extend(["---", "", "## 你的历史经验", "", memory_text, ""])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("加载员工 %s 历史经验失败: %s", emp.name, e)
 
     # 预研发现（如果有 research round，第一轮注入）
     if is_first_round and emp.research_instructions or (is_first_round and emp.tools):

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Iterable, Sequence
 
 from crew.context_detector import detect_project
@@ -13,7 +16,7 @@ from crew.models import Employee
 
 try:  # pragma: no cover - optional dependency
     from crew.id_client import fetch_agent_identity
-except Exception:  # pragma: no cover - optional
+except ImportError:  # pragma: no cover - optional
     fetch_agent_identity = None  # type: ignore
 
 
@@ -71,7 +74,8 @@ def generate_prompt_by_name(
     if agent_id is not None and fetch_agent_identity:
         try:
             agent_identity = fetch_agent_identity(agent_id)
-        except Exception:  # pragma: no cover
+        except Exception as e:  # pragma: no cover
+            logger.debug("获取 Agent %s 身份失败: %s", agent_id, e)
             agent_identity = None
 
     project_info = detect_project(project_dir) if smart_context else None

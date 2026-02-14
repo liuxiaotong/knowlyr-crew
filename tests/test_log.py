@@ -91,3 +91,42 @@ class TestWorkLogger:
         logger = WorkLogger(log_dir=Path("/tmp/nonexistent-crew-test-dir"))
         sessions = logger.list_sessions()
         assert sessions == []
+
+    def test_add_entry_empty_session_file(self):
+        """空 session 文件应报 ValueError."""
+        session_id = self.logger.create_session("code-reviewer")
+        session_file = Path(self.tmpdir) / f"{session_id}.jsonl"
+        session_file.write_text("")
+        with pytest.raises(ValueError, match="为空"):
+            self.logger.add_entry(session_id, "action", "detail")
+
+    def test_add_entry_corrupted_json(self):
+        """首行 JSON 损坏应报 ValueError."""
+        session_id = self.logger.create_session("code-reviewer")
+        session_file = Path(self.tmpdir) / f"{session_id}.jsonl"
+        session_file.write_text("not valid json\n")
+        with pytest.raises(ValueError, match="损坏"):
+            self.logger.add_entry(session_id, "action", "detail")
+
+    def test_get_session_skips_bad_lines(self):
+        """get_session 应跳过损坏的 JSON 行."""
+        session_id = self.logger.create_session("code-reviewer")
+        session_file = Path(self.tmpdir) / f"{session_id}.jsonl"
+        # 追加一行坏数据
+        with open(session_file, "a") as f:
+            f.write("bad json line\n")
+        entries = self.logger.get_session(session_id)
+        # 应至少有 session_start 条目，坏行被跳过
+        assert len(entries) == 1
+        assert entries[0]["action"] == "session_start"
+
+    def test_add_entry_missing_employee_name_key(self):
+        """首行缺少 employee_name 字段不应崩溃."""
+        session_id = self.logger.create_session("code-reviewer")
+        session_file = Path(self.tmpdir) / f"{session_id}.jsonl"
+        import json
+        session_file.write_text(json.dumps({"action": "start"}) + "\n")
+        # 应该不崩溃，使用 'unknown' 作为 employee_name
+        self.logger.add_entry(session_id, "step1", "detail")
+        entries = self.logger.get_session(session_id)
+        assert len(entries) == 2

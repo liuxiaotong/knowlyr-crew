@@ -1,10 +1,15 @@
 """评估闭环 — 追踪决策质量，回写纠正到记忆."""
 
 import json
+import logging
+import os
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -128,8 +133,20 @@ class EvaluationEngine:
             if found_decision is None:
                 return None
 
-            # 重写决策文件
-            path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            # 原子重写决策文件
+            content = "\n".join(new_lines) + "\n"
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(path.parent), suffix=".tmp",
+            )
+            try:
+                os.write(fd, content.encode("utf-8"))
+                os.close(fd)
+                os.replace(tmp_path, str(path))
+            except Exception:
+                os.close(fd)
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
 
         # 将评估结论写入员工记忆（锁外执行，避免死锁）
         try:

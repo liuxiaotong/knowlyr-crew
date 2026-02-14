@@ -1,12 +1,15 @@
 """工作日志 — JSONL 格式追踪员工工作记录."""
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from crew.models import WorkLogEntry
 from crew.paths import resolve_project_dir
+
+logger = logging.getLogger(__name__)
 
 
 class WorkLogger:
@@ -87,11 +90,17 @@ class WorkLogger:
             raise ValueError(f"Session 不存在: {session_id}")
 
         # 从第一条记录获取 employee_name
-        first_line = session_file.read_text(encoding="utf-8").split("\n")[0]
-        first_entry = json.loads(first_line)
+        lines = session_file.read_text(encoding="utf-8").splitlines()
+        if not lines or not lines[0].strip():
+            raise ValueError(f"Session 文件为空: {session_id}")
+        try:
+            first_entry = json.loads(lines[0])
+        except json.JSONDecodeError as e:
+            logger.warning("Session %s 首行 JSON 解析失败: %s", session_id, e)
+            raise ValueError(f"Session 文件损坏: {session_id}") from e
 
         entry = WorkLogEntry(
-            employee_name=first_entry["employee_name"],
+            employee_name=first_entry.get("employee_name", "unknown"),
             action=action,
             detail=detail,
             severity=severity,
@@ -167,8 +176,14 @@ class WorkLogger:
             return []
 
         entries = []
-        for line in session_file.read_text(encoding="utf-8").split("\n"):
-            if line.strip():
+        for line in session_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
                 entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                logger.warning("跳过无效日志行: %s", line[:100])
+                continue
 
         return entries

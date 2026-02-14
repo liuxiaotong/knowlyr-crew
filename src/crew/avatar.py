@@ -106,8 +106,8 @@ def generate_avatar(
     })
 
     try:
-        resp = urllib.request.urlopen(req, timeout=30)
-        result = json.loads(resp.read())
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
     except Exception as e:
         logger.error("提交生成任务失败: %s", e)
         return None
@@ -128,8 +128,8 @@ def generate_avatar(
             headers={"Authorization": f"Bearer {api_key}"},
         )
         try:
-            poll_resp = urllib.request.urlopen(poll_req, timeout=15)
-            data = json.loads(poll_resp.read())
+            with urllib.request.urlopen(poll_req, timeout=15) as poll_resp:
+                data = json.loads(poll_resp.read())
         except Exception as e:
             logger.warning("轮询任务失败 (attempt %d): %s", attempt, e)
             continue
@@ -150,10 +150,15 @@ def generate_avatar(
             output_path = output_dir / "avatar_raw.png"
             try:
                 urllib.request.urlretrieve(img_url, str(output_path))
+                if not output_path.exists() or output_path.stat().st_size == 0:
+                    logger.error("下载的图片文件为空")
+                    output_path.unlink(missing_ok=True)
+                    return None
                 logger.info("头像已下载: %s (%d KB)", output_path, output_path.stat().st_size // 1024)
                 return output_path
             except Exception as e:
                 logger.error("下载图片失败: %s", e)
+                output_path.unlink(missing_ok=True)
                 return None
 
         elif status == "FAILED":
