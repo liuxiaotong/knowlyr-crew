@@ -388,12 +388,8 @@ async def _execute_employee(
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    employees = discover_employees(project_dir=ctx.project_dir)
-    match = None
-    for emp in employees:
-        if emp.name == name:
-            match = emp
-            break
+    result = discover_employees(project_dir=ctx.project_dir)
+    match = result.get(name)
 
     if match is None:
         raise ValueError(f"未找到员工: {name}")
@@ -449,12 +445,8 @@ async def _stream_employee(
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    employees = discover_employees(project_dir=ctx.project_dir)
-    match = None
-    for emp in employees:
-        if emp.name == name:
-            match = emp
-            break
+    result = discover_employees(project_dir=ctx.project_dir)
+    match = result.get(name)
 
     if match is None:
         async def _error():

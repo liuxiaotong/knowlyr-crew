@@ -538,8 +538,10 @@ class TestStreamEmployee:
         """stream=true 应返回 text/event-stream."""
         from crew.models import Employee
 
+        from crew.models import DiscoveryResult
+
         emp = Employee(name="test-emp", display_name="Test", description="", body="")
-        mock_discover.return_value = [emp]
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
         mock_engine = MagicMock()
         mock_engine.prompt.return_value = "test prompt"
         mock_engine_cls.return_value = mock_engine
@@ -569,7 +571,9 @@ class TestStreamEmployee:
     @patch("crew.discovery.discover_employees")
     def test_stream_unknown_employee(self, mock_discover):
         """流式请求未知员工应返回 error 事件."""
-        mock_discover.return_value = []
+        from crew.models import DiscoveryResult
+
+        mock_discover.return_value = DiscoveryResult(employees={})
 
         client = _make_client()
         resp = client.post(
@@ -723,10 +727,10 @@ class TestIdentityPassthrough:
     @patch("crew.id_client.afetch_agent_identity", new_callable=AsyncMock)
     def test_stream_with_agent_id(self, mock_identity, mock_exec, mock_engine_cls, mock_discover):
         """stream + agent_id 应获取身份并传给 prompt."""
-        from crew.models import Employee
+        from crew.models import DiscoveryResult, Employee
 
         emp = Employee(name="test-emp", display_name="Test", description="", body="")
-        mock_discover.return_value = [emp]
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
         mock_identity.return_value = {"name": "测试代理", "id": 42}
         mock_engine = MagicMock()
         mock_engine.prompt.return_value = "test prompt"
