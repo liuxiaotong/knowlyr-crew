@@ -22,6 +22,19 @@ class WorkLogResult(BaseModel):
     is_exemplar: bool = False
 
 
+class HumanFeedback(BaseModel):
+    """人工评分反馈条目."""
+
+    work_log_id: int
+    task_type: str = ""
+    auto_score: float | None = None
+    human_score: float
+    is_exemplar: bool = False
+    output_preview: str = ""
+    error: str = ""
+    created_at: str = ""
+
+
 class _CircuitBreaker:
     """Simple circuit breaker: after N consecutive failures, skip calls for cooldown_seconds."""
 
@@ -128,8 +141,17 @@ def fetch_agent_identity(agent_id: int) -> AgentIdentity | None:
         return None
 
 
-def send_heartbeat(agent_id: int, detail: str = "") -> bool:
-    """向 knowlyr-id 发送心跳（增加 daily_run_count）.
+def send_heartbeat(
+    agent_id: int,
+    detail: str = "",
+    *,
+    task_type: str = "",
+    tokens_used: int = 0,
+    model_used: str = "",
+    execution_ms: int = 0,
+    error: str = "",
+) -> bool:
+    """向 knowlyr-id 发送心跳（附带执行上下文）.
 
     Returns:
         True 成功, False 失败（不抛异常）
@@ -144,10 +166,24 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
 
     base_url, token = _get_config()
     url = f"{base_url}/api/agents/{agent_id}/heartbeat"
+    payload: dict = {}
+    if detail:
+        payload["label"] = detail
+    if task_type:
+        payload["task_type"] = task_type
+    if tokens_used:
+        payload["tokens_used"] = tokens_used
+    if model_used:
+        payload["model_used"] = model_used
+    if execution_ms:
+        payload["execution_ms"] = execution_ms
+    if error:
+        payload["error"] = error[:200]
     try:
         resp = httpx.post(
             url,
             headers=_headers(token),
+            json=payload if payload else None,
             timeout=5.0,
         )
         resp.raise_for_status()
@@ -418,7 +454,16 @@ async def afetch_agent_identity(agent_id: int) -> AgentIdentity | None:
         return None
 
 
-async def asend_heartbeat(agent_id: int, detail: str = "") -> bool:
+async def asend_heartbeat(
+    agent_id: int,
+    detail: str = "",
+    *,
+    task_type: str = "",
+    tokens_used: int = 0,
+    model_used: str = "",
+    execution_ms: int = 0,
+    error: str = "",
+) -> bool:
     """send_heartbeat 的异步版本."""
     if _breaker.is_open():
         logger.debug("knowlyr-id 断路器打开，跳过请求")
@@ -428,9 +473,26 @@ async def asend_heartbeat(agent_id: int, detail: str = "") -> bool:
         return False
     base_url, token = _get_config()
     url = f"{base_url}/api/agents/{agent_id}/heartbeat"
+    payload: dict = {}
+    if detail:
+        payload["label"] = detail
+    if task_type:
+        payload["task_type"] = task_type
+    if tokens_used:
+        payload["tokens_used"] = tokens_used
+    if model_used:
+        payload["model_used"] = model_used
+    if execution_ms:
+        payload["execution_ms"] = execution_ms
+    if error:
+        payload["error"] = error[:200]
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, headers=_headers(token), timeout=5.0)
+            resp = await client.post(
+                url, headers=_headers(token),
+                json=payload if payload else None,
+                timeout=5.0,
+            )
             resp.raise_for_status()
             _breaker.record_success()
             return True
@@ -641,6 +703,68 @@ async def afetch_exemplars(agent_id: int, task_type: str, limit: int = 2) -> str
         _breaker.record_failure()
         logger.warning("Agent %s 范例获取失败: %s", agent_id, e)
         return ""
+
+
+# ── 人工评分反馈 ──
+
+
+def fetch_feedback(
+    agent_id: int,
+    task_type: str = "",
+    limit: int = 5,
+) -> list[HumanFeedback]:
+    """从 knowlyr-id 获取最近的人工评分反馈.
+
+    Returns:
+        HumanFeedback 列表，失败返回空列表
+    """
+    if _breaker.is_open():
+        return []
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return []
+    base_url, token = _get_config()
+    url = f"{base_url}/api/work/feedback"
+    params: dict = {"agent_id": agent_id, "limit": limit}
+    if task_type:
+        params["task_type"] = task_type
+    try:
+        resp = httpx.get(url, headers=_headers(token), params=params, timeout=5.0)
+        resp.raise_for_status()
+        _breaker.record_success()
+        return [HumanFeedback(**f) for f in resp.json().get("feedbacks", [])]
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 反馈获取失败: %s", agent_id, e)
+        return []
+
+
+async def afetch_feedback(
+    agent_id: int,
+    task_type: str = "",
+    limit: int = 5,
+) -> list[HumanFeedback]:
+    """fetch_feedback 的异步版本."""
+    if _breaker.is_open():
+        return []
+    httpx = _get_httpx()
+    if httpx is None or not _get_config()[1]:
+        return []
+    base_url, token = _get_config()
+    url = f"{base_url}/api/work/feedback"
+    params: dict = {"agent_id": agent_id, "limit": limit}
+    if task_type:
+        params["task_type"] = task_type
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=_headers(token), params=params, timeout=5.0)
+            resp.raise_for_status()
+            _breaker.record_success()
+            return [HumanFeedback(**f) for f in resp.json().get("feedbacks", [])]
+    except Exception as e:
+        _breaker.record_failure()
+        logger.warning("Agent %s 反馈获取失败: %s", agent_id, e)
+        return []
 
 
 # ── 工作记录提交 ──
