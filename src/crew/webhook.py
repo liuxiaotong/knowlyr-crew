@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ try:
 except ImportError:
     HAS_STARLETTE = False
 
+from crew.exceptions import EmployeeNotFoundError, PipelineNotFoundError
 from crew.task_registry import TaskRegistry
 
 
@@ -119,12 +120,21 @@ def create_webhook_app(
 
     app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 
+    # 添加请求大小限制（始终生效）
+    from crew.auth import RequestSizeLimitMiddleware
+
+    app.add_middleware(RequestSizeLimitMiddleware)
+
     # 添加认证中间件
     if token:
-        from crew.auth import BearerTokenMiddleware
+        from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
         skip_paths = ["/health", "/webhook/github"]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
+        app.add_middleware(
+            RateLimitMiddleware,
+            skip_paths=["/health", "/metrics", "/webhook/github"],
+        )
 
     # 添加 CORS 中间件（后添加 = 先执行，确保 OPTIONS 预检不被认证拦截）
     if cors_origins:
@@ -356,19 +366,24 @@ async def _dispatch_task(
     model: str | None = None,
 ) -> JSONResponse:
     """创建任务并调度执行."""
+    trace_id = uuid.uuid4().hex[:12]
     record = ctx.registry.create(
         trigger=trigger,
         target_type=target_type,
         target_name=target_name,
         args=args,
     )
+    logger.info(
+        "任务开始 [trace=%s] %s → %s/%s (task=%s)",
+        trace_id, trigger, target_type, target_name, record.task_id,
+    )
 
     if sync:
-        await _execute_task(ctx, record.task_id, agent_id=agent_id, model=model)
+        await _execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id)
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id, model=model))
+    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id))
     return JSONResponse(
         {"task_id": record.task_id, "status": "pending"},
         status_code=202,
@@ -380,6 +395,7 @@ async def _execute_task(
     task_id: str,
     agent_id: int | None = None,
     model: str | None = None,
+    trace_id: str = "",
 ) -> None:
     """执行任务."""
     record = ctx.registry.get(task_id)
@@ -390,10 +406,12 @@ async def _execute_task(
 
     try:
         if record.target_type == "pipeline":
+            logger.info("执行 pipeline [trace=%s] %s", trace_id, record.target_name)
             result = await _execute_pipeline(
                 ctx, record.target_name, record.args, agent_id=agent_id, task_id=task_id,
             )
         elif record.target_type == "employee":
+            logger.info("执行 employee [trace=%s] %s", trace_id, record.target_name)
             result = await _execute_employee(
                 ctx, record.target_name, record.args, agent_id=agent_id, model=model,
             )
@@ -401,9 +419,10 @@ async def _execute_task(
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
             return
 
+        logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
     except Exception as e:
-        logger.exception("任务执行失败: %s", task_id)
+        logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
 
 
@@ -419,7 +438,7 @@ async def _execute_pipeline(
 
     pipelines = discover_pipelines(project_dir=ctx.project_dir)
     if name not in pipelines:
-        raise ValueError(f"未找到 pipeline: {name}")
+        raise PipelineNotFoundError(name)
 
     pipeline = load_pipeline(pipelines[name])
 
@@ -456,7 +475,7 @@ async def _execute_employee(
     match = result.get(name)
 
     if match is None:
-        raise ValueError(f"未找到员工: {name}")
+        raise EmployeeNotFoundError(name)
 
     # 获取 agent 身份
     agent_identity = None

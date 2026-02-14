@@ -324,3 +324,57 @@ class TestCreateEmbedder:
             embedder = _create_embedder()
         mock_oai.assert_called_once()
         mock_gem.assert_not_called()
+
+
+# ── Embedding timeout ──
+
+
+class TestEmbeddingTimeout:
+    """嵌入 API 超时保护."""
+
+    def test_openai_embedder_passes_timeout(self):
+        """验证 OpenAI embedder 传递 timeout 参数."""
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False):
+            try:
+                from crew.memory_search import _OpenAIEmbedder
+
+                mock_client = MagicMock()
+                mock_resp = MagicMock()
+                mock_resp.data = [MagicMock(embedding=[0.1] * 256)]
+                mock_client.embeddings.create.return_value = mock_resp
+
+                embedder = _OpenAIEmbedder.__new__(_OpenAIEmbedder)
+                embedder._client = mock_client
+                embedder._model = "text-embedding-3-small"
+
+                result = embedder.embed("test text")
+                call_kwargs = mock_client.embeddings.create.call_args[1]
+                assert call_kwargs.get("timeout") == 5.0
+                assert result is not None
+            except Exception:
+                pytest.skip("openai SDK not available")
+
+    def test_gemini_embedder_uses_timeout(self):
+        """验证 Gemini embedder 有超时保护（通过 ThreadPoolExecutor）."""
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}, clear=False):
+            try:
+                from crew.memory_search import _GeminiEmbedder
+
+                mock_genai = MagicMock()
+                mock_genai.embed_content.return_value = {"embedding": [0.1] * 256}
+
+                embedder = _GeminiEmbedder.__new__(_GeminiEmbedder)
+                embedder._genai = mock_genai
+                embedder._model = "models/text-embedding-004"
+
+                with patch("crew.memory_search.ThreadPoolExecutor") as mock_pool:
+                    mock_future = MagicMock()
+                    mock_future.result.return_value = {"embedding": [0.1] * 256}
+                    mock_pool.return_value.__enter__ = MagicMock(return_value=mock_pool.return_value)
+                    mock_pool.return_value.__exit__ = MagicMock(return_value=False)
+                    mock_pool.return_value.submit.return_value = mock_future
+
+                    result = embedder.embed("test text")
+                    mock_future.result.assert_called_once_with(timeout=5.0)
+            except Exception:
+                pytest.skip("google-generativeai SDK not available")

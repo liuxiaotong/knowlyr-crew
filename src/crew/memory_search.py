@@ -204,6 +204,7 @@ class _OpenAIEmbedder(_Embedder):
             resp = self._client.embeddings.create(
                 model="text-embedding-3-small",
                 input=text,
+                timeout=5.0,
             )
             return resp.data[0].embedding
         except Exception as e:
@@ -221,10 +222,15 @@ class _GeminiEmbedder(_Embedder):
     def embed(self, text: str) -> list[float] | None:
         try:
             import google.generativeai as genai
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-            )
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    genai.embed_content,
+                    model="models/text-embedding-004",
+                    content=text,
+                )
+                result = future.result(timeout=5.0)
             return result["embedding"]
         except Exception as e:
             logger.warning("Gemini embedding 失败: %s", e)

@@ -259,6 +259,15 @@ class TestTaskPersistence:
         reg = TaskRegistry(persist_path=jsonl)
         assert len(reg._tasks) == 0  # 损坏行全部跳过，不崩溃
 
+    def test_corrupt_jsonl_logs_warning(self, tmp_path, caplog):
+        """损坏的 JSONL 记录应产生 warning 日志."""
+        import logging
+        path = tmp_path / "tasks.jsonl"
+        path.write_text("not-valid-json\n")
+        with caplog.at_level(logging.WARNING, logger="crew.task_registry"):
+            registry = TaskRegistry(persist_path=path)
+        assert "跳过无效" in caplog.text
+
 
 # ── Webhook App 端点测试 ──
 

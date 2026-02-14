@@ -633,9 +633,10 @@ class TestRetry:
 
     def test_retry_delay(self):
         from crew.executor import _retry_delay
-        assert _retry_delay(0) == 1
-        assert _retry_delay(1) == 2
-        assert _retry_delay(2) == 4
+        for attempt in range(3):
+            delay = _retry_delay(attempt)
+            base = 2 ** attempt
+            assert base <= delay <= base + 0.5
 
 
 class TestGeminiExecute:
@@ -724,3 +725,123 @@ class TestQwenExecute:
         assert result.content == "Qwen result"
         client_call = mock_openai.OpenAI.call_args[1]
         assert "dashscope" in client_call["base_url"]
+
+
+class TestMoonshotExecute:
+    """测试 Moonshot 执行路径（OpenAI 兼容）."""
+
+    @patch("crew.executor._get_openai")
+    def test_uses_moonshot_base_url(self, mock_get):
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Moonshot result"
+        mock_choice.finish_reason = "stop"
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.model = "moonshot-v1-8k"
+        mock_resp.usage.prompt_tokens = 35
+        mock_resp.usage.completion_tokens = 8
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        mock_openai = MagicMock()
+        mock_openai.OpenAI.return_value = mock_client
+        mock_get.return_value = mock_openai
+
+        result = execute_prompt(
+            system_prompt="test", api_key="key", model="moonshot-v1-8k", stream=False,
+        )
+        assert result.content == "Moonshot result"
+        client_call = mock_openai.OpenAI.call_args[1]
+        assert "moonshot" in client_call["base_url"]
+
+
+class TestFallbackModel:
+    """测试 fallback 模型."""
+
+    @patch("crew.executor.time")
+    @patch("crew.executor._get_openai")
+    @patch("crew.executor._get_anthropic")
+    def test_fallback_on_primary_failure(self, mock_ant_get, mock_oai_get, mock_time):
+        """主模型失败后切换到 fallback."""
+        # 主模型（Anthropic）失败
+        rate_err = Exception("rate limited")
+        rate_err.status_code = 429
+
+        mock_ant_client = MagicMock()
+        mock_ant_client.messages.create.side_effect = rate_err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_ant_client
+        mock_ant_get.return_value = mock_anthropic
+
+        # Fallback 模型（OpenAI）成功
+        mock_choice = MagicMock()
+        mock_choice.message.content = "fallback ok"
+        mock_choice.finish_reason = "stop"
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_resp.model = "gpt-4o"
+        mock_resp.usage.prompt_tokens = 10
+        mock_resp.usage.completion_tokens = 5
+
+        mock_oai_client = MagicMock()
+        mock_oai_client.chat.completions.create.return_value = mock_resp
+        mock_openai = MagicMock()
+        mock_openai.OpenAI.return_value = mock_oai_client
+        mock_oai_get.return_value = mock_openai
+
+        result = execute_prompt(
+            system_prompt="test",
+            api_key="key",
+            stream=False,
+            fallback_model="gpt-4o",
+        )
+        assert result.content == "fallback ok"
+
+    @patch("crew.executor._get_anthropic")
+    def test_no_fallback_on_non_retryable(self, mock_get):
+        """非可重试错误也会尝试 fallback."""
+        auth_err = Exception("unauthorized")
+        auth_err.status_code = 401
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = auth_err
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        # 无 fallback 时直接抛出
+        with pytest.raises(Exception, match="unauthorized"):
+            execute_prompt(system_prompt="test", api_key="key", stream=False)
+
+
+class TestMetricsRecording:
+    """测试执行器自动记录指标."""
+
+    @patch("crew.executor._get_anthropic")
+    def test_records_metrics_on_success(self, mock_get):
+        from crew.metrics import get_collector
+
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="ok")]
+        mock_msg.model = "claude-sonnet-4-20250514"
+        mock_msg.usage.input_tokens = 100
+        mock_msg.usage.output_tokens = 10
+        mock_msg.stop_reason = "end_turn"
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_msg
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_get.return_value = mock_anthropic
+
+        collector = get_collector()
+        collector.reset()
+
+        execute_prompt(system_prompt="test", api_key="key", stream=False)
+
+        snap = collector.snapshot()
+        assert snap["calls"]["total"] >= 1
+        assert snap["calls"]["success"] >= 1
+        assert snap["tokens"]["input"] >= 100

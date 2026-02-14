@@ -27,6 +27,15 @@ from crew.session_summary import SessionMemoryWriter
 EMPLOYEE_SUBDIR = Path("private") / "employees"
 
 
+def _suggest_similar(name: str, candidates: list[str]) -> str:
+    """查找相似名称，返回提示文本."""
+    import difflib
+    close = difflib.get_close_matches(name, candidates, n=3, cutoff=0.5)
+    if close:
+        return f"\n类似的名称: {', '.join(close)}"
+    return ""
+
+
 def _employee_root() -> Path:
     """返回当前项目的员工根目录."""
     return Path.cwd() / EMPLOYEE_SUBDIR
@@ -562,6 +571,7 @@ def show(name: str):
 @click.option("--execute", "execute_mode", is_flag=True, help="执行 prompt（调用 LLM API）")
 @click.option("-m", "--message", "user_message", type=str, default=None, help="自定义 user message（--execute 模式）")
 @click.option("--no-stream", "no_stream", is_flag=True, help="禁用流式输出（--execute 模式）")
+@click.option("--debug-context", is_flag=True, help="显示检测到的项目上下文信息")
 def run(
     name: str,
     positional_args: tuple[str, ...],
@@ -575,11 +585,23 @@ def run(
     execute_mode: bool,
     user_message: str | None,
     no_stream: bool,
+    debug_context: bool,
 ):
     """加载员工并生成 prompt."""
+    if debug_context:
+        from crew.context_detector import detect_project
+        info = detect_project()
+        click.echo(f"[Context] 项目类型: {info.project_type}")
+        click.echo(f"[Context] 框架: {info.framework or '-'}")
+        click.echo(f"[Context] 测试: {info.test_framework or '-'}")
+        click.echo(f"[Context] 包管理: {info.package_manager or '-'}")
+        click.echo(f"[Context] Lint: {', '.join(info.lint_tools) if info.lint_tools else '-'}")
+        click.echo("---")
     emp = sdk.get_employee(name)
     if emp is None:
-        click.echo(f"未找到员工: {name}", err=True)
+        all_names = list(discover_employees().employees.keys())
+        hint = _suggest_similar(name, all_names)
+        click.echo(f"未找到员工: {name}{hint}", err=True)
         sys.exit(1)
 
     lane_name = f"employee:{emp.name}"
@@ -1456,7 +1478,8 @@ def pipeline_show(name: str):
 
     pipelines = discover_pipelines()
     if name not in pipelines:
-        click.echo(f"未找到流水线: {name}", err=True)
+        hint = _suggest_similar(name, list(pipelines.keys()))
+        click.echo(f"未找到流水线: {name}{hint}", err=True)
         sys.exit(1)
 
     from crew.models import ParallelGroup
@@ -1488,7 +1511,8 @@ def pipeline_graph(name: str, output: str | None):
 
     pipelines = discover_pipelines()
     if name not in pipelines:
-        click.echo(f"未找到流水线: {name}", err=True)
+        hint = _suggest_similar(name, list(pipelines.keys()))
+        click.echo(f"未找到流水线: {name}{hint}", err=True)
         sys.exit(1)
 
     p = load_pipeline(pipelines[name])
@@ -1499,6 +1523,107 @@ def pipeline_graph(name: str, output: str | None):
         click.echo(f"已保存到 {output}")
     else:
         click.echo(mermaid)
+
+
+@pipeline.group("checkpoint")
+def pipeline_checkpoint():
+    """管理流水线断点."""
+
+
+@pipeline_checkpoint.command("list")
+@click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
+def checkpoint_list(project_dir):
+    """列出有断点的 pipeline 任务."""
+    from crew.task_registry import TaskRegistry
+
+    base = Path(project_dir) if project_dir else Path.cwd()
+    persist_path = base / ".crew" / "tasks.jsonl"
+    if not persist_path.exists():
+        click.echo("未找到任务记录文件 (.crew/tasks.jsonl)")
+        return
+
+    registry = TaskRegistry(persist_path=persist_path)
+    tasks = [
+        t for t in registry.list_recent(n=100)
+        if t.checkpoint and t.target_type == "pipeline"
+    ]
+    if not tasks:
+        click.echo("暂无带断点的 pipeline 任务。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="Pipeline 断点")
+        table.add_column("Task ID", style="cyan")
+        table.add_column("Pipeline", style="green")
+        table.add_column("状态")
+        table.add_column("已完成步骤", justify="right")
+
+        for t in tasks:
+            completed = len(t.checkpoint.get("completed_steps", []))
+            table.add_row(t.task_id, t.target_name, t.status, str(completed))
+
+        console.print(table)
+    except ImportError:
+        for t in tasks:
+            completed = len(t.checkpoint.get("completed_steps", []))
+            click.echo(f"  {t.task_id}  {t.target_name}  {t.status}  步骤={completed}")
+
+
+@pipeline_checkpoint.command("resume")
+@click.argument("task_id")
+@click.option("--model", type=str, default=None, help="LLM 模型标识符")
+@click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
+def checkpoint_resume(task_id: str, model: str | None, project_dir):
+    """从断点恢复 pipeline 执行."""
+    import asyncio
+
+    from crew.pipeline import aresume_pipeline, discover_pipelines, load_pipeline
+    from crew.task_registry import TaskRegistry
+
+    base = Path(project_dir) if project_dir else Path.cwd()
+    persist_path = base / ".crew" / "tasks.jsonl"
+    if not persist_path.exists():
+        click.echo("未找到任务记录文件", err=True)
+        sys.exit(1)
+
+    registry = TaskRegistry(persist_path=persist_path)
+    record = registry.get(task_id)
+    if record is None:
+        click.echo(f"未找到任务: {task_id}", err=True)
+        sys.exit(1)
+
+    if not record.checkpoint:
+        click.echo("该任务没有断点数据", err=True)
+        sys.exit(1)
+
+    pipeline_name = record.checkpoint.get("pipeline_name", record.target_name)
+    pipelines = discover_pipelines(project_dir=base)
+    if pipeline_name not in pipelines:
+        click.echo(f"未找到 pipeline: {pipeline_name}", err=True)
+        sys.exit(1)
+
+    p = load_pipeline(pipelines[pipeline_name])
+
+    def _on_step(step_result, checkpoint_data):
+        registry.update_checkpoint(task_id, checkpoint_data)
+        click.echo(f"  步骤完成: {step_result.employee}")
+
+    click.echo(f"恢复 pipeline: {pipeline_name} (task={task_id})")
+    result = asyncio.run(aresume_pipeline(
+        p,
+        checkpoint=record.checkpoint,
+        initial_args=record.args,
+        project_dir=base,
+        execute=model is not None,
+        model=model,
+        on_step_complete=_on_step,
+    ))
+    registry.update(task_id, "completed", result=result.model_dump(mode="json"))
+    click.echo(f"完成! 共 {len(result.steps)} 步")
 
 
 @pipeline.command("run")
@@ -2341,8 +2466,31 @@ def memory_correct(employee: str, old_id: str, content: str):
 
 
 @memory.command("index")
-def memory_index_cmd():
+@click.option("--repair", is_flag=True, help="修复模式 — 删除并重建 embeddings.db")
+def memory_index_cmd(repair: bool):
     """重建混合搜索索引."""
+    if repair:
+        from crew.memory import MemoryStore
+        from crew.memory_search import SemanticMemoryIndex
+
+        store = MemoryStore()
+        memory_dir = store.memory_dir
+        db_path = memory_dir / "embeddings.db"
+        if db_path.exists():
+            db_path.unlink()
+            click.echo(f"已删除旧索引: {db_path}")
+
+        idx = SemanticMemoryIndex(memory_dir)
+        total = 0
+        for emp in store.list_employees():
+            entries = store.query(emp, limit=1000)
+            count = idx.reindex(emp, entries)
+            total += count
+            click.echo(f"  {emp}: {count}/{len(entries)} 条已索引")
+        idx.close()
+        click.echo(f"修复完成: 共 {total} 条")
+        return
+
     from crew.memory_index import MemorySearchIndex
 
     index = MemorySearchIndex()

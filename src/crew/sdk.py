@@ -8,6 +8,7 @@ from typing import Iterable, Sequence
 from crew.context_detector import detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
+from crew.exceptions import EmployeeNotFoundError
 from crew.models import Employee
 
 try:  # pragma: no cover - optional dependency
@@ -64,7 +65,7 @@ def generate_prompt_by_name(
     """High level helper to render prompt by employee name or trigger."""
     employee = get_employee(name_or_trigger, project_dir=project_dir)
     if employee is None:
-        raise ValueError(f"未找到员工: {name_or_trigger}")
+        raise EmployeeNotFoundError(name_or_trigger)
 
     agent_identity = None
     if agent_id is not None and fetch_agent_identity:
@@ -99,7 +100,7 @@ def run_pipeline_steps(
     for name, step_args in steps:
         employee = get_employee(name, project_dir=project_dir)
         if employee is None:
-            raise ValueError(f"未找到员工: {name}")
+            raise EmployeeNotFoundError(name)
 
         agent_identity = None
         if agent_id is not None and fetch_agent_identity:

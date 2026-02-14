@@ -85,3 +85,55 @@ class TestMetricsCollector:
         c1 = get_collector()
         c2 = get_collector()
         assert c1 is c2
+
+    def test_record_latency(self):
+        m = MetricsCollector()
+        m.record_latency(latency_ms=100.0, provider="anthropic")
+        m.record_latency(latency_ms=200.0, provider="anthropic")
+        m.record_latency(latency_ms=300.0, provider="openai")
+        snap = m.snapshot()
+        assert snap["latency"]["count"] == 3
+        assert snap["latency"]["mean_ms"] == 200.0
+        assert snap["latency_by_provider"]["anthropic"]["count"] == 2
+        assert snap["latency_by_provider"]["openai"]["count"] == 1
+
+    def test_latency_empty(self):
+        m = MetricsCollector()
+        snap = m.snapshot()
+        assert snap["latency"]["count"] == 0
+        assert snap["latency"]["mean_ms"] == 0
+        assert snap["latency_by_provider"] == {}
+
+    def test_latency_percentiles(self):
+        m = MetricsCollector()
+        for i in range(100):
+            m.record_latency(latency_ms=float(i + 1))
+        snap = m.snapshot()
+        assert snap["latency"]["count"] == 100
+        assert snap["latency"]["p50_ms"] == 51.0
+        assert snap["latency"]["p95_ms"] == 96.0
+        assert snap["latency"]["max_ms"] == 100.0
+
+    def test_latency_reset(self):
+        m = MetricsCollector()
+        m.record_latency(latency_ms=100.0, provider="anthropic")
+        m.reset()
+        snap = m.snapshot()
+        assert snap["latency"]["count"] == 0
+        assert snap["latency_by_provider"] == {}
+
+    def test_error_type_tracking(self):
+        m = MetricsCollector()
+        m.record_call(provider="anthropic", success=False, error_type="HTTP_429")
+        m.record_call(provider="anthropic", success=False, error_type="HTTP_429")
+        m.record_call(provider="anthropic", success=False, error_type="TimeoutError")
+        snap = m.snapshot()
+        errors = snap["by_provider"]["anthropic"]["errors"]
+        assert errors["HTTP_429"] == 2
+        assert errors["TimeoutError"] == 1
+
+    def test_error_type_not_tracked_on_success(self):
+        m = MetricsCollector()
+        m.record_call(provider="anthropic", success=True, error_type="should_not_appear")
+        snap = m.snapshot()
+        assert snap["by_provider"]["anthropic"].get("errors", {}) == {}

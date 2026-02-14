@@ -19,6 +19,7 @@ from mcp.types import (
     ReadResourceRequestParams,
 )
 
+from crew.exceptions import EmployeeNotFoundError
 from crew.mcp_server import create_server
 
 
@@ -129,7 +130,7 @@ class TestMCPPrompts:
     def test_get_prompt_not_found(self):
         """不存在的 prompt 应报错."""
         handler = self.server.request_handlers[GetPromptRequest]
-        with pytest.raises(ValueError, match="未找到"):
+        with pytest.raises(EmployeeNotFoundError, match="未找到"):
             _run(handler(GetPromptRequest(
                 method="prompts/get",
                 params=GetPromptRequestParams(name="nonexistent"),
@@ -166,7 +167,7 @@ class TestMCPResources:
     def test_read_resource_not_found(self):
         """不存在的资源应报错."""
         handler = self.server.request_handlers[ReadResourceRequest]
-        with pytest.raises(ValueError, match="未找到"):
+        with pytest.raises(EmployeeNotFoundError, match="未找到"):
             _run(handler(ReadResourceRequest(
                 method="resources/read",
                 params=ReadResourceRequestParams(uri="crew://employee/nonexistent"),

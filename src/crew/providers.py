@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from enum import Enum
 
+from crew.exceptions import ProviderError
+
 
 class Provider(Enum):
     ANTHROPIC = "anthropic"
@@ -69,7 +71,7 @@ def detect_provider(model: str) -> Provider:
         if model_lower.startswith(prefix):
             return provider
     supported = ", ".join(p for p, _ in _MODEL_PREFIXES)
-    raise ValueError(f"无法识别模型 '{model}' 的提供商。支持的前缀: {supported}")
+    raise ProviderError(f"无法识别模型 '{model}' 的提供商。支持的前缀: {supported}")
 
 
 def resolve_api_key(provider: Provider, api_key: str | None = None) -> str:
@@ -83,7 +85,7 @@ def resolve_api_key(provider: Provider, api_key: str | None = None) -> str:
     env_var = API_KEY_ENV_VARS[provider]
     key = os.environ.get(env_var, "")
     if not key:
-        raise ValueError(
+        raise ProviderError(
             f"{provider.value} API key 未设置。"
             f"请设置环境变量 {env_var} 或通过参数传递 api_key。"
         )

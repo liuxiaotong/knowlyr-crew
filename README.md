@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-597_passed-brightgreen.svg)](#开发--development)
+[![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 [![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
 [快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
@@ -164,6 +164,12 @@ pip install knowlyr-crew[mcp]
 | **TTL 缓存** | 员工发现和项目检测结果缓存 30s，避免每请求重扫文件系统 |
 | **请求日志** | 每次 tool 调用自动记录日志，异常自动捕获并返回错误响应 |
 | **并发安全** | JSONL read-modify-write 操作加 `fcntl.flock` 文件锁，SQLite 启用 WAL 模式 |
+| **请求大小限制** | 默认 1MB，超限返回 HTTP 413（始终生效） |
+| **速率限制** | 启用认证时自动生效，默认 60 请求/分钟/IP，`/health`、`/metrics`、`/webhook/github` 免限 |
+| **时序安全认证** | Bearer token 使用 `hmac.compare_digest` 防止时序攻击 |
+| **链路追踪** | 每个任务分配唯一 trace_id，贯穿日志全链路 |
+| **断路器** | knowlyr-id 连续 3 次失败后暂停请求 30 秒，自动恢复 |
+| **运行时指标** | `/metrics` 端点提供调用/延迟/token/错误统计，按员工和提供商分类 |
 
 ---
 
@@ -570,8 +576,12 @@ Execute 模式支持三家 LLM 提供商，根据模型名前缀自动检测：
 | **Anthropic** | `claude-*` | `ANTHROPIC_API_KEY` | `pip install knowlyr-crew[execute]` |
 | **OpenAI** | `gpt-*`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*` | `OPENAI_API_KEY` | `pip install knowlyr-crew[openai]` |
 | **DeepSeek** | `deepseek-*` | `DEEPSEEK_API_KEY` | `pip install knowlyr-crew[openai]` |
+| **Moonshot** | `moonshot-*` | `MOONSHOT_API_KEY` | `pip install knowlyr-crew[openai]` |
+| **Gemini** | `gemini-*` | `GOOGLE_API_KEY` | `pip install knowlyr-crew[gemini]` |
+| **智谱** | `glm-*` | `ZHIPUAI_API_KEY` | `pip install knowlyr-crew[openai]` |
+| **通义千问** | `qwen-*` | `DASHSCOPE_API_KEY` | `pip install knowlyr-crew[openai]` |
 
-> DeepSeek 使用 OpenAI 兼容 API，共用 `openai` 依赖，无需额外安装。
+> DeepSeek / Moonshot / 智谱 / 通义千问 使用 OpenAI 兼容 API，共用 `openai` 依赖。
 
 员工定义中的 `model` 字段直接决定使用哪个提供商：
 
@@ -580,6 +590,34 @@ Execute 模式支持三家 LLM 提供商，根据模型名前缀自动检测：
 model: gpt-4o          # → 自动使用 OpenAI
 model: deepseek-chat   # → 自动使用 DeepSeek
 model: claude-opus-4-6 # → 自动使用 Anthropic（默认）
+```
+
+### 断点恢复
+
+Pipeline 在 Execute 模式下支持断点续执行——中途失败时可从最后完成的步骤恢复：
+
+```bash
+# 查看有断点的任务
+knowlyr-crew pipeline checkpoint list
+
+# 从断点恢复
+knowlyr-crew pipeline checkpoint resume <task_id> --model claude-opus-4-6
+```
+
+Webhook 服务器重启时会自动恢复未完成的 pipeline 任务。
+
+### Fallback 模型
+
+Execute 模式支持 `fallback_model` 参数——当主模型重试耗尽后自动切换：
+
+```python
+from crew.executor import execute_prompt
+result = execute_prompt(
+    system_prompt="...", api_key="key",
+    model="claude-opus-4-6",
+    fallback_model="gpt-4o",  # 主模型失败后自动切换
+    stream=False,
+)
 ```
 
 发现路径：`builtin < project (.crew/pipelines/)`
@@ -1040,7 +1078,7 @@ pip install -e ".[all]"
 pytest -v
 ```
 
-**Tests**: 597 cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI, MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, Bearer token auth middleware, file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot), API key auto-resolution, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
+**Tests**: 700+ cases covering parsing (single-file + directory format), discovery (with TTL cache), engine, CLI (fuzzy matching, debug-context, checkpoint), MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async, circuit breaker), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough, request size limit, rate limiting, trace-id logging), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring, embedding timeout), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, custom exception hierarchy, Bearer token auth middleware (timing-safe), file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot/Gemini/Zhipu/Qwen), API key auto-resolution, fallback model, latency metrics, and knowlyr-id bidirectional sync (push/pull/register/disable/dry-run).
 
 ## License
 

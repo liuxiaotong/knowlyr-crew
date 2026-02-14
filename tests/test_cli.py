@@ -467,3 +467,91 @@ steps:
         assert result.exit_code == 0
         # Rich table 可能截断名称，检查有输出且无报错
         assert "触发时间" in result.output or "hourly" in result.output
+
+    # ── Fuzzy matching tests ──
+
+    def test_run_not_found_suggests_similar(self):
+        result = self.runner.invoke(main, ["run", "code-reviwer"])
+        assert result.exit_code == 1
+        assert "类似的名称" in result.output
+
+    def test_pipeline_show_not_found_suggests_similar(self, tmp_path, monkeypatch):
+        pl_dir = tmp_path / ".crew" / "pipelines"
+        pl_dir.mkdir(parents=True)
+        data = {"name": "full-review", "steps": [{"employee": "code-reviewer"}]}
+        (pl_dir / "full-review.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "show", "ful-review"])
+        assert result.exit_code == 1
+        assert "类似的名称" in result.output
+
+    def test_pipeline_graph_not_found_suggests_similar(self, tmp_path, monkeypatch):
+        pl_dir = tmp_path / ".crew" / "pipelines"
+        pl_dir.mkdir(parents=True)
+        data = {"name": "full-review", "steps": [{"employee": "code-reviewer"}]}
+        (pl_dir / "full-review.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "graph", "ful-review"])
+        assert result.exit_code == 1
+        assert "类似的名称" in result.output
+
+    # ── Debug context test ──
+
+    def test_run_debug_context(self):
+        result = self.runner.invoke(main, ["run", "code-reviewer", "main", "--debug-context"])
+        assert result.exit_code == 0
+        assert "[Context]" in result.output
+
+    # ── Checkpoint tests ──
+
+    def test_checkpoint_list_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "checkpoint", "list", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "未找到" in result.output
+
+    def test_checkpoint_list_with_data(self, tmp_path, monkeypatch):
+        import time as _t
+        from crew.task_registry import TaskRegistry
+
+        (tmp_path / ".crew").mkdir(parents=True)
+        persist_path = tmp_path / ".crew" / "tasks.jsonl"
+        registry = TaskRegistry(persist_path=persist_path)
+        record = registry.create(
+            trigger="direct",
+            target_type="pipeline",
+            target_name="full-review",
+            args={"target": "main"},
+        )
+        registry.update_checkpoint(record.task_id, {
+            "pipeline_name": "full-review",
+            "completed_steps": [{"employee": "code-reviewer"}],
+        })
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "checkpoint", "list", "-d", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "full-review" in result.output
+
+    def test_checkpoint_resume_no_task(self, tmp_path, monkeypatch):
+        (tmp_path / ".crew").mkdir(parents=True)
+        (tmp_path / ".crew" / "tasks.jsonl").write_text("")
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "checkpoint", "resume", "nonexist", "-d", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "未找到" in result.output
+
+    # ── Memory repair test ──
+
+    def test_memory_index_repair(self, tmp_path, monkeypatch):
+        from crew.memory import MemoryStore
+
+        monkeypatch.chdir(tmp_path)
+        mem_dir = tmp_path / ".crew" / "memory"
+        mem_dir.mkdir(parents=True)
+        store = MemoryStore(memory_dir=mem_dir)
+        store.add("bot", "finding", "test memory")
+
+        # CLI's MemoryStore() will use cwd, which is tmp_path
+        result = self.runner.invoke(main, ["memory", "index", "--repair"])
+        assert result.exit_code == 0
+        assert "修复完成" in result.output

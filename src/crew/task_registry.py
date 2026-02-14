@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -60,10 +63,11 @@ class TaskRegistry:
                 try:
                     record = TaskRecord.model_validate_json(line)
                     self._tasks[record.task_id] = record
-                except Exception:
+                except Exception as e:
+                    logger.warning("跳过无效的任务记录: %s", e)
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("加载任务历史失败: %s", e)
 
     def _persist(self, record: TaskRecord) -> None:
         """追加写入 JSONL."""
@@ -73,8 +77,8 @@ class TaskRegistry:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._persist_path, "a", encoding="utf-8") as f:
                 f.write(record.model_dump_json() + "\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("持久化任务记录失败 [%s]: %s", record.task_id, e)
 
     def _compact_if_needed(self) -> None:
         """如果记录过多，截断旧记录."""
@@ -95,8 +99,8 @@ class TaskRegistry:
         try:
             lines = [r.model_dump_json() for r in sorted_records[len(to_remove) :]]
             self._persist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("任务记录压缩失败: %s", e)
 
     def create(
         self,

@@ -1,6 +1,10 @@
-"""Bearer token 认证中间件."""
+"""认证与安全中间件."""
 
 from __future__ import annotations
+
+import hmac
+import time as _time
+from collections import defaultdict
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -8,7 +12,7 @@ from starlette.responses import JSONResponse
 
 
 class BearerTokenMiddleware(BaseHTTPMiddleware):
-    """校验 Authorization: Bearer <token>."""
+    """校验 Authorization: Bearer <token>（时序安全比较）."""
 
     def __init__(self, app, *, token: str, skip_paths: list[str] | None = None):
         super().__init__(app)
@@ -20,7 +24,69 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer ") or auth[7:] != self.token:
+        if not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], self.token):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+        return await call_next(request)
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """拒绝超过大小限制的请求（默认 1MB）."""
+
+    def __init__(self, app, *, max_bytes: int = 1_048_576):
+        super().__init__(app)
+        self.max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > self.max_bytes:
+            return JSONResponse(
+                {"error": "request too large"},
+                status_code=413,
+            )
+        return await call_next(request)
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """基于客户端 IP 的滑动窗口速率限制.
+
+    Args:
+        rate: 窗口期内最大请求数.
+        window: 窗口大小（秒）.
+        skip_paths: 跳过限制的路径列表.
+    """
+
+    def __init__(
+        self,
+        app,
+        *,
+        rate: int = 60,
+        window: float = 60.0,
+        skip_paths: list[str] | None = None,
+    ):
+        super().__init__(app)
+        self.rate = rate
+        self.window = window
+        self.skip_paths = skip_paths or ["/health", "/metrics"]
+        self._buckets: dict[str, list[float]] = defaultdict(list)
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in self.skip_paths:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        now = _time.monotonic()
+
+        # 清理过期记录
+        bucket = self._buckets[client_ip]
+        cutoff = now - self.window
+        self._buckets[client_ip] = [t for t in bucket if t > cutoff]
+
+        if len(self._buckets[client_ip]) >= self.rate:
+            return JSONResponse(
+                {"error": "rate limit exceeded"},
+                status_code=429,
+            )
+
+        self._buckets[client_ip].append(now)
         return await call_next(request)

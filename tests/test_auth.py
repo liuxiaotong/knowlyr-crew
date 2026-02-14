@@ -1,4 +1,4 @@
-"""BearerTokenMiddleware 测试."""
+"""认证与安全中间件测试."""
 
 import pytest
 
@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from crew.auth import BearerTokenMiddleware
+from crew.auth import BearerTokenMiddleware, RateLimitMiddleware, RequestSizeLimitMiddleware
 
 TOKEN = "test-secret-token"
 
@@ -83,3 +83,100 @@ class TestWithoutAuth:
     def test_health_still_works(self):
         resp = self.client.get("/health")
         assert resp.status_code == 200
+
+
+def _make_post_app():
+    """构建支持 POST 的测试 app."""
+
+    async def upload(request: Request):
+        body = await request.body()
+        return JSONResponse({"size": len(body)})
+
+    async def health(request: Request):
+        return JSONResponse({"status": "ok"})
+
+    return Starlette(
+        routes=[
+            Route("/health", endpoint=health, methods=["GET"]),
+            Route("/upload", endpoint=upload, methods=["POST"]),
+        ],
+    )
+
+
+class TestRequestSizeLimit:
+    """请求大小限制中间件."""
+
+    def test_oversized_request_rejected(self):
+        app = _make_post_app()
+        app.add_middleware(RequestSizeLimitMiddleware, max_bytes=100)
+        client = TestClient(app)
+        resp = client.post(
+            "/upload",
+            content="x" * 200,
+            headers={"Content-Length": "200", "Content-Type": "application/octet-stream"},
+        )
+        assert resp.status_code == 413
+        assert "too large" in resp.json()["error"]
+
+    def test_normal_request_passes(self):
+        app = _make_post_app()
+        app.add_middleware(RequestSizeLimitMiddleware, max_bytes=1000)
+        client = TestClient(app)
+        resp = client.post(
+            "/upload",
+            content="x" * 50,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert resp.status_code == 200
+
+    def test_no_content_length_passes(self):
+        """无 Content-Length 头的请求不被拦截."""
+        app = _make_post_app()
+        app.add_middleware(RequestSizeLimitMiddleware, max_bytes=10)
+        client = TestClient(app)
+        resp = client.get("/health")
+        assert resp.status_code == 200
+
+
+class TestRateLimiter:
+    """速率限制中间件."""
+
+    def test_within_limit_passes(self):
+        app = _make_post_app()
+        app.add_middleware(RateLimitMiddleware, rate=5, window=60.0)
+        client = TestClient(app)
+        for _ in range(5):
+            resp = client.get("/health")
+            assert resp.status_code == 200
+
+    def test_exceeds_limit_returns_429(self):
+        app = _make_post_app()
+        app.add_middleware(RateLimitMiddleware, rate=3, window=60.0, skip_paths=[])
+        client = TestClient(app)
+        for _ in range(3):
+            resp = client.post("/upload", content="x")
+            assert resp.status_code == 200
+        resp = client.post("/upload", content="x")
+        assert resp.status_code == 429
+        assert "rate limit" in resp.json()["error"]
+
+    def test_health_bypasses_rate_limit(self):
+        app = _make_post_app()
+        app.add_middleware(RateLimitMiddleware, rate=1, window=60.0, skip_paths=["/health"])
+        client = TestClient(app)
+        # 第一次 upload 应该成功
+        resp = client.post("/upload", content="x")
+        assert resp.status_code == 200
+        # 第二次 upload 被限流
+        resp = client.post("/upload", content="x")
+        assert resp.status_code == 429
+        # health 不受限制
+        for _ in range(5):
+            resp = client.get("/health")
+            assert resp.status_code == 200
+
+    def test_default_skip_paths(self):
+        app = _make_post_app()
+        middleware = RateLimitMiddleware(app, rate=10)
+        assert "/health" in middleware.skip_paths
+        assert "/metrics" in middleware.skip_paths

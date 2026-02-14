@@ -4,12 +4,46 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time as _time
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 AGENT_MEMORY_LIMIT = 2000
+
+
+class _CircuitBreaker:
+    """Simple circuit breaker: after N consecutive failures, skip calls for cooldown_seconds."""
+
+    def __init__(self, threshold: int = 3, cooldown: float = 30.0):
+        self._threshold = threshold
+        self._cooldown = cooldown
+        self._failures = 0
+        self._last_failure: float = 0.0
+        self._lock = threading.Lock()
+
+    def is_open(self) -> bool:
+        with self._lock:
+            if self._failures < self._threshold:
+                return False
+            if _time.monotonic() - self._last_failure > self._cooldown:
+                self._failures = 0
+                return False
+            return True
+
+    def record_success(self) -> None:
+        with self._lock:
+            self._failures = 0
+
+    def record_failure(self) -> None:
+        with self._lock:
+            self._failures += 1
+            self._last_failure = _time.monotonic()
+
+
+_breaker = _CircuitBreaker()
 
 
 def _get_config() -> tuple[str, str]:
@@ -59,6 +93,10 @@ def fetch_agent_identity(agent_id: int) -> AgentIdentity | None:
     Returns:
         AgentIdentity 对象，失败返回 None（不抛异常）
     """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
+
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法连接 knowlyr-id")
@@ -73,8 +111,10 @@ def fetch_agent_identity(agent_id: int) -> AgentIdentity | None:
     try:
         resp = httpx.get(url, headers=_headers(token), timeout=5.0)
         resp.raise_for_status()
+        _breaker.record_success()
         return _parse_identity(agent_id, resp.json())
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("获取 Agent %s 身份失败: %s", agent_id, e)
         return None
 
@@ -85,6 +125,10 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
     Returns:
         True 成功, False 失败（不抛异常）
     """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return False
+
     httpx = _get_httpx()
     if httpx is None or not _get_config()[1]:
         return False
@@ -98,8 +142,10 @@ def send_heartbeat(agent_id: int, detail: str = "") -> bool:
             timeout=5.0,
         )
         resp.raise_for_status()
+        _breaker.record_success()
         return True
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent %s 心跳发送失败: %s", agent_id, e)
         return False
 
@@ -118,6 +164,10 @@ def register_agent(
     Returns:
         agent_id（成功）或 None（失败，不抛异常）
     """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
+
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法注册 Agent")
@@ -151,9 +201,11 @@ def register_agent(
             timeout=10.0,
         )
         resp.raise_for_status()
+        _breaker.record_success()
         data = resp.json()
         return data.get("agent_id")
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent 注册失败: %s", e)
         return None
 
@@ -178,6 +230,10 @@ def update_agent(
     Returns:
         True 成功, False 失败（不抛异常）
     """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return False
+
     httpx = _get_httpx()
     if httpx is None or not _get_config()[1]:
         return False
@@ -222,8 +278,10 @@ def update_agent(
             timeout=10.0,
         )
         resp.raise_for_status()
+        _breaker.record_success()
         return True
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent %s 更新失败: %s", agent_id, e)
         return False
 
@@ -271,6 +329,10 @@ def list_agents() -> list[dict] | None:
     Returns:
         Agent 列表（成功）或 None（失败，不抛异常）
     """
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
+
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法列出 Agent")
@@ -289,8 +351,10 @@ def list_agents() -> list[dict] | None:
             timeout=5.0,
         )
         resp.raise_for_status()
+        _breaker.record_success()
         return resp.json()
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent 列表获取失败: %s", e)
         return None
 
@@ -319,6 +383,9 @@ def _parse_identity(agent_id: int, data: dict) -> AgentIdentity:
 
 async def afetch_agent_identity(agent_id: int) -> AgentIdentity | None:
     """fetch_agent_identity 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法连接 knowlyr-id")
@@ -332,14 +399,19 @@ async def afetch_agent_identity(agent_id: int) -> AgentIdentity | None:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=_headers(token), timeout=5.0)
             resp.raise_for_status()
+            _breaker.record_success()
             return _parse_identity(agent_id, resp.json())
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("获取 Agent %s 身份失败: %s", agent_id, e)
         return None
 
 
 async def asend_heartbeat(agent_id: int, detail: str = "") -> bool:
     """send_heartbeat 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return False
     httpx = _get_httpx()
     if httpx is None or not _get_config()[1]:
         return False
@@ -349,8 +421,10 @@ async def asend_heartbeat(agent_id: int, detail: str = "") -> bool:
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, headers=_headers(token), timeout=5.0)
             resp.raise_for_status()
+            _breaker.record_success()
             return True
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent %s 心跳发送失败: %s", agent_id, e)
         return False
 
@@ -365,6 +439,9 @@ async def aregister_agent(
     avatar_base64: str | None = None,
 ) -> int | None:
     """register_agent 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法注册 Agent")
@@ -391,8 +468,10 @@ async def aregister_agent(
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, headers=_headers(token), json=payload, timeout=10.0)
             resp.raise_for_status()
+            _breaker.record_success()
             return resp.json().get("agent_id")
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent 注册失败: %s", e)
         return None
 
@@ -413,6 +492,9 @@ async def aupdate_agent(
     agent_status: str | None = None,
 ) -> bool:
     """update_agent 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return False
     httpx = _get_httpx()
     if httpx is None or not _get_config()[1]:
         return False
@@ -449,8 +531,10 @@ async def aupdate_agent(
         async with httpx.AsyncClient() as client:
             resp = await client.put(url, headers=_headers(token), json=payload, timeout=10.0)
             resp.raise_for_status()
+            _breaker.record_success()
             return True
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent %s 更新失败: %s", agent_id, e)
         return False
 
@@ -466,6 +550,9 @@ async def aappend_agent_memory(agent_id: int, summary: str) -> bool:
 
 async def alist_agents() -> list[dict] | None:
     """list_agents 的异步版本."""
+    if _breaker.is_open():
+        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        return None
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法列出 Agent")
@@ -479,7 +566,9 @@ async def alist_agents() -> list[dict] | None:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=_headers(token), timeout=5.0)
             resp.raise_for_status()
+            _breaker.record_success()
             return resp.json()
     except Exception as e:
+        _breaker.record_failure()
         logger.warning("Agent 列表获取失败: %s", e)
         return None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
@@ -35,8 +36,8 @@ def _is_retryable(exc: Exception) -> bool:
 
 
 def _retry_delay(attempt: int) -> float:
-    """指数退避延迟（秒）: 1, 2, 4."""
-    return float(2 ** attempt)
+    """指数退避延迟（秒）: 2^attempt + random jitter."""
+    return float(2 ** attempt) + random.uniform(0, 0.5)
 
 
 # ── Lazy SDK imports ──
@@ -434,6 +435,46 @@ async def _gemini_aexecute(
     )
 
 
+# ── 指标记录 ──
+
+
+def _record_metrics(provider_name: str, result: ExecutionResult, elapsed: float) -> None:
+    """记录成功调用的指标."""
+    try:
+        from crew.metrics import get_collector
+
+        collector = get_collector()
+        collector.record_call(
+            provider=provider_name,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            success=True,
+        )
+        collector.record_latency(elapsed * 1000, provider=provider_name)
+    except Exception:
+        pass
+
+
+def _record_failure(provider_name: str, exc: Exception) -> None:
+    """记录失败调用的指标."""
+    try:
+        from crew.metrics import get_collector
+
+        error_type = type(exc).__name__
+        status = getattr(exc, "status_code", None)
+        if status is not None:
+            error_type = f"HTTP_{status}"
+        get_collector().record_call(
+            provider=provider_name,
+            input_tokens=0,
+            output_tokens=0,
+            success=False,
+            error_type=error_type,
+        )
+    except Exception:
+        pass
+
+
 # ── 公开 API ──
 
 
@@ -447,6 +488,7 @@ def execute_prompt(
     max_tokens: int | None = None,
     stream: bool = True,
     on_chunk: Callable[[str], None] | None = None,
+    fallback_model: str | None = None,
 ) -> ExecutionResult:
     """调用 LLM API 执行 prompt（支持 Anthropic / OpenAI / DeepSeek）.
 
@@ -459,6 +501,7 @@ def execute_prompt(
         max_tokens: 最大输出 token 数.
         stream: 是否流式输出.
         on_chunk: 流式模式下的文本块回调.
+        fallback_model: 所有重试耗尽后的备用模型.
 
     Returns:
         ExecutionResult.
@@ -469,30 +512,31 @@ def execute_prompt(
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
+            t0 = time.monotonic()
             if provider == Provider.ANTHROPIC:
-                return _anthropic_execute(
+                result = _anthropic_execute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream, on_chunk,
                 )
-
-            if provider == Provider.GEMINI:
-                return _gemini_execute(
+            elif provider == Provider.GEMINI:
+                result = _gemini_execute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream, on_chunk,
                 )
-
-            base_url = {
-                Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
-                Provider.MOONSHOT: MOONSHOT_BASE_URL,
-                Provider.ZHIPU: ZHIPU_BASE_URL,
-                Provider.QWEN: QWEN_BASE_URL,
-            }.get(provider)
-
-            return _openai_execute(
-                system_prompt, user_message, resolved_key, model,
-                temperature, max_tokens, stream, on_chunk,
-                base_url=base_url,
-            )
+            else:
+                base_url = {
+                    Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                    Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                    Provider.ZHIPU: ZHIPU_BASE_URL,
+                    Provider.QWEN: QWEN_BASE_URL,
+                }.get(provider)
+                result = _openai_execute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream, on_chunk,
+                    base_url=base_url,
+                )
+            _record_metrics(provider.value, result, time.monotonic() - t0)
+            return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):
                 delay = _retry_delay(attempt)
@@ -503,8 +547,28 @@ def execute_prompt(
                 time.sleep(delay)
                 last_exc = e
             else:
-                raise
-    raise last_exc  # type: ignore[misc]  # should not reach here
+                _record_failure(provider.value, e)
+                last_exc = e
+                break
+
+    # 尝试 fallback 模型
+    if fallback_model and last_exc is not None:
+        logger.warning("切换到 fallback 模型: %s", fallback_model)
+        try:
+            return execute_prompt(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                api_key=api_key,
+                model=fallback_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=stream,
+                on_chunk=on_chunk,
+            )
+        except Exception:
+            pass  # fallback 也失败，抛原始异常
+
+    raise last_exc  # type: ignore[misc]
 
 
 async def aexecute_prompt(
@@ -516,6 +580,7 @@ async def aexecute_prompt(
     temperature: float | None = None,
     max_tokens: int | None = None,
     stream: bool = True,
+    fallback_model: str | None = None,
 ) -> ExecutionResult | AsyncIterator[str]:
     """execute_prompt 的异步版本.
 
@@ -529,30 +594,33 @@ async def aexecute_prompt(
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
+            t0 = time.monotonic()
             if provider == Provider.ANTHROPIC:
-                return await _anthropic_aexecute(
+                result = await _anthropic_aexecute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream,
                 )
-
-            if provider == Provider.GEMINI:
-                return await _gemini_aexecute(
+            elif provider == Provider.GEMINI:
+                result = await _gemini_aexecute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream,
                 )
-
-            base_url = {
-                Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
-                Provider.MOONSHOT: MOONSHOT_BASE_URL,
-                Provider.ZHIPU: ZHIPU_BASE_URL,
-                Provider.QWEN: QWEN_BASE_URL,
-            }.get(provider)
-
-            return await _openai_aexecute(
-                system_prompt, user_message, resolved_key, model,
-                temperature, max_tokens, stream,
-                base_url=base_url,
-            )
+            else:
+                base_url = {
+                    Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                    Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                    Provider.ZHIPU: ZHIPU_BASE_URL,
+                    Provider.QWEN: QWEN_BASE_URL,
+                }.get(provider)
+                result = await _openai_aexecute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream,
+                    base_url=base_url,
+                )
+            # 流式模式下不记录指标（调用方消费完再记录）
+            if not stream and isinstance(result, ExecutionResult):
+                _record_metrics(provider.value, result, time.monotonic() - t0)
+            return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):
                 delay = _retry_delay(attempt)
@@ -563,5 +631,24 @@ async def aexecute_prompt(
                 await asyncio.sleep(delay)
                 last_exc = e
             else:
-                raise
-    raise last_exc  # type: ignore[misc]  # should not reach here
+                _record_failure(provider.value, e)
+                last_exc = e
+                break
+
+    # 尝试 fallback 模型
+    if fallback_model and last_exc is not None:
+        logger.warning("切换到 fallback 模型: %s", fallback_model)
+        try:
+            return await aexecute_prompt(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                api_key=api_key,
+                model=fallback_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=stream,
+            )
+        except Exception:
+            pass
+
+    raise last_exc  # type: ignore[misc]

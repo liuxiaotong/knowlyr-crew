@@ -28,6 +28,7 @@ except ImportError:
 from crew.context_detector import detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
+from crew.exceptions import EmployeeNotFoundError
 from crew.log import WorkLogger
 from crew.pipeline import arun_pipeline, discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
 
@@ -745,7 +746,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
         result = discover_employees(project_dir=_project_dir)
         emp = result.get(name)
         if emp is None:
-            raise ValueError(f"未找到: {name}")
+            raise EmployeeNotFoundError(name)
 
         engine = CrewEngine(project_dir=_project_dir)
         args = arguments or {}
@@ -793,7 +794,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
         result = discover_employees(project_dir=_project_dir)
         emp = result.get(emp_name)
         if emp is None:
-            raise ValueError(f"未找到: {emp_name}")
+            raise EmployeeNotFoundError(emp_name)
 
         if emp.source_path and emp.source_path.exists():
             if emp.source_path.is_dir():
