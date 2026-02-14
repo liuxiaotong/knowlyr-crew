@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # knowlyr-crew 部署脚本
 # 用法（从项目根目录执行）:
-#   bash deploy/deploy.sh              # 同步数据 + 重启
-#   bash deploy/deploy.sh sync         # 只同步私有数据（员工/讨论/流水线）
+#   bash deploy/deploy.sh              # 同步数据 + 重启 + ID同步
+#   bash deploy/deploy.sh sync         # 同步私有数据 + 重启 + ID同步
 #   bash deploy/deploy.sh engine       # 更新引擎 + 重启
 #   bash deploy/deploy.sh restart      # 只重启服务
-#   bash deploy/deploy.sh all          # 引擎 + 数据 + 重启
+#   bash deploy/deploy.sh id-sync      # 只同步到 knowlyr-id
+#   bash deploy/deploy.sh all          # 引擎 + 数据 + 重启 + ID同步
 set -euo pipefail
 
 SERVER="knowlyr-web-1"
@@ -50,6 +51,13 @@ sync_data() {
     echo "    数据已同步"
 }
 
+sync_id() {
+    echo "=== 同步到 knowlyr-id ==="
+    ssh "$SERVER" "$VENV/bin/knowlyr-crew agents sync-all \
+        --dir $PROJECT/private/employees/ --force"
+    echo "    ID 同步完成"
+}
+
 deploy_engine() {
     echo "=== 更新引擎 ==="
     ssh "$SERVER" "$VENV/bin/pip install --force-reinstall --no-deps \
@@ -78,6 +86,7 @@ case "$ACTION" in
     sync)
         sync_data
         restart_service
+        sync_id
         ;;
     engine)
         deploy_engine
@@ -86,13 +95,17 @@ case "$ACTION" in
     restart)
         restart_service
         ;;
+    id-sync)
+        sync_id
+        ;;
     all)
         deploy_engine
         sync_data
         restart_service
+        sync_id
         ;;
     *)
-        echo "用法: bash deploy/deploy.sh [sync|engine|restart|all]"
+        echo "用法: bash deploy/deploy.sh [sync|engine|restart|id-sync|all]"
         exit 1
         ;;
 esac

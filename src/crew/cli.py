@@ -2761,8 +2761,9 @@ def agents_status_cmd(target: str, by_employee: bool, heartbeat: bool):
 @agents.command("sync")
 @click.argument("name")
 def agents_sync_cmd(name: str):
-    """同步员工元数据到 knowlyr-id Agent."""
+    """同步单个员工元数据到 knowlyr-id Agent."""
     from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
     from crew.id_client import update_agent
 
     result = discover_employees()
@@ -2779,13 +2780,29 @@ def agents_sync_cmd(name: str):
     title = emp.display_name or emp.name
     capabilities = emp.description
     domains = emp.tags[:5] if emp.tags else []
-    system_prompt = emp.body if emp.body else None
+
+    # 渲染完整 prompt（而非原始 body）
+    engine = CrewEngine()
+    system_prompt = engine.prompt(emp)
+
+    # 从 yaml 读取 bio（Employee 模型未包含此字段）
+    bio = ""
+    if emp.source_path:
+        src = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
+        config_path = src / "employee.yaml"
+        if config_path.exists():
+            import yaml
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                bio = raw.get("bio", "")
 
     avatar_b64 = _load_avatar_base64(emp)
 
     click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
     click.echo(f"  nickname:      {nickname}", err=True)
     click.echo(f"  title:         {title}", err=True)
+    if bio:
+        click.echo(f"  bio:           {bio}", err=True)
     click.echo(f"  capabilities:  {capabilities}", err=True)
     if domains:
         click.echo(f"  domains:       {', '.join(domains)}", err=True)
@@ -2809,6 +2826,75 @@ def agents_sync_cmd(name: str):
         raise SystemExit(1)
 
     click.echo("✓ 同步完成", err=True)
+
+
+@agents.command("sync-all")
+@click.option(
+    "--dir", "employees_dir",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="员工目录（默认 .crew/global/）",
+)
+@click.option("--dry-run", is_flag=True, help="预览操作但不执行")
+@click.option("--push-only", is_flag=True, help="仅推送，不拉取")
+@click.option("--pull-only", is_flag=True, help="仅拉取，不推送")
+@click.option("--force", is_flag=True, help="忽略 content_hash，强制推送")
+def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
+    """批量同步所有员工到 knowlyr-id（双向）."""
+    from crew.sync import sync_all
+
+    if employees_dir is None:
+        from crew.paths import get_global_dir
+        employees_dir = get_global_dir()
+
+    do_push = not pull_only
+    do_pull = not push_only
+
+    click.echo(f"同步目录: {employees_dir}", err=True)
+    if dry_run:
+        click.echo("(dry-run 模式)", err=True)
+
+    report = sync_all(
+        employees_dir,
+        dry_run=dry_run,
+        push=do_push,
+        pull=do_pull,
+        force=force,
+    )
+
+    if report.registered:
+        click.echo(f"\n新注册 ({len(report.registered)}):", err=True)
+        for item in report.registered:
+            click.echo(f"  + {item}", err=True)
+
+    if report.pushed:
+        click.echo(f"\n已推送 ({len(report.pushed)}):", err=True)
+        for item in report.pushed:
+            click.echo(f"  → {item}", err=True)
+
+    if report.pulled:
+        click.echo(f"\n已拉取 ({len(report.pulled)}):", err=True)
+        for item in report.pulled:
+            click.echo(f"  ← {item}", err=True)
+
+    if report.disabled:
+        click.echo(f"\n已禁用 ({len(report.disabled)}):", err=True)
+        for item in report.disabled:
+            click.echo(f"  ✗ {item}", err=True)
+
+    if report.skipped:
+        click.echo(f"\n跳过 ({len(report.skipped)}):", err=True)
+        for item in report.skipped:
+            click.echo(f"  - {item}", err=True)
+
+    if report.errors:
+        click.echo(f"\n错误 ({len(report.errors)}):", err=True)
+        for name, msg in report.errors:
+            click.echo(f"  ! {name}: {msg}", err=True)
+        raise SystemExit(1)
+
+    total = len(report.pushed) + len(report.pulled) + len(report.registered) + len(report.disabled)
+    click.echo(f"\n✓ 同步完成 (推送:{len(report.pushed)} 拉取:{len(report.pulled)} 注册:{len(report.registered)} 禁用:{len(report.disabled)})", err=True)
 
 
 # ── serve 命令（Webhook 服务器）──
