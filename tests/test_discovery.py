@@ -143,3 +143,30 @@ description: 自定义审查员
             result = discover_employees(project_dir=Path(tmpdir))
             assert "file-worker" in result.employees
             assert "dir-worker" in result.employees
+
+
+class TestDiscoveryCacheThreadSafety:
+    """发现缓存线程安全."""
+
+    def test_concurrent_discover(self, tmp_path):
+        """多线程同时调用 discover_employees 不出错."""
+        import threading
+
+        results: list = []
+        errors: list = []
+
+        def _discover():
+            try:
+                r = discover_employees(project_dir=tmp_path, cache_ttl=0.5)
+                results.append(r)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_discover) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors
+        assert len(results) == 4

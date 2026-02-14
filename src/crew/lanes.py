@@ -26,7 +26,7 @@ class LaneLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+")
+        fh = open(self.path, "a+", encoding="utf-8")
         try:
             if fcntl:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX)

@@ -1,6 +1,7 @@
 """发现机制 — 内置 + .claude/skills + private/employees."""
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ── TTL 缓存 ──
 _cache: dict[str, tuple[float, DiscoveryResult]] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL = 30.0  # seconds
 
 # Claude Code Skills 目录
@@ -195,15 +197,17 @@ def discover_employees(
     key = str(root)
     now = time.monotonic()
 
-    if ttl > 0 and key in _cache:
-        ts, result = _cache[key]
-        if now - ts < ttl:
-            return result
+    with _cache_lock:
+        if ttl > 0 and key in _cache:
+            ts, result = _cache[key]
+            if now - ts < ttl:
+                return result
 
     result = _discover_employees_uncached(root)
 
     if ttl > 0:
-        _cache[key] = (now, result)
+        with _cache_lock:
+            _cache[key] = (now, result)
 
     return result
 

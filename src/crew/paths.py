@@ -49,7 +49,7 @@ def file_lock(path: Path) -> Iterator[None]:
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(lock_path, "a+")
+    fh = open(lock_path, "a+", encoding="utf-8")
     try:
         if fcntl:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
