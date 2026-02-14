@@ -1,4 +1,4 @@
-"""数据模型 — Employee / WorkLog / DiscoveryResult."""
+"""数据模型 — Employee / WorkLog / DiscoveryResult / Pipeline."""
 
 from datetime import datetime
 from pathlib import Path
@@ -145,3 +145,50 @@ class DiscoveryResult(BaseModel):
             if name_or_trigger in emp.triggers:
                 return emp
         return None
+
+
+# ── Pipeline 数据模型 ──
+
+
+class PipelineStep(BaseModel):
+    """流水线步骤."""
+
+    employee: str = Field(description="员工名称")
+    id: str = Field(default="", description="步骤标识符（用于输出引用）")
+    args: dict[str, str] = Field(default_factory=dict, description="参数")
+
+
+class ParallelGroup(BaseModel):
+    """并行步骤组."""
+
+    parallel: list[PipelineStep] = Field(description="并行执行的步骤列表")
+
+
+class StepResult(BaseModel):
+    """单步执行结果."""
+
+    employee: str = Field(description="员工名称")
+    step_id: str = Field(default="", description="步骤 ID")
+    step_index: int = Field(description="步骤序号（flat index, 从 0 开始）")
+    args: dict[str, str] = Field(default_factory=dict, description="解析后参数")
+    prompt: str = Field(description="生成的完整 prompt")
+    output: str = Field(default="", description="LLM 输出（仅 execute 模式）")
+    error: bool = Field(default=False, description="是否出错")
+    error_message: str = Field(default="", description="错误信息")
+    model: str = Field(default="", description="使用的模型")
+    input_tokens: int = Field(default=0, description="输入 token 数")
+    output_tokens: int = Field(default=0, description="输出 token 数")
+    duration_ms: int = Field(default=0, description="执行耗时 (ms)")
+
+
+class PipelineResult(BaseModel):
+    """流水线执行结果."""
+
+    pipeline_name: str = Field(description="流水线名称")
+    mode: Literal["prompt", "execute"] = Field(description="执行模式")
+    steps: list[StepResult | list[StepResult]] = Field(
+        description="步骤结果（list[StepResult] 表示并行组）"
+    )
+    total_duration_ms: int = Field(default=0, description="总耗时 (ms)")
+    total_input_tokens: int = Field(default=0, description="总输入 token")
+    total_output_tokens: int = Field(default=0, description="总输出 token")

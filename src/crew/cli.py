@@ -1451,14 +1451,24 @@ def pipeline_show(name: str):
         click.echo(f"未找到流水线: {name}", err=True)
         sys.exit(1)
 
+    from crew.models import ParallelGroup
+
     p = load_pipeline(pipelines[name])
     click.echo(f"流水线: {p.name}")
     click.echo(f"描述: {p.description}")
     click.echo(f"步骤: {len(p.steps)}")
     click.echo()
-    for i, step in enumerate(p.steps, 1):
-        args_str = ", ".join(f"{k}={v}" for k, v in step.args.items())
-        click.echo(f"  {i}. {step.employee}" + (f" ({args_str})" if args_str else ""))
+    for i, item in enumerate(p.steps, 1):
+        if isinstance(item, ParallelGroup):
+            click.echo(f"  {i}. [并行]")
+            for j, sub in enumerate(item.parallel, 1):
+                id_str = f" id={sub.id}" if sub.id else ""
+                args_str = ", ".join(f"{k}={v}" for k, v in sub.args.items())
+                click.echo(f"     {i}.{j} {sub.employee}{id_str}" + (f" ({args_str})" if args_str else ""))
+        else:
+            id_str = f" id={item.id}" if item.id else ""
+            args_str = ", ".join(f"{k}={v}" for k, v in item.args.items())
+            click.echo(f"  {i}. {item.employee}{id_str}" + (f" ({args_str})" if args_str else ""))
 
 
 @pipeline.command("run")
@@ -1468,13 +1478,17 @@ def pipeline_show(name: str):
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
+@click.option("--execute", is_flag=True, help="执行模式 — 自动调用 LLM 串联执行")
+@click.option("--model", type=str, default=None, help="LLM 模型标识符（execute 模式）")
 def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                 smart_context: bool, output: str | None, parallel: bool):
+                 smart_context: bool, output: str | None, parallel: bool,
+                 execute: bool, model: str | None):
     """执行流水线.
 
     NAME_OR_PATH 可以是流水线名称或 YAML 文件路径。
+    默认 prompt-only 模式，加 --execute 启用 LLM 自动执行。
     """
-    from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline
+    from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline, _flatten_results
 
     path_obj = Path(name_or_path)
     if path_obj.exists() and path_obj.suffix in (".yaml", ".yml"):
@@ -1492,11 +1506,21 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
             k, v = item.split("=", 1)
             initial_args[k] = v
 
+    # execute 模式需要 API key
+    api_key = None
+    if execute:
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            click.echo("错误: --execute 模式需要 ANTHROPIC_API_KEY 环境变量", err=True)
+            sys.exit(1)
+
     lane = LaneLock(f"pipeline:{p.name}") if not parallel else None
     if lane:
         lane.acquire()
     try:
-        click.echo(f"执行流水线: {p.name} ({len(p.steps)} 步)", err=True)
+        mode_label = "execute" if execute else "prompt-only"
+        click.echo(f"执行流水线: {p.name} ({len(p.steps)} 步, {mode_label})", err=True)
 
         transcript_recorder, transcript_id = _start_transcript(
             "pipeline",
@@ -1506,14 +1530,37 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
                 "agent_id": agent_id,
                 "initial_args": initial_args,
                 "smart_context": bool(smart_context),
+                "execute": execute,
                 "source": "cli.pipeline.run",
             },
         )
 
+        def _on_step(r):
+            status = "✗" if r.error else "✓"
+            suffix = ""
+            if execute and not r.error:
+                suffix = f" ({r.input_tokens}+{r.output_tokens} tokens, {r.duration_ms}ms)"
+            click.echo(f"  {status} {r.employee}{suffix}", err=True)
+            _record_transcript_message(
+                transcript_recorder,
+                transcript_id,
+                "step",
+                r.output if execute else r.prompt,
+                {
+                    "step_index": r.step_index,
+                    "employee": r.employee,
+                    "args": r.args,
+                    "error": r.error,
+                    "execute": execute,
+                },
+            )
+
         try:
-            results = run_pipeline(
+            result = run_pipeline(
                 p, initial_args=initial_args,
                 agent_id=agent_id, smart_context=smart_context,
+                execute=execute, api_key=api_key, model=model,
+                on_step_complete=_on_step,
             )
         except SystemExit as exc:
             _finish_transcript(
@@ -1532,25 +1579,23 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
             )
             raise
 
+        # 组装输出
+        all_results = _flatten_results(result.steps)
         parts = []
-        for i, r in enumerate(results, 1):
-            header = f"{'=' * 60}\n## 步骤 {i}: {r['employee']}\n{'=' * 60}"
-            parts.append(f"{header}\n\n{r['prompt']}")
-            click.echo(f"  ✓ 步骤 {i}: {r['employee']}", err=True)
-            _record_transcript_message(
-                transcript_recorder,
-                transcript_id,
-                "step",
-                r.get("prompt", ""),
-                {
-                    "step_index": i,
-                    "employee": r.get("employee"),
-                    "args": r.get("args", {}),
-                    "error": r.get("error", False),
-                },
-            )
+        for r in all_results:
+            content = r.output if execute else r.prompt
+            header = f"{'=' * 60}\n## 步骤 {r.step_index + 1}: {r.employee}\n{'=' * 60}"
+            parts.append(f"{header}\n\n{content}")
 
         combined = "\n\n".join(parts)
+
+        # token 统计（execute 模式）
+        if execute:
+            click.echo(
+                f"\n总计: {result.total_input_tokens}+{result.total_output_tokens} tokens, "
+                f"{result.total_duration_ms}ms",
+                err=True,
+            )
 
         try:
             if output:
@@ -1591,7 +1636,7 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
                 transcript_recorder,
                 transcript_id,
                 status="completed",
-                detail=f"{len(results)} steps",
+                detail=f"{len(all_results)} steps, mode={result.mode}",
             )
             _record_session_summary(
                 employee=f"pipeline:{p.name}",

@@ -29,7 +29,7 @@ from crew.context_detector import detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.log import WorkLogger
-from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
+from crew.pipeline import arun_pipeline, discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
 
 
 def _get_version() -> str:
@@ -145,7 +145,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             ),
             Tool(
                 name="run_pipeline",
-                description="执行流水线，按顺序运行多个员工并生成 prompt 序列",
+                description="执行流水线 — 支持 prompt-only 模式和 execute 模式（自动调用 LLM 串联执行）",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -166,6 +166,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "boolean",
                             "description": "自动检测项目类型（默认 true）",
                             "default": True,
+                        },
+                        "execute": {
+                            "type": "boolean",
+                            "description": "执行模式 — 自动调用 LLM 串联执行（默认 false）",
+                            "default": False,
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "LLM 模型标识符（execute 模式使用）",
                         },
                     },
                     "required": ["name"],
@@ -481,7 +490,11 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 data.append({
                     "name": pname,
                     "description": pl.description,
-                    "steps": [s.employee for s in pl.steps],
+                    "steps": [
+                        s.employee if hasattr(s, "employee")
+                        else [sub.employee for sub in s.parallel]
+                        for s in pl.steps
+                    ],
                     "path": str(ppath),
                 })
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
@@ -491,6 +504,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
             pl_args = arguments.get("args", {})
             agent_id = arguments.get("agent_id")
             smart_context = arguments.get("smart_context", True)
+            execute = arguments.get("execute", False)
+            pl_model = arguments.get("model")
 
             # 查找流水线
             pl_path = Path(pl_name)
@@ -506,14 +521,25 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if errors:
                 return [TextContent(type="text", text=f"流水线校验失败: {'; '.join(errors)}")]
 
-            outputs = run_pipeline(
+            # execute 模式需要 API key
+            api_key = None
+            if execute:
+                import os
+                api_key = os.environ.get("ANTHROPIC_API_KEY")
+                if not api_key:
+                    return [TextContent(type="text", text="错误: execute 模式需要 ANTHROPIC_API_KEY 环境变量")]
+
+            result = await arun_pipeline(
                 pipeline,
                 initial_args=pl_args,
                 agent_id=agent_id,
                 smart_context=smart_context,
                 project_dir=_project_dir,
+                execute=execute,
+                api_key=api_key,
+                model=pl_model,
             )
-            return [TextContent(type="text", text=json.dumps(outputs, ensure_ascii=False, indent=2))]
+            return [TextContent(type="text", text=result.model_dump_json(indent=2))]
 
         elif name == "list_discussions":
             from crew.discussion import discover_discussions, load_discussion
