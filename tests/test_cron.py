@@ -115,8 +115,8 @@ class TestValidateCronConfig:
             CronSchedule(
                 name="test",
                 cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
+                target_type="employee",
+                target_name="code-reviewer",
             ),
         ])
         errors = validate_cron_config(config)

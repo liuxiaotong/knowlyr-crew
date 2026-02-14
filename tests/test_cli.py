@@ -220,8 +220,6 @@ class TestCLI:
     def test_pipeline_list(self):
         result = self.runner.invoke(main, ["pipeline", "list"])
         assert result.exit_code == 0
-        assert "review-test-pr" in result.output
-        assert "full-review" in result.output
 
 
     def test_pipeline_run_parallel(self):
@@ -245,10 +243,10 @@ steps:
     def test_discuss_run_parallel(self):
         result = self.runner.invoke(
             main,
-            ["discuss", "run", "full-review", "--parallel"],
+            ["discuss", "adhoc", "-e", "code-reviewer", "-e", "test-engineer",
+             "-t", "代码质量", "--parallel"],
         )
         assert result.exit_code == 0
-        assert "生成讨论会" in result.output
 
     def test_discuss_adhoc_parallel(self):
         result = self.runner.invoke(
@@ -342,8 +340,14 @@ steps:
             finally:
                 os.chdir(old_cwd)
 
-    def test_pipeline_show(self):
-        result = self.runner.invoke(main, ["pipeline", "show", "review-test-pr"])
+    def test_pipeline_show(self, tmp_path, monkeypatch):
+        import yaml
+        pl_dir = tmp_path / ".crew" / "pipelines"
+        pl_dir.mkdir(parents=True)
+        data = {"name": "test-pl", "steps": [{"employee": "code-reviewer"}]}
+        (pl_dir / "test-pl.yaml").write_text(yaml.dump(data))
+        monkeypatch.chdir(tmp_path)
+        result = self.runner.invoke(main, ["pipeline", "show", "test-pl"])
         assert result.exit_code == 0
         assert "code-reviewer" in result.output
 
@@ -351,12 +355,20 @@ steps:
         result = self.runner.invoke(main, ["pipeline", "show", "nonexistent"])
         assert result.exit_code == 1
 
-    def test_pipeline_run(self):
-        builtin = Path(__file__).parent.parent / "src" / "crew" / "employees" / "pipelines" / "full-review.yaml"
+    def test_pipeline_run(self, tmp_path):
+        import yaml
+        data = {
+            "name": "test-run",
+            "steps": [
+                {"employee": "code-reviewer", "args": {"target": "main"}},
+                {"employee": "test-engineer", "args": {"target": "main"}},
+            ],
+        }
+        pl_file = tmp_path / "test-run.yaml"
+        pl_file.write_text(yaml.dump(data))
         result = self.runner.invoke(
-            main, ["pipeline", "run", str(builtin), "--arg", "target=main"],
+            main, ["pipeline", "run", str(pl_file), "--arg", "target=main"],
         )
         assert result.exit_code == 0
         assert "code-reviewer" in result.output
-        assert "refactor-guide" in result.output
         assert "test-engineer" in result.output

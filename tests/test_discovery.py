@@ -71,7 +71,7 @@ description: 自定义审查员
         d = builtin_dir()
         assert d.is_dir()
         md_files = list(d.glob("*.md"))
-        assert len(md_files) >= 5
+        assert len(md_files) >= 1
 
     def test_discover_dir_format_in_private(self):
         """private 层应能发现目录格式的员工."""

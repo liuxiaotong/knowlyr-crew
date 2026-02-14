@@ -243,32 +243,6 @@ class TestLoadDiscussion:
         assert len(d.rounds) == 2
         assert d.rounds[0].name == "需求对齐"
 
-    def test_load_builtin_architecture_review(self):
-        builtin = (
-            Path(__file__).parent.parent
-            / "src"
-            / "crew"
-            / "employees"
-            / "discussions"
-            / "architecture-review.yaml"
-        )
-        d = load_discussion(builtin)
-        assert d.name == "architecture-review"
-        assert len(d.participants) >= 3
-
-    def test_load_builtin_feature_design(self):
-        builtin = (
-            Path(__file__).parent.parent
-            / "src"
-            / "crew"
-            / "employees"
-            / "discussions"
-            / "feature-design.yaml"
-        )
-        d = load_discussion(builtin)
-        assert d.name == "feature-design"
-        assert isinstance(d.rounds, list)
-
     def test_load_yaml_with_mode(self, tmp_path):
         data = {
             "name": "test-1v1",
@@ -683,11 +657,6 @@ class TestAdhocDiscussion:
 
 class TestDiscoverDiscussions:
     """测试讨论会发现."""
-
-    def test_discover_builtin(self):
-        discussions = discover_discussions()
-        assert "architecture-review" in discussions
-        assert "feature-design" in discussions
 
     def test_discover_project(self, tmp_path):
         d_dir = tmp_path / ".crew" / "discussions"

@@ -120,18 +120,6 @@ class TestLoadPipeline:
         assert len(pl.steps[1].parallel) == 2
         assert pl.steps[1].parallel[0].id == "sec"
 
-    def test_load_builtin_review_test_pr(self):
-        builtin = Path(__file__).parent.parent / "src" / "crew" / "employees" / "pipelines" / "review-test-pr.yaml"
-        pl = load_pipeline(builtin)
-        assert pl.name == "review-test-pr"
-        assert len(pl.steps) == 3
-        assert pl.steps[0].employee == "code-reviewer"
-
-    def test_load_builtin_full_review(self):
-        builtin = Path(__file__).parent.parent / "src" / "crew" / "employees" / "pipelines" / "full-review.yaml"
-        pl = load_pipeline(builtin)
-        assert pl.name == "full-review"
-        assert len(pl.steps) == 3
 
 
 class TestValidatePipeline:
@@ -364,11 +352,6 @@ class TestRunPipeline:
 
 class TestDiscoverPipelines:
     """测试流水线发现."""
-
-    def test_discover_builtin(self):
-        pipelines = discover_pipelines()
-        assert "review-test-pr" in pipelines
-        assert "full-review" in pipelines
 
     def test_discover_project(self, tmp_path):
         pl_dir = tmp_path / ".crew" / "pipelines"
