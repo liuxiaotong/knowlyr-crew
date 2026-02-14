@@ -1,0 +1,26 @@
+name: Deploy Engine
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Update engine & restart
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            /opt/knowlyr-crew/venv/bin/pip install --force-reinstall --no-deps \
+              "knowlyr-crew[webhook,execute,openai,id] @ git+https://github.com/liuxiaotong/knowlyr-crew.git" \
+            && systemctl restart knowlyr-crew \
+            && sleep 2 \
+            && curl -sf http://localhost:8765/health
+          '
