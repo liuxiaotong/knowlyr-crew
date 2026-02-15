@@ -1265,6 +1265,220 @@ async def _tool_create_feishu_event(
         return f"创建失败: {result.get('error', '未知错误')}"
 
 
+# ── 飞书日程查询/删除 ──
+
+
+async def _tool_read_feishu_calendar(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看飞书日历日程."""
+    import os
+    from datetime import datetime, timedelta, timezone as _tz
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    tz_cn = _tz(timedelta(hours=8))
+    date_str = (args.get("date") or "").strip()
+    days = max(int(args.get("days", 1)), 1)
+
+    if date_str:
+        try:
+            start_dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz_cn)
+        except ValueError:
+            return f"日期格式不对: {date_str}，需要 YYYY-MM-DD。"
+    else:
+        start_dt = datetime.now(tz_cn).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    end_dt = start_dt + timedelta(days=days)
+
+    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get("FEISHU_CALENDAR_ID", "")
+    if not cal_id:
+        return "未配置日历 ID。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "start_time": str(int(start_dt.timestamp())),
+                    "end_time": str(int(end_dt.timestamp())),
+                    "page_size": 50,
+                },
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            date_range = date_str or start_dt.strftime("%Y-%m-%d")
+            if days > 1:
+                date_range += f" ~ {end_dt.strftime('%Y-%m-%d')}"
+            return f"{date_range} 没有日程。"
+
+        lines = []
+        for ev in items:
+            summary = ev.get("summary", "无标题")
+            event_id = ev.get("event_id", "")
+            st = ev.get("start_time", {})
+            et = ev.get("end_time", {})
+            # timestamp or date
+            if st.get("timestamp"):
+                s = datetime.fromtimestamp(int(st["timestamp"]), tz=tz_cn)
+                e = datetime.fromtimestamp(int(et.get("timestamp", st["timestamp"])), tz=tz_cn)
+                time_str = f"{s.strftime('%m-%d %H:%M')}-{e.strftime('%H:%M')}"
+            elif st.get("date"):
+                time_str = f"{st['date']} 全天"
+            else:
+                time_str = "时间未知"
+            lines.append(f"{time_str} {summary} [event_id={event_id}]")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"查询失败: {e}"
+
+
+async def _tool_delete_feishu_event(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """删除飞书日历日程."""
+    import os
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    event_id = (args.get("event_id") or "").strip()
+    if not event_id:
+        return "需要 event_id 参数。先用 read_feishu_calendar 查到 event_id。"
+
+    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get("FEISHU_CALENDAR_ID", "")
+    if not cal_id:
+        return "未配置日历 ID。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(
+                f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events/{event_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            return f"日程已删除 (event_id={event_id})。"
+        return f"删除失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"删除失败: {e}"
+
+
+# ── 飞书待办任务 ──
+
+
+async def _tool_create_feishu_task(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在飞书创建待办任务."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    summary = (args.get("summary") or "").strip()
+    if not summary:
+        return "需要任务标题。"
+
+    due_str = (args.get("due") or "").strip()
+    description = args.get("description", "")
+
+    body: dict[str, Any] = {"summary": summary}
+    if description:
+        body["description"] = description
+    if due_str:
+        tz_cn = _tz(timedelta(hours=8))
+        try:
+            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=tz_cn)
+            body["due"] = {"timestamp": str(int(due_dt.timestamp())), "is_all_day": True}
+        except ValueError:
+            return f"截止日期格式不对: {due_str}，需要 YYYY-MM-DD。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/task/v2/tasks",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=body,
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            task = data.get("data", {}).get("task", {})
+            task_id = task.get("guid", "")
+            due_info = f"，截止 {due_str}" if due_str else ""
+            return f"待办已创建：{summary}{due_info} [task_id={task_id}]"
+        return f"创建失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"创建失败: {e}"
+
+
+async def _tool_list_feishu_tasks(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看飞书待办任务列表."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    limit = min(int(args.get("limit", 20)), 50)
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://open.feishu.cn/open-apis/task/v1/tasks",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"page_size": limit},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return "没有待办任务。"
+
+        tz_cn = _tz(timedelta(hours=8))
+        lines = []
+        for task in items:
+            summary = task.get("summary", "无标题")
+            complete_time = task.get("complete_time", "0")
+            status = "✅" if complete_time and complete_time != "0" else "⬜"
+            due = task.get("due", {})
+            due_str = ""
+            if due and due.get("time") and due["time"] != "0":
+                due_dt = datetime.fromtimestamp(int(due["time"]), tz=tz_cn)
+                due_str = f" 截止{due_dt.strftime('%m-%d')}"
+            lines.append(f"{status} {summary}{due_str}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"查询失败: {e}"
+
+
 # ── 飞书文档工具 ──
 
 
@@ -1828,7 +2042,11 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "get_system_health": _tool_get_system_health,
     "mark_read": _tool_mark_read,
     "update_agent": _tool_update_agent,
+    "read_feishu_calendar": _tool_read_feishu_calendar,
+    "delete_feishu_event": _tool_delete_feishu_event,
     "create_feishu_event": _tool_create_feishu_event,
+    "create_feishu_task": _tool_create_feishu_task,
+    "list_feishu_tasks": _tool_list_feishu_tasks,
     # 飞书文档
     "search_feishu_docs": _tool_search_feishu_docs,
     "read_feishu_doc": _tool_read_feishu_doc,

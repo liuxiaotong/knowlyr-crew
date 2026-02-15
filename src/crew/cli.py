@@ -698,6 +698,10 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         "mark_read": '{"status": "ok", "marked": 3}',
         "update_agent": '{"status": "updated"}',
         "create_feishu_event": '{"status": "created", "event_id": "evt_abc123", "calendar": "primary"}',
+        "read_feishu_calendar": '02-16 10:00-11:00 团队周会 [event_id=evt_001]\n02-16 14:00-15:00 投资人沟通 [event_id=evt_002]\n02-16 16:30-17:00 产品评审 [event_id=evt_003]',
+        "delete_feishu_event": '日程已删除 (event_id=evt_001)。',
+        "create_feishu_task": '待办已创建：准备投资人会议材料，截止 2026-02-20 [task_id=task_abc123]',
+        "list_feishu_tasks": '⬜ 准备投资人会议材料 截止02-20\n⬜ 整理Q1数据报告 截止02-18\n⬜ 确认下周出差行程\n✅ 发送新年祝福',
         "create_note": '{"status": "saved", "note_id": "note_001"}',
     }
     return _SIMPLE.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')

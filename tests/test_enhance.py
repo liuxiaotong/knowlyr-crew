@@ -56,11 +56,11 @@ class TestWebSearchHandler:
     def test_search_returns_results(self, mock_client_cls):
         mock_resp = MagicMock()
         mock_resp.text = (
-            '<a class="result__a" href="https://example.com">Example Title</a>'
-            '<a class="result__snippet">This is a snippet</a>'
+            '<li class="b_algo"><a href="https://example.com">Example Title</a>'
+            '<p>This is a snippet</p></li>'
         )
         mock_client = AsyncMock()
-        mock_client.post.return_value = mock_resp
+        mock_client.get.return_value = mock_resp
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
@@ -76,7 +76,7 @@ class TestWebSearchHandler:
         mock_resp = MagicMock()
         mock_resp.text = "<html><body>No results</body></html>"
         mock_client = AsyncMock()
-        mock_client.post.return_value = mock_resp
+        mock_client.get.return_value = mock_resp
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
@@ -89,7 +89,7 @@ class TestWebSearchHandler:
     def test_search_network_error(self):
         with patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.post.side_effect = Exception("network error")
+            mock_client.get.side_effect = Exception("network error")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_client

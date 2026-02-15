@@ -344,6 +344,77 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["agent_id"],
         },
     },
+    "read_feishu_calendar": {
+        "name": "read_feishu_calendar",
+        "description": "查看飞书日历日程。Kai 问今天有什么会、这周安排、日程时调用。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "起始日期 YYYY-MM-DD，默认今天",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "查几天（1=今天，7=本周），默认 1",
+                    "default": 1,
+                },
+            },
+            "required": [],
+        },
+    },
+    "delete_feishu_event": {
+        "name": "delete_feishu_event",
+        "description": "取消/删除飞书日历日程。需要先用 read_feishu_calendar 查到 event_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "要删除的日程 event_id",
+                },
+            },
+            "required": ["event_id"],
+        },
+    },
+    "create_feishu_task": {
+        "name": "create_feishu_task",
+        "description": "在飞书创建待办任务。Kai 说建个待办、记个任务时调用。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "任务标题",
+                },
+                "due": {
+                    "type": "string",
+                    "description": "截止日期 YYYY-MM-DD（可选）",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "任务描述（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["summary"],
+        },
+    },
+    "list_feishu_tasks": {
+        "name": "list_feishu_tasks",
+        "description": "查看飞书待办任务列表。Kai 问还有什么没做的、看看待办时调用。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数，默认 20",
+                    "default": 20,
+                },
+            },
+            "required": [],
+        },
+    },
     "create_feishu_event": {
         "name": "create_feishu_event",
         "description": "在飞书日历创建日程。Kai 说安排日程、设提醒、记个时间时调用。",
@@ -550,7 +621,9 @@ AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
-    "mark_read", "update_agent", "create_feishu_event",
+    "mark_read", "update_agent",
+    "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
+    "create_feishu_task", "list_feishu_tasks",
     # 飞书文档
     "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
     # GitHub
