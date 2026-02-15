@@ -33,6 +33,7 @@ class FeishuConfig(BaseModel):
     verification_token: str = Field(default="", description="事件订阅验证 token")
     encrypt_key: str = Field(default="", description="事件加密密钥（预留）")
     default_employee: str = Field(default="", description="未匹配 @mention 时的默认员工")
+    calendar_id: str = Field(default="", description="飞书日历 ID（创建日程用）")
 
 
 def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
@@ -58,6 +59,8 @@ def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
         data["verification_token"] = os.environ.get("FEISHU_VERIFICATION_TOKEN", "")
     if not data.get("encrypt_key"):
         data["encrypt_key"] = os.environ.get("FEISHU_ENCRYPT_KEY", "")
+    if not data.get("calendar_id"):
+        data["calendar_id"] = os.environ.get("FEISHU_CALENDAR_ID", "")
 
     return FeishuConfig(**data)
 

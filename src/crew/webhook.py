@@ -1235,12 +1235,14 @@ async def _tool_create_feishu_event(
 
     from crew.feishu import create_calendar_event
 
+    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or ""
     result = await create_calendar_event(
         token_mgr=ctx.feishu_token_mgr,
         summary=summary,
         start_timestamp=int(start_time.timestamp()),
         end_timestamp=int(end_time.timestamp()),
         description=description,
+        calendar_id=cal_id,
     )
 
     if result.get("ok"):
