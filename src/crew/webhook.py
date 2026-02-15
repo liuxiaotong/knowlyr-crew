@@ -1389,6 +1389,39 @@ async def _tool_send_feishu_group(
     return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
 
 
+async def _tool_list_feishu_groups(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """列出机器人加入的所有飞书群."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://open.feishu.cn/open-apis/im/v1/chats",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"page_size": 50},
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                return f"查询失败: {data.get('msg', '未知错误')}"
+            items = data.get("data", {}).get("items", [])
+            if not items:
+                return "机器人没有加入任何群。"
+            lines = []
+            for item in items:
+                name = item.get("name", "未命名")
+                chat_id = item.get("chat_id", "")
+                lines.append(f"{name} — {chat_id}")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"查询失败: {e}"
+
+
 # ── GitHub 工具 ──
 
 
@@ -1794,6 +1827,7 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "read_feishu_doc": _tool_read_feishu_doc,
     "create_feishu_doc": _tool_create_feishu_doc,
     "send_feishu_group": _tool_send_feishu_group,
+    "list_feishu_groups": _tool_list_feishu_groups,
     # GitHub
     "github_prs": _tool_github_prs,
     "github_issues": _tool_github_issues,

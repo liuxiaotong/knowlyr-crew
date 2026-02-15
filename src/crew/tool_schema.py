@@ -424,7 +424,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "send_feishu_group": {
         "name": "send_feishu_group",
-        "description": "发消息到飞书群。指定群聊 ID 和消息内容。",
+        "description": "发消息到飞书群。指定群聊 ID 和消息内容。不知道 chat_id 时先调 list_feishu_groups 查。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -432,6 +432,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "text": {"type": "string", "description": "消息内容"},
             },
             "required": ["chat_id", "text"],
+        },
+    },
+    "list_feishu_groups": {
+        "name": "list_feishu_groups",
+        "description": "列出机器人加入的所有飞书群，返回群名和 chat_id。发群消息前用这个查 chat_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
         },
     },
     # ── GitHub 工具 ──
@@ -544,7 +552,7 @@ AGENT_TOOLS = {
     "read_notes", "read_messages", "get_system_health",
     "mark_read", "update_agent", "create_feishu_event",
     # 飞书文档
-    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group",
+    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
     # GitHub
     "github_prs", "github_issues", "github_repo_activity",
     # Notion
