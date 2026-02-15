@@ -58,6 +58,7 @@ class Employee(BaseModel):
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     api_key: str = Field(default="", description="专属 API key（留空则使用环境变量）")
+    base_url: str = Field(default="", description="专属 API base URL（留空则按 provider 自动推断）")
     agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
     avatar_prompt: str = Field(default="", description="头像生成 prompt（留空则自动推断）")
     research_instructions: str = Field(

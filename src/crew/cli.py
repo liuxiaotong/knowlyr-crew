@@ -690,6 +690,7 @@ def _execute_with_tool_loop(
             api_key=api_key,
             model=model,
             max_tokens=max_tokens or 4096,
+            base_url=getattr(emp, "base_url", "") or None,
         )
         total_input += result.input_tokens
         total_output += result.output_tokens
@@ -983,6 +984,7 @@ def _run_employee_job(
                     max_tokens=agent_identity.max_tokens,
                     stream=stream_enabled,
                     on_chunk=_on_chunk if stream_enabled else None,
+                    base_url=emp.base_url or None,
                 )
             except Exception as exc:
                 if traj_collector is not None:

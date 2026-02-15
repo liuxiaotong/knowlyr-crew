@@ -939,6 +939,11 @@ import os as _os
 
 _ID_API_BASE = _os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
 _ID_API_TOKEN = _os.environ.get("AGENT_API_TOKEN", "")
+_GITHUB_TOKEN = _os.environ.get("GITHUB_TOKEN", "")
+_GITHUB_API_BASE = "https://api.github.com"
+_NOTION_API_KEY = _os.environ.get("NOTION_API_KEY", "")
+_NOTION_API_BASE = "https://api.notion.com/v1"
+_NOTION_VERSION = "2022-06-28"
 
 
 async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
@@ -1349,6 +1354,7 @@ async def _execute_employee_with_tools(
             api_key=match.api_key or None,
             model=use_model,
             max_tokens=4096,
+            base_url=match.base_url or None,
         )
         total_input += result.input_tokens
         total_output += result.output_tokens
@@ -1531,9 +1537,10 @@ async def _execute_employee(
         use_model = model or match.model or "claude-sonnet-4-20250514"
         exec_kwargs = dict(
             system_prompt=prompt,
-            api_key=None,
+            api_key=match.api_key or None,
             model=use_model,
             stream=False,
+            base_url=match.base_url or None,
         )
         if user_message:
             exec_kwargs["user_message"] = user_message
@@ -1600,9 +1607,10 @@ async def _stream_employee(
             stream_iter = await asyncio.wait_for(
                 aexecute_prompt(
                     system_prompt=prompt,
-                    api_key=None,
+                    api_key=match.api_key or None,
                     model=use_model,
                     stream=True,
+                    base_url=match.base_url or None,
                 ),
                 timeout=300,
             )

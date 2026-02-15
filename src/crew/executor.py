@@ -533,6 +533,7 @@ def execute_prompt(
     stream: bool = True,
     on_chunk: Callable[[str], None] | None = None,
     fallback_model: str | None = None,
+    base_url: str | None = None,
 ) -> ExecutionResult:
     """调用 LLM API 执行 prompt（支持 Anthropic / OpenAI / DeepSeek）.
 
@@ -568,7 +569,7 @@ def execute_prompt(
                     temperature, max_tokens, stream, on_chunk,
                 )
             else:
-                base_url = {
+                effective_base_url = base_url or {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -577,7 +578,7 @@ def execute_prompt(
                 result = _openai_execute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream, on_chunk,
-                    base_url=base_url,
+                    base_url=effective_base_url,
                 )
             _record_metrics(provider.value, result, time.monotonic() - t0)
             _record_trajectory(result)
@@ -626,6 +627,7 @@ async def aexecute_prompt(
     max_tokens: int | None = None,
     stream: bool = True,
     fallback_model: str | None = None,
+    base_url: str | None = None,
 ) -> ExecutionResult | AsyncIterator[str]:
     """execute_prompt 的异步版本.
 
@@ -651,7 +653,7 @@ async def aexecute_prompt(
                     temperature, max_tokens, stream,
                 )
             else:
-                base_url = {
+                effective_base_url = base_url or {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -660,7 +662,7 @@ async def aexecute_prompt(
                 result = await _openai_aexecute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream,
-                    base_url=base_url,
+                    base_url=effective_base_url,
                 )
             if not stream and isinstance(result, ExecutionResult):
                 _record_metrics(provider.value, result, time.monotonic() - t0)
@@ -932,6 +934,7 @@ def execute_with_tools(
     api_key: str | None = None,
     model: str = "claude-sonnet-4-5-20250929",
     max_tokens: int = 4096,
+    base_url: str | None = None,
 ) -> ToolExecutionResult:
     """带工具调用的 LLM 执行.
 
@@ -961,7 +964,7 @@ def execute_with_tools(
                 Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
                 Provider.ZHIPU, Provider.QWEN,
             ):
-                base_url = {
+                effective_base_url = base_url or {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -969,7 +972,7 @@ def execute_with_tools(
                 }.get(provider)
                 result = _openai_execute_with_tools(
                     system_prompt, messages, tools, resolved_key, model, max_tokens,
-                    base_url=base_url,
+                    base_url=effective_base_url,
                 )
             else:
                 raise ValueError(f"Provider {provider} 暂不支持 tool_use")
@@ -1004,6 +1007,7 @@ async def aexecute_with_tools(
     api_key: str | None = None,
     model: str = "claude-sonnet-4-5-20250929",
     max_tokens: int = 4096,
+    base_url: str | None = None,
 ) -> ToolExecutionResult:
     """execute_with_tools 的异步版本."""
     provider = detect_provider(model)
@@ -1021,7 +1025,7 @@ async def aexecute_with_tools(
                 Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
                 Provider.ZHIPU, Provider.QWEN,
             ):
-                base_url = {
+                effective_base_url = base_url or {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -1029,7 +1033,7 @@ async def aexecute_with_tools(
                 }.get(provider)
                 result = await _openai_aexecute_with_tools(
                     system_prompt, messages, tools, resolved_key, model, max_tokens,
-                    base_url=base_url,
+                    base_url=effective_base_url,
                 )
             else:
                 raise ValueError(f"Provider {provider} 暂不支持 tool_use")
