@@ -599,9 +599,9 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         if has_tools:
             chat_context = (
-                "这是飞书实时聊天。你有工具可以用。"
-                "Kai 问业务数据相关的问题时，先用 query_stats 查数据再回答，不要猜。"
-                "拿到数据后用你自己的口语风格说，不要原样搬数据。"
+                "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
+                "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
+                "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
             )
         else:
             chat_context = (
@@ -615,7 +615,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         message_history = None
         if ctx.feishu_chat_store:
             history_entries = ctx.feishu_chat_store.get_recent(
-                msg_event.chat_id, limit=20,
+                msg_event.chat_id, limit=40,
             )
             if history_entries:
                 message_history = [
@@ -626,7 +626,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 如果没有工具且没有 message_history 格式的支持，回退到 prompt 注入
         if not has_tools and message_history:
             history_text = ctx.feishu_chat_store.format_for_prompt(
-                msg_event.chat_id, limit=20,
+                msg_event.chat_id, limit=40,
             )
             if history_text:
                 chat_context += (
@@ -1074,6 +1074,66 @@ async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ct
         return resp.text
 
 
+async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """标消息已读."""
+    mark_all = args.get("all", False)
+    sender_name = args.get("sender_name", "")
+
+    payload: dict[str, Any] = {"user_id": 1}
+
+    if mark_all:
+        payload["all"] = True
+    elif sender_name:
+        # 先查 sender_id
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{_ID_API_BASE}/api/stats/user",
+                params={"q": sender_name},
+                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+            )
+            try:
+                users = resp.json()
+                if not users:
+                    return f"找不到用户「{sender_name}」"
+                payload["sender_id"] = users[0]["id"]
+            except Exception:
+                return f"查询用户失败: {resp.text[:200]}"
+    else:
+        return "需要指定 sender_name 或 all=true"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{_ID_API_BASE}/api/messages/mark-read-batch",
+            json=payload,
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """管理 AI 同事."""
+    target_id = args.get("agent_id")
+    if not target_id:
+        return "需要 agent_id 参数"
+
+    update_data: dict[str, Any] = {}
+    if args.get("status"):
+        update_data["agent_status"] = args["status"]
+    if args.get("memory"):
+        update_data["memory"] = args["memory"]
+
+    if not update_data:
+        return "没有要更新的内容（需要 status 或 memory）"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(
+            f"{_ID_API_BASE}/api/agents/{target_id}",
+            json=update_data,
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
@@ -1085,6 +1145,8 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "read_notes": _tool_read_notes,
     "read_messages": _tool_read_messages,
     "get_system_health": _tool_get_system_health,
+    "mark_read": _tool_mark_read,
+    "update_agent": _tool_update_agent,
 }
 
 

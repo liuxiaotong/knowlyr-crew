@@ -303,6 +303,47 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "mark_read": {
+        "name": "mark_read",
+        "description": "把 Kai 的未读消息标为已读。可以标某个人发的，也可以全部标已读。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sender_name": {
+                    "type": "string",
+                    "description": "发件人姓名（标该人的消息已读）",
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "true=全部标已读",
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
+    },
+    "update_agent": {
+        "name": "update_agent",
+        "description": "管理AI同事：暂停/恢复运行、更新记忆。先用 list_agents 查到 agent_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "AI同事的用户ID",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "active=运行 / paused=暂停 / disabled=禁用",
+                },
+                "memory": {
+                    "type": "string",
+                    "description": "更新AI同事的记忆内容",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
@@ -310,6 +351,7 @@ AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
+    "mark_read", "update_agent",
 }
 
 
