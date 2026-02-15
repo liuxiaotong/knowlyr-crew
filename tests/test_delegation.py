@@ -64,6 +64,9 @@ def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent
     emp.agent_id = agent_id
     emp.base_url = base_url
     emp.api_key = api_key
+    emp.fallback_model = ""
+    emp.fallback_api_key = ""
+    emp.fallback_base_url = ""
     return emp
 
 
