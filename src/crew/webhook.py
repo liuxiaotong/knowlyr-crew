@@ -638,21 +638,6 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             )
             return
 
-        # 发送"处理中"提示
-        import random as _random
-
-        _THINKING_MSGS = [
-            "让我看看...",
-            "稍等，我查一下",
-            "好的，马上",
-            "收到，稍等",
-        ]
-        await send_feishu_text(
-            ctx.feishu_token_mgr,
-            msg_event.chat_id,
-            _random.choice(_THINKING_MSGS),
-        )
-
         # 执行员工 — 飞书实时聊天
         from crew.tool_schema import AGENT_TOOLS
 
@@ -666,6 +651,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
                 "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
                 "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
+                "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
             )
         else:
             chat_context = (
@@ -2629,6 +2615,19 @@ async def _handle_tool_call(
 
     if is_finish_tool(tool_name):
         return None
+
+    if tool_name == "add_memory":
+        from crew.memory import MemoryStore
+        project_dir = ctx.project_dir if ctx else Path(".")
+        store = MemoryStore(project_dir=project_dir)
+        entry = store.add(
+            employee=employee_name,
+            category=arguments.get("category", "finding"),
+            content=arguments.get("content", ""),
+            source_session="",
+        )
+        logger.info("记忆保存: %s → %s", employee_name, entry.content[:60])
+        return "已记住。"
 
     if tool_name == "delegate":
         logger.info("委派: %s → %s", employee_name, arguments.get("employee_name"))
