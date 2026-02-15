@@ -989,7 +989,7 @@ async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 
 async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
-    """搜索互联网（DuckDuckGo HTML）."""
+    """搜索互联网（Bing cn）."""
     import re
 
     import httpx
@@ -1001,28 +1001,29 @@ async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: "_Ap
 
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            resp = await client.post(
-                "https://html.duckduckgo.com/html/",
-                data={"q": query},
-                headers={"User-Agent": "Mozilla/5.0"},
+            resp = await client.get(
+                "https://cn.bing.com/search",
+                params={"q": query, "count": max_results},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+                    "Accept-Language": "zh-CN,zh;q=0.9",
+                },
             )
 
         results: list[str] = []
-        # DuckDuckGo HTML: <a class="result__a" href="...">title</a>
-        # + <a class="result__snippet">snippet</a>
-        for block in re.finditer(
-            r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
-            r'class="result__snippet"[^>]*>(.*?)</(?:a|span)>',
-            resp.text,
-            re.DOTALL,
-        ):
+        for block in re.finditer(r'<li class="b_algo".*?</li>', resp.text, re.DOTALL):
             if len(results) >= max_results:
                 break
-            href, title, snippet = block.groups()
-            title = re.sub(r"<[^>]+>", "", title).strip()
-            snippet = re.sub(r"<[^>]+>", "", snippet).strip()
-            if title or snippet:
-                results.append(f"{title}\n{snippet}\n{href}")
+            title_m = re.search(
+                r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', block.group(), re.DOTALL,
+            )
+            snippet_m = re.search(r"<p[^>]*>(.*?)</p>", block.group(), re.DOTALL)
+            if title_m:
+                href = title_m.group(1)
+                title = re.sub(r"<[^>]+>", "", title_m.group(2)).strip()
+                snippet = re.sub(r"<[^>]+>", "", snippet_m.group(1)).strip() if snippet_m else ""
+                if title or snippet:
+                    results.append(f"{title}\n{snippet}\n{href}")
 
         if not results:
             return f"未找到关于「{query}」的搜索结果"
@@ -1071,6 +1072,7 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """按昵称查用户详情."""
+    import httpx
     name = args.get("name", "")
     if not name:
         return "错误：需要 name 参数"
@@ -1085,6 +1087,7 @@ async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """查 AI 同事最近工作记录."""
+    import httpx
     name = args.get("name", "")
     days = args.get("days", 3)
     if not name:
@@ -1122,6 +1125,7 @@ async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_Ap
 
 async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """查 Kai 的未读消息概要."""
+    import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
             f"{_ID_API_BASE}/api/stats/unread",
@@ -1133,6 +1137,7 @@ async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: "
 
 async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """查服务器健康状态."""
+    import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
             f"{_ID_API_BASE}/api/stats/system-health",
@@ -1143,6 +1148,7 @@ async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ct
 
 async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """标消息已读."""
+    import httpx
     mark_all = args.get("all", False)
     sender_name = args.get("sender_name", "")
 
@@ -1179,6 +1185,7 @@ async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: "_App
 
 async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """管理 AI 同事."""
+    import httpx
     target_id = args.get("agent_id")
     if not target_id:
         return "需要 agent_id 参数"
