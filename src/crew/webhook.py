@@ -692,13 +692,19 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     except Exception as e:
         logger.exception("飞书消息处理失败: %s", e)
         try:
-            await send_feishu_card(
-                ctx.feishu_token_mgr,
-                msg_event.chat_id,
-                task_name="飞书任务",
-                task_result=None,
-                task_error=str(e),
-            )
+            error_text = f"出了点问题：{e}"
+            if msg_event.chat_type == "group":
+                await send_feishu_reply(
+                    ctx.feishu_token_mgr,
+                    msg_event.message_id,
+                    error_text,
+                )
+            else:
+                await send_feishu_text(
+                    ctx.feishu_token_mgr,
+                    msg_event.chat_id,
+                    error_text,
+                )
         except Exception:
             logger.exception("飞书错误回复发送失败")
 
@@ -992,12 +998,43 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_A
     return f"笔记已保存: {filename}"
 
 
+async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """按昵称查用户详情."""
+    name = args.get("name", "")
+    if not name:
+        return "错误：需要 name 参数"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/stats/user",
+            params={"q": name},
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """查 AI 同事最近工作记录."""
+    name = args.get("name", "")
+    days = args.get("days", 3)
+    if not name:
+        return "错误：需要 name 参数"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/stats/agent-work",
+            params={"name": name, "days": days},
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
     "list_agents": _tool_list_agents,
     "web_search": _tool_web_search,
     "create_note": _tool_create_note,
+    "lookup_user": _tool_lookup_user,
+    "query_agent_work": _tool_query_agent_work,
 }
 
 

@@ -232,10 +232,46 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["title", "content"],
         },
     },
+    "lookup_user": {
+        "name": "lookup_user",
+        "description": "按姓名查用户详情（活跃度、消息数、注册时间等）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "用户昵称（支持模糊搜索）",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    "query_agent_work": {
+        "name": "query_agent_work",
+        "description": "查某个AI同事最近的工作记录（任务数、成功率、评分、具体任务列表）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "AI同事昵称",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "查最近几天，默认3",
+                    "default": 3,
+                },
+            },
+            "required": ["name"],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
-AGENT_TOOLS = {"query_stats", "send_message", "list_agents", "delegate", "web_search", "create_note"}
+AGENT_TOOLS = {
+    "query_stats", "send_message", "list_agents", "delegate",
+    "web_search", "create_note", "lookup_user", "query_agent_work",
+}
 
 
 def employee_tools_to_schemas(tools: list[str]) -> list[dict[str, Any]]:
