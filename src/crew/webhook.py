@@ -569,20 +569,25 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             f"\U0001f4dd {emp_display} 已收到任务，正在处理...",
         )
 
-        # 执行员工 — 飞书对话明确标注为实时聊天，防止幻觉
-        feishu_task = (
-            f"[实时对话] Kai 在飞书上对你说：{task_text}\n\n"
-            f"这是实时对话，不是定时任务。你手上没有任何业务数据。"
-            f"只回答 Kai 说的内容，不要主动汇报工作、不要编造任何具体信息。"
-            f"如果他问你不知道的事，就说你不知道。"
+        # 执行员工 — 飞书实时聊天
+        chat_context = (
+            "这是飞书实时聊天。你现在没有任何业务数据。"
+            "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
+            "这些信息只有每天定时简报里才有，现在你手上没有。"
+            "Kai 问这些就说「这个我得看看今天的数据才能说」。"
+            "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
         )
-        args = {"task": feishu_task}
+        args = {"task": chat_context}
         if emp and emp.args:
             first_required = next((a for a in emp.args if a.required), None)
             if first_required:
-                args[first_required.name] = feishu_task
+                args[first_required.name] = chat_context
 
-        result = await _execute_employee(ctx, employee_name, args, model=None)
+        # 把 Kai 的原话作为 user_message，让模型直接回复
+        result = await _execute_employee(
+            ctx, employee_name, args, model=None,
+            user_message=task_text,
+        )
 
         # 发送结果卡片
         task_name = f"{emp_display} — 飞书任务"
@@ -969,6 +974,7 @@ async def _execute_employee(
     args: dict[str, str],
     agent_id: int | None = None,
     model: str | None = None,
+    user_message: str | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
     from crew.discovery import discover_employees
@@ -1003,12 +1009,15 @@ async def _execute_employee(
         from crew.executor import aexecute_prompt
 
         use_model = model or match.model or "claude-sonnet-4-20250514"
-        result = await aexecute_prompt(
+        exec_kwargs = dict(
             system_prompt=prompt,
             api_key=None,
             model=use_model,
             stream=False,
         )
+        if user_message:
+            exec_kwargs["user_message"] = user_message
+        result = await aexecute_prompt(**exec_kwargs)
     except (ValueError, ImportError):
         result = None
 
