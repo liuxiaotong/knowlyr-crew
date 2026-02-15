@@ -569,12 +569,18 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             f"\U0001f4dd {emp_display} 已收到任务，正在处理...",
         )
 
-        # 执行员工
-        args = {"task": task_text}
+        # 执行员工 — 飞书对话明确标注为实时聊天，防止幻觉
+        feishu_task = (
+            f"[实时对话] Kai 在飞书上对你说：{task_text}\n\n"
+            f"这是实时对话，不是定时任务。你手上没有任何业务数据。"
+            f"只回答 Kai 说的内容，不要主动汇报工作、不要编造任何具体信息。"
+            f"如果他问你不知道的事，就说你不知道。"
+        )
+        args = {"task": feishu_task}
         if emp and emp.args:
             first_required = next((a for a in emp.args if a.required), None)
             if first_required:
-                args[first_required.name] = task_text
+                args[first_required.name] = feishu_task
 
         result = await _execute_employee(ctx, employee_name, args, model=None)
 
