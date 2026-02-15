@@ -14,9 +14,10 @@ from crew.paths import resolve_project_dir
 class DeliveryTarget(BaseModel):
     """投递目标（嵌入 cron 配置）."""
 
-    type: Literal["webhook", "email"] = Field(description="投递类型")
-    url: str = Field(default="", description="Webhook URL")
+    type: Literal["webhook", "email", "feishu"] = Field(description="投递类型")
+    url: str = Field(default="", description="Webhook URL / 飞书机器人 Webhook URL")
     headers: dict[str, str] = Field(default_factory=dict, description="自定义请求头")
+    secret: str = Field(default="", description="飞书机器人签名密钥（可选）")
     to: str = Field(default="", description="收件人邮箱")
     subject: str = Field(default="", description="邮件主题（支持 {name} 占位符）")
 

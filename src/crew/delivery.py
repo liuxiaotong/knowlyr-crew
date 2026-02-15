@@ -1,11 +1,14 @@
-"""投递层 — 将任务结果推送到外部渠道（Webhook / 邮件）."""
+"""投递层 — 将任务结果推送到外部渠道（Webhook / 邮件 / 飞书）."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import smtplib
 import os
+import time
 from email.mime.text import MIMEText
 from typing import Any, Literal
 
@@ -16,15 +19,18 @@ logger = logging.getLogger(__name__)
 WEBHOOK_TIMEOUT = 30.0  # httpx POST 超时（秒）
 SMTP_TIMEOUT = 10  # SMTP 连接超时（秒）
 EMAIL_BODY_MAX_LENGTH = 2000  # 邮件正文截断长度
+FEISHU_CARD_CONTENT_MAX = 4000  # 飞书卡片内容截断长度
 
 
 class DeliveryTarget(BaseModel):
     """单个投递目标."""
 
-    type: Literal["webhook", "email"] = Field(description="投递类型")
-    # webhook
-    url: str = Field(default="", description="Webhook URL")
+    type: Literal["webhook", "email", "feishu"] = Field(description="投递类型")
+    # webhook / feishu
+    url: str = Field(default="", description="Webhook URL / 飞书机器人 Webhook URL")
     headers: dict[str, str] = Field(default_factory=dict, description="自定义请求头")
+    # feishu
+    secret: str = Field(default="", description="飞书机器人签名密钥（可选）")
     # email
     to: str = Field(default="", description="收件人邮箱")
     subject: str = Field(default="", description="邮件主题（支持 {name} 占位符）")
@@ -89,6 +95,8 @@ async def _deliver_one(
         return await _deliver_webhook(target, task_name=task_name, task_result=task_result, task_error=task_error)
     elif target.type == "email":
         return await _deliver_email(target, task_name=task_name, task_result=task_result, task_error=task_error)
+    elif target.type == "feishu":
+        return await _deliver_feishu(target, task_name=task_name, task_result=task_result, task_error=task_error)
     else:
         return DeliveryResult(target_type=target.type, success=False, detail=f"未知投递类型: {target.type}")
 
@@ -211,3 +219,123 @@ def _send_smtp(host: str, port: int, user: str, password: str, msg: MIMEText) ->
         if user and password:
             server.login(user, password)
         server.send_message(msg)
+
+
+# ── 飞书投递 ──
+
+
+def _feishu_sign(secret: str, timestamp: int) -> str:
+    """生成飞书机器人签名.
+
+    算法: HMAC-SHA256(timestamp + "\\n" + secret) → base64
+    """
+    import base64
+
+    string_to_sign = f"{timestamp}\n{secret}"
+    hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    return base64.b64encode(hmac_code).decode("utf-8")
+
+
+def _build_feishu_card(
+    task_name: str,
+    task_result: dict[str, Any] | None,
+    task_error: str | None,
+) -> dict[str, Any]:
+    """构建飞书交互式卡片消息.
+
+    成功: 绿色 header + markdown 内容
+    失败: 红色 header + 错误信息
+    """
+    if task_error:
+        header_color = "red"
+        header_title = f"❌ {task_name or '任务'} — 执行失败"
+        content = f"**错误信息:**\n\n{task_error}"
+    else:
+        header_color = "green"
+        header_title = f"✅ {task_name or '任务'} — 执行完成"
+
+        if task_result:
+            output = task_result.get("output", "")
+            if isinstance(output, str):
+                if len(output) > FEISHU_CARD_CONTENT_MAX:
+                    output = output[:FEISHU_CARD_CONTENT_MAX] + "\n\n...(已截断)"
+                content = output
+            else:
+                import json
+                content = json.dumps(output, ensure_ascii=False, indent=2)[:FEISHU_CARD_CONTENT_MAX]
+        else:
+            content = "任务已完成。"
+
+    # 附加元信息
+    elements: list[dict[str, Any]] = [
+        {"tag": "markdown", "content": content},
+    ]
+
+    # 如果有 employee / model 信息
+    if task_result:
+        note_parts = []
+        if task_result.get("employee"):
+            note_parts.append(f"员工: {task_result['employee']}")
+        if task_result.get("model"):
+            note_parts.append(f"模型: {task_result['model']}")
+        if task_result.get("duration_ms"):
+            secs = task_result["duration_ms"] / 1000
+            note_parts.append(f"耗时: {secs:.1f}s")
+        if note_parts:
+            elements.append({
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": " | ".join(note_parts)}],
+            })
+
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": header_title},
+                "template": header_color,
+            },
+            "elements": elements,
+        },
+    }
+
+
+async def _deliver_feishu(
+    target: DeliveryTarget,
+    *,
+    task_name: str,
+    task_result: dict[str, Any] | None,
+    task_error: str | None,
+) -> DeliveryResult:
+    """投递到飞书群机器人 Webhook."""
+    if not target.url:
+        return DeliveryResult(target_type="feishu", success=False, detail="URL 为空")
+
+    try:
+        import httpx
+    except ImportError:
+        return DeliveryResult(target_type="feishu", success=False, detail="httpx 未安装")
+
+    payload = _build_feishu_card(task_name, task_result, task_error)
+
+    # 签名校验
+    if target.secret:
+        timestamp = int(time.time())
+        sign = _feishu_sign(target.secret, timestamp)
+        payload["timestamp"] = str(timestamp)
+        payload["sign"] = sign
+
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
+            resp = await client.post(target.url, json=payload, headers=headers)
+        body = resp.json() if resp.status_code < 500 else {}
+        code = body.get("code", body.get("StatusCode", -1))
+
+        if resp.status_code < 400 and code == 0:
+            return DeliveryResult(target_type="feishu", success=True, detail="发送成功")
+        else:
+            msg = body.get("msg", body.get("StatusMessage", f"HTTP {resp.status_code}"))
+            return DeliveryResult(target_type="feishu", success=False, detail=msg)
+    except Exception as e:
+        return DeliveryResult(target_type="feishu", success=False, detail=str(e))

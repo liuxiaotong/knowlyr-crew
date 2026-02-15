@@ -1,4 +1,4 @@
-"""测试投递层 — Webhook + 邮件."""
+"""测试投递层 — Webhook + 邮件 + 飞书."""
 
 import asyncio
 import os
@@ -9,11 +9,15 @@ import pytest
 from crew.delivery import (
     DeliveryResult,
     DeliveryTarget,
+    FEISHU_CARD_CONTENT_MAX,
     WEBHOOK_TIMEOUT,
     SMTP_TIMEOUT,
     deliver,
+    _build_feishu_card,
     _deliver_email,
+    _deliver_feishu,
     _deliver_webhook,
+    _feishu_sign,
 )
 
 
@@ -334,3 +338,271 @@ class TestTimeoutConstants:
     def test_email_body_max_length(self):
         from crew.delivery import EMAIL_BODY_MAX_LENGTH
         assert EMAIL_BODY_MAX_LENGTH == 2000
+
+    def test_feishu_card_content_max(self):
+        assert FEISHU_CARD_CONTENT_MAX == 4000
+
+
+# ── 飞书签名 ──
+
+
+class TestFeishuSign:
+    """飞书机器人签名."""
+
+    def test_sign_not_empty(self):
+        result = _feishu_sign("test-secret", 1700000000)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_sign_deterministic(self):
+        a = _feishu_sign("secret-key", 1700000000)
+        b = _feishu_sign("secret-key", 1700000000)
+        assert a == b
+
+    def test_sign_changes_with_secret(self):
+        a = _feishu_sign("secret-1", 1700000000)
+        b = _feishu_sign("secret-2", 1700000000)
+        assert a != b
+
+    def test_sign_changes_with_timestamp(self):
+        a = _feishu_sign("secret", 1700000000)
+        b = _feishu_sign("secret", 1700000001)
+        assert a != b
+
+
+# ── 飞书卡片构建 ──
+
+
+class TestBuildFeishuCard:
+    """飞书交互式卡片消息构建."""
+
+    def test_success_card(self):
+        card = _build_feishu_card("daily-review", {"output": "一切正常"}, None)
+        assert card["msg_type"] == "interactive"
+        header = card["card"]["header"]
+        assert header["template"] == "green"
+        assert "daily-review" in header["title"]["content"]
+        assert "✅" in header["title"]["content"]
+
+        elements = card["card"]["elements"]
+        assert any(e["tag"] == "markdown" and "一切正常" in e["content"] for e in elements)
+
+    def test_error_card(self):
+        card = _build_feishu_card("fail-task", None, "LLM 超时")
+        header = card["card"]["header"]
+        assert header["template"] == "red"
+        assert "❌" in header["title"]["content"]
+        assert "fail-task" in header["title"]["content"]
+
+        elements = card["card"]["elements"]
+        assert any(e["tag"] == "markdown" and "LLM 超时" in e["content"] for e in elements)
+
+    def test_no_result_card(self):
+        card = _build_feishu_card("some-task", None, None)
+        elements = card["card"]["elements"]
+        assert any(e["tag"] == "markdown" and "任务已完成" in e["content"] for e in elements)
+
+    def test_content_truncation(self):
+        long_output = "x" * (FEISHU_CARD_CONTENT_MAX + 500)
+        card = _build_feishu_card("task", {"output": long_output}, None)
+        elements = card["card"]["elements"]
+        md = [e for e in elements if e["tag"] == "markdown"][0]
+        assert len(md["content"]) <= FEISHU_CARD_CONTENT_MAX + 20  # +截断提示
+        assert "已截断" in md["content"]
+
+    def test_metadata_notes(self):
+        result = {
+            "output": "done",
+            "employee": "code-reviewer",
+            "model": "claude-sonnet",
+            "duration_ms": 3500,
+        }
+        card = _build_feishu_card("task", result, None)
+        elements = card["card"]["elements"]
+        note = [e for e in elements if e["tag"] == "note"]
+        assert len(note) == 1
+        note_text = note[0]["elements"][0]["content"]
+        assert "code-reviewer" in note_text
+        assert "claude-sonnet" in note_text
+        assert "3.5s" in note_text
+
+    def test_non_string_output(self):
+        result = {"output": {"key": "value"}}
+        card = _build_feishu_card("task", result, None)
+        elements = card["card"]["elements"]
+        md = [e for e in elements if e["tag"] == "markdown"][0]
+        assert "key" in md["content"]
+
+    def test_empty_task_name(self):
+        card = _build_feishu_card("", None, None)
+        header = card["card"]["header"]
+        assert "任务" in header["title"]["content"]
+
+
+# ── 飞书投递 ──
+
+
+def _mock_feishu_client(*, status_code=200, body=None):
+    """创建 mock feishu httpx 客户端."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.json.return_value = body if body is not None else {"code": 0, "msg": "success"}
+
+    mock_client = AsyncMock()
+    mock_client.post.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    return mock_client
+
+
+class TestDeliverFeishu:
+    """飞书投递."""
+
+    def test_success(self):
+        target = DeliveryTarget(type="feishu", url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx")
+        mock_client = _mock_feishu_client()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = _run(_deliver_feishu(
+                target, task_name="daily-review",
+                task_result={"output": "all good"}, task_error=None,
+            ))
+
+        assert result.success is True
+        assert result.target_type == "feishu"
+
+        # 验证 POST payload 包含卡片
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["msg_type"] == "interactive"
+        assert "card" in payload
+
+    def test_empty_url(self):
+        target = DeliveryTarget(type="feishu", url="")
+        result = _run(_deliver_feishu(target, task_name="t", task_result=None, task_error=None))
+        assert result.success is False
+        assert "URL" in result.detail
+
+    def test_with_secret(self):
+        target = DeliveryTarget(
+            type="feishu",
+            url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+            secret="my-secret",
+        )
+        mock_client = _mock_feishu_client()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = _run(_deliver_feishu(
+                target, task_name="task",
+                task_result=None, task_error=None,
+            ))
+
+        assert result.success is True
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert "timestamp" in payload
+        assert "sign" in payload
+
+    def test_without_secret_no_sign(self):
+        target = DeliveryTarget(
+            type="feishu",
+            url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+        )
+        mock_client = _mock_feishu_client()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            _run(_deliver_feishu(
+                target, task_name="task",
+                task_result=None, task_error=None,
+            ))
+
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert "timestamp" not in payload
+        assert "sign" not in payload
+
+    def test_api_error_code(self):
+        target = DeliveryTarget(type="feishu", url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx")
+        mock_client = _mock_feishu_client(body={"code": 19001, "msg": "sign match fail"})
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = _run(_deliver_feishu(
+                target, task_name="task",
+                task_result=None, task_error=None,
+            ))
+
+        assert result.success is False
+        assert "sign match fail" in result.detail
+
+    def test_http_error(self):
+        target = DeliveryTarget(type="feishu", url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx")
+        mock_client = _mock_feishu_client(status_code=500, body={})
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = _run(_deliver_feishu(
+                target, task_name="task",
+                task_result=None, task_error=None,
+            ))
+
+        assert result.success is False
+
+    def test_connection_error(self):
+        target = DeliveryTarget(type="feishu", url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx")
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = ConnectionError("网络不可达")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = _run(_deliver_feishu(
+                target, task_name="task",
+                task_result=None, task_error=None,
+            ))
+
+        assert result.success is False
+        assert "网络不可达" in result.detail
+
+
+# ── deliver() 批量含飞书 ──
+
+
+class TestDeliverWithFeishu:
+    """批量投递含飞书目标."""
+
+    def test_feishu_in_batch(self):
+        targets = [
+            DeliveryTarget(type="webhook", url="https://example.com/hook"),
+            DeliveryTarget(type="feishu", url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"),
+        ]
+
+        mock_webhook = _mock_httpx_client(status_code=200)
+        mock_feishu_resp = MagicMock()
+        mock_feishu_resp.status_code = 200
+        mock_feishu_resp.json.return_value = {"code": 0, "msg": "success"}
+        mock_webhook.post.return_value = mock_feishu_resp
+
+        with patch("httpx.AsyncClient", return_value=mock_webhook):
+            results = _run(deliver(
+                targets, task_name="batch",
+                task_result={"output": "ok"}, task_error=None,
+            ))
+
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+
+# ── DeliveryTarget 飞书字段 ──
+
+
+class TestDeliveryTargetFeishu:
+    """飞书投递目标模型字段."""
+
+    def test_feishu_target(self):
+        t = DeliveryTarget(
+            type="feishu",
+            url="https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+            secret="my-secret",
+        )
+        assert t.type == "feishu"
+        assert t.secret == "my-secret"
+
+    def test_secret_default_empty(self):
+        t = DeliveryTarget(type="feishu", url="https://example.com")
+        assert t.secret == ""
