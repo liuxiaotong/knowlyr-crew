@@ -708,6 +708,9 @@ def _execute_with_tool_loop(
             model=model,
             max_tokens=max_tokens or 4096,
             base_url=getattr(emp, "base_url", "") or None,
+            fallback_model=getattr(emp, "fallback_model", "") or None,
+            fallback_api_key=getattr(emp, "fallback_api_key", "") or None,
+            fallback_base_url=getattr(emp, "fallback_base_url", "") or None,
         )
         total_input += result.input_tokens
         total_output += result.output_tokens

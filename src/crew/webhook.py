@@ -1889,6 +1889,9 @@ async def _execute_employee_with_tools(
             model=use_model,
             max_tokens=4096,
             base_url=match.base_url or None,
+            fallback_model=match.fallback_model or None,
+            fallback_api_key=match.fallback_api_key or None,
+            fallback_base_url=match.fallback_base_url or None,
         )
         total_input += result.input_tokens
         total_output += result.output_tokens

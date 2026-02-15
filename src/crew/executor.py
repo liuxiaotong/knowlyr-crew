@@ -955,6 +955,9 @@ def execute_with_tools(
     model: str = "claude-sonnet-4-5-20250929",
     max_tokens: int = 4096,
     base_url: str | None = None,
+    fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
+    fallback_base_url: str | None = None,
 ) -> ToolExecutionResult:
     """带工具调用的 LLM 执行.
 
@@ -1022,6 +1025,22 @@ def execute_with_tools(
                 last_exc = e
                 break
 
+    # 尝试 fallback 模型
+    if fallback_model and last_exc is not None:
+        logger.warning("Tool-use 切换到 fallback 模型: %s", fallback_model)
+        try:
+            return execute_with_tools(
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                api_key=fallback_api_key or api_key,
+                model=fallback_model,
+                max_tokens=max_tokens,
+                base_url=fallback_base_url,
+            )
+        except Exception as e:
+            logger.debug("Tool-use fallback 模型也失败: %s", e)
+
     raise last_exc  # type: ignore[misc]
 
 
@@ -1034,6 +1053,9 @@ async def aexecute_with_tools(
     model: str = "claude-sonnet-4-5-20250929",
     max_tokens: int = 4096,
     base_url: str | None = None,
+    fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
+    fallback_base_url: str | None = None,
 ) -> ToolExecutionResult:
     """execute_with_tools 的异步版本."""
     provider = detect_provider(model)
@@ -1088,5 +1110,21 @@ async def aexecute_with_tools(
                 _record_failure(provider.value, e)
                 last_exc = e
                 break
+
+    # 尝试 fallback 模型
+    if fallback_model and last_exc is not None:
+        logger.warning("Async tool-use 切换到 fallback 模型: %s", fallback_model)
+        try:
+            return await aexecute_with_tools(
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                api_key=fallback_api_key or api_key,
+                model=fallback_model,
+                max_tokens=max_tokens,
+                base_url=fallback_base_url,
+            )
+        except Exception as e:
+            logger.debug("Async tool-use fallback 模型也失败: %s", e)
 
     raise last_exc  # type: ignore[misc]
