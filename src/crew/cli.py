@@ -3470,8 +3470,8 @@ def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str
         trajectories = trajectories[-1:]
         click.echo("提示: 默认只打分最后一条。用 --all 打分全部，或 -n 5 打分最后 5 条。", err=True)
 
-    # 自动检测 moonshot 配置
-    config_kwargs: dict = {"provider": provider}
+    # crew 的 AI 员工是对话类 agent，使用 conversation 领域评估
+    config_kwargs: dict = {"provider": provider, "domain": "conversation"}
     if provider == "openai":
         if not base_url and os.environ.get("MOONSHOT_API_KEY"):
             config_kwargs["base_url"] = "https://api.moonshot.cn/v1"
@@ -3497,6 +3497,19 @@ def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str
         click.echo(f"  结果分: {result.outcome_score:.2f}")
         click.echo(f"  过程分: {result.process_score:.2f}")
         click.echo(f"  步骤数: {len(result.step_rewards)}")
+        # 显示各维度平均分
+        if result.step_rewards:
+            all_rubric_ids: list[str] = []
+            for sr in result.step_rewards:
+                for rid in sr.rubric_scores:
+                    if rid not in all_rubric_ids:
+                        all_rubric_ids.append(rid)
+            if all_rubric_ids:
+                click.echo("  维度:")
+                for rid in all_rubric_ids:
+                    scores = [sr.rubric_scores.get(rid, 0) for sr in result.step_rewards]
+                    avg = sum(scores) / len(scores)
+                    click.echo(f"    {rid}: {avg:.2f}")
 
 
 @trajectory.command("export")
