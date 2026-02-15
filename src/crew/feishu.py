@@ -139,18 +139,48 @@ class FeishuMessageEvent(BaseModel):
     mentions: list[dict[str, str]] = Field(
         default_factory=list, description="@mention 列表 [{key, id, name}]"
     )
+    msg_type: str = Field(default="text", description="消息类型 text / image / ...")
+    image_key: str = Field(default="", description="图片 key（仅 image 类型）")
 
 
 def parse_message_event(payload: dict[str, Any]) -> FeishuMessageEvent | None:
     """从飞书事件回调 payload 中解析消息.
 
-    只处理 text 类型消息，其他类型返回 None.
+    支持 text 和 image 类型，其他类型返回 None.
     """
     event = payload.get("event", {})
     message = event.get("message", {})
     sender = event.get("sender", {})
 
     msg_type = message.get("message_type", "")
+
+    common_kwargs = dict(
+        message_id=message.get("message_id", ""),
+        chat_id=message.get("chat_id", ""),
+        chat_type=message.get("chat_type", "group"),
+        sender_id=sender.get("sender_id", {}).get("open_id", ""),
+        msg_type=msg_type,
+    )
+
+    if msg_type == "image":
+        content_str = message.get("content", "{}")
+        try:
+            content = _json.loads(content_str)
+        except _json.JSONDecodeError:
+            content = {}
+        image_key = content.get("image_key", "")
+
+        # image 消息也可能有 mentions（群聊 @bot + 发图）
+        raw_mentions = message.get("mentions", [])
+        mentions = _parse_mentions(raw_mentions, "")
+
+        return FeishuMessageEvent(
+            **common_kwargs,
+            text="",
+            mentions=mentions,
+            image_key=image_key,
+        )
+
     if msg_type != "text":
         return None
 
@@ -163,26 +193,29 @@ def parse_message_event(payload: dict[str, Any]) -> FeishuMessageEvent | None:
     text = content.get("text", "")
 
     raw_mentions = message.get("mentions", [])
-    mentions: list[dict[str, str]] = []
-    for m in raw_mentions:
-        mention_info = {
-            "key": m.get("key", ""),
-            "id": m.get("id", {}).get("open_id", ""),
-            "name": m.get("name", ""),
-        }
-        mentions.append(mention_info)
-        # 从文本中移除 @mention 占位符
-        if mention_info["key"]:
-            text = text.replace(mention_info["key"], "").strip()
+    mentions = _parse_mentions(raw_mentions, text)
+    # 从文本中移除 @mention 占位符
+    for m in mentions:
+        if m["key"]:
+            text = text.replace(m["key"], "").strip()
 
     return FeishuMessageEvent(
-        message_id=message.get("message_id", ""),
-        chat_id=message.get("chat_id", ""),
-        chat_type=message.get("chat_type", "group"),
-        sender_id=sender.get("sender_id", {}).get("open_id", ""),
+        **common_kwargs,
         text=text,
         mentions=mentions,
     )
+
+
+def _parse_mentions(raw_mentions: list, text: str) -> list[dict[str, str]]:
+    """解析 @mention 列表."""
+    mentions: list[dict[str, str]] = []
+    for m in raw_mentions:
+        mentions.append({
+            "key": m.get("key", ""),
+            "id": m.get("id", {}).get("open_id", ""),
+            "name": m.get("name", ""),
+        })
+    return mentions
 
 
 # ── 员工路由 ──
@@ -304,6 +337,38 @@ async def send_feishu_text(
     return await send_feishu_message(
         token_manager, chat_id, content=content, msg_type="text",
     )
+
+
+async def send_feishu_reply(
+    token_manager: FeishuTokenManager,
+    message_id: str,
+    text: str,
+) -> dict[str, Any]:
+    """回复指定消息（形成 thread）."""
+    import httpx
+
+    token = await token_manager.get_token()
+    url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    body = {
+        "msg_type": "text",
+        "content": _json.dumps({"text": text}, ensure_ascii=False),
+    }
+
+    async with httpx.AsyncClient(timeout=MESSAGE_SEND_TIMEOUT) as client:
+        resp = await client.post(url, json=body, headers=headers)
+        data = resp.json()
+
+    code = data.get("code", -1)
+    if code != 0:
+        msg = data.get("msg", "unknown")
+        logger.warning("飞书回复发送失败: %s (code=%d)", msg, code)
+
+    return data
 
 
 # ── 事件去重 ──

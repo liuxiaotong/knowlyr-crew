@@ -161,13 +161,32 @@ class TestParseMessageEvent:
         assert event.mentions[0]["name"] == "林锐"
         assert event.sender_id == "ou_sender"
 
-    def test_non_text_message(self):
+    def test_image_message_parsed(self):
+        """image 消息现在能被解析（用于友好拒绝回复）."""
         payload = {
             "event": {
                 "message": {
                     "message_id": "msg_002",
                     "chat_id": "oc_xxx",
                     "message_type": "image",
+                    "content": json.dumps({"image_key": "img-abc"}),
+                },
+                "sender": {"sender_id": {"open_id": "ou_sender"}},
+            }
+        }
+        event = parse_message_event(payload)
+        assert event is not None
+        assert event.msg_type == "image"
+        assert event.image_key == "img-abc"
+
+    def test_unsupported_msg_type_returns_none(self):
+        """video 等不支持的消息类型仍返回 None."""
+        payload = {
+            "event": {
+                "message": {
+                    "message_id": "msg_002",
+                    "chat_id": "oc_xxx",
+                    "message_type": "video",
                     "content": "{}",
                 },
                 "sender": {"sender_id": {"open_id": "ou_sender"}},
@@ -563,16 +582,16 @@ class TestFeishuEventEndpoint:
         assert resp.json()["message"] == "ignored"
 
     def test_unsupported_message_type(self):
-        """非文本消息应返回 unsupported."""
+        """video 等不支持的消息类型应返回 unsupported."""
         config = FeishuConfig(app_id="id", app_secret="secret")
         client = _make_feishu_client(feishu_config=config)
         resp = client.post("/feishu/event", json={
             "header": {"event_type": "im.message.receive_v1"},
             "event": {
                 "message": {
-                    "message_id": "msg_img",
+                    "message_id": "msg_vid",
                     "chat_id": "oc_xxx",
-                    "message_type": "image",
+                    "message_type": "video",
                     "content": "{}",
                 },
                 "sender": {"sender_id": {"open_id": "ou_x"}},

@@ -190,10 +190,52 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "web_search": {
+        "name": "web_search",
+        "description": "搜索互联网获取实时信息。适用于查行业动态、竞品信息、技术概念等。返回搜索结果摘要。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "返回结果数量上限",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    "create_note": {
+        "name": "create_note",
+        "description": "保存备忘或笔记。存储在项目目录中，长期保留。适合记录决策、待办、会议要点。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "笔记标题（也用作文件名）",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "笔记内容（markdown 格式）",
+                },
+                "tags": {
+                    "type": "string",
+                    "description": "标签，逗号分隔（如 decision,urgent）",
+                    "default": "",
+                },
+            },
+            "required": ["title", "content"],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
-AGENT_TOOLS = {"query_stats", "send_message", "list_agents", "delegate"}
+AGENT_TOOLS = {"query_stats", "send_message", "list_agents", "delegate", "web_search", "create_note"}
 
 
 def employee_tools_to_schemas(tools: list[str]) -> list[dict[str, Any]]:

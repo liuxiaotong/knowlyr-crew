@@ -540,6 +540,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     from crew.feishu import (
         resolve_employee_from_mention,
         send_feishu_card,
+        send_feishu_reply,
         send_feishu_text,
     )
 
@@ -564,6 +565,15 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             )
             return
 
+        # 图片消息处理（当前不支持 vision）
+        if msg_event.msg_type == "image":
+            await send_feishu_text(
+                ctx.feishu_token_mgr,
+                msg_event.chat_id,
+                "我暂时看不了图片，你描述一下？",
+            )
+            return
+
         # 发送"处理中"提示
         emp = discovery.get(employee_name)
         emp_display = ""
@@ -572,12 +582,14 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         await send_feishu_text(
             ctx.feishu_token_mgr,
             msg_event.chat_id,
-            f"\U0001f4dd {emp_display} 已收到任务，正在处理...",
+            f"{emp_display} 收到，稍等...",
         )
 
         # 执行员工 — 飞书实时聊天
+        from crew.tool_schema import AGENT_TOOLS
+
         has_tools = any(
-            t in ("query_stats", "send_message", "list_agents", "delegate")
+            t in AGENT_TOOLS
             for t in (emp.tools or [])
         ) if emp else False
 
@@ -654,15 +666,19 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             except Exception as e:
                 logger.debug("飞书记忆沉淀失败: %s", e)
 
-        # 发送结果卡片
-        task_name = f"{emp_display} — 飞书任务"
-        await send_feishu_card(
-            ctx.feishu_token_mgr,
-            msg_event.chat_id,
-            task_name=task_name,
-            task_result=result,
-            task_error=None,
-        )
+        # 发送回复（群聊用 reply thread，私聊用顶层消息）
+        if msg_event.chat_type == "group":
+            await send_feishu_reply(
+                ctx.feishu_token_mgr,
+                msg_event.message_id,
+                output_text,
+            )
+        else:
+            await send_feishu_text(
+                ctx.feishu_token_mgr,
+                msg_event.chat_id,
+                output_text,
+            )
 
         # 记录任务
         record = ctx.registry.create(
@@ -853,7 +869,7 @@ _ID_API_BASE = _os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
 _ID_API_TOKEN = _os.environ.get("AGENT_API_TOKEN", "")
 
 
-async def _tool_query_stats(args: dict, *, agent_id: int | None = None) -> str:
+async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """调用 knowlyr-id /api/stats/briefing."""
     import httpx
 
@@ -865,7 +881,7 @@ async def _tool_query_stats(args: dict, *, agent_id: int | None = None) -> str:
         return resp.text
 
 
-async def _tool_send_message(args: dict, *, agent_id: int | None = None) -> str:
+async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """调用 knowlyr-id /api/messages/agent-send."""
     import httpx
 
@@ -883,7 +899,7 @@ async def _tool_send_message(args: dict, *, agent_id: int | None = None) -> str:
         return resp.text
 
 
-async def _tool_list_agents(args: dict, *, agent_id: int | None = None) -> str:
+async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
     """调用 knowlyr-id /api/agents."""
     import httpx
 
@@ -895,10 +911,93 @@ async def _tool_list_agents(args: dict, *, agent_id: int | None = None) -> str:
         return resp.text
 
 
+async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """搜索互联网（DuckDuckGo HTML）."""
+    import re
+
+    import httpx
+
+    query = args.get("query", "")
+    max_results = min(args.get("max_results", 5), 10)
+    if not query:
+        return "错误：query 不能为空"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": query},
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+
+        results: list[str] = []
+        # DuckDuckGo HTML: <a class="result__a" href="...">title</a>
+        # + <a class="result__snippet">snippet</a>
+        for block in re.finditer(
+            r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
+            r'class="result__snippet"[^>]*>(.*?)</(?:a|span)>',
+            resp.text,
+            re.DOTALL,
+        ):
+            if len(results) >= max_results:
+                break
+            href, title, snippet = block.groups()
+            title = re.sub(r"<[^>]+>", "", title).strip()
+            snippet = re.sub(r"<[^>]+>", "", snippet).strip()
+            if title or snippet:
+                results.append(f"{title}\n{snippet}\n{href}")
+
+        if not results:
+            return f"未找到关于「{query}」的搜索结果"
+        return "\n\n---\n\n".join(results)
+    except Exception as e:
+        return f"搜索失败: {e}"
+
+
+async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """保存备忘/笔记到 .crew/notes/."""
+    import re
+    from datetime import datetime
+
+    title = args.get("title", "untitled")
+    content = args.get("content", "")
+    tags = args.get("tags", "")
+
+    if not content:
+        return "错误：content 不能为空"
+
+    # 确定项目目录
+    project_dir = ctx.project_dir if ctx and ctx.project_dir else Path(".")
+
+    # sanitize filename
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]", "-", title)[:60].strip("-")
+    date_str = datetime.now().strftime("%Y%m%d-%H%M")
+    filename = f"{date_str}-{safe_title}.md"
+
+    notes_dir = project_dir / ".crew" / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+
+    # frontmatter + content
+    lines = [
+        "---",
+        f"title: {title}",
+        f"date: {datetime.now().isoformat()}",
+    ]
+    if tags:
+        lines.append(f"tags: [{tags}]")
+    lines.extend(["---", "", content])
+
+    note_path = notes_dir / filename
+    note_path.write_text("\n".join(lines), encoding="utf-8")
+    return f"笔记已保存: {filename}"
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
     "list_agents": _tool_list_agents,
+    "web_search": _tool_web_search,
+    "create_note": _tool_create_note,
 }
 
 
@@ -1107,7 +1206,7 @@ async def _handle_tool_call(
     if handler:
         try:
             logger.info("工具调用: %s.%s(%s)", employee_name, tool_name, list(arguments.keys()))
-            return await handler(arguments, agent_id=agent_id)
+            return await handler(arguments, agent_id=agent_id, ctx=ctx)
         except Exception as e:
             logger.warning("工具 %s 执行失败: %s", tool_name, e)
             return f"工具执行失败: {e}"
