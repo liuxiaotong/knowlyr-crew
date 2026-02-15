@@ -770,7 +770,12 @@ def _run_employee_job(
             )
             sys.exit(1)
 
-        effective_message = user_message or "请开始执行上述任务。"
+        if user_message:
+            effective_message = user_message
+        else:
+            # 把 task/target/goal 参数放进 user message，让模型明确知道要做什么
+            task_arg = args_dict.get("task") or args_dict.get("target") or args_dict.get("goal") or ""
+            effective_message = task_arg if task_arg else "请开始执行上述任务。"
         stream_enabled = not no_stream and not output and not to_clipboard
 
         def _on_chunk(chunk: str) -> None:
