@@ -1,9 +1,9 @@
 <div align="center">
 
-<h1>Crew — AI Skill Loader</h1>
+<h1>Crew — AI Skill Loader & Employee Engine</h1>
 
-<p><strong>用 Markdown + YAML 定义专业技能，通过 MCP 加载到 AI IDE</strong><br/>
-<em>Define professional AI skills in Markdown + YAML, load into Claude Code / Cursor via MCP</em></p>
+<p><strong>用 Markdown + YAML 定义 AI 员工，通过 MCP 加载到 AI IDE，通过 API 驱动 knowlyr-id 运行时</strong><br/>
+<em>Define AI employees in Markdown + YAML. Load into AI IDEs via MCP, power knowlyr-id runtime via API.</em></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -16,9 +16,9 @@
 </div>
 
 > **Crew 不是又一个 Agent 框架。**
-> 它是 AI IDE 的"人才市场"—— 每个"数字员工"是一个目录或 Markdown 文件，
-> 通过 MCP 协议加载为可复用的专业技能。
-> AI IDE 自己决定怎么执行，Crew 只负责定义"谁做什么"。
+> 它是 AI 员工的**能力定义层**——每个"数字员工"是一个目录或 Markdown 文件，
+> 通过 MCP 协议加载到 AI IDE，通过 HTTP API 驱动 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 的 AI 员工运行时。
+> Crew 定义"谁做什么、怎么做"，knowlyr-id 管理身份、对话和运行时状态。
 
 ---
 
@@ -51,9 +51,10 @@ graph LR
     E -->|MCP Tools| S
     S -->|stdio| IDE["本地 AI IDE"]
     S -->|SSE / HTTP| Remote["远程客户端"]
-    IDE -->|--agent-id| ID["knowlyr-id<br/>Agent Identity"]
+    IDE -->|--agent-id| ID["knowlyr-id<br/>身份 + 运行时"]
     Remote -->|Bearer token| S
-    ID --> E
+    ID -->|运行时获取 prompt/model| E
+    E -->|sync 推送 prompt/avatar| ID
 ```
 
 Crew 通过 MCP 协议暴露三种原语：
@@ -696,6 +697,7 @@ graph TB
 | `/run/employee/{name}` | POST | Bearer | 直接触发员工（支持 SSE 流式） |
 | `/tasks/{task_id}` | GET | Bearer | 查询任务状态和结果 |
 | `/cron/status` | GET | Bearer | 查询 cron 调度器状态 |
+| `/api/employees/{id}/prompt` | GET | Bearer | 获取员工能力定义（供 knowlyr-id 运行时调用） |
 
 所有执行端点支持三种模式：
 - **异步模式**（默认）：立即返回 `task_id`（HTTP 202），后台执行，通过 `/tasks/{task_id}` 轮询结果
@@ -990,79 +992,113 @@ knowlyr-crew sync --clean              # 同步 + 清理孤立目录
 
 ## knowlyr-id 协作 / Integration
 
-与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——id 管身份，Crew 管技能：
+与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——**Crew 定义能力，id 管理身份和运行时**：
 
 ```
-knowlyr-crew run code-reviewer main --agent-id 3050
-    │
-    ├─ 1. 发现技能定义
-    ├─ 2. 从 knowlyr-id 获取 Agent 3050 的身份信息
-    │      → nickname, title, domains, memory
-    ├─ 3. 生成 prompt（注入 agent 身份）
-    ├─ 4. 发送心跳到 knowlyr-id
-    └─ 5. 输出 prompt
+┌─────────────────────────────────────────────────┐
+│              Crew（本项目 = 能力权威）              │
+│                                                   │
+│  员工定义: prompt · model · temperature · tools   │
+│           avatar · bio · tags · workflows         │
+│  训练数据: trajectories · sessions                 │
+└────────────────────┬────────────────────────────┘
+                     │
+        ┌────────────┼────────────┐
+        │ API 获取    │ sync 推送   │
+        │ prompt     │ 全字段      │
+        ↓            ↓            │
+┌─────────────────────────────────────────────────┐
+│         knowlyr-id（身份 + 运行时）                │
+│                                                   │
+│  身份: 用户账号 · 角色 · EXP · 等级               │
+│  运行时: 对话历史 · 记忆 · 心跳 · 工作日志         │
+│  管理: API Key · 调度 · 触达 · 财务               │
+│  容灾: system_prompt 缓存（crew 不可用时回退）      │
+└─────────────────────────────────────────────────┘
 ```
+
+knowlyr-id 在运行时通过 `CREW_API_URL` 从 Crew 获取员工的 prompt / model / temperature（5 分钟缓存），
+Crew 不可用时自动回退到 DB 中的缓存副本。knowlyr-id 连接是**可选的**——不配置时 Crew 作为独立 MCP 技能服务运行。
+
+### 两种协作模式
+
+**模式一：CLI / MCP 模式**（Crew 主动调用 id）
 
 ```bash
+knowlyr-crew run code-reviewer main --agent-id 3050
+# 1. 从 id 获取 Agent 3050 身份信息 → 注入 prompt
+# 2. 生成 prompt → 输出
+# 3. 发送心跳到 id
+```
+
+**模式二：API 模式**（id 调用 Crew）
+
+```bash
+# knowlyr-id 在用户发私信时自动调用：
+GET /api/employees/3050/prompt
+# → 返回 system_prompt, model, temperature, tools, tool_schemas
+```
+
+Crew Webhook 服务器暴露 `/api/employees/{id}/prompt` 端点，
+knowlyr-id 的 `crew_client.py` 在每次 AI 回复时调用此端点获取最新的员工能力定义。
+
+### 环境变量
+
+```bash
+# Crew 端（调用 id）
 export KNOWLYR_ID_URL=https://id.knowlyr.com
 export AGENT_API_TOKEN=your-token
 pip install knowlyr-crew[id]
-```
 
-不带 `--agent-id` 时行为完全一致，knowlyr-id 连接是可选的。
+# id 端（调用 Crew，在 knowlyr-id 的 .env 中配置）
+CREW_API_URL=http://127.0.0.1:8765
+CREW_API_TOKEN=your-crew-token
+```
 
 ### 双向同步 / Bidirectional Sync
 
 `agents sync-all` 命令实现本地员工目录与 knowlyr-id 之间的批量双向同步：
 
 ```bash
-# 批量同步所有员工（默认扫描 .crew/global/）
-knowlyr-crew agents sync-all
+# 一键部署（推荐）：rsync → 重启 crew → 同步 knowlyr-id
+make push
 
-# 指定目录 + 预览
-knowlyr-crew agents sync-all --dir private/employees/ --dry-run
-
-# 仅推送本地变更到 id
-knowlyr-crew agents sync-all --push-only --force
+# 或手动同步
+knowlyr-crew agents sync-all --dir private/employees/ --dry-run   # 预览
+knowlyr-crew agents sync-all --dir private/employees/ --force     # 强制全量
 ```
 
-**Push（本地 → id）：**
-- 元数据：character_name → nickname, display_name → title, bio → bio, description → capabilities, tags → domains
-- 渲染后的完整 prompt → system_prompt（包含角色前言、变量替换、记忆注入）
+**Push（Crew → id）：**
+- 元数据：character_name → nickname, display_name → title, bio, description → capabilities, tags → domains
+- 渲染后的完整 prompt → system_prompt（容灾缓存）
 - avatar.webp → avatar_base64
+- crew_name 自动写入（id 运行时通过 crew_name 匹配员工定义）
+- model / temperature / max_tokens → 配置缓存
 - 新员工（无 agent_id）自动注册，agent_id 回写到 employee.yaml
 - 本地已删除的员工 → 远端设为 inactive
 
-**Pull（id → 本地）：**
+**Pull（id → Crew）：**
 - 运行时积累的 memory → memory-id.md（保留对话中学到的经验）
 - model / temperature → employee.yaml（运行时调整的模型配置同步回来）
 
 **内容哈希优化：** 利用 `_content_hash` 字段，prompt 未变时跳过 prompt/avatar 推送，仅同步 metadata。`--force` 可强制全量推送。
 
-### 部署集成
-
-`deploy/deploy.sh` 自动在数据同步后触发 id 同步：
-
-```bash
-bash deploy/deploy.sh sync      # rsync 数据 → 重启服务 → 同步 knowlyr-id
-bash deploy/deploy.sh id-sync   # 仅同步到 knowlyr-id
-bash deploy/deploy.sh all       # 引擎 + 数据 + 重启 + ID 同步
-```
-
 ### 字段映射 / Field Mapping
 
 | Crew Employee | knowlyr-id | 方向 | 说明 |
 |---|---|---|---|
+| `name` | `crew_name` | push → | Crew 内部名称（运行时匹配用） |
 | `character_name` | `nickname` | push → | 人名 |
 | `display_name` | `title` | push → | 头衔 |
 | `bio` | `bio` | push → | 一句话简介 |
 | `description` | `capabilities` | push → | 能力介绍 |
 | `tags` | `domains` | push → | 能力领域 |
-| rendered prompt | `system_prompt` | push → | 完整系统提示词 |
+| rendered prompt | `system_prompt` | push → | 完整系统提示词（容灾缓存） |
 | `avatar.webp` | `avatar_base64` | push → | 头像 |
+| `model` | `model` | push → | 模型（运行时优先用 Crew API） |
+| `temperature` | `temperature` | ↔ | 温度参数（双向同步） |
+| `max_tokens` | `max_tokens` | push → | 最大 token 数 |
 | `memory-id.md` | `memory` | ← pull | 运行时积累的记忆 |
-| `model` | `model` | ← pull | 模型配置 |
-| `temperature` | `temperature` | ← pull | 温度参数 |
 
 ---
 
@@ -1110,13 +1146,14 @@ graph LR
         Sandbox --> Recorder["Recorder<br/>Recording"]
         Recorder --> Reward["Reward<br/>Scoring"]
     end
-    Crew["Crew<br/>AI Skill Loader"]
-    ID["ID<br/>Identity"]
+    Crew["Crew<br/>AI Employee Engine"]
+    ID["ID<br/>Identity + Runtime"]
     Crew -.-> Radar
     Crew -.-> Check
     Crew -.-> Audit
     Crew -.-> Hub
-    Crew <--> ID
+    Crew -.->|能力定义| ID
+    ID -.->|身份 + 记忆| Crew
     style Crew fill:#0969da,color:#fff,stroke:#0969da
     style ID fill:#2da44e,color:#fff,stroke:#2da44e
 ```
@@ -1131,8 +1168,8 @@ graph LR
 | Production | **DataLabel** | knowlyr-datalabel | Lightweight annotation | [GitHub](https://github.com/liuxiaotong/data-label) |
 | Quality | **DataCheck** | knowlyr-datacheck | Rule validation, dedup | [GitHub](https://github.com/liuxiaotong/data-check) |
 | Audit | **ModelAudit** | knowlyr-modelaudit | Distillation detection, fingerprinting | [GitHub](https://github.com/liuxiaotong/model-audit) |
-| Identity | **knowlyr-id** | — | User identity, agent management | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
-| Skills | **Crew** | knowlyr-crew | AI Skill Loader | You are here |
+| Identity | **knowlyr-id** | — | Identity + AI employee runtime | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
+| Skills | **Crew** | knowlyr-crew | AI Skill Loader & Employee Engine | You are here |
 | Agent | **knowlyr-agent** | knowlyr-sandbox / recorder / reward / hub | Sandbox + recording + reward + orchestration | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
 
 ---
@@ -1155,5 +1192,5 @@ pytest -v
 ---
 
 <div align="center">
-<sub><a href="https://github.com/liuxiaotong">knowlyr</a> data engineering ecosystem · AI Skill Loader</sub>
+<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — open-source AI employee engine for AI-native communities</sub>
 </div>
