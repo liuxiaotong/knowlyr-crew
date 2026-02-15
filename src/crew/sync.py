@@ -229,6 +229,9 @@ def _push_employee(
         domains=domains,
         system_prompt=system_prompt,
         avatar_base64=avatar_b64,
+        crew_name=name,
+        temperature=config.get("temperature"),
+        max_tokens=config.get("max_tokens"),
     )
     if ok:
         report.pushed.append(name)
@@ -295,9 +298,12 @@ def _register_new(
     nickname = config.get("character_name") or config.get("display_name") or name
     title = config.get("display_name") or name
     capabilities = config.get("description", "")
+    bio = config.get("bio", "")
     tags = config.get("tags", [])
     domains = tags[:5] if tags else []
     model = config.get("model", "")
+    temperature = config.get("temperature")
+    max_tokens = config.get("max_tokens")
 
     # 渲染 prompt
     system_prompt = ""
@@ -321,6 +327,10 @@ def _register_new(
         model=model,
         system_prompt=system_prompt,
         avatar_base64=avatar_b64,
+        crew_name=name,
+        bio=bio,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
     if agent_id is None:
         report.errors.append((name, "注册失败"))

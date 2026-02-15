@@ -203,6 +203,10 @@ def register_agent(
     model: str = "",
     system_prompt: str = "",
     avatar_base64: str | None = None,
+    crew_name: str = "",
+    bio: str = "",
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> int | None:
     """在 knowlyr-id 注册新 Agent.
 
@@ -237,6 +241,14 @@ def register_agent(
         payload["system_prompt"] = system_prompt
     if avatar_base64 is not None:
         payload["avatar_base64"] = avatar_base64
+    if crew_name:
+        payload["crew_name"] = crew_name
+    if bio:
+        payload["bio"] = bio
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
 
     try:
         resp = httpx.post(
@@ -270,6 +282,7 @@ def update_agent(
     temperature: float | None = None,
     max_tokens: int | None = None,
     agent_status: str | None = None,
+    crew_name: str | None = None,
 ) -> bool:
     """更新 knowlyr-id Agent 配置.
 
@@ -314,6 +327,8 @@ def update_agent(
         payload["max_tokens"] = max_tokens
     if agent_status is not None:
         payload["agent_status"] = agent_status
+    if crew_name is not None:
+        payload["crew_name"] = crew_name
 
     if not payload:
         return True  # nothing to update

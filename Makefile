@@ -22,13 +22,25 @@ pull:
 	@ls $(LOCAL_CREW)/sessions/*.jsonl 2>/dev/null | wc -l | xargs -I{} echo "Sessions: {} 个"
 	@echo "拉取完成。用 Claude Code 分析后修改 prompt，然后 make push"
 
-## 第2步: 将改进后的员工配置推送到服务器
+## 第2步: 一键部署员工（推送 + 重启 + 同步到 knowlyr-id）
 push:
 	@echo "=== 推送员工配置 ==="
 	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/
 	@echo ""
-	@echo "=== 推送完成 ==="
-	@echo "员工配置已更新。运行 make test-employee NAME=ceo-assistant 验证"
+	@echo "=== 重启 crew 服务 ==="
+	ssh $(SERVER) "sudo systemctl restart knowlyr-crew"
+	@sleep 2
+	@echo "=== 同步到 knowlyr-id ==="
+	ssh $(SERVER) "set -a && source /opt/knowlyr-crew/.env && set +a && \
+		/opt/knowlyr-crew/venv/bin/knowlyr-crew agents sync-all \
+		--dir $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/ --force"
+	@echo ""
+	@echo "=== 部署完成 ==="
+
+## 只推送文件，不重启不同步
+push-only:
+	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/
+	@echo "文件已推送（未重启、未同步）"
 
 ## 第3步: 在服务器上测试某个员工
 test-employee:
