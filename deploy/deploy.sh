@@ -69,6 +69,7 @@ deploy_engine() {
 upgrade_trajectory() {
     echo "=== 更新轨迹组件 ==="
     ssh "$SERVER" "$VENV/bin/pip install --upgrade \
+        --index-url https://pypi.org/simple/ \
         knowlyr-core knowlyr-sandbox knowlyr-recorder knowlyr-reward knowlyr-hub"
     echo "    轨迹组件已更新"
 }
