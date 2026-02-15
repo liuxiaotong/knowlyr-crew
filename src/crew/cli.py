@@ -624,6 +624,167 @@ def run(
         )
 
 
+_CLI_MAX_TOOL_ROUNDS = 10
+
+
+def _cli_handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
+    """CLI 端工具调用处理 — 返回模拟结果供模型消费."""
+    from crew.tool_schema import is_finish_tool
+
+    if is_finish_tool(tool_name):
+        return ""
+
+    click.echo(f"  [tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)[:200]})", err=True)
+
+    # CLI 模式下返回模拟数据，让模型知道工具被调用了
+    _MOCK_RESPONSES: dict[str, str] = {
+        "query_stats": '{"dau": 923, "wau": 3847, "messages_today": 3612, "new_users_this_week": 31, "active_agents": 33, "revenue_mtd": 42800}',
+        "lookup_user": '{"user_id": 1001, "name": "示例用户", "email": "user@example.com", "created_at": "2025-12-01", "messages_sent": 156}',
+        "query_agent_work": '{"agent": "requested", "tasks_completed_today": 5, "tasks_in_progress": 2, "last_active": "10 分钟前"}',
+        "list_agents": '[{"agent_id": 3073, "name": "ceo-assistant", "status": "active"}, {"agent_id": 3001, "name": "code-reviewer", "status": "active"}, {"agent_id": 3002, "name": "product-manager", "status": "active"}]',
+        "read_messages": '{"unread": 3, "messages": [{"from": "code-reviewer", "content": "PR #42 审查完成，有两个建议", "time": "14:30"}, {"from": "product-manager", "content": "新需求文档已更新", "time": "15:00"}]}',
+        "get_system_health": '{"status": "healthy", "uptime": "72h", "cpu": "23%", "memory": "61%", "api_latency_p99": "320ms"}',
+        "send_message": '{"status": "sent", "message_id": "msg_12345"}',
+        "delegate": '{"status": "delegated", "task_id": "task_67890"}',
+        "mark_read": '{"status": "ok", "marked": 3}',
+        "update_agent": '{"status": "updated"}',
+        "create_feishu_event": '{"status": "created", "event_id": "evt_abc123", "calendar": "primary"}',
+        "create_note": '{"status": "saved", "note_id": "note_001"}',
+        "read_notes": '{"notes": []}',
+        "web_search": '{"results": [{"title": "相关搜索结果", "snippet": "这是一条模拟的搜索结果摘要。", "url": "https://example.com"}]}',
+    }
+
+    return _MOCK_RESPONSES.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
+
+
+def _execute_with_tool_loop(
+    *,
+    system_prompt: str,
+    user_message: str,
+    emp: Any,
+    api_key: str,
+    model: str,
+    max_tokens: int | None = None,
+) -> Any:
+    """CLI 端带工具调用的 agent loop."""
+    from crew.executor import ExecutionResult, execute_with_tools
+    from crew.providers import Provider, detect_provider
+    from crew.tool_schema import AGENT_TOOLS, employee_tools_to_schemas, is_finish_tool
+
+    agent_tool_names = [t for t in (emp.tools or []) if t in AGENT_TOOLS]
+    tool_schemas = employee_tools_to_schemas(agent_tool_names)
+
+    provider = detect_provider(model)
+    is_anthropic = provider == Provider.ANTHROPIC
+
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+    total_input = 0
+    total_output = 0
+    final_content = ""
+
+    for round_num in range(_CLI_MAX_TOOL_ROUNDS):
+        result = execute_with_tools(
+            system_prompt=system_prompt,
+            messages=messages,
+            tools=tool_schemas,
+            api_key=api_key,
+            model=model,
+            max_tokens=max_tokens or 4096,
+        )
+        total_input += result.input_tokens
+        total_output += result.output_tokens
+
+        if not result.has_tool_calls:
+            final_content = result.content
+            break
+
+        # 处理 tool calls
+        if is_anthropic:
+            assistant_content: list[dict[str, Any]] = []
+            if result.content:
+                assistant_content.append({"type": "text", "text": result.content})
+            for tc in result.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            tool_results: list[dict[str, Any]] = []
+            finished = False
+            for tc in result.tool_calls:
+                if is_finish_tool(tc.name):
+                    final_content = tc.arguments.get("result", result.content)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": final_content,
+                    })
+                    finished = True
+                else:
+                    tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": tool_output[:10000],
+                    })
+            messages.append({"role": "user", "content": tool_results})
+            if finished:
+                break
+        else:
+            # OpenAI 兼容格式 (Moonshot, DeepSeek, etc.)
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": result.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for tc in result.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            finished = False
+            for tc in result.tool_calls:
+                if is_finish_tool(tc.name):
+                    final_content = tc.arguments.get("result", result.content)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": final_content,
+                    })
+                    finished = True
+                else:
+                    tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_output[:10000],
+                    })
+            if finished:
+                break
+    else:
+        final_content = result.content or "达到最大工具调用轮次限制。"
+
+    click.echo(final_content)
+
+    return ExecutionResult(
+        content=final_content,
+        model=model,
+        input_tokens=total_input,
+        output_tokens=total_output,
+        stop_reason="stop",
+    )
+
+
 def _run_employee_job(
     *,
     emp,
@@ -793,30 +954,49 @@ def _run_employee_job(
         except Exception:
             traj_collector = None
 
+        # 检查是否需要 tool calling agent loop
+        has_agent_tools = False
         try:
-            result = execute_prompt(
+            from crew.tool_schema import AGENT_TOOLS
+            has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
+        except ImportError:
+            pass
+
+        if has_agent_tools:
+            result = _execute_with_tool_loop(
                 system_prompt=text,
                 user_message=effective_message,
+                emp=emp,
                 api_key=exec_api_key,
                 model=effective_model,
-                temperature=agent_identity.temperature,
-                max_tokens=agent_identity.max_tokens,
-                stream=stream_enabled,
-                on_chunk=_on_chunk if stream_enabled else None,
+                max_tokens=agent_identity.max_tokens if agent_identity else None,
             )
-        except Exception as exc:
-            if traj_collector is not None:
-                traj_collector.__exit__(None, None, None)
-            click.echo(f"\nLLM 执行失败: {exc}", err=True)
-            _finish_transcript(
-                transcript_recorder, transcript_id,
-                status="error", detail=f"execute_error: {str(exc)[:200]}",
-            )
-            sys.exit(1)
+            already_streamed = True  # _execute_with_tool_loop 已输出
+        else:
+            try:
+                result = execute_prompt(
+                    system_prompt=text,
+                    user_message=effective_message,
+                    api_key=exec_api_key,
+                    model=effective_model,
+                    temperature=agent_identity.temperature,
+                    max_tokens=agent_identity.max_tokens,
+                    stream=stream_enabled,
+                    on_chunk=_on_chunk if stream_enabled else None,
+                )
+            except Exception as exc:
+                if traj_collector is not None:
+                    traj_collector.__exit__(None, None, None)
+                click.echo(f"\nLLM 执行失败: {exc}", err=True)
+                _finish_transcript(
+                    transcript_recorder, transcript_id,
+                    status="error", detail=f"execute_error: {str(exc)[:200]}",
+                )
+                sys.exit(1)
 
-        if stream_enabled:
-            click.echo()  # trailing newline
-            already_streamed = True
+            if stream_enabled:
+                click.echo()  # trailing newline
+                already_streamed = True
 
         _record_transcript_message(
             transcript_recorder, transcript_id,
