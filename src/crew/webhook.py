@@ -1384,9 +1384,9 @@ async def _tool_send_feishu_group(
 
     from crew.feishu import send_feishu_text
     result = await send_feishu_text(ctx.feishu_token_mgr, chat_id, text)
-    if result.get("ok"):
+    if result.get("code") == 0 or result.get("ok"):
         return f"消息已发送到群 {chat_id}。"
-    return f"发送失败: {result.get('error', '未知错误')}"
+    return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
 
 
 # ── GitHub 工具 ──
