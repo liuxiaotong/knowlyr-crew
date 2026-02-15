@@ -3464,11 +3464,12 @@ def trajectory_score(score_all: bool, last: int):
         traj_dict = traj.model_dump() if hasattr(traj, "model_dump") else traj
         result = engine.score(traj_dict)
         agent = traj.agent.replace("crew/", "")
-        task = traj.task.description[:30]
+        task = traj.task.description[:30] if hasattr(traj.task, "description") else str(traj.task)[:30]
         click.echo(f"\n{agent} | {task}")
         click.echo(f"  总分: {result.total_score:.2f}")
-        for dim, score in result.dimension_scores.items():
-            click.echo(f"  {dim}: {score:.2f}")
+        click.echo(f"  结果分: {result.outcome_score:.2f}")
+        click.echo(f"  过程分: {result.process_score:.2f}")
+        click.echo(f"  步骤数: {len(result.step_rewards)}")
 
 
 @trajectory.command("export")
