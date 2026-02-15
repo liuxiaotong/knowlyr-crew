@@ -176,8 +176,12 @@ def parse_employee_dir(
     if not description:
         raise ValueError(f"缺少必填字段 description: {config_path}")
 
-    # 拼接 body: prompt.md + workflows/*.md + adaptors/*.md
+    # 拼接 body: prompt.md + soul.md + workflows/*.md + adaptors/*.md
     parts = [prompt_path.read_text(encoding="utf-8")]
+
+    soul_path = dir_path / "soul.md"
+    if soul_path.exists():
+        parts.append(soul_path.read_text(encoding="utf-8"))
 
     for subdir in ("workflows", "adaptors"):
         sub_path = dir_path / subdir
