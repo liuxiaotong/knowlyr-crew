@@ -1519,6 +1519,98 @@ async def _tool_complete_feishu_task(
         return f"操作失败: {e}"
 
 
+async def _tool_delete_feishu_task(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """删除飞书待办任务."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    task_id = (args.get("task_id") or "").strip()
+    if not task_id:
+        return "需要 task_id。先用 list_feishu_tasks 查看任务列表。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(
+                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            return f"任务已删除 [task_id={task_id}]"
+        return f"删除失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"删除失败: {e}"
+
+
+async def _tool_update_feishu_task(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """更新飞书待办任务."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    task_id = (args.get("task_id") or "").strip()
+    if not task_id:
+        return "需要 task_id。先用 list_feishu_tasks 查看任务列表。"
+
+    summary = (args.get("summary") or "").strip()
+    due_str = (args.get("due") or "").strip()
+    description = args.get("description")
+
+    body: dict[str, Any] = {}
+    update_fields: list[str] = []
+    if summary:
+        body["summary"] = summary
+        update_fields.append("summary")
+    if description is not None and description != "":
+        body["description"] = description
+        update_fields.append("description")
+    if due_str:
+        tz_cn = _tz(timedelta(hours=8))
+        try:
+            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=tz_cn)
+            body["due"] = {"time": str(int(due_dt.timestamp()))}
+            update_fields.append("due")
+        except ValueError:
+            return f"截止日期格式不对: {due_str}，需要 YYYY-MM-DD。"
+
+    if not body:
+        return "需要至少一个要更新的字段（summary/due/description）。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.patch(
+                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"task": body, "update_fields": update_fields},
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            parts = []
+            if summary:
+                parts.append(f"标题→{summary}")
+            if due_str:
+                parts.append(f"截止→{due_str}")
+            if description is not None and description != "":
+                parts.append("描述已更新")
+            return f"任务已更新: {', '.join(parts)} [task_id={task_id}]"
+        return f"更新失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"更新失败: {e}"
+
+
 async def _tool_feishu_chat_history(
     args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
 ) -> str:
@@ -1764,6 +1856,97 @@ async def _tool_stock_price(
                 return f"{name} ({symbol.upper()})\n现价: ¥{price}"
     except Exception as e:
         return f"股价查询失败: {e}"
+
+
+async def _tool_get_datetime(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """获取当前准确日期时间."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    tz_cn = _tz(timedelta(hours=8))
+    now = datetime.now(tz_cn)
+    weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
+    return f"{now.strftime('%Y-%m-%d %H:%M')} {weekday}"
+
+
+async def _tool_calculate(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """安全计算数学表达式."""
+    import ast
+    import math
+    import operator
+
+    expr = (args.get("expression") or "").strip()
+    if not expr:
+        return "需要一个数学表达式，如 1+2*3 或 (100*1.15**12)。"
+
+    # 安全求值：只允许数学运算
+    _OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+    _FUNCS = {
+        "abs": abs, "round": round, "int": int, "float": float,
+        "sqrt": math.sqrt, "log": math.log, "log10": math.log10,
+        "sin": math.sin, "cos": math.cos, "tan": math.tan,
+        "pi": math.pi, "e": math.e,
+        "max": max, "min": min, "sum": sum,
+        "pow": pow,
+    }
+
+    def _eval(node: ast.AST) -> Any:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError(f"不允许的常量: {node.value}")
+        if isinstance(node, ast.BinOp):
+            op = _OPS.get(type(node.op))
+            if op is None:
+                raise ValueError(f"不支持的运算: {type(node.op).__name__}")
+            return op(_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp):
+            op = _OPS.get(type(node.op))
+            if op is None:
+                raise ValueError(f"不支持的运算: {type(node.op).__name__}")
+            return op(_eval(node.operand))
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _FUNCS:
+                fn = _FUNCS[node.func.id]
+                args_vals = [_eval(a) for a in node.args]
+                return fn(*args_vals)
+            raise ValueError(f"不允许的函数: {ast.dump(node.func)}")
+        if isinstance(node, ast.Name):
+            if node.id in _FUNCS:
+                return _FUNCS[node.id]
+            raise ValueError(f"未知变量: {node.id}")
+        if isinstance(node, ast.Tuple):
+            return tuple(_eval(e) for e in node.elts)
+        if isinstance(node, ast.List):
+            return [_eval(e) for e in node.elts]
+        raise ValueError(f"不支持的语法: {type(node).__name__}")
+
+    try:
+        tree = ast.parse(expr, mode="eval")
+        result = _eval(tree)
+        # 格式化结果
+        if isinstance(result, float):
+            if result == int(result) and abs(result) < 1e15:
+                return str(int(result))
+            return f"{result:,.6g}"
+        return str(result)
+    except (ValueError, TypeError, SyntaxError, ZeroDivisionError) as e:
+        return f"计算错误: {e}"
 
 
 # ── 飞书文档工具 ──
@@ -2414,8 +2597,12 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "create_feishu_task": _tool_create_feishu_task,
     "list_feishu_tasks": _tool_list_feishu_tasks,
     "complete_feishu_task": _tool_complete_feishu_task,
+    "delete_feishu_task": _tool_delete_feishu_task,
+    "update_feishu_task": _tool_update_feishu_task,
     "feishu_chat_history": _tool_feishu_chat_history,
     "weather": _tool_weather,
+    "get_datetime": _tool_get_datetime,
+    "calculate": _tool_calculate,
     # 飞书文档
     "search_feishu_docs": _tool_search_feishu_docs,
     "read_feishu_doc": _tool_read_feishu_doc,

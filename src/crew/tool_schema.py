@@ -429,6 +429,69 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["task_id"],
         },
     },
+    "delete_feishu_task": {
+        "name": "delete_feishu_task",
+        "description": "删除飞书待办任务。需要先用 list_feishu_tasks 查到 task_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要删除的任务 task_id",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "update_feishu_task": {
+        "name": "update_feishu_task",
+        "description": "更新飞书待办任务的标题、截止日期或描述。需要先用 list_feishu_tasks 查到 task_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要更新的任务 task_id",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "新标题（可选）",
+                },
+                "due": {
+                    "type": "string",
+                    "description": "新截止日期 YYYY-MM-DD（可选）",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "新描述（可选）",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "get_datetime": {
+        "name": "get_datetime",
+        "description": "获取当前准确日期时间（北京时间）。不确定现在几点、今天星期几时调用。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "calculate": {
+        "name": "calculate",
+        "description": "计算数学表达式。支持加减乘除、幂次、sqrt、log、三角函数等。适合精确计算场景。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "数学表达式，如 100*1.15**12 或 sqrt(144)",
+                },
+            },
+            "required": ["expression"],
+        },
+    },
     "feishu_chat_history": {
         "name": "feishu_chat_history",
         "description": "读取飞书群/会话的最近消息。需要 chat_id，不知道就先用 list_feishu_groups 查。",
@@ -763,7 +826,9 @@ AGENT_TOOLS = {
     "mark_read", "update_agent",
     "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
     "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
+    "delete_feishu_task", "update_feishu_task",
     "feishu_chat_history", "weather",
+    "get_datetime", "calculate",
     "send_feishu_dm", "feishu_group_members",
     "exchange_rate", "stock_price",
     # 记忆
