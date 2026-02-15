@@ -709,6 +709,26 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["symbol"],
         },
     },
+    # ── 记忆工具 ──
+    "add_memory": {
+        "name": "add_memory",
+        "description": "记录一条持久记忆。记忆会自动注入到未来的对话中。适合记录反思、发现、决策背景。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "分类: finding(发现/反思) / decision(决策) / correction(纠正)",
+                    "default": "finding",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "记忆内容（用自己的话写）",
+                },
+            },
+            "required": ["content"],
+        },
+    },
     # ── 信息采集工具 ──
     "read_url": {
         "name": "read_url",
@@ -746,6 +766,8 @@ AGENT_TOOLS = {
     "feishu_chat_history", "weather",
     "send_feishu_dm", "feishu_group_members",
     "exchange_rate", "stock_price",
+    # 记忆
+    "add_memory",
     # 飞书文档
     "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
     # GitHub

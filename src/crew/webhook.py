@@ -600,6 +600,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     """后台处理飞书消息：路由到员工 → 执行 → 回复卡片."""
     from crew.discovery import discover_employees
     from crew.feishu import (
+        download_feishu_image,
         resolve_employee_from_mention,
         send_feishu_card,
         send_feishu_reply,
@@ -629,14 +630,24 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         emp = discovery.get(employee_name)
 
-        # 图片消息处理（当前不支持 vision）
-        if msg_event.msg_type == "image":
-            await send_feishu_text(
-                ctx.feishu_token_mgr,
-                msg_event.chat_id,
-                "我暂时看不了图片，你描述一下？",
-            )
-            return
+        # 图片消息 → 下载图片 + vision
+        image_data: tuple[bytes, str] | None = None
+        if msg_event.msg_type == "image" and msg_event.image_key:
+            try:
+                image_data = await download_feishu_image(
+                    ctx.feishu_token_mgr, msg_event.image_key,
+                )
+            except Exception as exc:
+                logger.warning("飞书图片下载失败: %s", exc)
+                await send_feishu_text(
+                    ctx.feishu_token_mgr,
+                    msg_event.chat_id,
+                    "图片没下载下来，你描述一下？",
+                )
+                return
+            # 图片消息的 text 为空，给个默认提示
+            if not task_text:
+                task_text = "Kai 发了一张图片，请看图片内容并回应。"
 
         # 执行员工 — 飞书实时聊天
         from crew.tool_schema import AGENT_TOOLS
@@ -693,9 +704,20 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 args[first_required.name] = chat_context
 
         # 把 Kai 的原话作为 user_message，让模型直接回复
+        # 如果有图片，构建 multimodal content（OpenAI 格式）
+        user_msg: str | list[dict[str, Any]] = task_text
+        if image_data is not None:
+            import base64 as _b64
+            img_bytes, media_type = image_data
+            b64 = _b64.b64encode(img_bytes).decode()
+            user_msg = [
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}},
+                {"type": "text", "text": task_text},
+            ]
+
         result = await _execute_employee(
             ctx, employee_name, args, model=None,
-            user_message=task_text,
+            user_message=user_msg,
             message_history=message_history,
         )
 
