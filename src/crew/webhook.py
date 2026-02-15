@@ -103,6 +103,7 @@ def create_webhook_app(
         Route("/webhook", endpoint=_make_handler(ctx, _handle_generic), methods=["POST"]),
         Route("/run/pipeline/{name}", endpoint=_make_handler(ctx, _handle_run_pipeline), methods=["POST"]),
         Route("/run/employee/{name}", endpoint=_make_handler(ctx, _handle_run_employee), methods=["POST"]),
+        Route("/agent/run/{name}", endpoint=_make_handler(ctx, _handle_agent_run), methods=["POST"]),
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
         Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
@@ -321,6 +322,115 @@ async def _handle_run_employee(request: Request, ctx: _AppContext):
         agent_id=agent_id,
         model=model,
     )
+
+
+async def _handle_agent_run(request: Request, ctx: _AppContext):
+    """Agent 模式执行员工 — 在 Docker 沙箱中自主完成任务 (SSE 流式).
+
+    Body:
+        task: 任务描述 (必填)
+        model: 模型 ID (可选)
+        max_steps: 最大步数 (可选, 默认 30)
+        repo: Git 仓库 (可选, 如 "owner/repo")
+        base_commit: 基准 commit (可选)
+        sandbox: 沙箱配置 (可选)
+    """
+    import json as _json
+
+    name = request.path_params["name"]
+    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    task_desc = payload.get("task", "")
+    if not task_desc:
+        return JSONResponse({"error": "缺少 task 参数"}, status_code=400)
+
+    model = payload.get("model", "claude-sonnet-4-5-20250929")
+    max_steps = payload.get("max_steps", 30)
+    repo = payload.get("repo", "")
+    base_commit = payload.get("base_commit", "")
+    sandbox_cfg = payload.get("sandbox", {})
+
+    try:
+        from agentsandbox import Sandbox, SandboxEnv
+        from agentsandbox.config import SandboxConfig, TaskConfig
+        from knowlyrcore.wrappers import MaxStepsWrapper, RecorderWrapper
+    except ImportError:
+        return JSONResponse(
+            {"error": "knowlyr-agent 未安装。请运行: pip install knowlyr-crew[agent]"},
+            status_code=501,
+        )
+
+    from crew.agent_bridge import create_crew_agent
+
+    async def _event_stream():
+        steps_log: list[dict] = []
+
+        def on_step(step_num: int, tool_name: str, params: dict):
+            entry = {"type": "step", "step": step_num, "tool": tool_name, "params": params}
+            steps_log.append(entry)
+
+        try:
+            # 创建 agent 函数
+            agent = create_crew_agent(
+                name,
+                task_desc,
+                model=model,
+                project_dir=ctx.project_dir,
+                on_step=on_step,
+            )
+
+            # 创建沙箱环境
+            s_config = SandboxConfig(
+                image=sandbox_cfg.get("image", "python:3.11-slim"),
+                memory_limit=sandbox_cfg.get("memory_limit", "512m"),
+                cpu_limit=sandbox_cfg.get("cpu_limit", 1.0),
+                network_enabled=sandbox_cfg.get("network_enabled", False),
+            )
+            t_config = TaskConfig(
+                repo_url=repo,
+                base_commit=base_commit,
+                description=task_desc,
+            )
+            env = SandboxEnv(config=s_config, task_config=t_config, max_steps=max_steps)
+
+            # 运行 agent loop (同步，在线程中执行)
+            def _run_loop():
+                ts = env.reset()
+                while not ts.done:
+                    action = agent(ts.observation)
+                    ts = env.step(action)
+                return ts
+
+            loop = asyncio.get_event_loop()
+            final_ts = await loop.run_in_executor(None, _run_loop)
+
+            # 尝试获取 trajectory
+            trajectory = None
+            if hasattr(env, "get_trajectory"):
+                trajectory = env.get_trajectory()
+
+            env.close()
+
+            # 发送每步 SSE
+            for entry in steps_log:
+                yield f"data: {_json.dumps(entry, ensure_ascii=False)}\n\n"
+
+            # 发送最终结果
+            result_data = {
+                "type": "result",
+                "output": final_ts.observation,
+                "terminated": final_ts.terminated,
+                "truncated": final_ts.truncated,
+                "total_steps": len(steps_log),
+            }
+            if trajectory:
+                result_data["trajectory"] = trajectory
+            yield f"data: {_json.dumps(result_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.exception("Agent 执行失败: %s", e)
+            yield f"data: {_json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 async def _handle_task_status(request: Request, ctx: _AppContext) -> JSONResponse:

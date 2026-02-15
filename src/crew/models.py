@@ -1,5 +1,6 @@
-"""数据模型 — Employee / WorkLog / DiscoveryResult / Pipeline."""
+"""数据模型 — Employee / WorkLog / DiscoveryResult / Pipeline / AgentExecution."""
 
+from dataclasses import dataclass, field as dc_field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -192,3 +193,32 @@ class PipelineResult(BaseModel):
     total_duration_ms: int = Field(default=0, description="总耗时 (ms)")
     total_input_tokens: int = Field(default=0, description="总输入 token")
     total_output_tokens: int = Field(default=0, description="总输出 token")
+
+
+# ── Agent 执行数据模型 ──
+
+
+@dataclass
+class ToolCall:
+    """LLM 返回的工具调用."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = dc_field(default_factory=dict)
+
+
+@dataclass
+class ToolExecutionResult:
+    """带工具调用的 LLM 执行结果."""
+
+    content: str
+    tool_calls: list[ToolCall] = dc_field(default_factory=list)
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    stop_reason: str = ""
+
+    @property
+    def has_tool_calls(self) -> bool:
+        """是否包含工具调用."""
+        return len(self.tool_calls) > 0

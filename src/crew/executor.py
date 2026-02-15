@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
-from typing import Callable
+from typing import Any, Callable
 
+from crew.models import ToolCall, ToolExecutionResult
 from crew.providers import (
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
@@ -676,5 +678,355 @@ async def aexecute_prompt(
             )
         except Exception as e:
             logger.debug("Async fallback 模型也失败: %s", e)
+
+    raise last_exc  # type: ignore[misc]
+
+
+# ── Tool-use API ──
+
+
+def _anthropic_execute_with_tools(
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str,
+    model: str,
+    max_tokens: int,
+) -> ToolExecutionResult:
+    anthropic = _get_anthropic()
+    if anthropic is None:
+        raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=messages,
+        tools=tools,
+    )
+
+    text_parts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for block in resp.content:
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_calls.append(ToolCall(
+                id=block.id,
+                name=block.name,
+                arguments=block.input if isinstance(block.input, dict) else {},
+            ))
+
+    return ToolExecutionResult(
+        content="\n".join(text_parts),
+        tool_calls=tool_calls,
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+        stop_reason=resp.stop_reason,
+    )
+
+
+async def _anthropic_aexecute_with_tools(
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str,
+    model: str,
+    max_tokens: int,
+) -> ToolExecutionResult:
+    anthropic = _get_anthropic()
+    if anthropic is None:
+        raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
+
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    resp = await client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=messages,
+        tools=tools,
+    )
+
+    text_parts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for block in resp.content:
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_calls.append(ToolCall(
+                id=block.id,
+                name=block.name,
+                arguments=block.input if isinstance(block.input, dict) else {},
+            ))
+
+    return ToolExecutionResult(
+        content="\n".join(text_parts),
+        tool_calls=tool_calls,
+        model=resp.model,
+        input_tokens=resp.usage.input_tokens,
+        output_tokens=resp.usage.output_tokens,
+        stop_reason=resp.stop_reason,
+    )
+
+
+def _openai_execute_with_tools(
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+) -> ToolExecutionResult:
+    openai = _get_openai()
+    if openai is None:
+        raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
+
+    client_kwargs: dict = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = openai.OpenAI(**client_kwargs)
+
+    # 转换 Anthropic 格式 tools 为 OpenAI 格式
+    openai_tools = []
+    for t in tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {}),
+            },
+        })
+
+    full_messages = [{"role": "system", "content": system_prompt}] + messages
+    kwargs: dict = {
+        "model": model,
+        "messages": full_messages,
+        "tools": openai_tools,
+        "max_tokens": max_tokens,
+    }
+
+    resp = client.chat.completions.create(**kwargs)
+    choice = resp.choices[0] if resp.choices else None
+    content = (choice.message.content or "") if choice and choice.message else ""
+
+    tool_calls: list[ToolCall] = []
+    if choice and choice.message and choice.message.tool_calls:
+        for tc in choice.message.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=args,
+            ))
+
+    return ToolExecutionResult(
+        content=content,
+        tool_calls=tool_calls,
+        model=resp.model or model,
+        input_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+        output_tokens=resp.usage.completion_tokens if resp.usage else 0,
+        stop_reason=choice.finish_reason if choice else "unknown",
+    )
+
+
+async def _openai_aexecute_with_tools(
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+) -> ToolExecutionResult:
+    openai = _get_openai()
+    if openai is None:
+        raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
+
+    client_kwargs: dict = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = openai.AsyncOpenAI(**client_kwargs)
+
+    openai_tools = []
+    for t in tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {}),
+            },
+        })
+
+    full_messages = [{"role": "system", "content": system_prompt}] + messages
+    kwargs: dict = {
+        "model": model,
+        "messages": full_messages,
+        "tools": openai_tools,
+        "max_tokens": max_tokens,
+    }
+
+    resp = await client.chat.completions.create(**kwargs)
+    choice = resp.choices[0] if resp.choices else None
+    content = (choice.message.content or "") if choice and choice.message else ""
+
+    tool_calls: list[ToolCall] = []
+    if choice and choice.message and choice.message.tool_calls:
+        for tc in choice.message.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=args,
+            ))
+
+    return ToolExecutionResult(
+        content=content,
+        tool_calls=tool_calls,
+        model=resp.model or model,
+        input_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+        output_tokens=resp.usage.completion_tokens if resp.usage else 0,
+        stop_reason=choice.finish_reason if choice else "unknown",
+    )
+
+
+def execute_with_tools(
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str | None = None,
+    model: str = "claude-sonnet-4-5-20250929",
+    max_tokens: int = 4096,
+) -> ToolExecutionResult:
+    """带工具调用的 LLM 执行.
+
+    Args:
+        system_prompt: 系统 prompt.
+        messages: 对话历史 [{"role": "user"/"assistant"/"tool", "content": ...}].
+        tools: LLM 工具定义（Anthropic 格式）.
+        api_key: API key（None 时自动解析）.
+        model: 模型标识符.
+        max_tokens: 最大输出 token 数.
+
+    Returns:
+        ToolExecutionResult — 包含文本内容和工具调用.
+    """
+    provider = detect_provider(model)
+    resolved_key = resolve_api_key(provider, api_key)
+
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            t0 = time.monotonic()
+            if provider == Provider.ANTHROPIC:
+                result = _anthropic_execute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                )
+            elif provider in (
+                Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
+                Provider.ZHIPU, Provider.QWEN,
+            ):
+                base_url = {
+                    Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                    Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                    Provider.ZHIPU: ZHIPU_BASE_URL,
+                    Provider.QWEN: QWEN_BASE_URL,
+                }.get(provider)
+                result = _openai_execute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    base_url=base_url,
+                )
+            else:
+                raise ValueError(f"Provider {provider} 暂不支持 tool_use")
+            _record_metrics(provider.value, ExecutionResult(
+                content=result.content, model=result.model,
+                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                stop_reason=result.stop_reason,
+            ), time.monotonic() - t0)
+            return result
+        except Exception as e:
+            if attempt < MAX_RETRIES and _is_retryable(e):
+                delay = _retry_delay(attempt)
+                logger.warning(
+                    "Tool-use LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
+                    attempt + 1, MAX_RETRIES, delay, e,
+                )
+                time.sleep(delay)
+                last_exc = e
+            else:
+                _record_failure(provider.value, e)
+                last_exc = e
+                break
+
+    raise last_exc  # type: ignore[misc]
+
+
+async def aexecute_with_tools(
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    api_key: str | None = None,
+    model: str = "claude-sonnet-4-5-20250929",
+    max_tokens: int = 4096,
+) -> ToolExecutionResult:
+    """execute_with_tools 的异步版本."""
+    provider = detect_provider(model)
+    resolved_key = resolve_api_key(provider, api_key)
+
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            t0 = time.monotonic()
+            if provider == Provider.ANTHROPIC:
+                result = await _anthropic_aexecute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                )
+            elif provider in (
+                Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
+                Provider.ZHIPU, Provider.QWEN,
+            ):
+                base_url = {
+                    Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
+                    Provider.MOONSHOT: MOONSHOT_BASE_URL,
+                    Provider.ZHIPU: ZHIPU_BASE_URL,
+                    Provider.QWEN: QWEN_BASE_URL,
+                }.get(provider)
+                result = await _openai_aexecute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    base_url=base_url,
+                )
+            else:
+                raise ValueError(f"Provider {provider} 暂不支持 tool_use")
+            _record_metrics(provider.value, ExecutionResult(
+                content=result.content, model=result.model,
+                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                stop_reason=result.stop_reason,
+            ), time.monotonic() - t0)
+            return result
+        except Exception as e:
+            if attempt < MAX_RETRIES and _is_retryable(e):
+                delay = _retry_delay(attempt)
+                logger.warning(
+                    "Async tool-use LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
+                    attempt + 1, MAX_RETRIES, delay, e,
+                )
+                await asyncio.sleep(delay)
+                last_exc = e
+            else:
+                _record_failure(provider.value, e)
+                last_exc = e
+                break
 
     raise last_exc  # type: ignore[misc]

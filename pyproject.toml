@@ -46,6 +46,8 @@ execute = ["anthropic>=0.40"]
 openai = ["openai>=1.0"]
 gemini = ["google-generativeai>=0.5"]
 webhook = ["starlette>=0.27", "uvicorn>=0.20", "croniter>=2.0"]
+# agent = ["knowlyr-sandbox>=0.1.0", "knowlyr-core>=0.1.0"]  # TODO: 发布后取消注释
+# agent-hub = ["knowlyr-hub>=0.1.0"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
 all = ["knowlyr-crew[mcp,id,execute,openai,dev,avatar,webhook]"]
 
