@@ -558,7 +558,14 @@ def execute_prompt(
     for attempt in range(MAX_RETRIES + 1):
         try:
             t0 = time.monotonic()
-            if provider == Provider.ANTHROPIC:
+            # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
+            if base_url:
+                result = _openai_execute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream, on_chunk,
+                    base_url=base_url,
+                )
+            elif provider == Provider.ANTHROPIC:
                 result = _anthropic_execute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream, on_chunk,
@@ -569,7 +576,7 @@ def execute_prompt(
                     temperature, max_tokens, stream, on_chunk,
                 )
             else:
-                effective_base_url = base_url or {
+                effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -642,7 +649,14 @@ async def aexecute_prompt(
     for attempt in range(MAX_RETRIES + 1):
         try:
             t0 = time.monotonic()
-            if provider == Provider.ANTHROPIC:
+            # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
+            if base_url:
+                result = await _openai_aexecute(
+                    system_prompt, user_message, resolved_key, model,
+                    temperature, max_tokens, stream,
+                    base_url=base_url,
+                )
+            elif provider == Provider.ANTHROPIC:
                 result = await _anthropic_aexecute(
                     system_prompt, user_message, resolved_key, model,
                     temperature, max_tokens, stream,
@@ -653,7 +667,7 @@ async def aexecute_prompt(
                     temperature, max_tokens, stream,
                 )
             else:
-                effective_base_url = base_url or {
+                effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -956,7 +970,13 @@ def execute_with_tools(
     for attempt in range(MAX_RETRIES + 1):
         try:
             t0 = time.monotonic()
-            if provider == Provider.ANTHROPIC:
+            # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
+            if base_url:
+                result = _openai_execute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    base_url=base_url,
+                )
+            elif provider == Provider.ANTHROPIC:
                 result = _anthropic_execute_with_tools(
                     system_prompt, messages, tools, resolved_key, model, max_tokens,
                 )
@@ -964,7 +984,7 @@ def execute_with_tools(
                 Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
                 Provider.ZHIPU, Provider.QWEN,
             ):
-                effective_base_url = base_url or {
+                effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,
@@ -1017,7 +1037,13 @@ async def aexecute_with_tools(
     for attempt in range(MAX_RETRIES + 1):
         try:
             t0 = time.monotonic()
-            if provider == Provider.ANTHROPIC:
+            # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
+            if base_url:
+                result = await _openai_aexecute_with_tools(
+                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    base_url=base_url,
+                )
+            elif provider == Provider.ANTHROPIC:
                 result = await _anthropic_aexecute_with_tools(
                     system_prompt, messages, tools, resolved_key, model, max_tokens,
                 )
@@ -1025,7 +1051,7 @@ async def aexecute_with_tools(
                 Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
                 Provider.ZHIPU, Provider.QWEN,
             ):
-                effective_base_url = base_url or {
+                effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
                     Provider.MOONSHOT: MOONSHOT_BASE_URL,
                     Provider.ZHIPU: ZHIPU_BASE_URL,

@@ -53,7 +53,7 @@ def _make_tool_result(
     )
 
 
-def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent_id=None):
+def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent_id=None, base_url="", api_key=""):
     emp = MagicMock()
     emp.tools = tools or []
     emp.model = model
@@ -62,6 +62,8 @@ def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent
     emp.description = desc
     emp.args = []
     emp.agent_id = agent_id
+    emp.base_url = base_url
+    emp.api_key = api_key
     return emp
 
 

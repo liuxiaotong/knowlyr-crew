@@ -1327,7 +1327,8 @@ async def _execute_employee_with_tools(
 
     use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
-    is_anthropic = provider == Provider.ANTHROPIC
+    # base_url 强制走 OpenAI 兼容路径，消息格式也要对应
+    is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
 
     # 构建消息列表（含历史对话）
     messages: list[dict[str, Any]] = []

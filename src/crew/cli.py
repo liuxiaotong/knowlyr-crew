@@ -652,6 +652,22 @@ def _cli_handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
         "create_note": '{"status": "saved", "note_id": "note_001"}',
         "read_notes": '{"notes": []}',
         "web_search": '{"results": [{"title": "相关搜索结果", "snippet": "这是一条模拟的搜索结果摘要。", "url": "https://example.com"}]}',
+        # 飞书文档
+        "search_feishu_docs": '{"docs": [{"title": "Q1 战略规划", "url": "https://feishu.cn/docx/abc123", "type": "doc"}, {"title": "产品路线图", "url": "https://feishu.cn/docx/def456", "type": "wiki"}]}',
+        "read_feishu_doc": '{"title": "Q1 战略规划", "content": "本季度核心目标：日活突破 2000，AI 自动化率 80%，签约 5 家付费客户。"}',
+        "create_feishu_doc": '{"status": "created", "document_id": "doc_xyz789", "url": "https://feishu.cn/docx/xyz789"}',
+        "send_feishu_group": '{"status": "sent", "message_id": "msg_feishu_001"}',
+        # GitHub
+        "github_prs": '{"prs": [{"number": 42, "title": "feat: add new feature", "state": "open", "author": "kai", "url": "https://github.com/org/repo/pull/42"}]}',
+        "github_issues": '{"issues": [{"number": 10, "title": "Bug: login failure", "state": "open", "labels": ["bug"], "assignee": "kai"}]}',
+        "github_repo_activity": '{"commits_7d": 15, "contributors": 3, "recent": [{"sha": "abc1234", "message": "fix: resolve auth issue", "author": "kai"}]}',
+        # Notion
+        "notion_search": '{"results": [{"title": "产品规划 2026", "url": "https://notion.so/abc123", "type": "page", "last_edited": "2026-02-14"}]}',
+        "notion_read": '{"title": "产品规划 2026", "content": "核心方向：AI Agent 平台化，目标客户：中小企业。"}',
+        "notion_create": '{"status": "created", "page_id": "page_notion_001", "url": "https://notion.so/page_notion_001"}',
+        # 信息采集
+        "read_url": '{"content": "这是一篇模拟的网页正文内容，已自动提取去噪。"}',
+        "rss_read": '{"entries": [{"title": "v2.0 发布公告", "link": "https://example.com/blog/v2", "summary": "新版本带来了全新功能..."}]}',
     }
 
     return _MOCK_RESPONSES.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
@@ -675,7 +691,8 @@ def _execute_with_tool_loop(
     tool_schemas = employee_tools_to_schemas(agent_tool_names)
 
     provider = detect_provider(model)
-    is_anthropic = provider == Provider.ANTHROPIC
+    # base_url 强制走 OpenAI 兼容路径，消息格式也要对应
+    is_anthropic = provider == Provider.ANTHROPIC and not getattr(emp, "base_url", "")
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
     total_input = 0
