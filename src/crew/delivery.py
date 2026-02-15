@@ -271,22 +271,6 @@ def _build_feishu_card(
         {"tag": "markdown", "content": content},
     ]
 
-    # 如果有 employee / model 信息
-    if task_result:
-        note_parts = []
-        if task_result.get("employee"):
-            note_parts.append(f"员工: {task_result['employee']}")
-        if task_result.get("model"):
-            note_parts.append(f"模型: {task_result['model']}")
-        if task_result.get("duration_ms"):
-            secs = task_result["duration_ms"] / 1000
-            note_parts.append(f"耗时: {secs:.1f}s")
-        if note_parts:
-            elements.append({
-                "tag": "note",
-                "elements": [{"tag": "plain_text", "content": " | ".join(note_parts)}],
-            })
-
     return {
         "msg_type": "interactive",
         "card": {
