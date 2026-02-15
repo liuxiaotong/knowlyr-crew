@@ -30,6 +30,7 @@ def create_webhook_app(
     config: "WebhookConfig | None" = None,
     cron_config: "CronConfig | None" = None,
     cors_origins: list[str] | None = None,
+    feishu_config: "FeishuConfig | None" = None,
 ) -> "Starlette":
     """创建 webhook Starlette 应用.
 
@@ -39,6 +40,7 @@ def create_webhook_app(
         config: Webhook 配置.
         cron_config: Cron 调度配置（可选）.
         cors_origins: 允许的 CORS 来源列表（可选，为空则不启用 CORS）.
+        feishu_config: 飞书 Bot 配置（可选）.
     """
     if not HAS_STARLETTE:
         raise ImportError("starlette 未安装。请运行: pip install knowlyr-crew[webhook]")
@@ -58,6 +60,17 @@ def create_webhook_app(
         config=config,
         registry=registry,
     )
+
+    # 初始化飞书 Bot
+    if feishu_config and feishu_config.app_id and feishu_config.app_secret:
+        from crew.feishu import EventDeduplicator, FeishuTokenManager
+
+        ctx.feishu_config = feishu_config
+        ctx.feishu_token_mgr = FeishuTokenManager(
+            feishu_config.app_id, feishu_config.app_secret,
+        )
+        ctx.feishu_dedup = EventDeduplicator()
+        logger.info("飞书 Bot 已启用 (app_id=%s)", feishu_config.app_id)
 
     # 初始化 cron 调度器
     scheduler = None
@@ -107,6 +120,7 @@ def create_webhook_app(
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
         Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
+        Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
     ]
 
     async def on_startup():
@@ -140,11 +154,11 @@ def create_webhook_app(
     if token:
         from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
-        skip_paths = ["/health", "/webhook/github"]
+        skip_paths = ["/health", "/webhook/github", "/feishu/event"]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
-            skip_paths=["/health", "/metrics", "/webhook/github"],
+            skip_paths=["/health", "/metrics", "/webhook/github", "/feishu/event"],
         )
 
     # 添加 CORS 中间件（后添加 = 先执行，确保 OPTIONS 预检不被认证拦截）
@@ -176,6 +190,9 @@ class _AppContext:
         self.registry = registry
         self.scheduler = None  # CronScheduler, set by create_webhook_app
         self.heartbeat_mgr = None  # HeartbeatManager, set by create_webhook_app
+        self.feishu_config = None  # FeishuConfig, set by create_webhook_app
+        self.feishu_token_mgr = None  # FeishuTokenManager, set by create_webhook_app
+        self.feishu_dedup = None  # EventDeduplicator, set by create_webhook_app
 
 
 def _make_handler(ctx: _AppContext, handler):
@@ -460,6 +477,138 @@ async def _handle_task_replay(request: Request, ctx: _AppContext) -> JSONRespons
         args=record.args,
         sync=False,
     )
+
+
+async def _handle_feishu_event(request: Request, ctx: _AppContext) -> JSONResponse:
+    """处理飞书事件回调.
+
+    支持:
+    1. URL verification challenge
+    2. im.message.receive_v1 消息事件
+    """
+    payload = await request.json()
+
+    # 1. URL 验证（飞书注册回调地址时发送）
+    if payload.get("type") == "url_verification":
+        challenge = payload.get("challenge", "")
+        return JSONResponse({"challenge": challenge})
+
+    # 2. 检查飞书是否配置
+    if ctx.feishu_config is None or ctx.feishu_token_mgr is None:
+        return JSONResponse({"error": "飞书 Bot 未配置"}, status_code=501)
+
+    # 3. 验证 event token
+    header = payload.get("header", {})
+    event_token = header.get("token", payload.get("token", ""))
+    if ctx.feishu_config.verification_token:
+        from crew.feishu import verify_feishu_event
+
+        if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
+            return JSONResponse({"error": "invalid token"}, status_code=401)
+
+    # 4. 只处理消息事件
+    event_type = header.get("event_type", "")
+    if event_type != "im.message.receive_v1":
+        return JSONResponse({"message": "ignored", "event_type": event_type})
+
+    # 5. 解析消息
+    from crew.feishu import parse_message_event
+
+    msg_event = parse_message_event(payload)
+    if msg_event is None:
+        return JSONResponse({"message": "unsupported message type"})
+
+    # 6. 去重
+    if ctx.feishu_dedup and ctx.feishu_dedup.is_duplicate(msg_event.message_id):
+        return JSONResponse({"message": "duplicate"})
+
+    # 7. 后台处理（飞书要求 3s 内响应）
+    asyncio.create_task(_feishu_dispatch(ctx, msg_event))
+
+    return JSONResponse({"message": "ok"})
+
+
+async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
+    """后台处理飞书消息：路由到员工 → 执行 → 回复卡片."""
+    from crew.discovery import discover_employees
+    from crew.feishu import (
+        resolve_employee_from_mention,
+        send_feishu_card,
+        send_feishu_text,
+    )
+
+    assert ctx.feishu_config is not None
+    assert ctx.feishu_token_mgr is not None
+
+    try:
+        discovery = discover_employees(project_dir=ctx.project_dir)
+
+        employee_name, task_text = resolve_employee_from_mention(
+            msg_event.mentions,
+            msg_event.text,
+            discovery,
+            default_employee=ctx.feishu_config.default_employee,
+        )
+
+        if employee_name is None:
+            await send_feishu_text(
+                ctx.feishu_token_mgr,
+                msg_event.chat_id,
+                "未能识别目标员工，请 @员工名 + 任务描述。",
+            )
+            return
+
+        # 发送"处理中"提示
+        emp = discovery.get(employee_name)
+        emp_display = ""
+        if emp:
+            emp_display = emp.character_name or emp.effective_display_name
+        await send_feishu_text(
+            ctx.feishu_token_mgr,
+            msg_event.chat_id,
+            f"\U0001f4dd {emp_display} 已收到任务，正在处理...",
+        )
+
+        # 执行员工
+        args = {"task": task_text}
+        if emp and emp.args:
+            first_required = next((a for a in emp.args if a.required), None)
+            if first_required:
+                args[first_required.name] = task_text
+
+        result = await _execute_employee(ctx, employee_name, args, model=None)
+
+        # 发送结果卡片
+        task_name = f"{emp_display} — 飞书任务"
+        await send_feishu_card(
+            ctx.feishu_token_mgr,
+            msg_event.chat_id,
+            task_name=task_name,
+            task_result=result,
+            task_error=None,
+        )
+
+        # 记录任务
+        record = ctx.registry.create(
+            trigger="feishu",
+            target_type="employee",
+            target_name=employee_name,
+            args=args,
+        )
+        ctx.registry.update(record.task_id, "completed", result=result)
+
+    except Exception as e:
+        logger.exception("飞书消息处理失败: %s", e)
+        try:
+            await send_feishu_card(
+                ctx.feishu_token_mgr,
+                msg_event.chat_id,
+                task_name="飞书任务",
+                task_result=None,
+                task_error=str(e),
+            )
+        except Exception:
+            logger.exception("飞书错误回复发送失败")
 
 
 async def _handle_cron_status(request: Request, ctx: _AppContext) -> JSONResponse:
@@ -775,12 +924,24 @@ def serve_webhook(
         from crew.cron_config import load_cron_config
         cron_config = load_cron_config(project_dir)
 
+    # 加载飞书配置
+    feishu_cfg = None
+    try:
+        from crew.feishu import load_feishu_config
+
+        feishu_cfg = load_feishu_config(project_dir)
+        if not (feishu_cfg.app_id and feishu_cfg.app_secret):
+            feishu_cfg = None
+    except Exception:
+        pass
+
     app = create_webhook_app(
         project_dir=project_dir,
         token=token,
         config=config,
         cron_config=cron_config,
         cors_origins=cors_origins,
+        feishu_config=feishu_cfg,
     )
 
     logger.info("启动 Webhook 服务器: %s:%d", host, port)
