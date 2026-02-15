@@ -1670,6 +1670,94 @@ async def _tool_weather(
         return f"天气查询失败: {e}"
 
 
+async def _tool_exchange_rate(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查汇率."""
+    import httpx
+
+    base = (args.get("from") or args.get("base") or "USD").upper().strip()
+    targets = (args.get("to") or "CNY").upper().strip()
+    target_list = [t.strip() for t in targets.split(",") if t.strip()]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"https://api.exchangerate-api.com/v4/latest/{base}")
+            data = resp.json()
+
+        if "rates" not in data:
+            return f"查询失败: 不支持货币 {base}"
+
+        rates = data["rates"]
+        lines = [f"基准: 1 {base}"]
+        for t in target_list:
+            rate = rates.get(t)
+            if rate is not None:
+                lines.append(f"= {rate} {t}")
+            else:
+                lines.append(f"{t}: 不支持")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"汇率查询失败: {e}"
+
+
+async def _tool_stock_price(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查股价（A股/美股）."""
+    import re
+
+    import httpx
+
+    symbol = (args.get("symbol") or "").strip()
+    if not symbol:
+        return "需要股票代码，如：sh600519（茅台）、gb_aapl（苹果）。"
+
+    # 规范化：纯数字默认为沪市A股
+    sym = symbol.lower()
+    if re.match(r"^\d{6}$", sym):
+        sym = f"sh{sym}" if sym.startswith("6") else f"sz{sym}"
+    elif re.match(r"^[a-z]{1,5}$", sym):
+        sym = f"gb_{sym}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://hq.sinajs.cn/list={sym}",
+                headers={"Referer": "https://finance.sina.com.cn"},
+            )
+        text = resp.text.strip()
+        if not text or '=""' in text:
+            return f"未找到股票: {symbol}"
+
+        # 解析 Sina 行情数据
+        m = re.search(r'="(.+)"', text)
+        if not m:
+            return f"数据解析失败: {symbol}"
+
+        fields = m.group(1).split(",")
+        if sym.startswith("gb_"):
+            # 美股格式: 名称,现价,涨跌幅%,时间,涨跌额,开盘,最高,最低,...
+            if len(fields) < 4:
+                return f"数据不完整: {symbol}"
+            name, price, change_pct = fields[0], fields[1], fields[2]
+            return f"{name} ({symbol.upper()})\n现价: ${price}  涨跌: {change_pct}%"
+        else:
+            # A股格式: 名称,今开,昨收,现价,最高,最低,...
+            if len(fields) < 6:
+                return f"数据不完整: {symbol}"
+            name, today_open, prev_close, price, high, low = fields[:6]
+            try:
+                change = float(price) - float(prev_close)
+                change_pct = change / float(prev_close) * 100
+                sign = "+" if change >= 0 else ""
+                return f"{name} ({symbol.upper()})\n现价: ¥{price}  涨跌: {sign}{change:.2f} ({sign}{change_pct:.2f}%)\n今开: {today_open}  最高: {high}  最低: {low}"
+            except (ValueError, ZeroDivisionError):
+                return f"{name} ({symbol.upper()})\n现价: ¥{price}"
+    except Exception as e:
+        return f"股价查询失败: {e}"
+
+
 # ── 飞书文档工具 ──
 
 
@@ -1830,6 +1918,85 @@ async def _tool_list_feishu_groups(
                 chat_id = item.get("chat_id", "")
                 lines.append(f"{name} — {chat_id}")
             return "\n".join(lines)
+    except Exception as e:
+        return f"查询失败: {e}"
+
+
+async def _tool_send_feishu_dm(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """给飞书用户发私聊消息."""
+    import json as _json
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    open_id = (args.get("open_id") or "").strip()
+    text = (args.get("text") or "").strip()
+    if not open_id:
+        return "需要 open_id。先用 feishu_group_members 查成员列表获取 open_id。"
+    if not text:
+        return "消息内容不能为空。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "receive_id": open_id,
+                    "msg_type": "text",
+                    "content": _json.dumps({"text": text}),
+                },
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            return f"私聊消息已发送给 {open_id}。"
+        return f"发送失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"发送失败: {e}"
+
+
+async def _tool_feishu_group_members(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看飞书群成员列表."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    chat_id = (args.get("chat_id") or "").strip()
+    if not chat_id:
+        return "需要 chat_id。先用 list_feishu_groups 查群列表。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://open.feishu.cn/open-apis/im/v1/chats/{chat_id}/members",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"page_size": 50},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return "群里没有成员（或无权限查看）。"
+
+        lines = []
+        for m in items:
+            name = m.get("name", "未知")
+            mid = m.get("member_id", "")
+            lines.append(f"{name} [open_id={mid}]")
+        return "\n".join(lines)
     except Exception as e:
         return f"查询失败: {e}"
 
@@ -2247,6 +2414,10 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "create_feishu_doc": _tool_create_feishu_doc,
     "send_feishu_group": _tool_send_feishu_group,
     "list_feishu_groups": _tool_list_feishu_groups,
+    "send_feishu_dm": _tool_send_feishu_dm,
+    "feishu_group_members": _tool_feishu_group_members,
+    "exchange_rate": _tool_exchange_rate,
+    "stock_price": _tool_stock_price,
     # GitHub
     "github_prs": _tool_github_prs,
     "github_issues": _tool_github_issues,

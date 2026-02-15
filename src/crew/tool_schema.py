@@ -642,6 +642,73 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["parent_id", "title", "content"],
         },
     },
+    "send_feishu_dm": {
+        "name": "send_feishu_dm",
+        "description": "给飞书用户发私聊消息。需要对方 open_id，不知道就先用 feishu_group_members 查。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "open_id": {
+                    "type": "string",
+                    "description": "接收人的 open_id（形如 ou_xxxxx）",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "消息内容",
+                },
+            },
+            "required": ["open_id", "text"],
+        },
+    },
+    "feishu_group_members": {
+        "name": "feishu_group_members",
+        "description": "查看飞书群成员列表（姓名+open_id）。发私聊前用这个查 open_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": "飞书群聊 ID（形如 oc_xxxxx）",
+                },
+            },
+            "required": ["chat_id"],
+        },
+    },
+    # ── 金融工具 ──
+    "exchange_rate": {
+        "name": "exchange_rate",
+        "description": "查汇率。默认美元兑人民币，支持所有主流货币。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "description": "基准货币代码（如 USD、EUR、CNY），默认 USD",
+                    "default": "USD",
+                },
+                "to": {
+                    "type": "string",
+                    "description": "目标货币代码，逗号分隔（如 CNY,EUR,JPY），默认 CNY",
+                    "default": "CNY",
+                },
+            },
+            "required": [],
+        },
+    },
+    "stock_price": {
+        "name": "stock_price",
+        "description": "查股价。支持A股（如 sh600519 茅台）和美股（如 gb_aapl 苹果）。纯数字默认A股，纯字母默认美股。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "股票代码（如 sh600519、sz000001、gb_aapl、aapl、600519）",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
     # ── 信息采集工具 ──
     "read_url": {
         "name": "read_url",
@@ -677,6 +744,8 @@ AGENT_TOOLS = {
     "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
     "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
     "feishu_chat_history", "weather",
+    "send_feishu_dm", "feishu_group_members",
+    "exchange_rate", "stock_price",
     # 飞书文档
     "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
     # GitHub

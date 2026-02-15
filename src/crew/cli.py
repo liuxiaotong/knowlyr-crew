@@ -705,6 +705,10 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         "complete_feishu_task": '任务已完成 ✅ [task_id=task_abc123]',
         "feishu_chat_history": '[02-15 14:30] ou_user1: 下午开会记得带材料\n[02-15 14:25] ou_user2: 好的收到\n[02-15 14:20] ou_user1: Q1 报告写完了吗',
         "weather": '上海市 当前 6.7℃，湿度 78%，空气优(PM2.5:21)\n2026-02-15(星期日) 多云 7℃~15℃ 东北风2级\n2026-02-16(星期一) 小雨 4℃~8℃ 东北风2级\n2026-02-17(星期二) 晴 3℃~10℃ 北风1级',
+        "exchange_rate": '基准: 1 USD\n= 6.91 CNY',
+        "stock_price": '贵州茅台 (SH600519)\n现价: ¥1485.30  涨跌: -1.30 (-0.09%)\n今开: 1486.60  最高: 1507.80  最低: 1470.58',
+        "send_feishu_dm": '私聊消息已发送给 ou_xxx。',
+        "feishu_group_members": '刘凯 [open_id=ou_de186aad7faf2c2b72b78223577e2bd9]',
         "create_note": '{"status": "saved", "note_id": "note_001"}',
     }
     return _SIMPLE.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
