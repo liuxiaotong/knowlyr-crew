@@ -279,6 +279,8 @@ async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONRes
         "tool_schemas": tool_schemas,
         "system_prompt": system_prompt,
         "agent_id": employee.agent_id,
+        "api_key": employee.api_key or "",
+        "base_url": employee.base_url or "",
     })
 
 
