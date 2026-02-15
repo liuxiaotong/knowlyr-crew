@@ -627,8 +627,84 @@ def run(
 _CLI_MAX_TOOL_ROUNDS = 10
 
 
+def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
+    """生成随机化的模拟工具返回，避免训练数据里出现固定数字."""
+    import random
+
+    if tool_name == "query_stats":
+        dau = random.randint(700, 1200)
+        wau = random.randint(3000, 5000)
+        msgs = random.randint(2500, 5000)
+        new_users = random.randint(15, 60)
+        agents = random.randint(30, 40)
+        revenue = random.randint(30000, 80000)
+        return json.dumps({"dau": dau, "wau": wau, "messages_today": msgs, "new_users_this_week": new_users, "active_agents": agents, "revenue_mtd": revenue})
+    if tool_name == "lookup_user":
+        uid = random.randint(1001, 9999)
+        msgs = random.randint(50, 500)
+        return json.dumps({"user_id": uid, "name": "示例用户", "email": "user@example.com", "created_at": "2025-12-01", "messages_sent": msgs})
+    if tool_name == "query_agent_work":
+        done = random.randint(2, 8)
+        prog = random.randint(1, 4)
+        mins = random.randint(1, 60)
+        return json.dumps({"agent": "requested", "tasks_completed_today": done, "tasks_in_progress": prog, "last_active": f"{mins} 分钟前"})
+    if tool_name == "list_agents":
+        return '[{"agent_id": 3073, "name": "ceo-assistant", "status": "active"}, {"agent_id": 3001, "name": "code-reviewer", "status": "active"}, {"agent_id": 3002, "name": "product-manager", "status": "active"}]'
+    if tool_name == "read_messages":
+        unread = random.randint(0, 5)
+        return json.dumps({"unread": unread, "messages": [{"from": "code-reviewer", "content": "PR #42 审查完成，有两个建议", "time": "14:30"}, {"from": "product-manager", "content": "新需求文档已更新", "time": "15:00"}]})
+    if tool_name == "get_system_health":
+        cpu = random.randint(15, 45)
+        mem = random.randint(40, 75)
+        latency = random.randint(200, 500)
+        return json.dumps({"status": "healthy", "uptime": "72h", "cpu": f"{cpu}%", "memory": f"{mem}%", "api_latency_p99": f"{latency}ms"})
+    if tool_name == "read_notes":
+        return '{"notes": []}'
+    if tool_name == "web_search":
+        return '{"results": [{"title": "相关搜索结果", "snippet": "这是一条模拟的搜索结果摘要。", "url": "https://example.com"}]}'
+    # 飞书
+    if tool_name == "search_feishu_docs":
+        return '{"docs": [{"title": "Q1 战略规划", "url": "https://feishu.cn/docx/abc123", "type": "doc"}, {"title": "产品路线图", "url": "https://feishu.cn/docx/def456", "type": "wiki"}]}'
+    if tool_name == "read_feishu_doc":
+        return '{"title": "Q1 战略规划", "content": "本季度核心目标：日活突破 2000，AI 自动化率 80%，签约 5 家付费客户。"}'
+    if tool_name == "create_feishu_doc":
+        return '{"status": "created", "document_id": "doc_xyz789", "url": "https://feishu.cn/docx/xyz789"}'
+    if tool_name == "send_feishu_group":
+        return '{"status": "sent", "message_id": "msg_feishu_001"}'
+    # GitHub
+    if tool_name == "github_prs":
+        return '{"prs": [{"number": 42, "title": "feat: add new feature", "state": "open", "author": "kai", "url": "https://github.com/org/repo/pull/42"}]}'
+    if tool_name == "github_issues":
+        return '{"issues": [{"number": 10, "title": "Bug: login failure", "state": "open", "labels": ["bug"], "assignee": "kai"}]}'
+    if tool_name == "github_repo_activity":
+        commits = random.randint(8, 25)
+        return json.dumps({"commits_7d": commits, "contributors": 3, "recent": [{"sha": "abc1234", "message": "fix: resolve auth issue", "author": "kai"}]})
+    # Notion
+    if tool_name == "notion_search":
+        return '{"results": [{"title": "产品规划 2026", "url": "https://notion.so/abc123", "type": "page", "last_edited": "2026-02-14"}]}'
+    if tool_name == "notion_read":
+        return '{"title": "产品规划 2026", "content": "核心方向：AI Agent 平台化，目标客户：中小企业。"}'
+    if tool_name == "notion_create":
+        return '{"status": "created", "page_id": "page_notion_001", "url": "https://notion.so/page_notion_001"}'
+    # 信息采集
+    if tool_name == "read_url":
+        return '{"content": "这是一篇模拟的网页正文内容，已自动提取去噪。"}'
+    if tool_name == "rss_read":
+        return '{"entries": [{"title": "v2.0 发布公告", "link": "https://example.com/blog/v2", "summary": "新版本带来了全新功能..."}]}'
+    # 简单操作类工具 — 固定返回 ok
+    _SIMPLE: dict[str, str] = {
+        "send_message": '{"status": "sent", "message_id": "msg_12345"}',
+        "delegate": '{"status": "delegated", "task_id": "task_67890"}',
+        "mark_read": '{"status": "ok", "marked": 3}',
+        "update_agent": '{"status": "updated"}',
+        "create_feishu_event": '{"status": "created", "event_id": "evt_abc123", "calendar": "primary"}',
+        "create_note": '{"status": "saved", "note_id": "note_001"}',
+    }
+    return _SIMPLE.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
+
+
 def _cli_handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
-    """CLI 端工具调用处理 — 返回模拟结果供模型消费."""
+    """CLI 端工具调用处理 — 返回随机化模拟结果供模型消费."""
     from crew.tool_schema import is_finish_tool
 
     if is_finish_tool(tool_name):
@@ -636,41 +712,7 @@ def _cli_handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
 
     click.echo(f"  [tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)[:200]})", err=True)
 
-    # CLI 模式下返回模拟数据，让模型知道工具被调用了
-    _MOCK_RESPONSES: dict[str, str] = {
-        "query_stats": '{"dau": 923, "wau": 3847, "messages_today": 3612, "new_users_this_week": 31, "active_agents": 33, "revenue_mtd": 42800}',
-        "lookup_user": '{"user_id": 1001, "name": "示例用户", "email": "user@example.com", "created_at": "2025-12-01", "messages_sent": 156}',
-        "query_agent_work": '{"agent": "requested", "tasks_completed_today": 5, "tasks_in_progress": 2, "last_active": "10 分钟前"}',
-        "list_agents": '[{"agent_id": 3073, "name": "ceo-assistant", "status": "active"}, {"agent_id": 3001, "name": "code-reviewer", "status": "active"}, {"agent_id": 3002, "name": "product-manager", "status": "active"}]',
-        "read_messages": '{"unread": 3, "messages": [{"from": "code-reviewer", "content": "PR #42 审查完成，有两个建议", "time": "14:30"}, {"from": "product-manager", "content": "新需求文档已更新", "time": "15:00"}]}',
-        "get_system_health": '{"status": "healthy", "uptime": "72h", "cpu": "23%", "memory": "61%", "api_latency_p99": "320ms"}',
-        "send_message": '{"status": "sent", "message_id": "msg_12345"}',
-        "delegate": '{"status": "delegated", "task_id": "task_67890"}',
-        "mark_read": '{"status": "ok", "marked": 3}',
-        "update_agent": '{"status": "updated"}',
-        "create_feishu_event": '{"status": "created", "event_id": "evt_abc123", "calendar": "primary"}',
-        "create_note": '{"status": "saved", "note_id": "note_001"}',
-        "read_notes": '{"notes": []}',
-        "web_search": '{"results": [{"title": "相关搜索结果", "snippet": "这是一条模拟的搜索结果摘要。", "url": "https://example.com"}]}',
-        # 飞书文档
-        "search_feishu_docs": '{"docs": [{"title": "Q1 战略规划", "url": "https://feishu.cn/docx/abc123", "type": "doc"}, {"title": "产品路线图", "url": "https://feishu.cn/docx/def456", "type": "wiki"}]}',
-        "read_feishu_doc": '{"title": "Q1 战略规划", "content": "本季度核心目标：日活突破 2000，AI 自动化率 80%，签约 5 家付费客户。"}',
-        "create_feishu_doc": '{"status": "created", "document_id": "doc_xyz789", "url": "https://feishu.cn/docx/xyz789"}',
-        "send_feishu_group": '{"status": "sent", "message_id": "msg_feishu_001"}',
-        # GitHub
-        "github_prs": '{"prs": [{"number": 42, "title": "feat: add new feature", "state": "open", "author": "kai", "url": "https://github.com/org/repo/pull/42"}]}',
-        "github_issues": '{"issues": [{"number": 10, "title": "Bug: login failure", "state": "open", "labels": ["bug"], "assignee": "kai"}]}',
-        "github_repo_activity": '{"commits_7d": 15, "contributors": 3, "recent": [{"sha": "abc1234", "message": "fix: resolve auth issue", "author": "kai"}]}',
-        # Notion
-        "notion_search": '{"results": [{"title": "产品规划 2026", "url": "https://notion.so/abc123", "type": "page", "last_edited": "2026-02-14"}]}',
-        "notion_read": '{"title": "产品规划 2026", "content": "核心方向：AI Agent 平台化，目标客户：中小企业。"}',
-        "notion_create": '{"status": "created", "page_id": "page_notion_001", "url": "https://notion.so/page_notion_001"}',
-        # 信息采集
-        "read_url": '{"content": "这是一篇模拟的网页正文内容，已自动提取去噪。"}',
-        "rss_read": '{"entries": [{"title": "v2.0 发布公告", "link": "https://example.com/blog/v2", "summary": "新版本带来了全新功能..."}]}',
-    }
-
-    return _MOCK_RESPONSES.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
+    return _generate_mock_response(tool_name, arguments)
 
 
 def _execute_with_tool_loop(
@@ -681,6 +723,7 @@ def _execute_with_tool_loop(
     api_key: str,
     model: str,
     max_tokens: int | None = None,
+    traj_collector: Any | None = None,
 ) -> Any:
     """CLI 端带工具调用的 agent loop."""
     from crew.executor import ExecutionResult, execute_with_tools
@@ -717,6 +760,16 @@ def _execute_with_tool_loop(
 
         if not result.has_tool_calls:
             final_content = result.content
+            # 记录最终回复到轨迹
+            if traj_collector is not None:
+                traj_collector.add_tool_step(
+                    thought=result.content,
+                    tool_name="respond",
+                    tool_params={},
+                    tool_output=result.content,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
             break
 
         # 处理 tool calls
@@ -746,6 +799,16 @@ def _execute_with_tool_loop(
                     finished = True
                 else:
                     tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    # 记录工具调用到轨迹
+                    if traj_collector is not None:
+                        traj_collector.add_tool_step(
+                            thought=result.content or "",
+                            tool_name=tc.name,
+                            tool_params=tc.arguments,
+                            tool_output=tool_output[:2000],
+                            input_tokens=result.input_tokens,
+                            output_tokens=result.output_tokens,
+                        )
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tc.id,
@@ -785,6 +848,16 @@ def _execute_with_tool_loop(
                     finished = True
                 else:
                     tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    # 记录工具调用到轨迹
+                    if traj_collector is not None:
+                        traj_collector.add_tool_step(
+                            thought=result.content or "",
+                            tool_name=tc.name,
+                            tool_params=tc.arguments,
+                            tool_output=tool_output[:2000],
+                            input_tokens=result.input_tokens,
+                            output_tokens=result.output_tokens,
+                        )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -991,6 +1064,7 @@ def _run_employee_job(
                 api_key=exec_api_key,
                 model=effective_model,
                 max_tokens=agent_identity.max_tokens if agent_identity else None,
+                traj_collector=traj_collector,
             )
             already_streamed = True  # _execute_with_tool_loop 已输出
         else:

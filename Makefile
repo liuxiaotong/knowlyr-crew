@@ -42,7 +42,7 @@ push-only:
 	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/
 	@echo "文件已推送（未重启、未同步）"
 
-## 第3步: 在服务器上测试某个员工
+## 第3步: 在服务器上测试某个员工（走真实 webhook，调真实工具）
 test-employee:
 ifndef NAME
 	$(error 用法: make test-employee NAME=ceo-assistant TASK="今天心情不错")
@@ -50,10 +50,13 @@ endif
 ifndef TASK
 	$(eval TASK := 你好)
 endif
-	@echo "=== 测试 $(NAME) ==="
-	ssh $(SERVER) 'cd $(REMOTE_DIR) && source /opt/knowlyr-crew/venv/bin/activate && \
-		set -a && source /opt/knowlyr-crew/.env && set +a && \
-		knowlyr-crew run $(NAME) --execute --arg task="$(TASK)"'
+	@echo "=== 测试 $(NAME)（webhook 真实链路） ==="
+	@ssh $(SERVER) 'set -a && source /opt/knowlyr-crew/.env && set +a && \
+		curl -s -X POST http://localhost:8765/run/employee/$(NAME) \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$CREW_API_TOKEN" \
+		-d "{\"args\": {\"task\": \"$(TASK)\"}, \"sync\": true, \"agent_id\": 3073}" \
+		| python3 -c "import sys,json; d=json.load(sys.stdin); r=d.get(\"result\",d); print(r.get(\"output\",\"(no output)\")); print(\"  [model]\", r.get(\"model\",\"?\")); print(\"  [tokens]\", r.get(\"input_tokens\",0), \"in /\", r.get(\"output_tokens\",0), \"out\"); print(\"  [rounds]\", r.get(\"tool_rounds\",0))"'
 
 # ============================================================
 # 快捷命令
