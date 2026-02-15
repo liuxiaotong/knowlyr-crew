@@ -362,6 +362,21 @@ def run_pipeline(
     agent_identity = _resolve_agent_identity(agent_id)
     _check_agent_active(agent_identity, agent_id)
 
+    # 启用轨迹录制（仅 execute 模式）
+    _traj_collector = None
+    if execute:
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            _traj_collector = TrajectoryCollector(
+                f"pipeline/{pipeline.name}",
+                pipeline.description or pipeline.name,
+                model=model or "",
+            )
+            _traj_collector.__enter__()
+        except Exception:
+            _traj_collector = None
+
     # 输出注册表
     outputs_by_id: dict[str, str] = {}
     outputs_by_index: dict[int, str] = {}
@@ -453,6 +468,17 @@ def run_pipeline(
 
     # 汇总 token 统计
     all_results = _flatten_results(step_results)
+
+    # 完成轨迹录制
+    if _traj_collector is not None:
+        try:
+            has_error = any(r.error for r in all_results)
+            _traj_collector.finish(success=not has_error)
+        except Exception as e:
+            logger.debug("流水线轨迹录制失败: %s", e)
+        finally:
+            _traj_collector.__exit__(None, None, None)
+
     return PipelineResult(
         pipeline_name=pipeline.name,
         mode="execute" if execute else "prompt",

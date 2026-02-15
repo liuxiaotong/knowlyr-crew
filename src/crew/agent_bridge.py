@@ -80,6 +80,18 @@ def create_crew_agent(
 
         step_count += 1
 
+        # 轨迹录制：用上一步的 tool_result 补全 pending step
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            _collector = TrajectoryCollector.current()
+            if _collector is not None and step_count > 1 and last_tool_calls:
+                _collector.complete_tool_step(
+                    tool_output=observation[:5000],
+                )
+        except Exception:
+            _collector = None
+
         # 首次调用：发送任务描述 + 初始 observation
         if step_count == 1:
             user_content = f"## 任务\n\n{task_description}"
@@ -131,6 +143,17 @@ def create_crew_agent(
             tc = result.tool_calls[0]  # 取第一个工具调用
             last_tool_calls = result.tool_calls
 
+            # 轨迹录制：记录 thought + tool_call，等待下次 observation 补全
+            if _collector is not None:
+                _collector.begin_tool_step(
+                    thought=result.content,
+                    tool_name=tc.name,
+                    tool_params=tc.arguments,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    model=result.model,
+                )
+
             if on_step:
                 on_step(step_count, tc.name, tc.arguments)
 
@@ -143,6 +166,18 @@ def create_crew_agent(
 
         # 无工具调用 — LLM 给出了最终文本回复
         last_tool_calls = []
+
+        # 轨迹录制：最终回复记为完整步骤
+        if _collector is not None:
+            _collector.add_tool_step(
+                thought=result.content,
+                tool_name="submit",
+                tool_params={},
+                tool_output=result.content,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+
         if on_step:
             on_step(step_count, "submit", {"result": result.content[:200]})
         return {"tool": "submit", "params": {"result": result.content}}

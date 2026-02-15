@@ -477,6 +477,23 @@ def _record_failure(provider_name: str, exc: Exception) -> None:
         logger.debug("记录失败指标失败: %s", e)
 
 
+def _record_trajectory(result: ExecutionResult) -> None:
+    """如果当前上下文有 TrajectoryCollector，记录 execute_prompt 结果."""
+    try:
+        from crew.trajectory import TrajectoryCollector
+
+        collector = TrajectoryCollector.current()
+        if collector is not None:
+            collector.add_prompt_step(
+                content=result.content,
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+    except Exception as e:
+        logger.debug("轨迹录制失败: %s", e)
+
+
 class _MetricsStreamWrapper:
     """包装异步流式迭代器，在流消费完毕后自动记录指标."""
 
@@ -563,6 +580,7 @@ def execute_prompt(
                     base_url=base_url,
                 )
             _record_metrics(provider.value, result, time.monotonic() - t0)
+            _record_trajectory(result)
             return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):

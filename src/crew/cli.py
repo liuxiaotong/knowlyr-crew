@@ -734,6 +734,7 @@ def _run_employee_job(
 
     # --execute: 调用 LLM API 执行 prompt
     already_streamed = False
+    traj_collector = None
     if execute_mode:
         effective_model = (
             (agent_identity.model if agent_identity else None)
@@ -775,6 +776,18 @@ def _run_employee_job(
         def _on_chunk(chunk: str) -> None:
             click.echo(chunk, nl=False)
 
+        # 启用轨迹录制
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            task_desc = args_dict.get("target", "") or args_dict.get("goal", "") or emp.description
+            traj_collector = TrajectoryCollector(
+                emp.name, task_desc, model=effective_model,
+            )
+            traj_collector.__enter__()
+        except Exception:
+            traj_collector = None
+
         try:
             result = execute_prompt(
                 system_prompt=text,
@@ -787,6 +800,8 @@ def _run_employee_job(
                 on_chunk=_on_chunk if stream_enabled else None,
             )
         except Exception as exc:
+            if traj_collector is not None:
+                traj_collector.__exit__(None, None, None)
             click.echo(f"\nLLM 执行失败: {exc}", err=True)
             _finish_transcript(
                 transcript_recorder, transcript_id,
@@ -808,6 +823,15 @@ def _run_employee_job(
                 "stop_reason": result.stop_reason,
             },
         )
+
+        # 完成轨迹录制
+        if traj_collector is not None:
+            try:
+                traj_collector.finish(success=True)
+            except Exception as e:
+                logger.debug("轨迹录制完成失败: %s", e)
+            finally:
+                traj_collector.__exit__(None, None, None)
 
         click.echo(
             f"[{result.model}] {result.input_tokens} in / {result.output_tokens} out",
@@ -3325,3 +3349,233 @@ def agent_run(employee_name, task, model, max_steps, repo, base_commit, image, p
 
     if ts.observation:
         console.print(f"\n[bold]结果:[/bold]\n{ts.observation[:2000]}")
+
+
+# ── trajectory 子命令组 ──
+
+
+@main.group()
+def trajectory():
+    """轨迹管理 — 查看、打分、导出训练数据."""
+    pass
+
+
+@trajectory.command("list")
+@click.option("-n", "--limit", type=int, default=20, help="显示条数")
+def trajectory_list(limit: int):
+    """列出已录制的轨迹."""
+    from pathlib import Path
+    import json
+
+    traj_file = Path(".crew/trajectories/trajectories.jsonl")
+    if not traj_file.exists():
+        click.echo("暂无轨迹数据。")
+        click.echo("使用 knowlyr-crew run <employee> --execute 录制首条轨迹。")
+        return
+
+    entries = []
+    for line in traj_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
+
+    if not entries:
+        click.echo("轨迹文件为空。")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title=f"已录制轨迹 (共 {len(entries)} 条)")
+        table.add_column("#", justify="right", style="dim")
+        table.add_column("员工", style="cyan")
+        table.add_column("任务", style="green", max_width=40)
+        table.add_column("模型", style="yellow")
+        table.add_column("步数", justify="right")
+        table.add_column("Tokens", justify="right")
+        table.add_column("结果", justify="center")
+
+        for i, entry in enumerate(entries[-limit:], 1):
+            agent = entry.get("agent", "")
+            task_desc = entry.get("task", {}).get("description", "")
+            model = entry.get("model", "")
+            steps = entry.get("steps", [])
+            outcome = entry.get("outcome", {})
+            success = outcome.get("success", False)
+            tokens = outcome.get("total_tokens", 0)
+
+            table.add_row(
+                str(i),
+                agent.replace("crew/", ""),
+                task_desc[:40],
+                model.split("/")[-1][:20] if "/" in model else model[:20],
+                str(len(steps)),
+                str(tokens),
+                "[green]OK[/green]" if success else "[red]FAIL[/red]",
+            )
+
+        console.print(table)
+    except ImportError:
+        for i, entry in enumerate(entries[-limit:], 1):
+            agent = entry.get("agent", "")
+            task = entry.get("task", {}).get("description", "")[:40]
+            steps = len(entry.get("steps", []))
+            click.echo(f"  {i}. {agent} | {task} | {steps} steps")
+
+    click.echo(f"\n文件: {traj_file}", err=True)
+
+
+@trajectory.command("score")
+@click.option("--all", "score_all", is_flag=True, help="打分所有轨迹")
+@click.option("-n", "--last", type=int, default=0, help="打分最后 N 条")
+def trajectory_score(score_all: bool, last: int):
+    """对轨迹进行 Reward 打分."""
+    from pathlib import Path
+
+    traj_file = Path(".crew/trajectories/trajectories.jsonl")
+    if not traj_file.exists():
+        click.echo("暂无轨迹数据。", err=True)
+        sys.exit(1)
+
+    try:
+        from agentrecorder.schema import Trajectory
+        from agentreward import RewardEngine
+
+        trajectories = Trajectory.from_jsonl(traj_file)
+    except ImportError as e:
+        click.echo(f"Error: 依赖未安装 — {e}", err=True)
+        click.echo("请运行: pip install knowlyr-recorder knowlyr-reward", err=True)
+        sys.exit(1)
+
+    if not trajectories:
+        click.echo("轨迹文件为空。")
+        return
+
+    if last > 0:
+        trajectories = trajectories[-last:]
+    elif not score_all:
+        trajectories = trajectories[-1:]
+        click.echo("提示: 默认只打分最后一条。用 --all 打分全部，或 -n 5 打分最后 5 条。", err=True)
+
+    engine = RewardEngine()
+    for traj in trajectories:
+        result = engine.score(traj)
+        agent = traj.agent.replace("crew/", "")
+        task = traj.task.description[:30]
+        click.echo(f"\n{agent} | {task}")
+        click.echo(f"  总分: {result.total_score:.2f}")
+        for dim, score in result.dimension_scores.items():
+            click.echo(f"  {dim}: {score:.2f}")
+
+
+@trajectory.command("export")
+@click.option("-f", "--format", "fmt", type=click.Choice(["sft", "dpo"]),
+              default="sft", help="导出格式")
+@click.option("-o", "--output", "output_path", type=click.Path(), required=True,
+              help="输出文件路径")
+def trajectory_export(fmt: str, output_path: str):
+    """导出轨迹为训练数据."""
+    from pathlib import Path
+
+    traj_file = Path(".crew/trajectories/trajectories.jsonl")
+    if not traj_file.exists():
+        click.echo("暂无轨迹数据。", err=True)
+        sys.exit(1)
+
+    try:
+        from trajectoryhub import DatasetExporter
+    except ImportError:
+        click.echo("Error: knowlyr-hub 未安装。请运行: pip install knowlyr-hub", err=True)
+        sys.exit(1)
+
+    exporter = DatasetExporter(str(traj_file.parent))
+    if fmt == "sft":
+        exporter.export_sft(output_path)
+    else:
+        exporter.export_dpo(output_path)
+
+    click.echo(f"已导出 {fmt.upper()} 数据: {output_path}")
+
+
+@trajectory.command("convert")
+@click.option("-o", "--output", type=click.Path(), default=None,
+              help="输出文件路径 (默认追加到 .crew/trajectories/trajectories.jsonl)")
+def trajectory_convert(output: str | None):
+    """将已有 sessions（含 --execute 回复）转为标准轨迹格式."""
+    from pathlib import Path
+
+    try:
+        from agentrecorder import Recorder
+        from agentrecorder.adapters import CrewAdapter
+    except ImportError:
+        click.echo("Error: knowlyr-recorder 未安装。请运行: pip install knowlyr-recorder", err=True)
+        sys.exit(1)
+
+    session_dir = Path(".crew/sessions")
+    if not session_dir.is_dir():
+        click.echo("未找到 .crew/sessions/ 目录。")
+        return
+
+    adapter = CrewAdapter()
+    recorder = Recorder(adapter)
+    output_path = output or ".crew/trajectories/trajectories.jsonl"
+
+    converted = 0
+    for f in sorted(session_dir.glob("*.jsonl")):
+        if adapter.validate(str(f)):
+            traj = recorder.convert(str(f))
+            traj.to_jsonl(output_path)
+            converted += 1
+
+    if converted:
+        click.echo(f"已转换 {converted} 条 session → {output_path}")
+    else:
+        click.echo("未找到包含执行回复的 session。")
+        click.echo("使用 knowlyr-crew run <employee> --execute 产生可转换的 session。")
+
+
+@trajectory.command("stats")
+def trajectory_stats():
+    """显示轨迹数据统计."""
+    from pathlib import Path
+    import json
+    from collections import Counter
+
+    traj_file = Path(".crew/trajectories/trajectories.jsonl")
+    if not traj_file.exists():
+        click.echo("暂无轨迹数据。")
+        return
+
+    entries = []
+    for line in traj_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
+
+    if not entries:
+        click.echo("轨迹文件为空。")
+        return
+
+    # 统计
+    employee_counter = Counter()
+    total_steps = 0
+    total_tokens = 0
+    success_count = 0
+
+    for entry in entries:
+        agent = entry.get("agent", "").replace("crew/", "")
+        employee_counter[agent] += 1
+        total_steps += len(entry.get("steps", []))
+        total_tokens += entry.get("outcome", {}).get("total_tokens", 0)
+        if entry.get("outcome", {}).get("success"):
+            success_count += 1
+
+    click.echo(f"轨迹总数: {len(entries)}")
+    click.echo(f"总步数:   {total_steps}")
+    click.echo(f"总 Tokens: {total_tokens:,}")
+    click.echo(f"成功率:   {success_count}/{len(entries)} ({100*success_count/len(entries):.0f}%)")
+    click.echo(f"\n按员工统计:")
+    for emp, count in employee_counter.most_common():
+        click.echo(f"  {emp}: {count} 条")
