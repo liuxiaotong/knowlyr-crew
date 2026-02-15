@@ -730,6 +730,233 @@ async def _execute_pipeline(
     return result.model_dump(mode="json")
 
 
+async def _delegate_employee(
+    ctx: _AppContext,
+    employee_name: str,
+    task: str,
+    *,
+    model: str | None = None,
+) -> str:
+    """执行被委派的员工（纯文本输入/输出，不支持递归委派）."""
+    from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
+
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    target = discovery.get(employee_name)
+    if target is None:
+        available = ", ".join(sorted(discovery.employees.keys()))
+        return f"错误：未找到员工 '{employee_name}'。可用员工：{available}"
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+    prompt = engine.prompt(target, args={"task": task})
+
+    try:
+        from crew.executor import aexecute_prompt
+
+        use_model = model or target.model or "claude-sonnet-4-20250514"
+        result = await aexecute_prompt(
+            system_prompt=prompt,
+            user_message=task,
+            api_key=None,
+            model=use_model,
+            stream=False,
+        )
+        return result.content
+    except Exception as e:
+        return f"委派执行失败: {e}"
+
+
+_MAX_DELEGATION_ROUNDS = 10
+
+
+async def _execute_employee_with_delegation(
+    ctx: _AppContext,
+    name: str,
+    args: dict[str, str],
+    *,
+    agent_id: int | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """执行带委派能力的员工（agent loop with delegate tool）."""
+    from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
+    from crew.executor import aexecute_with_tools
+    from crew.providers import Provider, detect_provider
+    from crew.tool_schema import employee_tools_to_schemas, is_finish_tool
+
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    match = discovery.get(name)
+    if match is None:
+        raise EmployeeNotFoundError(name)
+
+    # agent 身份
+    agent_identity = None
+    if agent_id:
+        try:
+            from crew.id_client import afetch_agent_identity
+            agent_identity = await afetch_agent_identity(agent_id)
+        except Exception:
+            pass
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
+
+    # 追加可委派的同事名单
+    roster_lines: list[str] = []
+    for emp_name, emp in discovery.employees.items():
+        if emp_name != name:
+            label = emp.character_name or emp.effective_display_name
+            roster_lines.append(f"- {emp_name}（{label}）：{emp.description}")
+    if roster_lines:
+        prompt += "\n\n---\n\n## 可委派的同事\n\n使用 delegate 工具调用他们。\n\n" + "\n".join(
+            roster_lines
+        )
+
+    # 仅暴露 delegate + submit
+    tool_schemas = employee_tools_to_schemas(["delegate"])
+
+    use_model = model or match.model or "claude-sonnet-4-20250514"
+    provider = detect_provider(use_model)
+    is_anthropic = provider == Provider.ANTHROPIC
+
+    task_text = args.get("task", "请开始执行上述任务。")
+    messages: list[dict[str, Any]] = [{"role": "user", "content": task_text}]
+
+    total_input = 0
+    total_output = 0
+    final_content = ""
+    rounds = 0
+
+    for rounds in range(_MAX_DELEGATION_ROUNDS):  # noqa: B007
+        result = await aexecute_with_tools(
+            system_prompt=prompt,
+            messages=messages,
+            tools=tool_schemas,
+            api_key=None,
+            model=use_model,
+            max_tokens=4096,
+        )
+        total_input += result.input_tokens
+        total_output += result.output_tokens
+
+        if not result.has_tool_calls:
+            final_content = result.content
+            break
+
+        # ── 构建 assistant 消息 + 处理 tool calls ──
+        if is_anthropic:
+            # Anthropic: content 数组包含 text + tool_use blocks
+            assistant_content: list[dict[str, Any]] = []
+            if result.content:
+                assistant_content.append({"type": "text", "text": result.content})
+            for tc in result.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            # 处理每个 tool call → tool_result blocks
+            tool_results: list[dict[str, Any]] = []
+            finished = False
+            for tc in result.tool_calls:
+                if is_finish_tool(tc.name):
+                    final_content = tc.arguments.get("result", result.content)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": final_content,
+                    })
+                    finished = True
+                elif tc.name == "delegate":
+                    logger.info("委派: %s → %s", name, tc.arguments.get("employee_name"))
+                    delegate_result = await _delegate_employee(
+                        ctx,
+                        tc.arguments.get("employee_name", ""),
+                        tc.arguments.get("task", ""),
+                    )
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": delegate_result[:10000],
+                    })
+                else:
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": f"工具 '{tc.name}' 不可用，请使用 delegate 或 submit。",
+                        "is_error": True,
+                    })
+            messages.append({"role": "user", "content": tool_results})
+            if finished:
+                break
+        else:
+            # OpenAI-compatible: assistant 有 tool_calls 数组，回复用 role=tool
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": result.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": __import__("json").dumps(
+                                tc.arguments, ensure_ascii=False
+                            ),
+                        },
+                    }
+                    for tc in result.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            finished = False
+            for tc in result.tool_calls:
+                if is_finish_tool(tc.name):
+                    final_content = tc.arguments.get("result", result.content)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": final_content,
+                    })
+                    finished = True
+                elif tc.name == "delegate":
+                    logger.info("委派: %s → %s", name, tc.arguments.get("employee_name"))
+                    delegate_result = await _delegate_employee(
+                        ctx,
+                        tc.arguments.get("employee_name", ""),
+                        tc.arguments.get("task", ""),
+                    )
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": delegate_result[:10000],
+                    })
+                else:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": f"工具 '{tc.name}' 不可用，请使用 delegate 或 submit。",
+                    })
+            if finished:
+                break
+    else:
+        final_content = result.content or "达到最大委派轮次限制。"
+
+    return {
+        "employee": name,
+        "prompt": prompt[:500],
+        "output": final_content,
+        "model": use_model,
+        "input_tokens": total_input,
+        "output_tokens": total_output,
+        "delegations": rounds,
+    }
+
+
 async def _execute_employee(
     ctx: _AppContext,
     name: str,
@@ -741,11 +968,17 @@ async def _execute_employee(
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    result = discover_employees(project_dir=ctx.project_dir)
-    match = result.get(name)
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    match = discovery.get(name)
 
     if match is None:
         raise EmployeeNotFoundError(name)
+
+    # 如果员工有 delegate 工具，使用带委派的 agent loop
+    if "delegate" in (match.tools or []):
+        return await _execute_employee_with_delegation(
+            ctx, name, args, agent_id=agent_id, model=model,
+        )
 
     # 获取 agent 身份
     agent_identity = None

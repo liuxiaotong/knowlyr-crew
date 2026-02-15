@@ -136,6 +136,24 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["result"],
         },
     },
+    "delegate": {
+        "name": "delegate",
+        "description": "委派任务给另一位 AI 同事执行。同事将独立完成任务并返回结果。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "employee_name": {
+                    "type": "string",
+                    "description": "目标员工名称（如 code-reviewer、doc-writer）",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "委派的具体任务描述",
+                },
+            },
+            "required": ["employee_name", "task"],
+        },
+    },
 }
 
 
