@@ -783,28 +783,42 @@ topic: Review $target design
 goal: Produce improvement decisions
 mode: auto                                  # auto / discussion / meeting
 background_mode: auto                       # full / summary / minimal / auto
+action_output: true                         # 自动生成可执行 ActionPlan JSON
 participants:
   - employee: product-manager
     role: moderator                         # moderator / speaker / recorder
     focus: 需求完整性
+    stance: 偏用户体验                       # 预设立场（强制多元视角）
+    execution_role: monitor                 # 讨论后执行阶段的角色
   - employee: code-reviewer
     role: speaker
     focus: 安全性
+    must_challenge: [product-manager]       # 必须质疑的参会者
+    max_agree_ratio: 0.6                    # 最多 60% 同意，强制产生分歧
+    execution_role: executor
+tension_seeds:                              # 预设争议点，注入讨论强制触发分歧
+  - 安全性 vs 开发效率
+  - 自研 vs 第三方方案
 rules:                                      # 可选，默认提供 6 条规则
   - Every participant must speak each round
   - Encourage constructive disagreement
-round_template: adversarial                 # 可选，使用预定义轮次模板
+round_template: deep-adversarial            # 可选，使用预定义轮次模板
 rounds:                                     # int（自动生成）或 list（自定义）
-  - name: Initial Assessment
+  - name: 各抒己见
     instruction: Each role gives initial evaluation
     interaction: round-robin                # free / round-robin / challenge / response
-  - name: Cross-Challenge                   #   / brainstorm / vote / debate
+    max_words_per_turn: 300                 #   / brainstorm / vote / debate
+  - name: 交叉盘问                           #   / cross-examine / steelman-then-attack
     instruction: Challenge each other's conclusions
-    interaction: challenge
-  - name: Response
-    interaction: response
+    interaction: cross-examine
+    require_direct_reply: true              # 必须引用并回应他人具体观点
+    min_disagreements: 2                    # 本轮至少 2 个分歧
+  - name: 强化后攻击
+    interaction: steelman-then-attack
+    require_direct_reply: true
   - name: Decision
     instruction: Summarize action items
+    interaction: vote
 output_format: decision                     # decision / transcript / summary
 output:                                     # 可选，自动保存
   filename: "{date}-$target.md"
@@ -821,11 +835,62 @@ output:                                     # 可选，自动保存
 | **1v1 会议** | 单个参与者自动切换为会话式 prompt，无多轮结构 |
 | **即席讨论** | CLI `discuss adhoc` 或 MCP `run_discussion(employees=..., topic=...)` 免 YAML |
 | **会议记录** | 自动保存到 `.crew/meetings/`，`discuss history` 查看历史 |
-| **互动模式** | `free` / `round-robin` / `challenge` / `response` / `brainstorm` / `vote` / `debate` |
-| **轮次模板** | `standard` / `brainstorm-to-decision` / `adversarial`，`round_template` 字段一键展开 |
+| **互动模式** | `free` / `round-robin` / `challenge` / `response` / `brainstorm` / `vote` / `debate` / `cross-examine` / `steelman-then-attack` |
+| **轮次模板** | `standard` / `brainstorm-to-decision` / `adversarial` / `deep-adversarial` / `discuss-then-execute`，`round_template` 字段一键展开 |
+| **对抗性讨论** | `stance`（预设立场）、`must_challenge`（必须质疑）、`max_agree_ratio`（分歧配额）、`tension_seeds`（争议种子） |
+| **反独白控制** | `max_words_per_turn`（字数限制）、`require_direct_reply`（引用回应）、`min_disagreements`（最低分歧）、非首轮自动去重 |
+| **讨论→执行** | `action_output: true` 自动生成 ActionPlan JSON，`pipeline_from_action_plan()` 转为可执行 Pipeline |
+| **角色生命周期** | `execution_role`（executor / reviewer / monitor / idle）定义讨论后执行阶段的职责 |
 | **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
 | **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
 | **三层发现** | `builtin < global (.crew/global/discussions/，可由 KNOWLYR_CREW_GLOBAL_DIR 指定) < project (.crew/discussions/)` |
+
+### 对抗性讨论
+
+AI 讨论的常见问题是"共识太快、独白式发言"。Crew 提供多层机制强制产生有价值的分歧：
+
+| 机制 | 说明 |
+|------|------|
+| `stance` | 为参会者预设立场倾向，发言必须体现该立场 |
+| `must_challenge` | 指定必须质疑的参会者，不可只说"我同意" |
+| `max_agree_ratio` | 分歧配额，如 0.6 表示最多 60% 完全同意 |
+| `tension_seeds` | 预设争议点列表，首轮注入强制表态 |
+| `cross-examine` | 交叉盘问：选择一位他人，提出 3 个具体问题（事实挑战、逻辑推演、替代方案） |
+| `steelman-then-attack` | 先强化再攻击：先用 2-3 句强化对方论点，再找弱点 |
+| `max_words_per_turn` | 字数限制，防止独白式长篇发言 |
+| `require_direct_reply` | 必须引用他人原文（`>` 标记）再回应 |
+| `min_disagreements` | 本轮最少分歧数 |
+| 非首轮去重 | 自动注入"禁止重复、增量贡献、标记状态"约束 |
+
+### 讨论→执行衔接
+
+设置 `action_output: true` 后，讨论汇总会额外输出结构化 ActionPlan JSON：
+
+```json
+{
+  "decisions": ["决策1"],
+  "unresolved": ["未解决分歧"],
+  "actions": [
+    {"id": "A1", "description": "任务", "assignee_role": "executor",
+     "depends_on": [], "priority": "P0", "verification": "验证方式", "phase": "implement"}
+  ],
+  "review_criteria": ["验收标准"]
+}
+```
+
+通过 `pipeline_from_action_plan()` 可将 ActionPlan 自动转为 Pipeline：
+- 按 `depends_on` 拓扑排序
+- 无依赖的 actions 自动并行（ParallelGroup）
+- 自动追加 review 步骤
+
+```python
+from crew.pipeline import pipeline_from_action_plan
+from crew.models import DiscussionActionPlan
+
+plan = DiscussionActionPlan(**action_plan_json)
+pipeline = pipeline_from_action_plan(plan)
+# A1 → [A2, A3] 并行 → A4 → review
+```
 
 ---
 

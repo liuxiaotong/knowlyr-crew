@@ -34,6 +34,18 @@ class DiscussionParticipant(BaseModel):
         default="speaker", description="会议角色"
     )
     focus: str = Field(default="", description="本次讨论的关注重点")
+    stance: str = Field(default="", description="预设立场/倾向（如 '偏保守'、'偏激进'）")
+    must_challenge: list[str] = Field(
+        default_factory=list,
+        description="本参会者必须质疑的其他参会者列表（employee name）",
+    )
+    max_agree_ratio: float = Field(
+        default=1.0,
+        description="最大同意比例（0.0~1.0），低于 1.0 时强制产生分歧",
+    )
+    execution_role: Literal["executor", "reviewer", "monitor", "idle"] = Field(
+        default="idle", description="讨论后执行阶段的角色",
+    )
 
 
 class DiscussionRound(BaseModel):
@@ -44,7 +56,17 @@ class DiscussionRound(BaseModel):
     interaction: Literal[
         "free", "round-robin", "challenge", "response",
         "brainstorm", "vote", "debate",
+        "cross-examine", "steelman-then-attack",
     ] = Field(default="free", description="互动模式")
+    min_disagreements: int = Field(
+        default=0, description="本轮最少产生的分歧数（0=不限制）",
+    )
+    max_words_per_turn: int = Field(
+        default=0, description="每人每轮最大字数（0=不限制），防止独白",
+    )
+    require_direct_reply: bool = Field(
+        default=False, description="是否要求每人必须引用并回应至少一位他人的具体观点",
+    )
 
 
 class Discussion(BaseModel):
@@ -71,6 +93,18 @@ class Discussion(BaseModel):
     )
     output: EmployeeOutput | None = Field(
         default=None, description="自动保存配置（filename/dir），为 None 时不自动保存"
+    )
+    tension_seeds: list[str] = Field(
+        default_factory=list,
+        description="预设的争议点列表，注入到讨论中强制触发分歧",
+    )
+    action_output: bool = Field(
+        default=False,
+        description="讨论结束后是否自动生成 pipeline 可执行的行动计划",
+    )
+    post_pipeline: str = Field(
+        default="",
+        description="讨论结束后自动触发的 pipeline 名称",
     )
 
     @property
@@ -118,6 +152,22 @@ _INTERACTION_RULES: dict[str, str] = {
         "正方先陈述论点，反方逐一反驳。每方发言需引用具体事实和数据。"
         "发言格式：**【正方/反方】姓名**: 论点内容"
     ),
+    "cross-examine": (
+        "**本轮要求**：交叉盘问模式。每位参会者选择一位他人，"
+        "针对其上一轮的关键论点提出 3 个具体问题。问题必须是：\n"
+        "1）基于事实的挑战（'你说X，但数据显示Y'）；\n"
+        "2）逻辑推演（'如果按你的方案，那么Z怎么办？'）；\n"
+        "3）替代方案（'为什么不用W方案？'）。\n"
+        "被盘问者必须逐条回答，不可回避。\n"
+        "发言格式：**【盘问】XX → YY**: 问题内容"
+    ),
+    "steelman-then-attack": (
+        "**本轮要求**：先强化再攻击。每位参会者必须：\n"
+        "1）先用 2-3 句话尽可能强化另一位参会者的论点（steelman）；\n"
+        "2）然后再指出该论点即使在最强形式下仍然存在的弱点。\n"
+        "格式：**【强化】XX → YY 的观点**: 最强版本...\n"
+        "**【弱点】XX → YY 的观点**: 即使如此，仍有..."
+    ),
 }
 
 _1V1_RULES = [
@@ -143,6 +193,68 @@ _ROUND_TEMPLATES: dict[str, list[DiscussionRound]] = {
         DiscussionRound(name="质疑挑战", instruction="互相挑战观点", interaction="challenge"),
         DiscussionRound(name="回应辩护", instruction="回应质疑", interaction="response"),
         DiscussionRound(name="共识决议", instruction="达成共识，形成决议"),
+    ],
+    "deep-adversarial": [
+        DiscussionRound(
+            name="各抒己见",
+            instruction="每位参会者表明立场，给出核心论点和关键依据",
+            interaction="round-robin",
+            max_words_per_turn=300,
+        ),
+        DiscussionRound(
+            name="交叉盘问",
+            instruction="针对他人观点提出具体问题和挑战",
+            interaction="cross-examine",
+            require_direct_reply=True,
+            min_disagreements=2,
+        ),
+        DiscussionRound(
+            name="强化后攻击",
+            instruction="先尽可能强化对方论点，再找弱点",
+            interaction="steelman-then-attack",
+            require_direct_reply=True,
+        ),
+        DiscussionRound(
+            name="收敛方案",
+            instruction="基于前面的分歧，提出折中或创新的综合方案",
+            interaction="free",
+            max_words_per_turn=400,
+        ),
+        DiscussionRound(
+            name="决议与分工",
+            instruction="形成决议、分配任务、标记未解决分歧",
+            interaction="vote",
+        ),
+    ],
+    "discuss-then-execute": [
+        DiscussionRound(
+            name="问题定义",
+            instruction="主持人定义问题，各方从自身角度补充问题边界",
+            interaction="round-robin",
+            max_words_per_turn=200,
+        ),
+        DiscussionRound(
+            name="方案提出",
+            instruction="每人提出至少一个完整方案，包含具体实现步骤",
+            interaction="brainstorm",
+        ),
+        DiscussionRound(
+            name="方案对质",
+            instruction="对每个方案进行可行性挑战",
+            interaction="challenge",
+            require_direct_reply=True,
+            min_disagreements=1,
+        ),
+        DiscussionRound(
+            name="方案选择",
+            instruction="投票选择最终方案，标记需要妥协的部分",
+            interaction="vote",
+        ),
+        DiscussionRound(
+            name="任务拆解",
+            instruction="将方案拆解为具体任务，指定负责角色和依赖关系",
+            interaction="round-robin",
+        ),
     ],
 }
 
@@ -699,6 +811,87 @@ def _render_participant_prompt(
         parts.append("你必须回应上一轮中对你的质疑。如果没有人直接质疑你，也要回应他人的论点。")
     parts.append("")
 
+    # ── 对抗性约束 ──
+
+    if participant.stance:
+        parts.extend([
+            "## 你的立场",
+            "",
+            f"**预设立场**: {participant.stance}",
+            "你的发言必须体现这一立场倾向，即使其他参会者不同意。",
+            "",
+        ])
+
+    if participant.must_challenge:
+        names = ", ".join(participant.must_challenge)
+        parts.extend([
+            "## 必须质疑",
+            "",
+            f"你必须对 **{names}** 的观点提出至少一个实质性挑战。",
+            "不可以只说「我同意」或「补充一下」——你必须找到不同意的地方。",
+            "",
+        ])
+
+    if participant.max_agree_ratio < 1.0:
+        pct = int(participant.max_agree_ratio * 100)
+        parts.extend([
+            "## 分歧配额",
+            "",
+            f"对于他人提出的观点，你最多只能完全同意 {pct}%。",
+            "其余必须提出替代方案、补充条件或反对意见。",
+            "",
+        ])
+
+    # 争议种子注入（首轮）
+    if discussion.tension_seeds and is_first_round:
+        parts.extend(["## 需要讨论的争议点", ""])
+        for i, seed in enumerate(discussion.tension_seeds, 1):
+            parts.append(f"{i}. {seed}")
+        parts.extend([
+            "",
+            "你必须对上述至少一个争议点表明明确立场。",
+            "",
+        ])
+
+    # 反独白约束
+    if isinstance(round_info, DiscussionRound) and round_info.max_words_per_turn > 0:
+        parts.extend([
+            "## 字数限制",
+            "",
+            f"本轮发言不超过 **{round_info.max_words_per_turn}** 字。精练表达，不要堆砌长段落。",
+            "",
+        ])
+
+    if isinstance(round_info, DiscussionRound) and round_info.require_direct_reply:
+        parts.extend([
+            "## 直接回应要求",
+            "",
+            "你必须引用（用 > 引用标记）至少一位参会者上一轮发言中的具体句子，",
+            "然后表明同意、反对或修改，不可笼统评论。",
+            "",
+        ])
+
+    if isinstance(round_info, DiscussionRound) and round_info.min_disagreements > 0:
+        parts.extend([
+            "## 最低分歧要求",
+            "",
+            f"本轮你必须至少提出 **{round_info.min_disagreements}** 个实质性分歧点。",
+            "",
+        ])
+
+    # ── 去重约束（非首轮）──
+
+    if not is_first_round:
+        parts.extend([
+            "## 发言约束",
+            "",
+            "- **禁止重复**: 不要重述你在前几轮已经说过的观点。如果立场没变，用一句话确认即可。",
+            "- **增量贡献**: 每次发言必须包含至少一个新信息、新论点或新方案。",
+            "- **引用回应**: 回应他人时，必须引用其具体的原文片段（用 > 引用标记）。",
+            "- **标记状态**: 对每个讨论点标注 [已共识] [有分歧] [待决]。",
+            "",
+        ])
+
     return "\n".join(parts)
 
 
@@ -740,6 +933,44 @@ def _render_synthesis_prompt(
     ])
 
     parts.append(_OUTPUT_TEMPLATES[discussion.output_format])
+
+    # ActionPlan 输出
+    if discussion.action_output:
+        parts.extend([
+            "",
+            "---",
+            "",
+            "## 行动计划（结构化 JSON）",
+            "",
+            "在会议纪要之后，你还 **必须** 输出一份结构化的行动计划（JSON 格式）：",
+            "",
+            "```json",
+            "{",
+            '  "decisions": ["决策1", "决策2"],',
+            '  "unresolved": ["未解决的分歧1"],',
+            '  "actions": [',
+            "    {",
+            '      "id": "A1",',
+            '      "description": "具体任务描述",',
+            '      "assignee_role": "executor",',
+            '      "assignee_employee": "员工名称（可选）",',
+            '      "depends_on": [],',
+            '      "priority": "P0",',
+            '      "verification": "怎样算完成",',
+            '      "phase": "implement"',
+            "    }",
+            "  ],",
+            '  "review_criteria": ["验收标准1", "验收标准2"]',
+            "}",
+            "```",
+            "",
+            "**重要**：",
+            "- actions 中每个任务必须可独立执行，不可笼统",
+            "- depends_on 用于标记任务间依赖（如类型变更必须先于组件开发）",
+            "- phase 用于区分 research / implement / review / deploy 阶段",
+            "- 每个 action 必须指定 verification（验证方式）",
+            "",
+        ])
 
     # 自动保存
     if discussion.output is not None and discussion.output.filename:

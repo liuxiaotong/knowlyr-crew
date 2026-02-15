@@ -27,7 +27,7 @@ from crew.models import ParallelGroup, PipelineResult, PipelineStep, StepResult
 if TYPE_CHECKING:
     from crew.context_detector import ProjectInfo
     from crew.id_client import AgentIdentity
-    from crew.models import DiscoveryResult
+    from crew.models import DiscoveryResult, DiscussionActionPlan
 
 
 # ── Pipeline 定义 ──
@@ -879,3 +879,102 @@ def discover_pipelines(project_dir: Path | None = None) -> dict[str, Path]:
             pipelines[f.stem] = f
 
     return pipelines
+
+
+# ── ActionPlan → Pipeline 转换 ──
+
+
+def pipeline_from_action_plan(
+    action_plan: "DiscussionActionPlan",
+    employee_mapping: dict[str, str] | None = None,
+) -> Pipeline:
+    """从讨论行动计划自动生成 Pipeline.
+
+    策略:
+    1. 按 depends_on 拓扑排序 actions
+    2. 无依赖关系的 actions 合并为 ParallelGroup
+    3. 自动在最后追加 review 步骤（如有 review_criteria）
+
+    Args:
+        action_plan: 讨论产出的行动计划
+        employee_mapping: 角色到员工的映射（如 {"executor": "fullstack-engineer"}）
+    """
+    from crew.models import DiscussionActionPlan  # noqa: F811
+
+    employee_mapping = employee_mapping or {}
+
+    actions = {a.id: a for a in action_plan.actions}
+    if not actions:
+        return Pipeline(
+            name=f"plan-{action_plan.discussion_name}",
+            description=f"从讨论「{action_plan.topic}」自动生成的空 Pipeline",
+            steps=[],
+        )
+
+    # 拓扑排序
+    in_degree: dict[str, int] = {aid: 0 for aid in actions}
+    dependents: dict[str, list[str]] = {aid: [] for aid in actions}
+    for aid, action in actions.items():
+        for dep in action.depends_on:
+            if dep in actions:
+                in_degree[aid] += 1
+                dependents[dep].append(aid)
+
+    # BFS 分层
+    layers: list[list[str]] = []
+    queue = [aid for aid, deg in in_degree.items() if deg == 0]
+    while queue:
+        layers.append(sorted(queue))
+        next_queue: list[str] = []
+        for aid in queue:
+            for dep_id in dependents[aid]:
+                in_degree[dep_id] -= 1
+                if in_degree[dep_id] == 0:
+                    next_queue.append(dep_id)
+        queue = next_queue
+
+    # 生成 Pipeline steps
+    steps: list[PipelineStep | ParallelGroup] = []
+    for layer in layers:
+        layer_steps: list[PipelineStep] = []
+        for aid in layer:
+            action = actions[aid]
+            employee = (
+                action.assignee_employee
+                or employee_mapping.get(action.assignee_role, "")
+                or action.assignee_role
+            )
+            step = PipelineStep(
+                employee=employee,
+                id=aid,
+                args={
+                    "task": action.description,
+                    "priority": action.priority,
+                    "verification": action.verification,
+                },
+            )
+            layer_steps.append(step)
+
+        if len(layer_steps) == 1:
+            steps.append(layer_steps[0])
+        else:
+            steps.append(ParallelGroup(parallel=layer_steps))
+
+    # 追加 review 步骤
+    if action_plan.review_criteria:
+        criteria_text = "; ".join(action_plan.review_criteria)
+        review_employee = employee_mapping.get("reviewer", "code-reviewer")
+        steps.append(PipelineStep(
+            employee=review_employee,
+            id="review",
+            args={
+                "target": "{prev}",
+                "criteria": criteria_text,
+            },
+        ))
+
+    return Pipeline(
+        name=f"plan-{action_plan.discussion_name}",
+        description=f"从讨论「{action_plan.topic}」自动生成",
+        steps=steps,
+    )

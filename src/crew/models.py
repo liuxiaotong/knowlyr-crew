@@ -128,6 +128,37 @@ class DiscussionPlan(BaseModel):
     )
 
 
+# ── ActionPlan 数据模型（讨论→执行衔接）──
+
+
+class ActionItem(BaseModel):
+    """讨论产出的行动项."""
+
+    id: str = Field(description="行动项 ID，如 A1, A2")
+    description: str = Field(description="行动描述")
+    assignee_role: str = Field(description="建议负责的角色（executor/reviewer/monitor）")
+    assignee_employee: str = Field(default="", description="建议负责的员工名称")
+    depends_on: list[str] = Field(default_factory=list, description="依赖的行动项 ID")
+    priority: Literal["P0", "P1", "P2", "P3"] = Field(default="P2")
+    verification: str = Field(default="", description="验证标准")
+    phase: Literal["research", "implement", "review", "deploy"] = Field(
+        default="implement", description="执行阶段"
+    )
+
+
+class DiscussionActionPlan(BaseModel):
+    """讨论产出的可执行行动计划."""
+
+    discussion_name: str = Field(default="", description="讨论会名称")
+    topic: str = Field(default="", description="议题")
+    decisions: list[str] = Field(default_factory=list, description="达成的共识决策")
+    unresolved: list[str] = Field(default_factory=list, description="未解决分歧")
+    actions: list[ActionItem] = Field(default_factory=list, description="行动项列表")
+    review_criteria: list[str] = Field(
+        default_factory=list, description="验收标准（用于后续 review pipeline）"
+    )
+
+
 class DiscoveryResult(BaseModel):
     """发现结果 — 包含发现的员工和冲突信息."""
 
