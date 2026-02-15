@@ -154,7 +154,46 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["employee_name", "task"],
         },
     },
+    "query_stats": {
+        "name": "query_stats",
+        "description": "查询公司实时业务数据。返回用户增长、消息活跃、AI团队状态、财务等数据。问业务问题前先调这个。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "send_message": {
+        "name": "send_message",
+        "description": "给用户或AI同事发一条消息。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recipient_id": {
+                    "type": "integer",
+                    "description": "收件人用户ID。Kai=1",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "消息内容",
+                },
+            },
+            "required": ["recipient_id", "content"],
+        },
+    },
+    "list_agents": {
+        "name": "list_agents",
+        "description": "查看所有AI同事的列表和当前状态。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
+
+# 需要 agent loop 的工具（区别于 sandbox 工具）
+AGENT_TOOLS = {"query_stats", "send_message", "list_agents", "delegate"}
 
 
 def employee_tools_to_schemas(tools: list[str]) -> list[dict[str, Any]]:

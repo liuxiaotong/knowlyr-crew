@@ -70,6 +70,11 @@ def create_webhook_app(
             feishu_config.app_id, feishu_config.app_secret,
         )
         ctx.feishu_dedup = EventDeduplicator()
+
+        from crew.feishu_memory import FeishuChatStore
+
+        chat_store_dir = (project_dir or Path(".")) / ".crew" / "feishu-chats"
+        ctx.feishu_chat_store = FeishuChatStore(chat_store_dir)
         logger.info("飞书 Bot 已启用 (app_id=%s)", feishu_config.app_id)
 
     # 初始化 cron 调度器
@@ -193,6 +198,7 @@ class _AppContext:
         self.feishu_config = None  # FeishuConfig, set by create_webhook_app
         self.feishu_token_mgr = None  # FeishuTokenManager, set by create_webhook_app
         self.feishu_dedup = None  # EventDeduplicator, set by create_webhook_app
+        self.feishu_chat_store = None  # FeishuChatStore, set by create_webhook_app
 
 
 def _make_handler(ctx: _AppContext, handler):
@@ -570,13 +576,50 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         )
 
         # 执行员工 — 飞书实时聊天
-        chat_context = (
-            "这是飞书实时聊天。你现在没有任何业务数据。"
-            "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
-            "这些信息只有每天定时简报里才有，现在你手上没有。"
-            "Kai 问这些就说「这个我得看看今天的数据才能说」。"
-            "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
-        )
+        has_tools = any(
+            t in ("query_stats", "send_message", "list_agents", "delegate")
+            for t in (emp.tools or [])
+        ) if emp else False
+
+        if has_tools:
+            chat_context = (
+                "这是飞书实时聊天。你有工具可以用。"
+                "Kai 问业务数据相关的问题时，先用 query_stats 查数据再回答，不要猜。"
+                "拿到数据后用你自己的口语风格说，不要原样搬数据。"
+            )
+        else:
+            chat_context = (
+                "这是飞书实时聊天。你现在没有任何业务数据。"
+                "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
+                "Kai 问这些就说「这个我得看看今天的数据才能说」。"
+                "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
+            )
+
+        # 加载对话历史
+        message_history = None
+        if ctx.feishu_chat_store:
+            history_entries = ctx.feishu_chat_store.get_recent(
+                msg_event.chat_id, limit=20,
+            )
+            if history_entries:
+                message_history = [
+                    {"role": e["role"], "content": e["content"]}
+                    for e in history_entries
+                ]
+
+        # 如果没有工具且没有 message_history 格式的支持，回退到 prompt 注入
+        if not has_tools and message_history:
+            history_text = ctx.feishu_chat_store.format_for_prompt(
+                msg_event.chat_id, limit=20,
+            )
+            if history_text:
+                chat_context += (
+                    "\n\n## 最近对话记录\n\n"
+                    "以下是你和 Kai 最近的对话，用来保持上下文连贯。\n\n"
+                    + history_text
+                )
+            message_history = None  # 无工具时不走 message_history 参数
+
         args = {"task": chat_context}
         if emp and emp.args:
             first_required = next((a for a in emp.args if a.required), None)
@@ -587,7 +630,29 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         result = await _execute_employee(
             ctx, employee_name, args, model=None,
             user_message=task_text,
+            message_history=message_history,
         )
+
+        # 记录对话历史
+        output_text = result.get("output", "") if isinstance(result, dict) else str(result)
+        if ctx.feishu_chat_store:
+            ctx.feishu_chat_store.append(msg_event.chat_id, "user", task_text)
+            ctx.feishu_chat_store.append(msg_event.chat_id, "assistant", output_text)
+
+        # 沉淀长期记忆（后台，不阻塞回复）
+        if ctx.project_dir:
+            try:
+                from crew.feishu_memory import capture_feishu_memory
+
+                capture_feishu_memory(
+                    project_dir=ctx.project_dir,
+                    employee_name=employee_name,
+                    chat_id=msg_event.chat_id,
+                    user_text=task_text,
+                    assistant_text=output_text,
+                )
+            except Exception as e:
+                logger.debug("飞书记忆沉淀失败: %s", e)
 
         # 发送结果卡片
         task_name = f"{emp_display} — 飞书任务"
@@ -777,23 +842,82 @@ async def _delegate_employee(
         return f"委派执行失败: {e}"
 
 
-_MAX_DELEGATION_ROUNDS = 10
+_MAX_TOOL_ROUNDS = 10
 
 
-async def _execute_employee_with_delegation(
+# ── Tool handlers（调用 knowlyr-id API）──
+
+import os as _os
+
+_ID_API_BASE = _os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
+_ID_API_TOKEN = _os.environ.get("AGENT_API_TOKEN", "")
+
+
+async def _tool_query_stats(args: dict, *, agent_id: int | None = None) -> str:
+    """调用 knowlyr-id /api/stats/briefing."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/stats/briefing",
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+async def _tool_send_message(args: dict, *, agent_id: int | None = None) -> str:
+    """调用 knowlyr-id /api/messages/agent-send."""
+    import httpx
+
+    sender = agent_id or args.get("sender_id", 0)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{_ID_API_BASE}/api/messages/agent-send",
+            json={
+                "sender_id": sender,
+                "recipient_id": args.get("recipient_id"),
+                "content": args.get("content", ""),
+            },
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+async def _tool_list_agents(args: dict, *, agent_id: int | None = None) -> str:
+    """调用 knowlyr-id /api/agents."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/agents",
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+_TOOL_HANDLERS: dict[str, Any] = {
+    "query_stats": _tool_query_stats,
+    "send_message": _tool_send_message,
+    "list_agents": _tool_list_agents,
+}
+
+
+async def _execute_employee_with_tools(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
     *,
     agent_id: int | None = None,
     model: str | None = None,
+    user_message: str | None = None,
+    message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """执行带委派能力的员工（agent loop with delegate tool）."""
+    """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
     from crew.executor import aexecute_with_tools
     from crew.providers import Provider, detect_provider
-    from crew.tool_schema import employee_tools_to_schemas, is_finish_tool
+    from crew.tool_schema import AGENT_TOOLS, employee_tools_to_schemas, is_finish_tool
 
     discovery = discover_employees(project_dir=ctx.project_dir)
     match = discovery.get(name)
@@ -812,33 +936,44 @@ async def _execute_employee_with_delegation(
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
 
-    # 追加可委派的同事名单
-    roster_lines: list[str] = []
-    for emp_name, emp in discovery.employees.items():
-        if emp_name != name:
-            label = emp.character_name or emp.effective_display_name
-            roster_lines.append(f"- {emp_name}（{label}）：{emp.description}")
-    if roster_lines:
-        prompt += "\n\n---\n\n## 可委派的同事\n\n使用 delegate 工具调用他们。\n\n" + "\n".join(
-            roster_lines
-        )
+    # 如果有 delegate 工具，追加同事名单
+    if "delegate" in (match.tools or []):
+        roster_lines: list[str] = []
+        for emp_name, emp in discovery.employees.items():
+            if emp_name != name:
+                label = emp.character_name or emp.effective_display_name
+                roster_lines.append(f"- {emp_name}（{label}）：{emp.description}")
+        if roster_lines:
+            prompt += "\n\n---\n\n## 可委派的同事\n\n使用 delegate 工具调用他们。\n\n" + "\n".join(
+                roster_lines
+            )
 
-    # 仅暴露 delegate + submit
-    tool_schemas = employee_tools_to_schemas(["delegate"])
+    # 从 employee 的 tools 列表中筛选 agent tools
+    agent_tool_names = [t for t in (match.tools or []) if t in AGENT_TOOLS]
+    tool_schemas = employee_tools_to_schemas(agent_tool_names)
 
     use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
     is_anthropic = provider == Provider.ANTHROPIC
 
-    task_text = args.get("task", "请开始执行上述任务。")
-    messages: list[dict[str, Any]] = [{"role": "user", "content": task_text}]
+    # 构建消息列表（含历史对话）
+    messages: list[dict[str, Any]] = []
+    if message_history:
+        for h in message_history:
+            messages.append({"role": h["role"], "content": h["content"]})
+
+    task_text = user_message or args.get("task", "请开始执行上述任务。")
+    messages.append({"role": "user", "content": task_text})
 
     total_input = 0
     total_output = 0
     final_content = ""
     rounds = 0
 
-    for rounds in range(_MAX_DELEGATION_ROUNDS):  # noqa: B007
+    # 解析 agent_id（从 match 的 agent_id 属性，或参数）
+    effective_agent_id = agent_id or getattr(match, "agent_id", None)
+
+    for rounds in range(_MAX_TOOL_ROUNDS):  # noqa: B007
         result = await aexecute_with_tools(
             system_prompt=prompt,
             messages=messages,
@@ -854,9 +989,8 @@ async def _execute_employee_with_delegation(
             final_content = result.content
             break
 
-        # ── 构建 assistant 消息 + 处理 tool calls ──
+        # ── 处理 tool calls ──
         if is_anthropic:
-            # Anthropic: content 数组包含 text + tool_use blocks
             assistant_content: list[dict[str, Any]] = []
             if result.content:
                 assistant_content.append({"type": "text", "text": result.content})
@@ -869,11 +1003,14 @@ async def _execute_employee_with_delegation(
                 })
             messages.append({"role": "assistant", "content": assistant_content})
 
-            # 处理每个 tool call → tool_result blocks
             tool_results: list[dict[str, Any]] = []
             finished = False
             for tc in result.tool_calls:
-                if is_finish_tool(tc.name):
+                tool_output = await _handle_tool_call(
+                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                )
+                if tool_output is None:
+                    # finish tool
                     final_content = tc.arguments.get("result", result.content)
                     tool_results.append({
                         "type": "tool_result",
@@ -881,30 +1018,16 @@ async def _execute_employee_with_delegation(
                         "content": final_content,
                     })
                     finished = True
-                elif tc.name == "delegate":
-                    logger.info("委派: %s → %s", name, tc.arguments.get("employee_name"))
-                    delegate_result = await _delegate_employee(
-                        ctx,
-                        tc.arguments.get("employee_name", ""),
-                        tc.arguments.get("task", ""),
-                    )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": delegate_result[:10000],
-                    })
                 else:
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tc.id,
-                        "content": f"工具 '{tc.name}' 不可用，请使用 delegate 或 submit。",
-                        "is_error": True,
+                        "content": tool_output[:10000],
                     })
             messages.append({"role": "user", "content": tool_results})
             if finished:
                 break
         else:
-            # OpenAI-compatible: assistant 有 tool_calls 数组，回复用 role=tool
             assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": result.content or "",
@@ -926,7 +1049,10 @@ async def _execute_employee_with_delegation(
 
             finished = False
             for tc in result.tool_calls:
-                if is_finish_tool(tc.name):
+                tool_output = await _handle_tool_call(
+                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                )
+                if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
                     messages.append({
                         "role": "tool",
@@ -934,28 +1060,16 @@ async def _execute_employee_with_delegation(
                         "content": final_content,
                     })
                     finished = True
-                elif tc.name == "delegate":
-                    logger.info("委派: %s → %s", name, tc.arguments.get("employee_name"))
-                    delegate_result = await _delegate_employee(
-                        ctx,
-                        tc.arguments.get("employee_name", ""),
-                        tc.arguments.get("task", ""),
-                    )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": delegate_result[:10000],
-                    })
                 else:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": f"工具 '{tc.name}' 不可用，请使用 delegate 或 submit。",
+                        "content": tool_output[:10000],
                     })
             if finished:
                 break
     else:
-        final_content = result.content or "达到最大委派轮次限制。"
+        final_content = result.content or "达到最大工具调用轮次限制。"
 
     return {
         "employee": name,
@@ -964,8 +1078,41 @@ async def _execute_employee_with_delegation(
         "model": use_model,
         "input_tokens": total_input,
         "output_tokens": total_output,
-        "delegations": rounds,
+        "tool_rounds": rounds,
     }
+
+
+async def _handle_tool_call(
+    ctx: _AppContext,
+    employee_name: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    agent_id: int | None,
+) -> str | None:
+    """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
+    from crew.tool_schema import is_finish_tool
+
+    if is_finish_tool(tool_name):
+        return None
+
+    if tool_name == "delegate":
+        logger.info("委派: %s → %s", employee_name, arguments.get("employee_name"))
+        return await _delegate_employee(
+            ctx,
+            arguments.get("employee_name", ""),
+            arguments.get("task", ""),
+        )
+
+    handler = _TOOL_HANDLERS.get(tool_name)
+    if handler:
+        try:
+            logger.info("工具调用: %s.%s(%s)", employee_name, tool_name, list(arguments.keys()))
+            return await handler(arguments, agent_id=agent_id)
+        except Exception as e:
+            logger.warning("工具 %s 执行失败: %s", tool_name, e)
+            return f"工具执行失败: {e}"
+
+    return f"工具 '{tool_name}' 不可用。"
 
 
 async def _execute_employee(
@@ -975,6 +1122,7 @@ async def _execute_employee(
     agent_id: int | None = None,
     model: str | None = None,
     user_message: str | None = None,
+    message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
     from crew.discovery import discover_employees
@@ -986,10 +1134,14 @@ async def _execute_employee(
     if match is None:
         raise EmployeeNotFoundError(name)
 
-    # 如果员工有 delegate 工具，使用带委派的 agent loop
-    if "delegate" in (match.tools or []):
-        return await _execute_employee_with_delegation(
+    # 如果员工有 agent tools，使用带工具的 agent loop
+    from crew.tool_schema import AGENT_TOOLS
+
+    if any(t in AGENT_TOOLS for t in (match.tools or [])):
+        return await _execute_employee_with_tools(
             ctx, name, args, agent_id=agent_id, model=model,
+            user_message=user_message,
+            message_history=message_history,
         )
 
     # 获取 agent 身份
