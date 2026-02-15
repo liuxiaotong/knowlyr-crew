@@ -408,8 +408,8 @@ async def create_calendar_event(
     token = await token_mgr.get_token()
     body: dict[str, Any] = {
         "summary": summary[:256],
-        "start": {"timestamp": str(start_timestamp)},
-        "end": {"timestamp": str(end_timestamp)},
+        "start_time": {"timestamp": str(start_timestamp)},
+        "end_time": {"timestamp": str(end_timestamp)},
     }
     if description:
         body["description"] = description[:2048]
