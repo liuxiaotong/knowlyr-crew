@@ -3,6 +3,8 @@ name: Deploy Engine
 on:
   push:
     branches: [main]
+  repository_dispatch:
+    types: [knowlyr-agent-released]
 
 jobs:
   deploy:
@@ -19,7 +21,18 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             /opt/knowlyr-crew/venv/bin/pip install --force-reinstall --no-deps \
-              "knowlyr-crew[webhook,execute,openai,id] @ git+https://github.com/liuxiaotong/knowlyr-crew.git" \
+              "knowlyr-crew[webhook,execute,openai,id,trajectory] @ git+https://github.com/liuxiaotong/knowlyr-crew.git" \
+            && systemctl restart knowlyr-crew \
+            && sleep 2 \
+            && curl -sf http://localhost:8765/health
+          '
+
+      - name: Upgrade trajectory packages
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            /opt/knowlyr-crew/venv/bin/pip install --upgrade \
+              knowlyr-core knowlyr-sandbox knowlyr-recorder knowlyr-reward knowlyr-hub \
             && systemctl restart knowlyr-crew \
             && sleep 2 \
             && curl -sf http://localhost:8765/health

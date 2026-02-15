@@ -62,8 +62,15 @@ sync_id() {
 deploy_engine() {
     echo "=== 更新引擎 ==="
     ssh "$SERVER" "$VENV/bin/pip install --force-reinstall --no-deps \
-        'knowlyr-crew[webhook,execute,openai,id] @ $ENGINE_REPO'"
+        'knowlyr-crew[webhook,execute,openai,id,trajectory] @ $ENGINE_REPO'"
     echo "    引擎已更新"
+}
+
+upgrade_trajectory() {
+    echo "=== 更新轨迹组件 ==="
+    ssh "$SERVER" "$VENV/bin/pip install --upgrade \
+        knowlyr-core knowlyr-sandbox knowlyr-recorder knowlyr-reward knowlyr-hub"
+    echo "    轨迹组件已更新"
 }
 
 restart_service() {
@@ -99,14 +106,19 @@ case "$ACTION" in
     id-sync)
         sync_id
         ;;
+    trajectory)
+        upgrade_trajectory
+        restart_service
+        ;;
     all)
         deploy_engine
+        upgrade_trajectory
         sync_data
         restart_service
         sync_id
         ;;
     *)
-        echo "用法: bash deploy/deploy.sh [sync|engine|restart|id-sync|all]"
+        echo "用法: bash deploy/deploy.sh [sync|engine|restart|id-sync|trajectory|all]"
         exit 1
         ;;
 esac
