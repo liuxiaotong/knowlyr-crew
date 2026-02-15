@@ -271,6 +271,43 @@ def resolve_employee_from_mention(
     return None, text
 
 
+# ── 图片下载 ──
+
+
+async def download_feishu_image(
+    token_manager: FeishuTokenManager,
+    image_key: str,
+) -> tuple[bytes, str]:
+    """下载飞书图片，返回 (image_bytes, media_type).
+
+    使用 GET /im/v1/images/{image_key} 接口。
+    """
+    import httpx
+
+    token = await token_manager.get_token()
+    url = f"{FEISHU_API_BASE}/im/v1/images/{image_key}"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+
+    content_type = resp.headers.get("content-type", "image/png")
+    # 飞书通常返回 image/png 或 image/jpeg
+    if "jpeg" in content_type or "jpg" in content_type:
+        media_type = "image/jpeg"
+    elif "gif" in content_type:
+        media_type = "image/gif"
+    elif "webp" in content_type:
+        media_type = "image/webp"
+    else:
+        media_type = "image/png"
+
+    return resp.content, media_type
+
+
 # ── 消息发送 ──
 
 

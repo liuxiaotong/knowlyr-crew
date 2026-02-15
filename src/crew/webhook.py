@@ -2447,7 +2447,7 @@ async def _execute_employee_with_tools(
     *,
     agent_id: int | None = None,
     model: str | None = None,
-    user_message: str | None = None,
+    user_message: "str | list[dict[str, Any]] | None" = None,
     message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
@@ -2677,7 +2677,7 @@ async def _execute_employee(
     args: dict[str, str],
     agent_id: int | None = None,
     model: str | None = None,
-    user_message: str | None = None,
+    user_message: "str | list[dict[str, Any]] | None" = None,
     message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
