@@ -265,12 +265,51 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["name"],
         },
     },
+    "read_notes": {
+        "name": "read_notes",
+        "description": "查看之前保存的备忘和笔记。可按关键词筛选。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "搜索关键词（可选）",
+                    "default": "",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回数量上限",
+                    "default": 10,
+                },
+            },
+            "required": [],
+        },
+    },
+    "read_messages": {
+        "name": "read_messages",
+        "description": "查看 Kai 的未读消息。返回未读数量和每个发件人的最新消息预览。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "get_system_health": {
+        "name": "get_system_health",
+        "description": "查看服务器健康状态（磁盘、内存、CPU、服务状态、错误日志）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
 AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "web_search", "create_note", "lookup_user", "query_agent_work",
+    "read_notes", "read_messages", "get_system_health",
 }
 
 

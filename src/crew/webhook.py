@@ -575,14 +575,18 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             return
 
         # 发送"处理中"提示
-        emp = discovery.get(employee_name)
-        emp_display = ""
-        if emp:
-            emp_display = emp.character_name or emp.effective_display_name
+        import random as _random
+
+        _THINKING_MSGS = [
+            "让我看看...",
+            "稍等，我查一下",
+            "好的，马上",
+            "收到，稍等",
+        ]
         await send_feishu_text(
             ctx.feishu_token_mgr,
             msg_event.chat_id,
-            f"{emp_display} 收到，稍等...",
+            _random.choice(_THINKING_MSGS),
         )
 
         # 执行员工 — 飞书实时聊天
@@ -1027,6 +1031,49 @@ async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx
         return resp.text
 
 
+async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """列出最近笔记，可选按关键词过滤."""
+    keyword = args.get("keyword", "")
+    limit = min(args.get("limit", 10), 20)
+
+    notes_dir = (ctx.project_dir if ctx and ctx.project_dir else Path(".")) / ".crew" / "notes"
+    if not notes_dir.exists():
+        return "暂无笔记"
+
+    files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+    results = []
+    for f in files:
+        if len(results) >= limit:
+            break
+        content = f.read_text(encoding="utf-8")
+        if keyword and keyword.lower() not in content.lower():
+            continue
+        results.append(f"【{f.stem}】\n{content[:200]}")
+
+    return "\n---\n".join(results) if results else "没有匹配的笔记"
+
+
+async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """查 Kai 的未读消息概要."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/stats/unread",
+            params={"user_id": 1},
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
+async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+    """查服务器健康状态."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_ID_API_BASE}/api/stats/system-health",
+            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+        )
+        return resp.text
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
@@ -1035,6 +1082,9 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "create_note": _tool_create_note,
     "lookup_user": _tool_lookup_user,
     "query_agent_work": _tool_query_agent_work,
+    "read_notes": _tool_read_notes,
+    "read_messages": _tool_read_messages,
+    "get_system_health": _tool_get_system_health,
 }
 
 
