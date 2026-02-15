@@ -826,6 +826,9 @@ def _openai_execute_with_tools(
         "tools": openai_tools,
         "max_tokens": max_tokens,
     }
+    # Kimi K2.5 默认开启 thinking，但 tool call 场景与 thinking 不兼容，关闭之
+    if model.lower().startswith("kimi-"):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     resp = client.chat.completions.create(**kwargs)
     choice = resp.choices[0] if resp.choices else None
@@ -890,6 +893,9 @@ async def _openai_aexecute_with_tools(
         "tools": openai_tools,
         "max_tokens": max_tokens,
     }
+    # Kimi K2.5 默认开启 thinking，但 tool call 场景与 thinking 不兼容，关闭之
+    if model.lower().startswith("kimi-"):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     resp = await client.chat.completions.create(**kwargs)
     choice = resp.choices[0] if resp.choices else None

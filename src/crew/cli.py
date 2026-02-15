@@ -898,8 +898,8 @@ def _run_employee_job(
     traj_collector = None
     if execute_mode:
         effective_model = (
-            (agent_identity.model if agent_identity else None)
-            or emp.model
+            emp.model
+            or (agent_identity.model if agent_identity else None)
             or "claude-sonnet-4-20250514"
         )
 
