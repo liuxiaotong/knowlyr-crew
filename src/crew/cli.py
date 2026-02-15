@@ -903,8 +903,8 @@ def _run_employee_job(
             or "claude-sonnet-4-20250514"
         )
 
-        # 解析 API key: agent_identity 优先，否则从环境变量自动检测
-        exec_api_key = agent_identity.api_key if agent_identity else None
+        # 解析 API key: employee.api_key > agent_identity > 环境变量
+        exec_api_key = emp.api_key or (agent_identity.api_key if agent_identity else None)
         if not exec_api_key:
             from crew.providers import detect_provider, resolve_api_key
             try:

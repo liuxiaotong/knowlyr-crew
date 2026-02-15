@@ -1344,7 +1344,7 @@ async def _execute_employee_with_tools(
             system_prompt=prompt,
             messages=messages,
             tools=tool_schemas,
-            api_key=None,
+            api_key=match.api_key or None,
             model=use_model,
             max_tokens=4096,
         )

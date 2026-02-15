@@ -29,6 +29,7 @@ _MODEL_PREFIXES: list[tuple[str, Provider]] = [
     ("chatgpt-", Provider.OPENAI),
     ("deepseek-", Provider.DEEPSEEK),
     ("moonshot-", Provider.MOONSHOT),
+    ("kimi-", Provider.MOONSHOT),
     ("gemini-", Provider.GEMINI),
     ("glm-", Provider.ZHIPU),
     ("qwen-", Provider.QWEN),
