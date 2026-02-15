@@ -59,6 +59,9 @@ class Employee(BaseModel):
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     api_key: str = Field(default="", description="专属 API key（留空则使用环境变量）")
     base_url: str = Field(default="", description="专属 API base URL（留空则按 provider 自动推断）")
+    fallback_model: str = Field(default="", description="备用模型（主模型失败时自动切换）")
+    fallback_api_key: str = Field(default="", description="备用模型的 API key")
+    fallback_base_url: str = Field(default="", description="备用模型的 base URL")
     agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
     avatar_prompt: str = Field(default="", description="头像生成 prompt（留空则自动推断）")
     research_instructions: str = Field(

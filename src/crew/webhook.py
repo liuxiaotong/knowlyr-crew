@@ -1258,6 +1258,523 @@ async def _tool_create_feishu_event(
         return f"创建失败: {result.get('error', '未知错误')}"
 
 
+# ── 飞书文档工具 ──
+
+
+async def _tool_search_feishu_docs(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """搜索飞书云文档."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法搜索文档。"
+
+    query = (args.get("query") or "").strip()
+    count = min(args.get("count", 10), 20)
+    if not query:
+        return "搜索关键词不能为空。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/suite/docs-api/search/object",
+            json={"query": query, "count": count, "offset": 0},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    data = resp.json()
+    if not data.get("data", {}).get("docs_entities"):
+        return "没有找到匹配的文档。"
+
+    lines = []
+    for doc in data["data"]["docs_entities"][:count]:
+        title = doc.get("title", "无标题")
+        url = doc.get("url", "")
+        doc_type = doc.get("docs_type", "")
+        lines.append(f"[{doc_type}] {title}\n{url}")
+    return "\n---\n".join(lines)
+
+
+async def _tool_read_feishu_doc(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取飞书文档内容."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法读取文档。"
+
+    doc_id = (args.get("document_id") or "").strip()
+    if not doc_id:
+        return "缺少 document_id。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    data = resp.json()
+    content = data.get("data", {}).get("content", "")
+    if not content:
+        return f"文档 {doc_id} 内容为空或无权限访问。"
+    if len(content) > 9500:
+        return content[:9500] + f"\n\n[内容已截断，共 {len(content)} 字符]"
+    return content
+
+
+async def _tool_create_feishu_doc(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在飞书创建新文档."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法创建文档。"
+
+    title = (args.get("title") or "").strip()
+    content = args.get("content", "")
+    folder_token = args.get("folder_token", "")
+    if not title:
+        return "缺少文档标题。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    create_body: dict = {"title": title}
+    if folder_token:
+        create_body["folder_token"] = folder_token
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/docx/v1/documents",
+            json=create_body,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        data = resp.json()
+        doc_id = data.get("data", {}).get("document", {}).get("document_id", "")
+        if not doc_id:
+            return f"创建文档失败: {data.get('msg', '未知错误')}"
+
+        if content:
+            await client.post(
+                f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
+                json={
+                    "children": [{
+                        "block_type": 2,
+                        "text": {"elements": [{"text_run": {"content": content}}]},
+                    }],
+                },
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            )
+
+    url = f"https://feishu.cn/docx/{doc_id}"
+    return f"文档已创建：{title}\n{url}"
+
+
+async def _tool_send_feishu_group(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """发消息到飞书群."""
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法发群消息。"
+
+    chat_id = (args.get("chat_id") or "").strip()
+    text = (args.get("text") or "").strip()
+    if not chat_id or not text:
+        return "需要 chat_id 和 text。"
+
+    from crew.feishu import send_feishu_text
+    result = await send_feishu_text(ctx.feishu_token_mgr, chat_id, text)
+    if result.get("ok"):
+        return f"消息已发送到群 {chat_id}。"
+    return f"发送失败: {result.get('error', '未知错误')}"
+
+
+# ── GitHub 工具 ──
+
+
+async def _tool_github_prs(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看 GitHub 仓库 PR 列表."""
+    import httpx
+
+    if not _GITHUB_TOKEN:
+        return "GitHub 未配置。请设置 GITHUB_TOKEN 环境变量。"
+
+    repo = (args.get("repo") or "").strip()
+    state = args.get("state", "open")
+    limit = min(args.get("limit", 10), 30)
+    if not repo or "/" not in repo:
+        return "repo 格式错误，应为 owner/repo。"
+
+    headers = {"Authorization": f"token {_GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_GITHUB_API_BASE}/repos/{repo}/pulls",
+            params={"state": state, "per_page": limit},
+            headers=headers,
+        )
+    if resp.status_code != 200:
+        return f"GitHub API 错误 {resp.status_code}: {resp.text[:500]}"
+
+    prs = resp.json()
+    if not prs:
+        return f"{repo} 没有 {state} 状态的 PR。"
+
+    lines = []
+    for pr in prs[:limit]:
+        labels = ", ".join(l["name"] for l in pr.get("labels", []))
+        label_str = f" [{labels}]" if labels else ""
+        lines.append(f"#{pr['number']} {pr['title']}{label_str} — {pr['user']['login']} ({pr['state']})\n{pr['html_url']}")
+    return "\n---\n".join(lines)
+
+
+async def _tool_github_issues(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看 GitHub 仓库 Issue 列表."""
+    import httpx
+
+    if not _GITHUB_TOKEN:
+        return "GitHub 未配置。请设置 GITHUB_TOKEN 环境变量。"
+
+    repo = (args.get("repo") or "").strip()
+    state = args.get("state", "open")
+    labels = args.get("labels", "")
+    limit = min(args.get("limit", 10), 30)
+    if not repo or "/" not in repo:
+        return "repo 格式错误，应为 owner/repo。"
+
+    params: dict = {"state": state, "per_page": limit}
+    if labels:
+        params["labels"] = labels
+
+    headers = {"Authorization": f"token {_GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_GITHUB_API_BASE}/repos/{repo}/issues",
+            params=params,
+            headers=headers,
+        )
+    if resp.status_code != 200:
+        return f"GitHub API 错误 {resp.status_code}: {resp.text[:500]}"
+
+    # GitHub Issues API 也返回 PR，需要过滤
+    issues = [i for i in resp.json() if "pull_request" not in i]
+    if not issues:
+        return f"{repo} 没有 {state} 状态的 Issue。"
+
+    lines = []
+    for issue in issues[:limit]:
+        labels_str = ", ".join(l["name"] for l in issue.get("labels", []))
+        label_part = f" [{labels_str}]" if labels_str else ""
+        assignee = issue.get("assignee", {})
+        assignee_str = f" → {assignee['login']}" if assignee else ""
+        lines.append(f"#{issue['number']} {issue['title']}{label_part}{assignee_str}\n{issue['html_url']}")
+    return "\n---\n".join(lines)
+
+
+async def _tool_github_repo_activity(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看 GitHub 仓库最近活动."""
+    import httpx
+    from datetime import datetime, timedelta, timezone
+
+    if not _GITHUB_TOKEN:
+        return "GitHub 未配置。请设置 GITHUB_TOKEN 环境变量。"
+
+    repo = (args.get("repo") or "").strip()
+    days = args.get("days", 7)
+    if not repo or "/" not in repo:
+        return "repo 格式错误，应为 owner/repo。"
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    headers = {"Authorization": f"token {_GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{_GITHUB_API_BASE}/repos/{repo}/commits",
+            params={"per_page": 30, "since": since},
+            headers=headers,
+        )
+    if resp.status_code != 200:
+        return f"GitHub API 错误 {resp.status_code}: {resp.text[:500]}"
+
+    commits = resp.json()
+    if not commits:
+        return f"{repo} 最近 {days} 天没有提交。"
+
+    authors: dict[str, int] = {}
+    lines = []
+    for c in commits[:20]:
+        sha = c["sha"][:7]
+        msg = (c["commit"]["message"].split("\n")[0])[:80]
+        author = c["commit"]["author"]["name"]
+        date = c["commit"]["author"]["date"][:10]
+        authors[author] = authors.get(author, 0) + 1
+        lines.append(f"{sha} {msg} — {author} ({date})")
+
+    summary = f"最近 {days} 天：{len(commits)} 次提交，{len(authors)} 位贡献者"
+    top_authors = ", ".join(f"{k}({v})" for k, v in sorted(authors.items(), key=lambda x: -x[1])[:5])
+    return f"{summary}\n贡献者: {top_authors}\n\n" + "\n".join(lines)
+
+
+# ── Notion 工具 ──
+
+
+def _notion_blocks_to_text(blocks: list[dict]) -> str:
+    """将 Notion blocks 转为纯文本."""
+    parts = []
+    for block in blocks:
+        btype = block.get("type", "")
+        data = block.get(btype, {})
+        rich_text = data.get("rich_text", [])
+        text = "".join(rt.get("plain_text", "") for rt in rich_text)
+        if btype.startswith("heading"):
+            parts.append(f"\n{text}\n")
+        elif btype == "to_do":
+            checked = "x" if data.get("checked") else " "
+            parts.append(f"[{checked}] {text}")
+        elif btype == "code":
+            parts.append(f"```\n{text}\n```")
+        elif text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
+async def _tool_notion_search(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """搜索 Notion 页面."""
+    import httpx
+
+    if not _NOTION_API_KEY:
+        return "Notion 未配置。请设置 NOTION_API_KEY 环境变量。"
+
+    query = (args.get("query") or "").strip()
+    limit = min(args.get("limit", 10), 20)
+    if not query:
+        return "搜索关键词不能为空。"
+
+    headers = {
+        "Authorization": f"Bearer {_NOTION_API_KEY}",
+        "Notion-Version": _NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{_NOTION_API_BASE}/search",
+            json={"query": query, "page_size": limit},
+            headers=headers,
+        )
+    if resp.status_code != 200:
+        return f"Notion API 错误 {resp.status_code}: {resp.text[:500]}"
+
+    results = resp.json().get("results", [])
+    if not results:
+        return "没有找到匹配的页面。"
+
+    lines = []
+    for r in results[:limit]:
+        obj_type = r.get("object", "page")
+        url = r.get("url", "")
+        edited = r.get("last_edited_time", "")[:10]
+        # 提取标题
+        props = r.get("properties", {})
+        title_prop = props.get("title", props.get("Name", {}))
+        title_arr = title_prop.get("title", []) if isinstance(title_prop, dict) else []
+        title = "".join(t.get("plain_text", "") for t in title_arr) or "无标题"
+        lines.append(f"[{obj_type}] {title} (edited: {edited})\n{url}")
+    return "\n---\n".join(lines)
+
+
+async def _tool_notion_read(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取 Notion 页面内容."""
+    import httpx
+
+    if not _NOTION_API_KEY:
+        return "Notion 未配置。请设置 NOTION_API_KEY 环境变量。"
+
+    page_id = (args.get("page_id") or "").strip().replace("-", "")
+    if not page_id:
+        return "缺少 page_id。"
+
+    headers = {
+        "Authorization": f"Bearer {_NOTION_API_KEY}",
+        "Notion-Version": _NOTION_VERSION,
+    }
+    all_blocks: list[dict] = []
+    next_cursor = None
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for _ in range(5):  # 最多取 5 页
+            params: dict = {"page_size": 100}
+            if next_cursor:
+                params["start_cursor"] = next_cursor
+            resp = await client.get(
+                f"{_NOTION_API_BASE}/blocks/{page_id}/children",
+                params=params,
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return f"Notion API 错误 {resp.status_code}: {resp.text[:500]}"
+            data = resp.json()
+            all_blocks.extend(data.get("results", []))
+            if not data.get("has_more"):
+                break
+            next_cursor = data.get("next_cursor")
+
+    text = _notion_blocks_to_text(all_blocks)
+    if not text.strip():
+        return f"页面 {page_id} 内容为空。"
+    if len(text) > 9500:
+        return text[:9500] + f"\n\n[内容已截断，共 {len(text)} 字符]"
+    return text
+
+
+async def _tool_notion_create(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在 Notion 创建新页面."""
+    import httpx
+
+    if not _NOTION_API_KEY:
+        return "Notion 未配置。请设置 NOTION_API_KEY 环境变量。"
+
+    parent_id = (args.get("parent_id") or "").strip().replace("-", "")
+    title = (args.get("title") or "").strip()
+    content = args.get("content", "")
+    if not parent_id or not title:
+        return "需要 parent_id 和 title。"
+
+    children = []
+    for para in content.split("\n\n")[:100]:
+        if para.strip():
+            children.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": para.strip()}}]},
+            })
+
+    headers = {
+        "Authorization": f"Bearer {_NOTION_API_KEY}",
+        "Notion-Version": _NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{_NOTION_API_BASE}/pages",
+            json={
+                "parent": {"page_id": parent_id},
+                "properties": {"title": {"title": [{"text": {"content": title}}]}},
+                "children": children,
+            },
+            headers=headers,
+        )
+    if resp.status_code not in (200, 201):
+        return f"Notion 创建失败 {resp.status_code}: {resp.text[:500]}"
+
+    url = resp.json().get("url", "")
+    return f"页面已创建：{title}\n{url}"
+
+
+# ── 信息采集工具 ──
+
+
+async def _tool_read_url(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取网页正文."""
+    import re
+
+    import httpx
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return "缺少 URL。"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = resp.text
+    except Exception as e:
+        return f"请求失败: {e}"
+
+    # 简单的 HTML → 纯文本提取
+    html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<footer[^>]*>.*?</footer>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<header[^>]*>.*?</header>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+    # 提取 <article> 或 <main>，否则取 <body>
+    for tag in ("article", "main"):
+        m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", html, re.DOTALL | re.IGNORECASE)
+        if m:
+            html = m.group(1)
+            break
+
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if not text:
+        return "无法提取页面内容。"
+    if len(text) > 9500:
+        return text[:9500] + f"\n\n[内容已截断，共 {len(text)} 字符]"
+    return text
+
+
+async def _tool_rss_read(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取 RSS/Atom 订阅源."""
+    import re
+    import xml.etree.ElementTree as ET
+
+    import httpx
+
+    url = (args.get("url") or "").strip()
+    limit = min(args.get("limit", 10), 30)
+    if not url:
+        return "缺少 RSS URL。"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        root = ET.fromstring(resp.text)
+    except Exception as e:
+        return f"RSS 解析失败: {e}"
+
+    entries = []
+    # RSS 2.0: <channel><item>
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        desc = (item.findtext("description") or "")[:200].strip()
+        desc = re.sub(r"<[^>]+>", "", desc)  # strip HTML
+        if title:
+            entries.append(f"{title}\n{desc}\n{link}")
+
+    # Atom: <entry>
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
+        title = (entry.findtext("atom:title", "", ns) or entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
+        link_el = entry.find("atom:link", ns) or entry.find("{http://www.w3.org/2005/Atom}link")
+        link = link_el.get("href", "") if link_el is not None else ""
+        summary = (entry.findtext("atom:summary", "", ns) or entry.findtext("{http://www.w3.org/2005/Atom}summary") or "")[:200].strip()
+        summary = re.sub(r"<[^>]+>", "", summary)
+        if title:
+            entries.append(f"{title}\n{summary}\n{link}")
+
+    if not entries:
+        return "订阅源中没有找到条目。"
+
+    return "\n---\n".join(entries[:limit])
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
@@ -1272,6 +1789,22 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "mark_read": _tool_mark_read,
     "update_agent": _tool_update_agent,
     "create_feishu_event": _tool_create_feishu_event,
+    # 飞书文档
+    "search_feishu_docs": _tool_search_feishu_docs,
+    "read_feishu_doc": _tool_read_feishu_doc,
+    "create_feishu_doc": _tool_create_feishu_doc,
+    "send_feishu_group": _tool_send_feishu_group,
+    # GitHub
+    "github_prs": _tool_github_prs,
+    "github_issues": _tool_github_issues,
+    "github_repo_activity": _tool_github_repo_activity,
+    # Notion
+    "notion_search": _tool_notion_search,
+    "notion_read": _tool_notion_read,
+    "notion_create": _tool_notion_create,
+    # 信息采集
+    "read_url": _tool_read_url,
+    "rss_read": _tool_rss_read,
 }
 
 

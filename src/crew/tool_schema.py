@@ -381,6 +381,160 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["summary", "date", "start_hour"],
         },
     },
+    # ── 飞书文档工具 ──
+    "search_feishu_docs": {
+        "name": "search_feishu_docs",
+        "description": "搜索飞书云文档和知识库。输入关键词，返回匹配的文档列表（标题、链接、摘要）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "count": {"type": "integer", "description": "返回数量上限", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    "read_feishu_doc": {
+        "name": "read_feishu_doc",
+        "description": "读取飞书文档内容。传入 document_id，返回文档纯文本。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string", "description": "飞书文档 ID（从搜索结果或 URL 获取）"},
+            },
+            "required": ["document_id"],
+        },
+    },
+    "create_feishu_doc": {
+        "name": "create_feishu_doc",
+        "description": "在飞书创建新文档。传入标题和正文，返回文档链接。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "文档标题"},
+                "content": {"type": "string", "description": "文档正文"},
+                "folder_token": {
+                    "type": "string",
+                    "description": "目标文件夹 token（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["title", "content"],
+        },
+    },
+    "send_feishu_group": {
+        "name": "send_feishu_group",
+        "description": "发消息到飞书群。指定群聊 ID 和消息内容。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "string", "description": "飞书群聊 ID（形如 oc_xxxxx）"},
+                "text": {"type": "string", "description": "消息内容"},
+            },
+            "required": ["chat_id", "text"],
+        },
+    },
+    # ── GitHub 工具 ──
+    "github_prs": {
+        "name": "github_prs",
+        "description": "查看 GitHub 仓库的 Pull Requests 列表。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "仓库（格式: owner/repo）"},
+                "state": {"type": "string", "description": "状态: open/closed/all", "default": "open"},
+                "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
+            },
+            "required": ["repo"],
+        },
+    },
+    "github_issues": {
+        "name": "github_issues",
+        "description": "查看 GitHub 仓库的 Issues 列表。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "仓库（格式: owner/repo）"},
+                "state": {"type": "string", "description": "状态: open/closed/all", "default": "open"},
+                "labels": {"type": "string", "description": "标签过滤（逗号分隔）", "default": ""},
+                "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
+            },
+            "required": ["repo"],
+        },
+    },
+    "github_repo_activity": {
+        "name": "github_repo_activity",
+        "description": "查看 GitHub 仓库最近活动：提交记录、贡献者。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "仓库（格式: owner/repo）"},
+                "days": {"type": "integer", "description": "查最近几天", "default": 7},
+            },
+            "required": ["repo"],
+        },
+    },
+    # ── Notion 工具 ──
+    "notion_search": {
+        "name": "notion_search",
+        "description": "搜索 Notion 页面和数据库。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    "notion_read": {
+        "name": "notion_read",
+        "description": "读取 Notion 页面内容。传入页面 ID，返回正文文本。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string", "description": "Notion 页面 ID"},
+            },
+            "required": ["page_id"],
+        },
+    },
+    "notion_create": {
+        "name": "notion_create",
+        "description": "在 Notion 创建新页面。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "string", "description": "父页面 ID"},
+                "title": {"type": "string", "description": "页面标题"},
+                "content": {"type": "string", "description": "页面内容"},
+            },
+            "required": ["parent_id", "title", "content"],
+        },
+    },
+    # ── 信息采集工具 ──
+    "read_url": {
+        "name": "read_url",
+        "description": "读取网页内容，自动提取正文。适合读文章、文档、公告。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "网页 URL"},
+            },
+            "required": ["url"],
+        },
+    },
+    "rss_read": {
+        "name": "rss_read",
+        "description": "读取 RSS/Atom 订阅源，返回最近条目的标题、链接和摘要。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "RSS/Atom 订阅源 URL"},
+                "limit": {"type": "integer", "description": "返回条目数量上限", "default": 10},
+            },
+            "required": ["url"],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
@@ -389,6 +543,14 @@ AGENT_TOOLS = {
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
     "mark_read", "update_agent", "create_feishu_event",
+    # 飞书文档
+    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group",
+    # GitHub
+    "github_prs", "github_issues", "github_repo_activity",
+    # Notion
+    "notion_search", "notion_read", "notion_create",
+    # 信息采集
+    "read_url", "rss_read",
 }
 
 

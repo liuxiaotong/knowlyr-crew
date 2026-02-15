@@ -533,6 +533,8 @@ def execute_prompt(
     stream: bool = True,
     on_chunk: Callable[[str], None] | None = None,
     fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
+    fallback_base_url: str | None = None,
     base_url: str | None = None,
 ) -> ExecutionResult:
     """调用 LLM API 执行 prompt（支持 Anthropic / OpenAI / DeepSeek）.
@@ -611,12 +613,13 @@ def execute_prompt(
             return execute_prompt(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                api_key=api_key,
+                api_key=fallback_api_key or api_key,
                 model=fallback_model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
                 on_chunk=on_chunk,
+                base_url=fallback_base_url,
             )
         except Exception as e:
             logger.debug("Fallback 模型也失败: %s", e)
@@ -634,6 +637,8 @@ async def aexecute_prompt(
     max_tokens: int | None = None,
     stream: bool = True,
     fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
+    fallback_base_url: str | None = None,
     base_url: str | None = None,
 ) -> ExecutionResult | AsyncIterator[str]:
     """execute_prompt 的异步版本.
@@ -704,11 +709,12 @@ async def aexecute_prompt(
             return await aexecute_prompt(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                api_key=api_key,
+                api_key=fallback_api_key or api_key,
                 model=fallback_model,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
+                base_url=fallback_base_url,
             )
         except Exception as e:
             logger.debug("Async fallback 模型也失败: %s", e)
