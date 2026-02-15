@@ -344,6 +344,43 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["agent_id"],
         },
     },
+    "create_feishu_event": {
+        "name": "create_feishu_event",
+        "description": "在飞书日历创建日程。Kai 说安排日程、设提醒、记个时间时调用。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "日程标题（如：查返回上海的机票酒店）",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "日期，YYYY-MM-DD 格式（如 2025-02-15）",
+                },
+                "start_hour": {
+                    "type": "integer",
+                    "description": "开始小时（0-23）",
+                },
+                "start_minute": {
+                    "type": "integer",
+                    "description": "开始分钟（0-59），默认 0",
+                    "default": 0,
+                },
+                "duration_minutes": {
+                    "type": "integer",
+                    "description": "持续时长（分钟），默认 60",
+                    "default": 60,
+                },
+                "description": {
+                    "type": "string",
+                    "description": "日程描述（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["summary", "date", "start_hour"],
+        },
+    },
 }
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
@@ -351,7 +388,7 @@ AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
-    "mark_read", "update_agent",
+    "mark_read", "update_agent", "create_feishu_event",
 }
 
 

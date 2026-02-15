@@ -565,6 +565,8 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             )
             return
 
+        emp = discovery.get(employee_name)
+
         # 图片消息处理（当前不支持 vision）
         if msg_event.msg_type == "image":
             await send_feishu_text(
@@ -1134,6 +1136,61 @@ async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: "_
         return resp.text
 
 
+async def _tool_create_feishu_event(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在飞书日历创建日程."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法创建日程。"
+
+    summary = (args.get("summary") or "").strip()
+    date_str = (args.get("date") or "").strip()
+    start_hour = args.get("start_hour", 9)
+    start_minute = args.get("start_minute", 0)
+    duration = args.get("duration_minutes", 60)
+    description = args.get("description", "")
+
+    if not summary:
+        return "缺少日程标题。"
+    if not date_str:
+        return "缺少日期。"
+
+    try:
+        start_hour = int(start_hour)
+        start_minute = int(start_minute)
+        duration = int(duration)
+    except (TypeError, ValueError):
+        return "时间参数格式不对。"
+
+    tz_cn = _tz(timedelta(hours=8))
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        start_time = d.replace(hour=start_hour, minute=start_minute, tzinfo=tz_cn)
+    except ValueError:
+        return f"日期格式不对: {date_str}，需要 YYYY-MM-DD。"
+
+    end_time = start_time + timedelta(minutes=max(duration, 15))
+
+    from crew.feishu import create_calendar_event
+
+    result = await create_calendar_event(
+        token_mgr=ctx.feishu_token_mgr,
+        summary=summary,
+        start_timestamp=int(start_time.timestamp()),
+        end_timestamp=int(end_time.timestamp()),
+        description=description,
+    )
+
+    if result.get("ok"):
+        end_str = end_time.strftime("%H:%M")
+        start_str = start_time.strftime("%H:%M")
+        return f"日程已创建：{date_str} {start_str}-{end_str}《{summary}》"
+    else:
+        return f"创建失败: {result.get('error', '未知错误')}"
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
@@ -1147,6 +1204,7 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "get_system_health": _tool_get_system_health,
     "mark_read": _tool_mark_read,
     "update_agent": _tool_update_agent,
+    "create_feishu_event": _tool_create_feishu_event,
 }
 
 

@@ -371,6 +371,70 @@ async def send_feishu_reply(
     return data
 
 
+# ── 日历日程 ──
+
+
+async def create_calendar_event(
+    token_mgr: "FeishuTokenManager",
+    summary: str,
+    start_timestamp: int,
+    end_timestamp: int,
+    description: str = "",
+    calendar_id: str = "",
+) -> dict[str, Any]:
+    """在飞书日历创建日程.
+
+    Args:
+        token_mgr: FeishuTokenManager 实例
+        summary: 日程标题
+        start_timestamp: 开始时间 unix 秒
+        end_timestamp: 结束时间 unix 秒
+        description: 日程描述（可选）
+        calendar_id: 日历 ID（不传则取环境变量 FEISHU_CALENDAR_ID）
+
+    Returns:
+        {"ok": True, "event_id": "...", "summary": "..."} 或
+        {"ok": False, "error": "..."}
+    """
+    import httpx
+
+    cal_id = calendar_id or os.environ.get("FEISHU_CALENDAR_ID", "")
+    if not cal_id:
+        return {"ok": False, "error": "未配置 FEISHU_CALENDAR_ID"}
+
+    token = await token_mgr.get_token()
+    body: dict[str, Any] = {
+        "summary": summary[:256],
+        "start": {"timestamp": str(start_timestamp)},
+        "end": {"timestamp": str(end_timestamp)},
+    }
+    if description:
+        body["description"] = description[:2048]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{FEISHU_API_BASE}/calendar/v4/calendars/{cal_id}/events",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                return {"ok": False, "error": data.get("msg", "未知错误")}
+            event = data.get("data", {}).get("event", {})
+            return {
+                "ok": True,
+                "event_id": event.get("event_id", ""),
+                "summary": event.get("summary", summary),
+            }
+    except Exception as e:
+        logger.error("飞书创建日程失败: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 # ── 事件去重 ──
 
 
