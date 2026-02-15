@@ -126,6 +126,7 @@ def create_webhook_app(
         Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
+        Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
     ]
 
     async def on_startup():
@@ -220,6 +221,65 @@ async def _metrics(request: Request) -> JSONResponse:
     """运行时指标."""
     from crew.metrics import get_collector
     return JSONResponse(get_collector().snapshot())
+
+
+async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONResponse:
+    """返回员工配置和渲染后的 system_prompt（供 knowlyr-id 调用）."""
+    from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
+    from crew.tool_schema import employee_tools_to_schemas
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir)
+
+    # 按 agent_id（数字）或 name（字符串）查找
+    employee = None
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                employee = emp
+                break
+    except ValueError:
+        employee = result.employees.get(identifier)
+
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    # 渲染 prompt（不传 agent_identity → 不含 DB 记忆）
+    engine = CrewEngine(ctx.project_dir)
+    system_prompt = engine.prompt(employee)
+    tool_schemas = employee_tools_to_schemas(employee.tools)
+
+    # 从 YAML 读取 Employee model 之外的字段（bio, temperature 等）
+    bio = ""
+    temperature = None
+    max_tokens = None
+    if employee.source_path:
+        yaml_path = employee.source_path / "employee.yaml"
+        if yaml_path.exists():
+            import yaml
+            with open(yaml_path) as f:
+                yaml_config = yaml.safe_load(f) or {}
+            bio = yaml_config.get("bio", "")
+            temperature = yaml_config.get("temperature")
+            max_tokens = yaml_config.get("max_tokens")
+
+    return JSONResponse({
+        "name": employee.name,
+        "character_name": employee.character_name,
+        "display_name": employee.display_name,
+        "description": employee.description,
+        "bio": bio,
+        "version": employee.version,
+        "model": employee.model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tools": employee.tools,
+        "tool_schemas": tool_schemas,
+        "system_prompt": system_prompt,
+        "agent_id": employee.agent_id,
+    })
 
 
 async def _handle_github(request: Request, ctx: _AppContext) -> JSONResponse:
