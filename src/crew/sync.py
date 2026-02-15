@@ -224,6 +224,7 @@ def _push_employee(
         agent_id=agent_id,
         nickname=nickname,
         title=title,
+        bio=bio,
         capabilities=capabilities,
         domains=domains,
         system_prompt=system_prompt,

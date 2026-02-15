@@ -259,6 +259,7 @@ def update_agent(
     agent_id: int,
     nickname: str | None = None,
     title: str | None = None,
+    bio: str | None = None,
     capabilities: str | None = None,
     domains: list[str] | None = None,
     model: str | None = None,
@@ -291,6 +292,8 @@ def update_agent(
         payload["nickname"] = nickname
     if title is not None:
         payload["title"] = title[:100]
+    if bio is not None:
+        payload["bio"] = bio
     if capabilities is not None:
         payload["capabilities"] = capabilities
     if domains is not None:
