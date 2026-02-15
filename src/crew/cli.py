@@ -780,7 +780,7 @@ def _run_employee_job(
         try:
             from crew.trajectory import TrajectoryCollector
 
-            task_desc = args_dict.get("target", "") or args_dict.get("goal", "") or emp.description
+            task_desc = args_dict.get("task") or args_dict.get("target") or args_dict.get("goal") or emp.description
             traj_collector = TrajectoryCollector(
                 emp.name, task_desc, model=effective_model,
             )
@@ -3430,8 +3430,13 @@ def trajectory_list(limit: int):
 @trajectory.command("score")
 @click.option("--all", "score_all", is_flag=True, help="打分所有轨迹")
 @click.option("-n", "--last", type=int, default=0, help="打分最后 N 条")
-def trajectory_score(score_all: bool, last: int):
+@click.option("--provider", default="openai", help="LLM judge provider (openai/anthropic)")
+@click.option("--model", "judge_model", default=None, help="LLM judge 模型名")
+@click.option("--base-url", default=None, help="OpenAI 兼容 API base URL")
+def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str | None,
+                     base_url: str | None):
     """对轨迹进行 Reward 打分."""
+    import os
     from pathlib import Path
 
     traj_file = Path(".crew/trajectories/trajectories.jsonl")
@@ -3442,6 +3447,7 @@ def trajectory_score(score_all: bool, last: int):
     try:
         from agentrecorder.schema import Trajectory
         from agentreward import RewardEngine
+        from agentreward.config import RewardConfig
 
         trajectories = Trajectory.from_jsonl(traj_file)
     except ImportError as e:
@@ -3459,7 +3465,23 @@ def trajectory_score(score_all: bool, last: int):
         trajectories = trajectories[-1:]
         click.echo("提示: 默认只打分最后一条。用 --all 打分全部，或 -n 5 打分最后 5 条。", err=True)
 
-    engine = RewardEngine()
+    # 自动检测 moonshot 配置
+    config_kwargs: dict = {"provider": provider}
+    if provider == "openai":
+        if not base_url and os.environ.get("MOONSHOT_API_KEY"):
+            config_kwargs["base_url"] = "https://api.moonshot.cn/v1"
+            config_kwargs["api_key"] = os.environ["MOONSHOT_API_KEY"]
+            config_kwargs["model_name"] = judge_model or "moonshot-v1-32k"
+        elif base_url:
+            config_kwargs["base_url"] = base_url
+            if judge_model:
+                config_kwargs["model_name"] = judge_model
+        elif judge_model:
+            config_kwargs["model_name"] = judge_model
+    elif judge_model:
+        config_kwargs["model_name"] = judge_model
+
+    engine = RewardEngine(RewardConfig(**config_kwargs))
     for traj in trajectories:
         traj_dict = traj.model_dump() if hasattr(traj, "model_dump") else traj
         result = engine.score(traj_dict)
