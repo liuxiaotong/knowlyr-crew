@@ -1002,6 +1002,9 @@ def _run_employee_job(
                     stream=stream_enabled,
                     on_chunk=_on_chunk if stream_enabled else None,
                     base_url=emp.base_url or None,
+                    fallback_model=emp.fallback_model or None,
+                    fallback_api_key=emp.fallback_api_key or None,
+                    fallback_base_url=emp.fallback_base_url or None,
                 )
             except Exception as exc:
                 if traj_collector is not None:

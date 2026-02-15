@@ -2075,6 +2075,9 @@ async def _execute_employee(
             model=use_model,
             stream=False,
             base_url=match.base_url or None,
+            fallback_model=match.fallback_model or None,
+            fallback_api_key=match.fallback_api_key or None,
+            fallback_base_url=match.fallback_base_url or None,
         )
         if user_message:
             exec_kwargs["user_message"] = user_message
@@ -2145,6 +2148,9 @@ async def _stream_employee(
                     model=use_model,
                     stream=True,
                     base_url=match.base_url or None,
+                    fallback_model=match.fallback_model or None,
+                    fallback_api_key=match.fallback_api_key or None,
+                    fallback_base_url=match.fallback_base_url or None,
                 ),
                 timeout=300,
             )
