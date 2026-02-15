@@ -161,7 +161,7 @@ class TestMCPResources:
         )))
         contents = result.root.contents
         assert len(contents) == 1
-        assert "角色定义" in contents[0].text
+        assert "审查" in contents[0].text
         assert "text/markdown" in contents[0].mimeType
 
     def test_read_resource_not_found(self):
