@@ -22,7 +22,7 @@ _P_EXEC_PROMPT = "crew.executor.aexecute_prompt"
 _P_EXEC_TOOLS = "crew.executor.aexecute_with_tools"
 _P_DETECT = "crew.providers.detect_provider"
 _P_DELEGATE = "crew.webhook._delegate_employee"
-_P_DELEG_LOOP = "crew.webhook._execute_employee_with_delegation"
+_P_TOOLS_LOOP = "crew.webhook._execute_employee_with_tools"
 
 
 def _run(coro):
@@ -53,7 +53,7 @@ def _make_tool_result(
     )
 
 
-def _make_emp(*, tools=None, model="test-model", name="test", desc="test"):
+def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent_id=None):
     emp = MagicMock()
     emp.tools = tools or []
     emp.model = model
@@ -61,6 +61,7 @@ def _make_emp(*, tools=None, model="test-model", name="test", desc="test"):
     emp.effective_display_name = name
     emp.description = desc
     emp.args = []
+    emp.agent_id = agent_id
     return emp
 
 
@@ -160,10 +161,10 @@ class TestDelegateEmployee:
         assert "委派执行失败" in result
 
 
-# ── Step 2b: _execute_employee_with_delegation tests ──
+# ── Step 2b: _execute_employee_with_tools tests ──
 
 
-class TestExecuteEmployeeWithDelegation:
+class TestExecuteEmployeeWithTools:
     def test_no_tool_calls_returns_text(self):
         """LLM 直接返回文本，不调用任何工具."""
         with (
@@ -187,10 +188,10 @@ class TestExecuteEmployeeWithDelegation:
             mock_detect.return_value = Provider.MOONSHOT
             mock_exec.return_value = _make_tool_result(content="直接回复内容")
 
-            from crew.webhook import _execute_employee_with_delegation
+            from crew.webhook import _execute_employee_with_tools
 
             result = _run(
-                _execute_employee_with_delegation(_make_ctx(), "test", {"task": "hello"})
+                _execute_employee_with_tools(_make_ctx(), "test", {"task": "hello"})
             )
             assert result["output"] == "直接回复内容"
             assert result["employee"] == "test"
@@ -240,10 +241,10 @@ class TestExecuteEmployeeWithDelegation:
 
             mock_delegate.return_value = "代码审查完毕，没有问题"
 
-            from crew.webhook import _execute_employee_with_delegation
+            from crew.webhook import _execute_employee_with_tools
 
             result = _run(
-                _execute_employee_with_delegation(
+                _execute_employee_with_tools(
                     _make_ctx(), "boss", {"task": "审查代码"}
                 )
             )
@@ -290,10 +291,10 @@ class TestExecuteEmployeeWithDelegation:
             ]
             mock_delegate.return_value = "文档内容"
 
-            from crew.webhook import _execute_employee_with_delegation
+            from crew.webhook import _execute_employee_with_tools
 
             result = _run(
-                _execute_employee_with_delegation(
+                _execute_employee_with_tools(
                     _make_ctx(), "boss", {"task": "写文档"}
                 )
             )
@@ -317,7 +318,7 @@ class TestExecuteEmployeeWithDelegation:
             patch(_P_EXEC_TOOLS, new_callable=AsyncMock) as mock_exec,
             patch(_P_DETECT) as mock_detect,
             patch(_P_DELEGATE, new_callable=AsyncMock) as mock_delegate,
-            patch("crew.webhook._MAX_DELEGATION_ROUNDS", 2),
+            patch("crew.webhook._MAX_TOOL_ROUNDS", 2),
         ):
             from crew.providers import Provider
 
@@ -343,10 +344,10 @@ class TestExecuteEmployeeWithDelegation:
                 ],
             )
 
-            from crew.webhook import _execute_employee_with_delegation
+            from crew.webhook import _execute_employee_with_tools
 
             result = _run(
-                _execute_employee_with_delegation(
+                _execute_employee_with_tools(
                     _make_ctx(), "boss", {"task": "loop"}
                 )
             )
@@ -384,10 +385,10 @@ class TestExecuteEmployeeWithDelegation:
                 _make_tool_result(content="好的"),
             ]
 
-            from crew.webhook import _execute_employee_with_delegation
+            from crew.webhook import _execute_employee_with_tools
 
             result = _run(
-                _execute_employee_with_delegation(
+                _execute_employee_with_tools(
                     _make_ctx(), "test", {"task": "test"}
                 )
             )
@@ -403,26 +404,26 @@ class TestExecuteEmployeeWithDelegation:
 
 
 class TestExecuteEmployeeRouting:
-    @patch(_P_DELEG_LOOP, new_callable=AsyncMock)
+    @patch(_P_TOOLS_LOOP, new_callable=AsyncMock)
     @patch(_P_DISCOVER)
-    def test_routes_to_delegation_when_delegate_in_tools(self, mock_disc, mock_deleg):
+    def test_routes_to_tools_when_agent_tool_in_tools(self, mock_disc, mock_tools):
         emp = _make_emp(tools=["file_read", "delegate"])
         discovery = MagicMock()
         discovery.get.return_value = emp
         mock_disc.return_value = discovery
 
-        mock_deleg.return_value = {"employee": "boss", "output": "ok"}
+        mock_tools.return_value = {"employee": "boss", "output": "ok"}
 
         from crew.webhook import _execute_employee
 
         result = _run(_execute_employee(_make_ctx(), "boss", {"task": "test"}))
-        mock_deleg.assert_called_once()
+        mock_tools.assert_called_once()
         assert result["output"] == "ok"
 
     @patch(_P_EXEC_PROMPT, new_callable=AsyncMock)
     @patch(_P_ENGINE)
     @patch(_P_DISCOVER)
-    def test_routes_to_prompt_when_no_delegate(self, mock_disc, mock_engine_cls, mock_exec):
+    def test_routes_to_prompt_when_no_agent_tools(self, mock_disc, mock_engine_cls, mock_exec):
         from crew.executor import ExecutionResult
 
         emp = _make_emp(tools=["file_read", "bash"])

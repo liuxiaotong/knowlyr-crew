@@ -352,6 +352,20 @@ wheels = [
 ]
 
 [[package]]
+name = "docker"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/9b/4a2ea29aeba62471211598dac5d96825bb49348fa07e906ea930394a83ce/docker-7.1.0.tar.gz", hash = "sha256:ad8c70e6e3f8926cb8a92619b832b4ea5299e2831c14284663184e200546fa6c", size = 117834, upload-time = "2024-05-23T11:13:57.216Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e3/26/57c6fb270950d476074c087527a558ccb6f4436657314bfb6cdf484114c4/docker-7.1.0-py3-none-any.whl", hash = "sha256:c96b93b7f0a746f9e77d325bcfb87422a3d8bd4f03136ae8a85b37f1898d5fc0", size = 147774, upload-time = "2024-05-23T11:13:55.01Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -365,7 +379,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -791,6 +805,18 @@ wheels = [
 ]
 
 [[package]]
+name = "knowlyr-core"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/6d/00226d27c35d6bb80ddc41dafcac174167c37ba94f92b3dbaef607e04e63/knowlyr_core-0.1.1.tar.gz", hash = "sha256:b525fbc1ed28c8f775d690c7965a851852e67dfaf630a1a2d11d8542fc3c78bd", size = 13077, upload-time = "2026-02-15T08:05:59.929Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/c0/d4252d3f3eec0077c9eb292df7d86f7202fd76d31c844cf4773b8bff35e7/knowlyr_core-0.1.1-py3-none-any.whl", hash = "sha256:b44892a324895c9633324d3b16fb173d8c64af3a0f7482576f6661e319bd0e21", size = 10765, upload-time = "2026-02-15T08:05:58.687Z" },
+]
+
+[[package]]
 name = "knowlyr-crew"
 version = "0.1.1"
 source = { editable = "." }
@@ -806,6 +832,11 @@ all = [
     { name = "anthropic" },
     { name = "croniter" },
     { name = "httpx" },
+    { name = "knowlyr-core" },
+    { name = "knowlyr-hub" },
+    { name = "knowlyr-recorder" },
+    { name = "knowlyr-reward" },
+    { name = "knowlyr-sandbox" },
     { name = "mcp" },
     { name = "openai" },
     { name = "pillow" },
@@ -838,6 +869,13 @@ mcp = [
 openai = [
     { name = "openai" },
 ]
+trajectory = [
+    { name = "knowlyr-core" },
+    { name = "knowlyr-hub" },
+    { name = "knowlyr-recorder" },
+    { name = "knowlyr-reward" },
+    { name = "knowlyr-sandbox" },
+]
 webhook = [
     { name = "croniter" },
     { name = "starlette" },
@@ -851,7 +889,12 @@ requires-dist = [
     { name = "croniter", marker = "extra == 'webhook'", specifier = ">=2.0" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.5" },
     { name = "httpx", marker = "extra == 'id'", specifier = ">=0.25" },
-    { name = "knowlyr-crew", extras = ["mcp", "id", "execute", "openai", "dev", "avatar", "webhook"], marker = "extra == 'all'" },
+    { name = "knowlyr-core", marker = "extra == 'trajectory'", specifier = ">=0.1.0" },
+    { name = "knowlyr-crew", extras = ["mcp", "id", "execute", "openai", "dev", "avatar", "webhook", "trajectory"], marker = "extra == 'all'" },
+    { name = "knowlyr-hub", marker = "extra == 'trajectory'", specifier = ">=0.1.0" },
+    { name = "knowlyr-recorder", marker = "extra == 'trajectory'", specifier = ">=0.1.0" },
+    { name = "knowlyr-reward", marker = "extra == 'trajectory'", specifier = ">=0.1.0" },
+    { name = "knowlyr-sandbox", marker = "extra == 'trajectory'", specifier = ">=0.1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
     { name = "pillow", marker = "extra == 'avatar'", specifier = ">=10.0" },
@@ -864,7 +907,63 @@ requires-dist = [
     { name = "starlette", marker = "extra == 'webhook'", specifier = ">=0.27" },
     { name = "uvicorn", marker = "extra == 'webhook'", specifier = ">=0.20" },
 ]
-provides-extras = ["mcp", "id", "avatar", "execute", "openai", "gemini", "webhook", "dev", "all"]
+provides-extras = ["mcp", "id", "avatar", "execute", "openai", "gemini", "webhook", "trajectory", "dev", "all"]
+
+[[package]]
+name = "knowlyr-hub"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "knowlyr-core" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/1a/e264fb85ce1dfd29013c96fca02494560e2ee2eff2c687e992c4b4dc9d6c/knowlyr_hub-0.1.0.tar.gz", hash = "sha256:9831e8e7aa5bd26ed8e67c2059a37db248191314d9c4658c5bdc6c9559611d4d", size = 33759, upload-time = "2026-02-09T20:05:50.067Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/c8/7808c7727adf33003ffe25eb147cbb841628ba09312ed718fbb129e94f13/knowlyr_hub-0.1.0-py3-none-any.whl", hash = "sha256:cb2acdc77eab083b806779522a09a56d25ed1d6d670497b224148cb5655c6f0b", size = 31207, upload-time = "2026-02-09T20:05:48.77Z" },
+]
+
+[[package]]
+name = "knowlyr-recorder"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "knowlyr-core" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/b9/1cb616d8a9720815e0b25985a8386b897032aaa6e0ae04edfae3fb770e7a/knowlyr_recorder-0.1.1.tar.gz", hash = "sha256:ec3da5615d3c7d812e848b57097f1162c572271e42696822e3991fcf3cb5d8dc", size = 22985, upload-time = "2026-02-15T08:06:06.081Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/58/ba87ed5b16176ff5f5bf2e8bb5a03a4d71d9072c99086047dfa70a9e0892/knowlyr_recorder-0.1.1-py3-none-any.whl", hash = "sha256:0a92ce2087a48f1ad8c479e6a86091d827397aa7a59e019097c4e4ad49d83eb2", size = 24927, upload-time = "2026-02-15T08:06:04.703Z" },
+]
+
+[[package]]
+name = "knowlyr-reward"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/7c/c9649b127f6a3bd4e5b8e8aebfbe7960840d3f6af7572331e96967263093/knowlyr_reward-0.1.0.tar.gz", hash = "sha256:0271676349ba3be723f6791fa1d0c73a72fc00431372fd48b93b3170ab340d56", size = 33874, upload-time = "2026-02-09T20:05:35.449Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/0c/53ce15adb35d3a743b510bfcecd89e64ff2e9849c7dee98e9015745441cb/knowlyr_reward-0.1.0-py3-none-any.whl", hash = "sha256:07bd124ec7fe3a2fdd449beea232afd0739222ffbc21bd11890599551142e098", size = 29352, upload-time = "2026-02-09T20:05:32.753Z" },
+]
+
+[[package]]
+name = "knowlyr-sandbox"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "docker" },
+    { name = "knowlyr-core" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/70/c2060b4a360f69f1b57771ddbe6fcbf565116a6f6c3634d9ef05afb1e9ae/knowlyr_sandbox-0.1.1.tar.gz", hash = "sha256:16fae20d1abd8caf4e5e2075cb2fa244737b2ac21ea4b6b7f33506d87c67493e", size = 21376, upload-time = "2026-02-15T08:06:03.043Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/54/d0e4ca5fa8a431d3f620bf88db19ba8f566960d195500dd87ee3aeca3dd8/knowlyr_sandbox-0.1.1-py3-none-any.whl", hash = "sha256:c517702ed134e68741554ac17a7275a08db91efab35a66f48ff990c9c703f7b2", size = 21260, upload-time = "2026-02-15T08:06:01.458Z" },
+]
 
 [[package]]
 name = "markdown-it-py"
