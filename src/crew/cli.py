@@ -3461,7 +3461,8 @@ def trajectory_score(score_all: bool, last: int):
 
     engine = RewardEngine()
     for traj in trajectories:
-        result = engine.score(traj)
+        traj_dict = traj.model_dump() if hasattr(traj, "model_dump") else traj
+        result = engine.score(traj_dict)
         agent = traj.agent.replace("crew/", "")
         task = traj.task.description[:30]
         click.echo(f"\n{agent} | {task}")
