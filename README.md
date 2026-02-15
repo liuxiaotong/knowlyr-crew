@@ -1,69 +1,100 @@
 <div align="center">
 
-<h1>Crew — AI Skill Loader & Employee Engine</h1>
+<h1>knowlyr Crew</h1>
 
-<p><strong>用 Markdown + YAML 定义 AI 员工，通过 MCP 加载到 AI IDE，通过 API 驱动 knowlyr-id 运行时</strong><br/>
-<em>Define AI employees in Markdown + YAML. Load into AI IDEs via MCP, power knowlyr-id runtime via API.</em></p>
+<p><strong>声明式 AI 员工引擎 — Markdown 定义能力，MCP 协议互通，经验持续进化</strong><br/>
+<em>Declarative AI employee engine — define capabilities in Markdown, interoperate via MCP, evolve through experience</em></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
-[![DashScope](https://img.shields.io/badge/avatar-通义万相-orange.svg)](#头像生成--avatar)
 
-[快速开始](#快速开始--quick-start) · [工作原理](#工作原理--how-it-works) · [MCP 集成](#mcp-集成--mcp-integration) · [CLI](#cli-使用--cli-usage) · [内置技能](#内置技能--builtin-skills) · [自定义技能](#自定义技能--custom-skills) · [流水线](#流水线--pipelines) · [服务器模式](#服务器模式--server-mode) · [讨论会](#讨论会--discussions) · [持久化记忆](#持久化记忆--persistent-memory) · [评估闭环](#评估闭环--evaluation-loop) · [Skills 互通](#skills-互通--interoperability) · [knowlyr-id](#knowlyr-id-协作--integration) · [头像生成](#头像生成--avatar) · [生态](#生态--ecosystem)
+[Motivation](#motivation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Defining Employees](#defining-employees) · [Core Capabilities](#core-capabilities) · [Server Mode](#server-mode) · [Integrations](#integrations) · [CLI Reference](#cli-reference) · [Ecosystem](#ecosystem)
 
 </div>
 
-> **Crew 不是又一个 Agent 框架。**
-> 它是 AI 员工的**能力定义层**——每个"数字员工"是一个目录或 Markdown 文件，
-> 通过 MCP 协议加载到 AI IDE，通过 HTTP API 驱动 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 的 AI 员工运行时。
-> Crew 定义"谁做什么、怎么做"，knowlyr-id 管理身份、对话和运行时状态。
+---
+
+## Overview
+
+Crew 将 AI 员工的能力定义从代码中解耦为 **Markdown + YAML 声明式规范**，通过 [MCP](https://modelcontextprotocol.io/) 协议暴露给任意 AI IDE，同时提供 HTTP API 驱动生产级运行时。
+
+核心设计原则：
+
+- **Markdown 即接口** — 每位员工是一个目录或 `.md` 文件，配置与提示词分离，版本可追踪
+- **MCP 协议互通** — Prompts / Resources / Tools 三原语，兼容 Claude Desktop、Cursor、Claude Code 及任何 MCP 客户端
+- **多智能体协商** — 结构化讨论会支持对抗性机制（预设立场、交叉盘问、分歧配额），避免"共识回声室"
+- **经验持续进化** — 持久化记忆 + 决策评估闭环，跨会话积累经验并自动修正认知偏差
 
 ---
 
-## 快速开始 / Quick Start
+## Motivation
+
+现有 AI Agent 框架普遍面临三个问题：
+
+| 痛点 | 现状 | Crew 的方法 |
+|------|------|-------------|
+| **能力散落** | prompt 硬编码在应用代码中，无法复用和版本管理 | 声明式 YAML + Markdown，与代码解耦 |
+| **工具锁定** | Agent 定义绑定特定框架或 IDE | MCP 协议原生支持，跨 IDE 互通 |
+| **无记忆进化** | 每次对话从零开始，错误反复出现 | 持久化记忆 + 评估闭环，经验自动积累 |
+
+Crew 不是又一个 Agent 编排框架。它专注于 AI 员工的**能力定义层**——"谁做什么、怎么做、学到了什么"，而将身份管理和用户交互交给专门的运行时（如 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id)）。
+
+---
+
+## Quick Start
 
 ```bash
 pip install knowlyr-crew[mcp]
 
-# 列出所有可用技能
+# 列出所有可用员工
 knowlyr-crew list
 
-# 运行代码审查（支持触发词 review）
-knowlyr-crew run code-reviewer main
-knowlyr-crew run review main --arg focus=security
+# 运行代码审查
+knowlyr-crew run review main --smart-context
 
-# 智能上下文：自动检测项目类型并注入适配提示
-knowlyr-crew run test-engineer src/auth.py --smart-context
-
-# 或配置 MCP 后由 AI IDE 自动调用（见下方）
+# 或配置 MCP 后由 AI IDE 自动调用
 ```
+
+**MCP 配置**（Claude Desktop / Claude Code / Cursor）：
+
+```json
+{
+  "mcpServers": {
+    "crew": {
+      "command": "knowlyr-crew",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+配置后 AI IDE 可直接调用 `code-reviewer` 审查代码、`test-engineer` 编写测试、`run_pipeline` 串联多员工流水线、`run_discussion` 发起多员工讨论。
 
 ---
 
-## 工作原理 / How It Works
+## Architecture
 
 ```mermaid
 graph LR
-    E["员工定义<br/>(目录 / Markdown)<br/>角色 + 工作流 + 参数 + 工具"] -->|MCP Prompts| S["MCP Server<br/>stdio / SSE / HTTP"]
+    E["Employee Spec<br/>(YAML + Markdown)"] -->|MCP Prompts| S["MCP Server<br/>stdio / SSE / HTTP"]
     E -->|MCP Resources| S
     E -->|MCP Tools| S
-    S -->|stdio| IDE["本地 AI IDE"]
-    S -->|SSE / HTTP| Remote["远程客户端"]
-    IDE -->|--agent-id| ID["knowlyr-id<br/>身份 + 运行时"]
-    Remote -->|Bearer token| S
-    ID -->|运行时获取 prompt/model| E
-    E -->|sync 推送 prompt/avatar| ID
+    S -->|stdio| IDE["AI IDE"]
+    S -->|SSE / HTTP| Remote["Remote Client"]
+    IDE -->|agent-id| ID["knowlyr-id<br/>Identity Runtime"]
+    ID -->|GET prompt| E
+    E -->|sync push| ID
 ```
 
-Crew 通过 MCP 协议暴露三种原语：
+### MCP 原语映射
 
-| MCP 原语 | 作用 | 数量 |
-|----------|------|------|
-| **Prompts** | 每个员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
+| MCP Primitive | 作用 | 数量 |
+|---------------|------|------|
+| **Prompts** | 每位员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 列出/查看/运行员工、讨论会、流水线、记忆、评估、日志、项目检测、会议历史、反馈、状态 | 17 |
+| **Tools** | 列出/查看/运行员工、讨论会、流水线、记忆、评估、日志、项目检测等 | 17 |
 
 <details>
 <summary>17 个 MCP Tools 详情</summary>
@@ -78,318 +109,32 @@ Crew 通过 MCP 协议暴露三种原语：
 | `list_pipelines` | 列出所有流水线 |
 | `run_pipeline` | 执行流水线 |
 | `list_discussions` | 列出所有讨论会 |
-| `run_discussion` | 生成讨论会 prompt（支持预定义/即席/编排模式） |
+| `run_discussion` | 生成讨论会 prompt |
 | `add_memory` | 为员工添加一条持久化记忆 |
 | `query_memory` | 查询员工的持久化记忆 |
 | `track_decision` | 记录一个待评估的决策 |
 | `evaluate_decision` | 评估决策并将经验写入员工记忆 |
 | `list_meeting_history` | 查看讨论会历史记录 |
-| `get_meeting_detail` | 获取某次讨论会的完整记录 |
-| `crew_feedback` | 提交工作反馈到 knowlyr-id（评分 + 日志） |
-| `crew_status` | 查询 Agent 状态（单个详情或全部列表） |
+| `get_meeting_detail` | 获取讨论会完整记录 |
+| `crew_feedback` | 提交工作反馈到 knowlyr-id |
+| `crew_status` | 查询 Agent 状态 |
 
 </details>
 
----
-
-## MCP 集成 / MCP Integration
-
-### stdio 模式（本地 AI IDE）
-
-将以下内容添加到 MCP 配置文件：
-
-```json
-{
-  "mcpServers": {
-    "crew": {
-      "command": "knowlyr-crew",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-> Claude Desktop: `claude_desktop_config.json` · Claude Code: `.mcp.json`
-
-### SSE / HTTP 模式（远程部署）
-
-支持三种传输协议，SSE 和 Streamable HTTP 适合部署到服务器供远程客户端连接：
+### 传输协议
 
 ```bash
-# stdio（默认，本地 AI IDE 用）
-knowlyr-crew mcp
-
-# SSE（Claude Desktop / Cursor 远程连接）
-knowlyr-crew mcp -t sse --host 0.0.0.0 --port 9000
-
-# Streamable HTTP（MCP 最新规范）
-knowlyr-crew mcp -t http --host 0.0.0.0 --port 9001
-
-# 启用 Bearer token 认证（推荐生产环境使用）
-knowlyr-crew mcp -t sse --port 9000 --api-token YOUR_SECRET
-# 或通过环境变量
-KNOWLYR_CREW_API_TOKEN=YOUR_SECRET knowlyr-crew mcp -t sse --port 9000
-```
-
-SSE/HTTP 模式自带 `/health` 端点（免认证），返回版本、员工数量和运行时间：
-
-```bash
-curl http://127.0.0.1:9000/health
-# {"status":"ok","version":"0.1.1","employees":6,"uptime_seconds":42}
-```
-
-配置后 AI IDE 可直接：
-- 调用 `code-reviewer` prompt 审查代码
-- 调用 `test-engineer` prompt 编写测试
-- 读取员工定义了解能力范围
-- 使用 `run_employee` tool 动态生成 prompt
-- 运行 `run_pipeline` 串联多员工流水线
-- 运行 `run_discussion` 发起多员工讨论（支持编排模式）
-- 使用 `add_memory` / `query_memory` 积累和查询员工经验
-- 使用 `track_decision` / `evaluate_decision` 追踪和评估决策
-
-```bash
-pip install knowlyr-crew[mcp]
-```
-
-### 服务端特性
-
-部署为 HTTP/SSE 服务时，内置以下生产级特性：
-
-| 特性 | 说明 |
-|------|------|
-| **Bearer 认证** | `--api-token` 或 `KNOWLYR_CREW_API_TOKEN`，未设置则免认证（开发模式） |
-| **健康检查** | `/health` 端点免认证，返回版本、员工数量、运行时间 |
-| **CORS 跨域** | `--cors-origin` 或 `CREW_CORS_ORIGINS`，支持多 origin，OPTIONS 预检免认证 |
-| **SSE 流式** | `/run/employee` 支持 `stream: true`，返回 `text/event-stream` 实时 token 输出 |
-| **任务持久化** | 任务记录自动写入 `.crew/tasks.jsonl`，重启恢复，超限自动压缩 |
-| **身份透传** | `agent_id` 参数自动从 knowlyr-id 获取 Agent 身份，注入 prompt |
-| **TTL 缓存** | 员工发现和项目检测结果缓存 30s，避免每请求重扫文件系统 |
-| **请求日志** | 每次 tool 调用自动记录日志，异常自动捕获并返回错误响应 |
-| **并发安全** | JSONL read-modify-write 操作加 `fcntl.flock` 文件锁，SQLite 启用 WAL 模式 |
-| **请求大小限制** | 默认 1MB，超限返回 HTTP 413（始终生效） |
-| **速率限制** | 启用认证时自动生效，默认 60 请求/分钟/IP，`/health`、`/metrics`、`/webhook/github` 免限 |
-| **时序安全认证** | Bearer token 使用 `hmac.compare_digest` 防止时序攻击 |
-| **链路追踪** | 每个任务分配唯一 trace_id，贯穿日志全链路 |
-| **断路器** | knowlyr-id 连续 3 次失败后暂停请求 30 秒，自动恢复 |
-| **运行时指标** | `/metrics` 端点提供调用/延迟/token/错误统计，按员工和提供商分类 |
-| **周期心跳** | HeartbeatManager 每 60s 向 knowlyr-id 发送心跳，Agent 状态实时在线 |
-
----
-
-## CLI 使用 / CLI Usage
-
-```bash
-pip install knowlyr-crew
-
-# ── 核心命令 ──
-knowlyr-crew list                                     # 列出所有员工
-knowlyr-crew list --tag security --layer project      # 按 tag / 层过滤
-knowlyr-crew list -f json                             # JSON 输出
-knowlyr-crew show <name>                              # 查看员工详情
-knowlyr-crew run <name> [ARGS...] [OPTIONS]           # 生成 prompt
-
-# ── run 选项 ──
-knowlyr-crew run review main --arg focus=security     # 触发词 + 命名参数
-knowlyr-crew run code-reviewer main --smart-context   # 自动检测项目上下文
-knowlyr-crew run code-reviewer main --agent-id 3050   # 绑定 knowlyr-id 身份
-knowlyr-crew run code-reviewer main --copy            # 复制到剪贴板
-knowlyr-crew run code-reviewer main -o review.md      # 输出到文件
-knowlyr-crew run code-reviewer main --raw             # 原始渲染（无包装）
-
-# ── 项目初始化 ──
-knowlyr-crew init                                     # 初始化 .crew/ 目录
-knowlyr-crew init --employee my-skill                 # 创建单文件员工模板
-knowlyr-crew init --employee my-skill --dir-format    # 创建目录格式员工模板
-knowlyr-crew validate .crew/                          # 校验员工定义
-# ── 模板与经验库 ──
-knowlyr-crew template list                            # 查看内置 + 自定义模板
-knowlyr-crew template apply advanced-employee \
-  --employee security-auditor --var "tags=['security']"  # 渲染模板
-
-# ── Skills 互通 ──
-knowlyr-crew export <name>                            # 导出为 SKILL.md
-knowlyr-crew export-all                               # 导出全部
-knowlyr-crew sync [--clean]                           # 同步到 .claude/skills/
-
-# ── 讨论会 ──
-knowlyr-crew discuss list                             # 列出讨论会
-knowlyr-crew discuss show <name>                      # 查看详情
-knowlyr-crew discuss run <name> [--arg key=val]       # 运行讨论
-knowlyr-crew discuss run <name> --orchestrated        # 编排模式（每人独立推理）
-knowlyr-crew discuss adhoc -e "员工1,员工2" -t "议题"  # 即席讨论（免 YAML）
-knowlyr-crew discuss adhoc -e "员工" -t "议题"         # 1v1 会议
-knowlyr-crew discuss history [-n 20] [--keyword ...]  # 会议历史
-knowlyr-crew discuss view <meeting_id>                # 查看历史会议
-
-# ── 持久化记忆 ──
-knowlyr-crew memory list                              # 列出有记忆的员工
-knowlyr-crew memory show <employee> [--category ...]  # 查看员工记忆
-knowlyr-crew memory add <employee> <category> <text>  # 添加记忆
-knowlyr-crew memory correct <employee> <old_id> <text> # 纠正旧记忆
-
-# ── 评估闭环 ──
-knowlyr-crew eval track <employee> <category> <text>  # 记录决策
-knowlyr-crew eval list [--employee NAME] [--status pending] # 列出决策
-knowlyr-crew eval run <decision_id> <actual_outcome>  # 评估决策
-knowlyr-crew eval prompt <decision_id>                # 生成评估 prompt
-
-# ── 流水线 ──
-knowlyr-crew pipeline list                            # 列出流水线
-knowlyr-crew pipeline show <name>                     # 查看详情
-knowlyr-crew pipeline run <name> [--arg key=val]      # 运行流水线
-knowlyr-crew pipeline run <name> --execute            # Execute 模式（调用 LLM）
-knowlyr-crew pipeline run <name> --execute --model claude-opus-4-6
-
-# ── 工作日志 ──
-knowlyr-crew log list [--employee NAME] [-n 20]       # 查看日志（severity/links）
-knowlyr-crew log show <session_id>                    # 查看会话详情
-
-# ── 质量雷达 ──
-knowlyr-crew check --json                             # 会输出 lint + 日志质量摘要
-knowlyr-crew check --output-file report.json          # 写入 JSON 报告（默认为 .crew/quality-report.json）
-
-# ── 头像生成 ──
-knowlyr-crew avatar <name>                             # 为员工生成头像（通义万相）
-
-# ── Agent 管理 ──
-knowlyr-crew register <name> [--dry-run]               # 注册员工到 knowlyr-id
-knowlyr-crew agents list                               # 列出已注册 Agent
-knowlyr-crew agents status <id> [--heartbeat]          # 查看 Agent 状态
-knowlyr-crew agents sync <name>                        # 同步单个员工到 knowlyr-id
-knowlyr-crew agents sync-all [--dir DIR]               # 批量双向同步所有员工
-knowlyr-crew agents sync-all --dry-run                 # 预览同步操作
-knowlyr-crew agents sync-all --push-only               # 仅推送（不拉取）
-knowlyr-crew agents sync-all --pull-only               # 仅拉取（不推送）
-knowlyr-crew agents sync-all --force                   # 强制推送（忽略缓存）
-
-# ── Webhook + Cron 服务器 ──
-knowlyr-crew serve --port 8765 --token SECRET         # 启动 Webhook + Cron 服务器
-knowlyr-crew serve --port 8765 --no-cron              # 仅 Webhook，禁用 Cron
-
-# ── MCP 服务 ──
-knowlyr-crew mcp                                      # 启动 MCP Server（stdio）
-knowlyr-crew mcp -t sse --port 9000                   # SSE 传输（远程连接）
-knowlyr-crew mcp -t http --port 9001                  # Streamable HTTP 传输
-knowlyr-crew mcp -t sse --api-token SECRET            # 启用 Bearer 认证
+knowlyr-crew mcp                                # stdio（默认，本地 IDE）
+knowlyr-crew mcp -t sse --port 9000             # SSE（远程连接）
+knowlyr-crew mcp -t http --port 9001            # Streamable HTTP
+knowlyr-crew mcp -t sse --api-token SECRET      # 启用 Bearer 认证
 ```
 
 ---
 
-## 内置技能 / Builtin Skills
+## Defining Employees
 
-6 个通用数字员工，各有专业工作流：
-
-| ID | 显示名 | 触发词 | 用途 |
-|----|--------|--------|------|
-| `product-manager` | Product Manager | `pm`, `product` | 需求分析、用户故事、优先级排序、路线图、竞品分析 |
-| `code-reviewer` | Code Reviewer | `review`, `cr` | 代码审查：质量、安全性、性能、风格 |
-| `test-engineer` | Test Engineer | `test`, `tests` | 编写或补充单元测试 |
-| `refactor-guide` | Refactor Guide | `refactor` | 分析代码结构，提出重构建议 |
-| `doc-writer` | Doc Writer | `doc`, `docs` | 生成或更新文档（README、API、注释、CHANGELOG） |
-| `pr-creator` | PR Creator | `pr`, `pull-request` | 分析变更，创建规范的 Pull Request |
-| `employee-generator` | 员工生成器 | `gen-employee`, `scaffold` | 将高层需求转化为 EMPLOYEE.md 草稿 |
-
-所有内置员工默认使用 `claude-opus-4-6` 模型，可在 `private/employees/` 中放置同名员工进行覆盖。
-
----
-
-## 自定义技能 / Custom Skills
-
-### 发现优先级
-
-| 优先级 | 位置 | 说明 |
-|--------|------|------|
-| 最高 | `private/employees/<name>/` 或 `private/employees/*.md` | 仓库内的自定义员工（目录或单文件） |
-| 中 | `.claude/skills/<name>/SKILL.md` | Claude Code Skills 兼容层 |
-| 低 | 包内置 | 默认员工 |
-
-- 目录格式与单文件格式可共存，同名时目录优先
-- 高优先级会覆盖低优先级的同名员工
-
-### 创建自定义技能
-
-```bash
-knowlyr-crew init                                         # 初始化 private/employees/
-knowlyr-crew init --employee security-auditor             # 单文件模板
-knowlyr-crew init --employee security-auditor --dir-format # 目录格式模板
-knowlyr-crew validate private/employees/                  # 校验定义
-knowlyr-crew lint .crew/pipelines                        # Lint 流水线 YAML
-knowlyr-crew check --json                                 # Lint + 日志质量检查
-knowlyr-crew catalog list --format json                 # 查看员工 Catalog 元数据
-knowlyr-crew catalog show product-manager --json        # 查看指定员工详情
-knowlyr-crew lint .crew/discussions                     # 使用 schemas/*.json 验证讨论会 YAML
-
-> **命名建议**：生成目录格式员工后，请将文件夹命名为 `character_name-agent_id`（未注册的 Agent 用 `0000`），并在 `employee.yaml` 中填入 `character_name` 与 `agent_id`。运行 `bash private/install.sh` 时会自动同步到 `.crew/global/`，确保本地与 knowlyr-id 一致。
-```
-
-### 模板与经验库
-
-除基础 init 外，可利用模板系统快速复用成熟骨架：
-
-| 命令 | 说明 |
-|------|------|
-| `knowlyr-crew template list` | 查看所有模板（内置 / `.crew/global/templates/`〔可由 `KNOWLYR_CREW_GLOBAL_DIR` 指定〕/ `private/templates/`），项目模板会覆盖同名内置 |
-| `knowlyr-crew template apply advanced-employee --employee foo` | 使用占位符渲染“高级员工”模板，自动写入 `private/employees/foo.md` |
-| `knowlyr-crew template apply meta-prompt -o prompt.md --var name=安全审计师` | 生成参数化 Meta Prompt，交给 Claude/Cursor 填写 |
-
-- 内置模板位于 `src/crew/builtin_templates/`，包含“高级员工骨架”和“员工生成 Meta Prompt”。
-- 在 `.crew/templates/` 放置 Markdown 模板即可被自动发现，支持打造团队经验库。
-- 模板语法为 `{{var}}`，可通过 `--var key=value` 或 `--employee` 自动填充常用字段。
-- 私有目录推荐使用 `character_name-agent_id` 的命名方式（未注册时可用 `0000` 占位），`private/install.sh` 会自动根据 `employee.yaml` 内的 `character_name/agent_id` 同步到 `.crew/global/`。
-
-### 自动化生成
-
-`employee-generator` 是内置的“员工生成器”员工，输入角色定位、参数需求、输出规范即可生成完整 EMPLOYEE.md：
-
-```bash
-knowlyr-crew run employee-generator "安全审计师" \
-  --arg capabilities="合规检查\n威胁建模" \
-  --arg parameters="target(required): 被审计系统; depth(optional, default=轻量): 深度" \
-  --arg output_expectation="Markdown, 输出风险矩阵 + 行动项" \
-  --arg context_hints="README.md, {project_type}, {framework}"
-```
-
-生成的结果可直接保存为 `private/employees/<name>.md`，或结合模板系统继续加工，构建“需求 → 模板 → 上线”的自动化流程。
-
-### 能力提升方法论
-
-为了让一组数字员工真正成为“协作团队”，推荐遵循以下流程：
-
-1. **标准化角色**：每个员工必须补齐 `summary/context/tools/args`，Prompt 中包含“输入参数 + 工作流程 + 输出要求”，并声明需要的上下文（例如 `pyproject.toml`、`README.md`、`{project_type}`）。
-2. **协作编排**：通过 `.crew/pipelines/` 与 `.crew/discussions/` 将多角色串联（如安全→性能→DevOps、需求→API→PR），配合 LaneLock/Sessions 自动记录执行轨迹。
-3. **记忆与评估闭环**：默认开启 `SessionRecorder`，使用 `SessionMemoryWriter` 写入 `.crew/memory/`，并用 `knowlyr-crew eval track/run` 跟踪关键决策，再将复盘结果同步到 knowlyr-id（`agents sync/status`）。
-4. **私有资源命名**：`private/employees/` 与 `.crew/global/` 目录统一使用 `character_name-agent_id`（无 ID 用 `0000`），`private/install.sh` 会自动根据 `employee.yaml` 更新，保证本地与 knowlyr-id 一一对应。
-5. **模板/Init 复用**：在 `.crew/templates/` 维护团队模板，新员工通过 `knowlyr-crew init --dir-format` 或模板生成后，立即运行 `bash private/install.sh` 安装到 global 层。
-
-该闭环可确保所有输出都可追溯、协作有序，远端 knowlyr-id 的记忆与本地同步，让数字员工持续进化。
-
-### 运行时沉淀工具
-
-`scripts/` 目录包含几类实用脚本，方便在真实运行时管理记忆与评估：
-
-| 脚本 | 用法 |
-|------|------|
-| `python scripts/session_digest.py -n 5` | 查看最近 N 次会话/流水线/讨论的简要摘要，便于手动复盘 |
-| `python scripts/memory_cleanup.py [--dry-run]` | 对 `.crew/memory/*.jsonl` 去重，保留最新的独特经验，保持记忆干净 |
-| `python scripts/eval_reminder.py [--max-age-hours 24]` | 读取 `.crew/evaluations/decisions.jsonl`，提醒仍处于 `pending` 状态的决策，督促尽快 `eval run` |
-
-与 `SessionRecorder`、`SessionMemoryWriter` 和 `knowlyr-crew eval track/run` 搭配，可形成“生成 → 记录 → 复盘”的日常沉淀流程。
-
-### SDK 调用
-
-在 python 项目或 knowlyr-ID 中可直接使用 `crew.sdk`：
-
-```python
-from crew import sdk
-
-text = sdk.generate_prompt_by_name(
-    "product-manager", args={"target": "ai-roadmap"}, smart_context=True,
-)
-print(text)
-```
-
-`sdk.list_employees()` 可返回所有员工对象，`sdk.generate_prompt()` 则接受 `Employee` 实例，方便批量生成 prompt 或在 ID 服务中直接调用。
+每位 AI 员工是一个**声明式规范**——YAML 定义元数据和参数，Markdown 定义行为指令。
 
 ### 目录格式（推荐）
 
@@ -397,58 +142,21 @@ print(text)
 
 ```
 security-auditor/
-├── employee.yaml    # 配置（元数据、参数、工具、输出）
-├── prompt.md        # 主提示词（角色定义 + 核心指令）
-├── workflows/       # 可选：按 scope 拆分的工作流
+├── employee.yaml    # 元数据、参数、工具、输出格式
+├── prompt.md        # 角色定义 + 核心指令
+├── workflows/       # 按场景拆分的工作流
 │   ├── scan.md
 │   └── report.md
-└── adaptors/        # 可选：按项目类型适配
-    ├── python.md
-    └── nodejs.md
+└── adaptors/        # 按项目类型适配（python / nodejs / ...）
+    └── python.md
 ```
 
-**employee.yaml**:
 ```yaml
-name: security-auditor
-display_name: Security Auditor
-character_name: Alex Morgan      # 可选，讨论会中的人设名
-summary: 安全审计专家...           # 可选，讨论会摘要模式使用
-version: "1.0"
-description: 审计安全漏洞
-model: claude-opus-4-6           # 可选，推荐使用的模型
-tags: [security, audit]
-triggers: [audit, sec]
-tools: [file_read, bash, grep]
-context: [pyproject.toml, src/]
-args:
-  - name: target
-    description: 审计目标
-    required: true
-  - name: severity
-    description: 最低严重等级
-    default: medium
-output:
-  format: markdown               # markdown / json / text
-  filename: "audit-{date}.md"
-  dir: ".crew/logs"
-```
-
-`prompt.md` + `workflows/*.md` + `adaptors/*.md` 按字母序拼接为完整提示词。
-
-**自动版本管理**：可写层（global、project）的目录格式员工自动跟踪内容哈希，当提示词文件变更时 patch 版本自动递增（如 `1.0` → `1.0.1`）。
-
-### 单文件格式
-
-适合简单员工，单个 `.md` 文件包含 YAML frontmatter + Markdown 正文：
-
-```yaml
----
+# employee.yaml
 name: security-auditor
 display_name: Security Auditor
 character_name: Alex Morgan
-summary: 安全审计专家...
 version: "1.0"
-description: 审计安全漏洞
 model: claude-opus-4-6
 tags: [security, audit]
 triggers: [audit, sec]
@@ -464,694 +172,387 @@ args:
 output:
   format: markdown
   filename: "audit-{date}.md"
----
-
-正文为自然语言指令，支持变量替换。
 ```
 
-### 变量替换 / Variable Substitution
+### 单文件格式
 
-Prompt 正文支持以下变量：
+适合简单员工——YAML frontmatter + Markdown 正文，在一个 `.md` 文件内完成定义。
+
+### 发现与优先级
+
+| 优先级 | 位置 | 说明 |
+|--------|------|------|
+| 最高 | `private/employees/` | 仓库内自定义员工 |
+| 中 | `.claude/skills/` | Claude Code Skills 兼容层 |
+| 低 | 包内置 | 默认员工 |
+
+同名时高优先级覆盖低优先级。
+
+### 内置员工
+
+| 员工 | 触发词 | 用途 |
+|------|--------|------|
+| `product-manager` | `pm` | 需求分析、用户故事、路线图 |
+| `code-reviewer` | `review` | 代码审查：质量、安全、性能 |
+| `test-engineer` | `test` | 编写或补充单元测试 |
+| `refactor-guide` | `refactor` | 代码结构分析、重构建议 |
+| `doc-writer` | `doc` | 文档生成（README / API / CHANGELOG） |
+| `pr-creator` | `pr` | 分析变更、创建 Pull Request |
+| `employee-generator` | `scaffold` | 将需求转化为 employee 定义草稿 |
+
+### 智能上下文
+
+`--smart-context` 自动检测项目类型（Python / Node.js / Go / Rust / Java）、框架（FastAPI / React / Express ...）、包管理器和测试框架，注入适配信息到 prompt 中。
+
+<details>
+<summary>Prompt 变量替换</summary>
 
 | 变量 | 说明 |
 |------|------|
 | `$target`, `$severity` | 命名参数值 |
 | `$1`, `$2` | 位置参数 |
-| `$ARGUMENTS`, `$@` | 所有参数拼接 |
-| `{date}` | 当前日期（YYYY-MM-DD） |
-| `{datetime}` | 当前日期时间 |
-| `{cwd}` | 当前工作目录 |
-| `{git_branch}` | 当前 Git 分支 |
-| `{name}` | 员工名称 |
-| `{project_type}` | 项目类型（python / nodejs / go / rust） |
-| `{framework}` | 框架（fastapi / react / express...） |
-| `{test_framework}` | 测试框架（pytest / jest / vitest...） |
-| `{package_manager}` | 包管理器（uv / npm / cargo...） |
+| `{date}`, `{datetime}` | 当前日期/时间 |
+| `{cwd}`, `{git_branch}` | 工作目录 / Git 分支 |
+| `{project_type}`, `{framework}` | 项目类型 / 框架 |
+| `{test_framework}`, `{package_manager}` | 测试框架 / 包管理器 |
 
-`tools` 和 `context` 是声明式提示，由 AI IDE 自行决定如何使用。
-
-### 智能上下文 / Smart Context
-
-`--smart-context` 自动检测项目类型并注入适配信息（无需子进程调用）：
-
-| 检测项 | 示例 |
-|--------|------|
-| 项目类型 | python, nodejs, go, rust, java |
-| 框架 | fastapi, django, flask, express, react, vue, nextjs |
-| 包管理器 | uv, pip, poetry, npm, yarn, pnpm, cargo, maven |
-| 测试框架 | pytest, unittest, jest, vitest, mocha, go test |
-| Lint 工具 | ruff, black, mypy, eslint, prettier, golangci-lint |
-| 关键文件 | pyproject.toml, package.json, go.mod, Cargo.toml |
+</details>
 
 ---
 
-## 流水线 / Pipelines
+## Core Capabilities
 
-多个员工按顺序/并行串联执行，支持步骤间输出传递和 LLM 自动执行：
+### 1. Multi-Agent Deliberation
 
-```bash
-knowlyr-crew pipeline list
-knowlyr-crew pipeline run review-test-pr --arg target=main
-
-# Execute 模式：自动调用 LLM 串联执行（多模型支持）
-knowlyr-crew pipeline run full-review --arg target=main --execute
-knowlyr-crew pipeline run full-review --arg target=main --execute --model claude-opus-4-6
-knowlyr-crew pipeline run full-review --arg target=main --execute --model gpt-4o
-knowlyr-crew pipeline run full-review --arg target=main --execute --model deepseek-chat
-```
-
-### 内置流水线
-
-| 名称 | 步骤 | 用途 |
-|------|------|------|
-| `review-test-pr` | code-reviewer → test-engineer → pr-creator | 审查 + 测试 + 创建 PR |
-| `full-review` | code-reviewer → refactor-guide → test-engineer | 完整代码审查 |
-
-### YAML 格式
-
-```yaml
-name: review-test-pr
-description: 审查代码、补充测试、创建 PR
-steps:
-  - employee: code-reviewer
-    id: review                              # 可选，用于输出引用
-    args:
-      target: $target
-  - parallel:                               # 并行执行
-    - employee: test-engineer
-      id: test
-      args:
-        target: $target
-    - employee: refactor-guide
-      id: refactor
-      args:
-        target: $target
-  - employee: pr-creator
-    args:
-      review: "{steps.review.output}"       # 按 ID 引用
-      context: "{prev}"                     # 引用上一步输出
-```
-
-### 输出引用
-
-步骤之间可以传递输出，前一步的 LLM 结果作为后续步骤的输入：
-
-| 语法 | 含义 |
-|------|------|
-| `{prev}` | 上一步输出（并行组 = 所有子步骤输出合并） |
-| `{steps.<id>.output}` | 按步骤 ID 引用 |
-| `{steps.<N>.output}` | 按 flat index (0-based) 引用 |
-
-### 执行模式
-
-| 模式 | 说明 |
-|------|------|
-| **Prompt-only**（默认） | 生成各步骤 prompt，占位符保留原样，由调用方填充 |
-| **Execute**（`--execute`） | 自动调用 LLM API 串联执行，输出传递实际生效（支持多模型） |
-
-并行组在 Execute 模式下使用 `asyncio.gather` 并发执行，Prompt 模式下顺序生成。
-
-### 多模型支持
-
-Execute 模式支持三家 LLM 提供商，根据模型名前缀自动检测：
-
-| 提供商 | 模型前缀 | 环境变量 | 安装 |
-|--------|---------|---------|------|
-| **Anthropic** | `claude-*` | `ANTHROPIC_API_KEY` | `pip install knowlyr-crew[execute]` |
-| **OpenAI** | `gpt-*`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*` | `OPENAI_API_KEY` | `pip install knowlyr-crew[openai]` |
-| **DeepSeek** | `deepseek-*` | `DEEPSEEK_API_KEY` | `pip install knowlyr-crew[openai]` |
-| **Moonshot** | `moonshot-*` | `MOONSHOT_API_KEY` | `pip install knowlyr-crew[openai]` |
-| **Gemini** | `gemini-*` | `GOOGLE_API_KEY` | `pip install knowlyr-crew[gemini]` |
-| **智谱** | `glm-*` | `ZHIPUAI_API_KEY` | `pip install knowlyr-crew[openai]` |
-| **通义千问** | `qwen-*` | `DASHSCOPE_API_KEY` | `pip install knowlyr-crew[openai]` |
-
-> DeepSeek / Moonshot / 智谱 / 通义千问 使用 OpenAI 兼容 API，共用 `openai` 依赖。
-
-员工定义中的 `model` 字段直接决定使用哪个提供商：
-
-```yaml
-# employee.yaml
-model: gpt-4o          # → 自动使用 OpenAI
-model: deepseek-chat   # → 自动使用 DeepSeek
-model: claude-opus-4-6 # → 自动使用 Anthropic（默认）
-```
-
-### 断点恢复
-
-Pipeline 在 Execute 模式下支持断点续执行——中途失败时可从最后完成的步骤恢复：
+结构化讨论会让多位 AI 员工围绕议题进行多轮对抗性协商，避免单一模型推理的"共识回声室"效应。
 
 ```bash
-# 查看有断点的任务
-knowlyr-crew pipeline checkpoint list
-
-# 从断点恢复
-knowlyr-crew pipeline checkpoint resume <task_id> --model claude-opus-4-6
-```
-
-Webhook 服务器重启时会自动恢复未完成的 pipeline 任务。
-
-### Fallback 模型
-
-Execute 模式支持 `fallback_model` 参数——当主模型重试耗尽后自动切换：
-
-```python
-from crew.executor import execute_prompt
-result = execute_prompt(
-    system_prompt="...", api_key="key",
-    model="claude-opus-4-6",
-    fallback_model="gpt-4o",  # 主模型失败后自动切换
-    stream=False,
-)
-```
-
-发现路径：`builtin < project (.crew/pipelines/)`
-
----
-
-## 服务器模式 / Server Mode
-
-Crew 可作为 HTTP 服务器运行，接收外部事件并自动触发 pipeline / 员工执行：
-
-```bash
-pip install knowlyr-crew[webhook]
-
-# 启动服务器（Webhook + Cron 一体化）
-knowlyr-crew serve --port 8765 --token YOUR_SECRET
-
-# 启用 CORS（前端跨域调用）
-knowlyr-crew serve --port 8765 --token YOUR_SECRET \
-  --cors-origin https://antgather.knowlyr.com \
-  --cors-origin http://localhost:3000
-# 或通过环境变量
-CREW_CORS_ORIGINS=https://antgather.knowlyr.com,http://localhost:3000 knowlyr-crew serve
-
-# 禁用 cron 调度
-knowlyr-crew serve --port 8765 --token YOUR_SECRET --no-cron
-```
-
-### 架构总览
-
-```mermaid
-graph TB
-    subgraph "外部事件源"
-        GH["GitHub<br/>push / PR"]
-        OC["OpenClaw<br/>消息事件"]
-        API["REST API<br/>直接调用"]
-        CRON["Cron 调度器<br/>定时触发"]
-    end
-
-    subgraph "Crew Server (knowlyr-crew serve)"
-        WH["Webhook Router<br/>签名验证 + 事件路由"]
-        TR["Task Registry<br/>任务追踪"]
-        EX["执行引擎"]
-    end
-
-    subgraph "执行目标"
-        PL["Pipeline Engine<br/>多步骤编排"]
-        EM["Employee Engine<br/>单员工执行"]
-        LLM["Multi-LLM<br/>Anthropic / OpenAI / DeepSeek"]
-    end
-
-    GH -->|X-Hub-Signature-256| WH
-    OC -->|Bearer token| WH
-    API -->|Bearer token| WH
-    CRON -->|内部触发| TR
-
-    WH --> TR
-    TR --> EX
-    EX --> PL
-    EX --> EM
-    PL --> LLM
-    EM --> LLM
-```
-
-### API 端点
-
-| 路径 | 方法 | 认证 | 说明 |
-|------|------|------|------|
-| `/health` | GET | 无 | 健康检查 |
-| `/webhook/github` | POST | GitHub signature | GitHub webhook，按配置路由到 pipeline/员工 |
-| `/webhook/openclaw` | POST | Bearer | OpenClaw 消息事件 |
-| `/webhook` | POST | Bearer | 通用 JSON webhook |
-| `/run/pipeline/{name}` | POST | Bearer | 直接触发 pipeline |
-| `/run/employee/{name}` | POST | Bearer | 直接触发员工（支持 SSE 流式） |
-| `/tasks/{task_id}` | GET | Bearer | 查询任务状态和结果 |
-| `/cron/status` | GET | Bearer | 查询 cron 调度器状态 |
-| `/api/employees/{id}/prompt` | GET | Bearer | 获取员工能力定义（供 knowlyr-id 运行时调用） |
-
-所有执行端点支持三种模式：
-- **异步模式**（默认）：立即返回 `task_id`（HTTP 202），后台执行，通过 `/tasks/{task_id}` 轮询结果
-- **同步模式**（`"sync": true`）：等待执行完成后返回结果
-- **SSE 流式**（`/run/employee` + `"stream": true`）：返回 `text/event-stream`，实时输出 token
-
-### Webhook 配置
-
-`.crew/webhook.yaml` 定义事件路由规则：
-
-```yaml
-github_secret: "whsec_xxx"
-routes:
-  - event: "pull_request"
-    target:
-      type: pipeline
-      name: full-review
-      args:
-        target: "{{pull_request.head.ref}}"   # 从 payload 解析
-  - event: "push"
-    target:
-      type: employee
-      name: code-reviewer
-      args:
-        target: "{{ref}}"
-```
-
-GitHub webhook 使用 HMAC-SHA256 签名验证，`{{dotted.path}}` 语法从 JSON payload 中提取参数。
-
-### Cron 调度
-
-`.crew/cron.yaml` 定义定时任务：
-
-```yaml
-schedules:
-  - name: daily-review
-    cron: "0 9 * * *"                         # 每天 9:00
-    target_type: pipeline
-    target_name: full-review
-    args:
-      target: main
-  - name: weekly-summary
-    cron: "0 0 * * 0"                         # 每周日 0:00
-    target_type: employee
-    target_name: doc-writer
-    args:
-      scope: weekly
-```
-
-Cron 调度器随 `serve` 命令自动启动，使用 `croniter` 解析 cron 表达式，每个任务独立 asyncio 后台协程。通过 `/cron/status` 可查询各任务的下次触发时间。
-
----
-
-## 讨论会 / Discussions
-
-多名数字员工围绕议题进行多轮结构化讨论，也支持 1v1 会议和即席讨论：
-
-```bash
-# 预定义讨论会
-knowlyr-crew discuss list
+# 预定义讨论
 knowlyr-crew discuss run architecture-review --arg target=auth.py
 
 # 即席讨论（无需 YAML）
 knowlyr-crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块质量"
-knowlyr-crew discuss adhoc -e "hr-manager" -t "招聘方案"           # 1v1 会议
 
-# 会议历史
-knowlyr-crew discuss history
-knowlyr-crew discuss view 20260212_143052
+# 编排模式：每位参会者独立推理
+knowlyr-crew discuss run architecture-review --orchestrated
 ```
 
-### 内置讨论会
+**对抗性机制：** Crew 提供多层机制强制产生有价值的分歧——`stance`（预设立场）、`must_challenge`（必须质疑指定参会者）、`max_agree_ratio`（分歧配额）、`tension_seeds`（争议种子注入）。交互模式包括 `round-robin`、`cross-examine`（交叉盘问）、`steelman-then-attack`（先强化后攻击）、`debate`、`vote` 等。
 
-| 名称 | 参与者 | 轮次 | 用途 |
-|------|--------|------|------|
-| `architecture-review` | 4 | 3 | 多角色架构评审 |
-| `feature-design` | 4 | 3 (custom) | 从需求到方案的功能设计 |
-| `full-review` | 6 | 3 (custom) | 全员评审：round-robin → challenge → response |
+**讨论→执行衔接：** 设置 `action_output: true` 后自动生成结构化 ActionPlan JSON，通过 `pipeline_from_action_plan()` 按依赖拓扑排序转为可执行 Pipeline。
 
-### YAML 格式
+<details>
+<summary>讨论会 YAML 示例</summary>
 
 ```yaml
-name: my-review
+name: architecture-review
 topic: Review $target design
 goal: Produce improvement decisions
-mode: auto                                  # auto / discussion / meeting
-background_mode: auto                       # full / summary / minimal / auto
-action_output: true                         # 自动生成可执行 ActionPlan JSON
+mode: auto
 participants:
   - employee: product-manager
-    role: moderator                         # moderator / speaker / recorder
+    role: moderator
     focus: 需求完整性
-    stance: 偏用户体验                       # 预设立场（强制多元视角）
-    execution_role: monitor                 # 讨论后执行阶段的角色
+    stance: 偏用户体验
   - employee: code-reviewer
     role: speaker
     focus: 安全性
-    must_challenge: [product-manager]       # 必须质疑的参会者
-    max_agree_ratio: 0.6                    # 最多 60% 同意，强制产生分歧
-    execution_role: executor
-tension_seeds:                              # 预设争议点，注入讨论强制触发分歧
+    must_challenge: [product-manager]
+    max_agree_ratio: 0.6
+tension_seeds:
   - 安全性 vs 开发效率
-  - 自研 vs 第三方方案
-rules:                                      # 可选，默认提供 6 条规则
-  - Every participant must speak each round
-  - Encourage constructive disagreement
-round_template: deep-adversarial            # 可选，使用预定义轮次模板
-rounds:                                     # int（自动生成）或 list（自定义）
+rounds:
   - name: 各抒己见
-    instruction: Each role gives initial evaluation
-    interaction: round-robin                # free / round-robin / challenge / response
-    max_words_per_turn: 300                 #   / brainstorm / vote / debate
-  - name: 交叉盘问                           #   / cross-examine / steelman-then-attack
-    instruction: Challenge each other's conclusions
+    interaction: round-robin
+  - name: 交叉盘问
     interaction: cross-examine
-    require_direct_reply: true              # 必须引用并回应他人具体观点
-    min_disagreements: 2                    # 本轮至少 2 个分歧
-  - name: 强化后攻击
-    interaction: steelman-then-attack
     require_direct_reply: true
+    min_disagreements: 2
   - name: Decision
-    instruction: Summarize action items
     interaction: vote
-output_format: decision                     # decision / transcript / summary
-output:                                     # 可选，自动保存
-  filename: "{date}-$target.md"
-  dir: ~/Desktop/meetings
+output_format: decision
 ```
 
-### 核心特性
+</details>
+
+### 2. Pipeline Orchestration
+
+多员工按顺序/并行串联执行，支持步骤间输出传递、多模型路由、断点恢复：
+
+```bash
+# 生成各步骤 prompt
+knowlyr-crew pipeline run review-test-pr --arg target=main
+
+# Execute 模式：自动调用 LLM 串联执行
+knowlyr-crew pipeline run full-review --execute --model claude-opus-4-6
+```
 
 | 特性 | 说明 |
 |------|------|
-| **编排模式** | `--orchestrated` 为每位参会者生成独立 prompt，消除单推理回声室效应 |
-| **预研轮次** | 有工具或 `research_instructions` 的员工自动获得 round 0，先用工具收集真实数据再发言 |
-| **持久化记忆** | 讨论 prompt 自动注入员工历史经验，发言基于真实积累而非临时编造 |
-| **1v1 会议** | 单个参与者自动切换为会话式 prompt，无多轮结构 |
-| **即席讨论** | CLI `discuss adhoc` 或 MCP `run_discussion(employees=..., topic=...)` 免 YAML |
-| **会议记录** | 自动保存到 `.crew/meetings/`，`discuss history` 查看历史 |
-| **互动模式** | `free` / `round-robin` / `challenge` / `response` / `brainstorm` / `vote` / `debate` / `cross-examine` / `steelman-then-attack` |
-| **轮次模板** | `standard` / `brainstorm-to-decision` / `adversarial` / `deep-adversarial` / `discuss-then-execute`，`round_template` 字段一键展开 |
-| **对抗性讨论** | `stance`（预设立场）、`must_challenge`（必须质疑）、`max_agree_ratio`（分歧配额）、`tension_seeds`（争议种子） |
-| **反独白控制** | `max_words_per_turn`（字数限制）、`require_direct_reply`（引用回应）、`min_disagreements`（最低分歧）、非首轮自动去重 |
-| **讨论→执行** | `action_output: true` 自动生成 ActionPlan JSON，`pipeline_from_action_plan()` 转为可执行 Pipeline |
-| **角色生命周期** | `execution_role`（executor / reviewer / monitor / idle）定义讨论后执行阶段的职责 |
-| **background_mode** | `auto` 按参与人数自动选择上下文深度（≤3 full，4-6 summary，>6 minimal） |
-| **character_name** | 员工定义 `character_name` 时，讨论中显示人设名（如 `林锐·Code Reviewer`） |
-| **三层发现** | `builtin < global (.crew/global/discussions/，可由 KNOWLYR_CREW_GLOBAL_DIR 指定) < project (.crew/discussions/)` |
+| **输出传递** | `{prev}`（上一步）、`{steps.<id>.output}`（按 ID 引用） |
+| **并行组** | YAML 中 `parallel:` 标记，Execute 模式下 `asyncio.gather` 并发 |
+| **多模型** | Anthropic / OpenAI / DeepSeek / Moonshot / Gemini / 智谱 / 通义千问，按模型名前缀自动路由 |
+| **断点恢复** | 中途失败从最后完成的步骤恢复（`pipeline checkpoint resume`） |
+| **Fallback** | 主模型重试耗尽后自动切换备选模型 |
 
-### 对抗性讨论
+### 3. Persistent Memory
 
-AI 讨论的常见问题是"共识太快、独白式发言"。Crew 提供多层机制强制产生有价值的分歧：
-
-| 机制 | 说明 |
-|------|------|
-| `stance` | 为参会者预设立场倾向，发言必须体现该立场 |
-| `must_challenge` | 指定必须质疑的参会者，不可只说"我同意" |
-| `max_agree_ratio` | 分歧配额，如 0.6 表示最多 60% 完全同意 |
-| `tension_seeds` | 预设争议点列表，首轮注入强制表态 |
-| `cross-examine` | 交叉盘问：选择一位他人，提出 3 个具体问题（事实挑战、逻辑推演、替代方案） |
-| `steelman-then-attack` | 先强化再攻击：先用 2-3 句强化对方论点，再找弱点 |
-| `max_words_per_turn` | 字数限制，防止独白式长篇发言 |
-| `require_direct_reply` | 必须引用他人原文（`>` 标记）再回应 |
-| `min_disagreements` | 本轮最少分歧数 |
-| 非首轮去重 | 自动注入"禁止重复、增量贡献、标记状态"约束 |
-
-### 讨论→执行衔接
-
-设置 `action_output: true` 后，讨论汇总会额外输出结构化 ActionPlan JSON：
-
-```json
-{
-  "decisions": ["决策1"],
-  "unresolved": ["未解决分歧"],
-  "actions": [
-    {"id": "A1", "description": "任务", "assignee_role": "executor",
-     "depends_on": [], "priority": "P0", "verification": "验证方式", "phase": "implement"}
-  ],
-  "review_criteria": ["验收标准"]
-}
-```
-
-通过 `pipeline_from_action_plan()` 可将 ActionPlan 自动转为 Pipeline：
-- 按 `depends_on` 拓扑排序
-- 无依赖的 actions 自动并行（ParallelGroup）
-- 自动追加 review 步骤
-
-```python
-from crew.pipeline import pipeline_from_action_plan
-from crew.models import DiscussionActionPlan
-
-plan = DiscussionActionPlan(**action_plan_json)
-pipeline = pipeline_from_action_plan(plan)
-# A1 → [A2, A3] 并行 → A4 → review
-```
-
----
-
-## 持久化记忆 / Persistent Memory
-
-每个员工拥有独立的经验记忆库，跨会话积累——不再每次从零开始：
+每位员工拥有独立的经验记忆库，跨会话积累——不再每次从零开始。
 
 ```bash
-# 添加记忆
 knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
-knowlyr-crew memory add code-reviewer decision "建议按模块拆分 CSS"
-
-# 查看记忆
-knowlyr-crew memory list                          # 列出有记忆的员工
-knowlyr-crew memory show code-reviewer            # 查看全部记忆
-knowlyr-crew memory show code-reviewer --category finding  # 按类别过滤
-
-# 纠正旧记忆
+knowlyr-crew memory show code-reviewer
 knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天"
 ```
-
-### 工作机制
 
 | 特性 | 说明 |
 |------|------|
 | **自动注入** | `run_employee` 和讨论会 prompt 自动包含该员工的历史记忆 |
-| **语义搜索** | 混合搜索：向量余弦相似度 (0.7) + 关键词匹配 (0.3) 加权排序，精确术语不遗漏 |
-| **多 Embedding 后端** | OpenAI `text-embedding-3-small` → Gemini `text-embedding-004` → TF-IDF 降级，无 API key 也可用 |
-| **四种类别** | `decision`（决策）、`estimate`（估算）、`finding`（发现）、`correction`（纠正） |
-| **置信度** | 每条记忆带 `confidence` 权重，查询时可按最低置信度过滤 |
-| **纠正机制** | `correct` 命令标记旧记忆为 superseded，创建新 correction 条目 |
-| **MCP Tools** | `add_memory` / `query_memory`，AI IDE 可在工作中自主积累经验 |
+| **语义搜索** | 向量余弦相似度 (0.7) + 关键词匹配 (0.3) 加权排序 |
+| **多 Embedding** | OpenAI → Gemini → TF-IDF 逐级降级，无 API key 也可用 |
+| **四种类别** | `decision` / `estimate` / `finding` / `correction` |
+| **纠正机制** | `correct` 标记旧记忆为 superseded，创建新条目 |
 
-```bash
-# 安装 Embedding 后端（可选，无则自动降级 TF-IDF）
-pip install knowlyr-crew[openai]   # OpenAI embedding（推荐）
-pip install knowlyr-crew[gemini]   # Gemini embedding（免费额度大）
-```
+存储：`.crew/memory/{employee}.jsonl`（记忆）+ `.crew/memory/embeddings.db`（向量索引）
 
-存储路径：`.crew/memory/{employee_name}.jsonl`（记忆）、`.crew/memory/embeddings.db`（向量索引）
-
----
-
-## 评估闭环 / Evaluation Loop
+### 4. Evaluation Loop
 
 追踪决策质量，回溯评估后自动将经验教训写入员工记忆——形成"决策→执行→复盘→改进"闭环：
 
 ```bash
 # 记录决策
-knowlyr-crew eval track pm estimate "CSS 拆分需要 2 天" \
-  --expected "2 天完成" --meeting-id M001
+knowlyr-crew eval track pm estimate "CSS 拆分需要 2 天"
 
-# 查看待评估决策
-knowlyr-crew eval list --status pending
-
-# 评估（实际结果 + 结论自动写入员工记忆）
-knowlyr-crew eval run <decision_id> "实际花了 5 天" \
-  --evaluation "低估了跨模块依赖的复杂度，未来类似任务 ×2.5"
-
-# 生成评估 prompt（交给 AI 分析偏差原因）
-knowlyr-crew eval prompt <decision_id>
+# 评估（结论自动写入员工记忆）
+knowlyr-crew eval run <id> "实际花了 5 天" \
+  --evaluation "低估了跨模块依赖的复杂度，未来 ×2.5"
 ```
 
-### 工作机制
+三种决策类别：`estimate`（估算）/ `recommendation`（建议）/ `commitment`（承诺）。评估结论自动作为 `correction` 类型写入该员工的持久化记忆。
+
+---
+
+## Server Mode
+
+Crew 可作为 HTTP 服务器运行，接收外部事件并自动触发 pipeline / 员工执行：
+
+```bash
+pip install knowlyr-crew[webhook]
+knowlyr-crew serve --port 8765 --token YOUR_SECRET
+```
+
+### API 端点
+
+| 路径 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查（免认证） |
+| `/webhook/github` | POST | GitHub webhook，按配置路由到 pipeline/员工 |
+| `/webhook/openclaw` | POST | OpenClaw 消息事件 |
+| `/run/pipeline/{name}` | POST | 触发 pipeline（支持异步/同步/SSE 流式） |
+| `/run/employee/{name}` | POST | 触发员工（支持 SSE 流式） |
+| `/api/employees/{id}/prompt` | GET | 获取员工能力定义（供 knowlyr-id 运行时调用） |
+| `/tasks/{task_id}` | GET | 查询任务状态和结果 |
+| `/metrics` | GET | 调用/延迟/token/错误统计 |
+| `/cron/status` | GET | Cron 调度器状态 |
+
+<details>
+<summary>服务端生产特性</summary>
 
 | 特性 | 说明 |
 |------|------|
-| **三种决策类别** | `estimate`（估算）、`recommendation`（建议）、`commitment`（承诺） |
-| **自动回写** | 评估结论自动作为 `correction` 类型写入该员工的持久化记忆 |
-| **评估 prompt** | `eval prompt` 生成结构化回溯分析模板，输出偏差描述、原因分析、经验教训 |
-| **MCP Tools** | `track_decision` / `evaluate_decision`，支持 AI IDE 在会议中自动提取和追踪决策 |
+| Bearer 认证 | `--api-token`，timing-safe 比较 |
+| CORS 跨域 | `--cors-origin`，多 origin 支持 |
+| 速率限制 | 60 请求/分钟/IP |
+| 请求大小限制 | 默认 1MB |
+| 断路器 | knowlyr-id 连续 3 次失败后暂停 30 秒 |
+| 链路追踪 | 每个任务唯一 trace_id |
+| 并发安全 | `fcntl.flock` 文件锁 + SQLite WAL |
+| 任务持久化 | `.crew/tasks.jsonl`，重启恢复 |
+| 周期心跳 | 每 60s 向 knowlyr-id 发送心跳 |
 
-存储路径：`.crew/evaluations/decisions.jsonl`
+</details>
 
----
+### Webhook 配置
 
-## Skills 互通 / Interoperability
-
-与 Claude Code 原生 Skills 双向转换：
-
-| Crew 格式 | SKILL.md 格式 | 转换方式 |
-|-----------|--------------|----------|
-| `tools: [file_read, git]` | `allowed-tools: Read Bash(git:*)` | 自动映射 |
-| `args`（类型化、必填） | `argument-hint: <target> [mode]` | `<>` = 必填，`[]` = 可选 |
-| `$target`, `$focus` | `$0`, `$1` | 位置变量转换 |
-| `display_name`, `tags` 等 | HTML 注释 | 元数据往返保持 |
-
-```bash
-knowlyr-crew export code-reviewer      # → .claude/skills/code-reviewer/SKILL.md
-knowlyr-crew export-all                # 导出全部
-knowlyr-crew sync --clean              # 同步 + 清理孤立目录
-```
-
-`.claude/skills/<name>/SKILL.md` 会被自动发现，参与四层优先级合并。
+`.crew/webhook.yaml` 定义事件路由规则（GitHub HMAC-SHA256 签名验证），`.crew/cron.yaml` 定义定时任务（croniter 解析）。
 
 ---
 
-## knowlyr-id 协作 / Integration
+## Integrations
 
-与 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 协作——**Crew 定义能力，id 管理身份和运行时**：
+### knowlyr-id — 身份与运行时
+
+Crew 定义"谁做什么"，[knowlyr-id](https://github.com/liuxiaotong/knowlyr-id) 管理身份、对话和运行时。两者协作但各自可独立使用。
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Crew（本项目 = 能力权威）              │
-│                                                   │
-│  员工定义: prompt · model · temperature · tools   │
-│           avatar · bio · tags · workflows         │
-│  训练数据: trajectories · sessions                 │
-└────────────────────┬────────────────────────────┘
-                     │
-        ┌────────────┼────────────┐
-        │ API 获取    │ sync 推送   │
-        │ prompt     │ 全字段      │
-        ↓            ↓            │
-┌─────────────────────────────────────────────────┐
-│         knowlyr-id（身份 + 运行时）                │
-│                                                   │
-│  身份: 用户账号 · 角色 · EXP · 等级               │
-│  运行时: 对话历史 · 记忆 · 心跳 · 工作日志         │
-│  管理: API Key · 调度 · 触达 · 财务               │
-│  容灾: system_prompt 缓存（crew 不可用时回退）      │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐
+│        Crew（能力权威）                │
+│  prompt · model · tools · avatar     │
+│  temperature · bio · tags            │
+└──────────────┬───────────────────────┘
+     API 获取 prompt │ sync 推送全字段
+┌──────────────┴───────────────────────┐
+│      knowlyr-id（身份 + 运行时）       │
+│  用户账号 · 对话 · 记忆 · 心跳        │
+│  调度 · 触达 · API Key · 工作日志     │
+└──────────────────────────────────────┘
 ```
 
-knowlyr-id 在运行时通过 `CREW_API_URL` 从 Crew 获取员工的 prompt / model / temperature（5 分钟缓存），
-Crew 不可用时自动回退到 DB 中的缓存副本。knowlyr-id 连接是**可选的**——不配置时 Crew 作为独立 MCP 技能服务运行。
-
-### 两种协作模式
-
-**模式一：CLI / MCP 模式**（Crew 主动调用 id）
+knowlyr-id 通过 `CREW_API_URL` 获取员工的 prompt / model / temperature（5 分钟缓存），不可用时回退到 DB 缓存。连接是**可选的**——不配置时 Crew 独立运行。
 
 ```bash
-knowlyr-crew run code-reviewer main --agent-id 3050
-# 1. 从 id 获取 Agent 3050 身份信息 → 注入 prompt
-# 2. 生成 prompt → 输出
-# 3. 发送心跳到 id
-```
-
-**模式二：API 模式**（id 调用 Crew）
-
-```bash
-# knowlyr-id 在用户发私信时自动调用：
-GET /api/employees/3050/prompt
-# → 返回 system_prompt, model, temperature, tools, tool_schemas
-```
-
-Crew Webhook 服务器暴露 `/api/employees/{id}/prompt` 端点，
-knowlyr-id 的 `crew_client.py` 在每次 AI 回复时调用此端点获取最新的员工能力定义。
-
-### 环境变量
-
-```bash
-# Crew 端（调用 id）
-export KNOWLYR_ID_URL=https://id.knowlyr.com
-export AGENT_API_TOKEN=your-token
-pip install knowlyr-crew[id]
-
-# id 端（调用 Crew，在 knowlyr-id 的 .env 中配置）
-CREW_API_URL=http://127.0.0.1:8765
-CREW_API_TOKEN=your-crew-token
-```
-
-### 双向同步 / Bidirectional Sync
-
-`agents sync-all` 命令实现本地员工目录与 knowlyr-id 之间的批量双向同步：
-
-```bash
-# 一键部署（推荐）：rsync → 重启 crew → 同步 knowlyr-id
+# 一键部署（rsync → 重启 → 同步 knowlyr-id）
 make push
-
-# 或手动同步
-knowlyr-crew agents sync-all --dir private/employees/ --dry-run   # 预览
-knowlyr-crew agents sync-all --dir private/employees/ --force     # 强制全量
 ```
 
-**Push（Crew → id）：**
-- 元数据：character_name → nickname, display_name → title, bio, description → capabilities, tags → domains
-- 渲染后的完整 prompt → system_prompt（容灾缓存）
-- avatar.webp → avatar_base64
-- crew_name 自动写入（id 运行时通过 crew_name 匹配员工定义）
-- model / temperature / max_tokens → 配置缓存
-- 新员工（无 agent_id）自动注册，agent_id 回写到 employee.yaml
-- 本地已删除的员工 → 远端设为 inactive
+<details>
+<summary>字段映射</summary>
 
-**Pull（id → Crew）：**
-- 运行时积累的 memory → memory-id.md（保留对话中学到的经验）
-- model / temperature → employee.yaml（运行时调整的模型配置同步回来）
+| Crew Employee | knowlyr-id | 方向 |
+|---|---|---|
+| `name` | `crew_name` | push → |
+| `character_name` | `nickname` | push → |
+| `display_name` | `title` | push → |
+| `bio` | `bio` | push → |
+| `description` | `capabilities` | push → |
+| `tags` | `domains` | push → |
+| rendered prompt | `system_prompt` | push → |
+| `avatar.webp` | `avatar_base64` | push → |
+| `model` | `model` | push → |
+| `temperature` | `temperature` | ↔ |
+| `max_tokens` | `max_tokens` | push → |
+| `memory-id.md` | `memory` | ← pull |
 
-**内容哈希优化：** 利用 `_content_hash` 字段，prompt 未变时跳过 prompt/avatar 推送，仅同步 metadata。`--force` 可强制全量推送。
+</details>
 
-### 字段映射 / Field Mapping
+### Claude Code Skills 互通
 
-| Crew Employee | knowlyr-id | 方向 | 说明 |
-|---|---|---|---|
-| `name` | `crew_name` | push → | Crew 内部名称（运行时匹配用） |
-| `character_name` | `nickname` | push → | 人名 |
-| `display_name` | `title` | push → | 头衔 |
-| `bio` | `bio` | push → | 一句话简介 |
-| `description` | `capabilities` | push → | 能力介绍 |
-| `tags` | `domains` | push → | 能力领域 |
-| rendered prompt | `system_prompt` | push → | 完整系统提示词（容灾缓存） |
-| `avatar.webp` | `avatar_base64` | push → | 头像 |
-| `model` | `model` | push → | 模型（运行时优先用 Crew API） |
-| `temperature` | `temperature` | ↔ | 温度参数（双向同步） |
-| `max_tokens` | `max_tokens` | push → | 最大 token 数 |
-| `memory-id.md` | `memory` | ← pull | 运行时积累的记忆 |
+Crew 员工与 Claude Code 原生 Skills 双向转换：`tools` ↔ `allowed-tools`、`args` ↔ `argument-hint`、元数据通过 HTML 注释往返保持。
 
----
+```bash
+knowlyr-crew export code-reviewer    # → .claude/skills/code-reviewer/SKILL.md
+knowlyr-crew sync --clean            # 同步 + 清理孤立目录
+```
 
-## 头像生成 / Avatar
+### Avatar 生成
 
-通过通义万相（DashScope）API 为数字员工生成写实职业照头像：
+通义万相（DashScope）生成写实职业照头像，768×768 → 256×256 webp：
 
 ```bash
 pip install knowlyr-crew[avatar]
-export DASHSCOPE_API_KEY=sk-xxx
-
-# 为员工生成头像（768x768 → 256x256 webp）
 knowlyr-crew avatar security-auditor
-
-# 创建员工时同时生成头像
-knowlyr-crew init --employee my-skill --dir-format --avatar
 ```
-
-头像流程：
-1. 从 `employee.yaml` 的 `avatar_prompt` 构建 prompt（无则自动推断）
-2. 调用通义万相 `wanx2.0-t2i-turbo` 生成 768×768 原图
-3. Pillow 中心裁剪 + 缩放为 256×256 webp（~5-8 KB）
-4. 保存到员工目录 `avatar.webp`
-5. `agents sync` 时自动上传到 knowlyr-id
 
 ---
 
-## 生态 / Ecosystem
+## CLI Reference
+
+<details>
+<summary>完整 CLI 命令列表</summary>
+
+### Core
+
+```bash
+knowlyr-crew list [--tag TAG] [--layer LAYER] [-f json]  # 列出员工
+knowlyr-crew show <name>                                  # 查看详情
+knowlyr-crew run <name> [ARGS] [--smart-context] [--agent-id ID] [--copy] [-o FILE]
+knowlyr-crew init [--employee NAME] [--dir-format] [--avatar]
+knowlyr-crew validate <path>
+knowlyr-crew check --json                                 # 质量雷达
+```
+
+### Discussions
+
+```bash
+knowlyr-crew discuss list
+knowlyr-crew discuss run <name> [--orchestrated] [--arg key=val]
+knowlyr-crew discuss adhoc -e "员工1,员工2" -t "议题"
+knowlyr-crew discuss history [-n 20]
+knowlyr-crew discuss view <meeting_id>
+```
+
+### Memory
+
+```bash
+knowlyr-crew memory list
+knowlyr-crew memory show <employee> [--category ...]
+knowlyr-crew memory add <employee> <category> <text>
+knowlyr-crew memory correct <employee> <old_id> <text>
+```
+
+### Evaluation
+
+```bash
+knowlyr-crew eval track <employee> <category> <text>
+knowlyr-crew eval list [--status pending]
+knowlyr-crew eval run <decision_id> <outcome> [--evaluation TEXT]
+knowlyr-crew eval prompt <decision_id>
+```
+
+### Pipeline
+
+```bash
+knowlyr-crew pipeline list
+knowlyr-crew pipeline run <name> [--execute] [--model MODEL] [--arg key=val]
+knowlyr-crew pipeline checkpoint list
+knowlyr-crew pipeline checkpoint resume <task_id>
+```
+
+### Server & MCP
+
+```bash
+knowlyr-crew serve --port 8765 --token SECRET [--no-cron] [--cors-origin URL]
+knowlyr-crew mcp [-t stdio|sse|http] [--port PORT] [--api-token TOKEN]
+```
+
+### Agent Management
+
+```bash
+knowlyr-crew register <name> [--dry-run]
+knowlyr-crew agents list
+knowlyr-crew agents status <id>
+knowlyr-crew agents sync <name>
+knowlyr-crew agents sync-all [--push-only|--pull-only] [--force] [--dry-run]
+```
+
+### Templates & Export
+
+```bash
+knowlyr-crew template list
+knowlyr-crew template apply <template> --employee <name> [--var key=val]
+knowlyr-crew export <name>                                # → SKILL.md
+knowlyr-crew export-all
+knowlyr-crew sync [--clean]                               # → .claude/skills/
+```
+
+### Other
+
+```bash
+knowlyr-crew avatar <name>                                # 头像生成
+knowlyr-crew log list [--employee NAME] [-n 20]           # 工作日志
+knowlyr-crew log show <session_id>
+```
+
+</details>
+
+---
+
+## Ecosystem
 
 <details>
 <summary>Architecture Diagram</summary>
 
 ```mermaid
 graph LR
-    subgraph Data Pipeline
-        Radar["Radar<br/>Discovery"] --> Recipe["Recipe<br/>Analysis"]
-        Recipe --> Synth["Synth<br/>Generation"]
-        Recipe --> Label["Label<br/>Annotation"]
-        Synth --> Check["Check<br/>Quality"]
-        Label --> Check
-    end
-    Audit["Audit<br/>Model Audit"]
-    subgraph Agent Toolchain
-        Hub["Hub<br/>Orchestration"] --> Sandbox["Sandbox<br/>Execution"]
-        Sandbox --> Recorder["Recorder<br/>Recording"]
-        Recorder --> Reward["Reward<br/>Scoring"]
-    end
+    Radar["Radar<br/>Discovery"] --> Recipe["Recipe<br/>Analysis"]
+    Recipe --> Synth["Synth<br/>Generation"]
+    Recipe --> Label["Label<br/>Annotation"]
+    Synth --> Check["Check<br/>Quality"]
+    Label --> Check
+    Check --> Audit["Audit<br/>Model Audit"]
+    Audit --> Agent["Agent<br/>Toolchain"]
     Crew["Crew<br/>AI Employee Engine"]
-    ID["ID<br/>Identity + Runtime"]
-    Crew -.-> Radar
-    Crew -.-> Check
-    Crew -.-> Audit
-    Crew -.-> Hub
+    ID["ID<br/>Identity Runtime"]
     Crew -.->|能力定义| ID
     ID -.->|身份 + 记忆| Crew
     style Crew fill:#0969da,color:#fff,stroke:#0969da
@@ -1160,30 +561,27 @@ graph LR
 
 </details>
 
-| Layer | Project | PyPI | Description | Repo |
-|-------|---------|------|-------------|------|
-| Discovery | **AI Dataset Radar** | knowlyr-radar | Competitive intelligence, trend analysis | [GitHub](https://github.com/liuxiaotong/ai-dataset-radar) |
-| Analysis | **DataRecipe** | knowlyr-datarecipe | Reverse engineering, schema extraction | [GitHub](https://github.com/liuxiaotong/data-recipe) |
-| Production | **DataSynth** | knowlyr-datasynth | LLM batch generation | [GitHub](https://github.com/liuxiaotong/data-synth) |
-| Production | **DataLabel** | knowlyr-datalabel | Lightweight annotation | [GitHub](https://github.com/liuxiaotong/data-label) |
-| Quality | **DataCheck** | knowlyr-datacheck | Rule validation, dedup | [GitHub](https://github.com/liuxiaotong/data-check) |
-| Audit | **ModelAudit** | knowlyr-modelaudit | Distillation detection, fingerprinting | [GitHub](https://github.com/liuxiaotong/model-audit) |
-| Identity | **knowlyr-id** | — | Identity + AI employee runtime | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
-| Skills | **Crew** | knowlyr-crew | AI Skill Loader & Employee Engine | You are here |
-| Agent | **knowlyr-agent** | knowlyr-sandbox / recorder / reward / hub | Sandbox + recording + reward + orchestration | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
+| Layer | Project | Description | Repo |
+|-------|---------|-------------|------|
+| Discovery | **AI Dataset Radar** | 数据集竞争情报、趋势分析 | [GitHub](https://github.com/liuxiaotong/ai-dataset-radar) |
+| Analysis | **DataRecipe** | 逆向分析、Schema 提取、成本估算 | [GitHub](https://github.com/liuxiaotong/data-recipe) |
+| Production | **DataSynth** / **DataLabel** | LLM 批量合成 / 轻量标注 | [GitHub](https://github.com/liuxiaotong/data-synth) · [GitHub](https://github.com/liuxiaotong/data-label) |
+| Quality | **DataCheck** | 规则验证、重复检测、分布分析 | [GitHub](https://github.com/liuxiaotong/data-check) |
+| Audit | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
+| Identity | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
+| Skills | **Crew** | 声明式 AI 员工引擎 | You are here |
+| Agent | **knowlyr-agent** | 沙箱 + 轨迹录制 + Reward + 编排 | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
 
 ---
 
-## 开发 / Development
+## Development
 
 ```bash
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-pytest -v
+pytest -v    # 791 test cases
 ```
-
-**Tests**: 791 cases covering parsing (single-file + directory format), discovery (TTL cache + thread-safe concurrent access), engine, CLI (fuzzy matching, debug-context, checkpoint), MCP Server (stdio/SSE/HTTP), Skills conversion, knowlyr-id client (sync + async, circuit breaker), project detection (with TTL cache), pipelines (output passing, parallel groups, execute mode, checkpoint/resume), webhook server (GitHub signature, event routing, async/sync execution, CORS middleware, SSE streaming, task JSONL persistence, agent identity passthrough, request size limit, rate limiting, trace-id logging), cron scheduler (config validation, trigger execution, delivery targets), discussions (1v1 meetings, ad-hoc, round templates, orchestrated mode), persistent memory (hybrid semantic search, multi-embedding backend, keyword scoring, embedding timeout, connection safety), evaluation loop, meeting log, SDK, auto versioning, JSON Schema validation, quality report, changelog draft, custom exception hierarchy, Bearer token auth middleware (timing-safe), file-lock concurrency safety, multi-model provider detection (Anthropic/OpenAI/DeepSeek/Moonshot/Gemini/Zhipu/Qwen), API key auto-resolution, fallback model, latency metrics, knowlyr-id bidirectional sync (push/pull/register/disable/dry-run), heartbeat manager, error recovery resilience (silent-exception elimination, resource leak prevention, defensive attribute access), and thread-safety guards on global caches.
 
 ## License
 
@@ -1192,5 +590,5 @@ pytest -v
 ---
 
 <div align="center">
-<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — open-source AI employee engine for AI-native communities</sub>
+<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — declarative AI employee engine</sub>
 </div>
