@@ -1472,11 +1472,200 @@ async def _tool_list_feishu_tasks(
             if due and due.get("time") and due["time"] != "0":
                 due_dt = datetime.fromtimestamp(int(due["time"]), tz=tz_cn)
                 due_str = f" 截止{due_dt.strftime('%m-%d')}"
-            lines.append(f"{status} {summary}{due_str}")
+            task_id = task.get("id", "")
+            lines.append(f"{status} {summary}{due_str} [task_id={task_id}]")
 
         return "\n".join(lines)
     except Exception as e:
         return f"查询失败: {e}"
+
+
+async def _tool_complete_feishu_task(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """完成飞书待办任务."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    task_id = (args.get("task_id") or "").strip()
+    if not task_id:
+        return "需要 task_id。先用 list_feishu_tasks 查看任务列表。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}/complete",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            return f"任务已完成 ✅ [task_id={task_id}]"
+        return f"操作失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"操作失败: {e}"
+
+
+async def _tool_feishu_chat_history(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取飞书群/会话最近消息."""
+    import json as _json
+    from datetime import datetime, timedelta, timezone as _tz
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    chat_id = (args.get("chat_id") or "").strip()
+    if not chat_id:
+        return "需要 chat_id。先用 list_feishu_groups 查群列表。"
+
+    limit = min(int(args.get("limit", 10)), 50)
+    token = await ctx.feishu_token_mgr.get_token()
+    tz_cn = _tz(timedelta(hours=8))
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://open.feishu.cn/open-apis/im/v1/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "container_id_type": "chat",
+                    "container_id": chat_id,
+                    "page_size": limit,
+                    "sort_type": "ByCreateTimeDesc",
+                },
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return "没有消息记录。"
+
+        lines = []
+        for msg in items:
+            sender = msg.get("sender", {}).get("id", "?")
+            msg_type = msg.get("msg_type", "text")
+            create_time = msg.get("create_time", "")
+            time_str = ""
+            if create_time:
+                try:
+                    dt = datetime.fromtimestamp(int(create_time) / 1000, tz=tz_cn)
+                    time_str = dt.strftime("%m-%d %H:%M")
+                except (ValueError, OSError):
+                    pass
+
+            body = msg.get("body", {}).get("content", "")
+            try:
+                content_obj = _json.loads(body) if body else {}
+                text = content_obj.get("text", "")
+            except _json.JSONDecodeError:
+                text = body
+
+            if msg_type == "image":
+                text = "[图片]"
+            elif msg_type == "file":
+                text = "[文件]"
+            elif msg_type == "sticker":
+                text = "[表情]"
+            elif not text:
+                text = f"[{msg_type}]"
+
+            # 截断长消息
+            if len(text) > 100:
+                text = text[:100] + "…"
+            lines.append(f"[{time_str}] {sender}: {text}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"查询失败: {e}"
+
+
+# ── 天气工具 ──
+
+# 中国主要城市代码映射（中国气象局编码）
+_CITY_CODES: dict[str, str] = {
+    "北京": "101010100", "上海": "101020100", "广州": "101280101",
+    "深圳": "101280601", "杭州": "101210101", "南京": "101190101",
+    "成都": "101270101", "重庆": "101040100", "武汉": "101200101",
+    "西安": "101110101", "苏州": "101190401", "天津": "101030100",
+    "长沙": "101250101", "郑州": "101180101", "青岛": "101120201",
+    "大连": "101070201", "宁波": "101210401", "厦门": "101230201",
+    "合肥": "101220101", "昆明": "101290101", "哈尔滨": "101050101",
+    "沈阳": "101070101", "济南": "101120101", "福州": "101230101",
+    "南昌": "101240101", "长春": "101060101", "贵阳": "101260101",
+    "石家庄": "101090101", "太原": "101100101", "南宁": "101300101",
+    "海口": "101310101", "兰州": "101160101", "银川": "101170101",
+    "西宁": "101150101", "拉萨": "101140101", "乌鲁木齐": "101130101",
+    "呼和浩特": "101080101", "珠海": "101280701", "无锡": "101190201",
+    "东莞": "101281601", "佛山": "101280800", "温州": "101210701",
+    "常州": "101191101", "泉州": "101230501", "烟台": "101120501",
+    "惠州": "101280301", "嘉兴": "101210301", "中山": "101281701",
+    "台州": "101210601", "绍兴": "101210501", "潍坊": "101120601",
+    "金华": "101210901", "保定": "101090201", "芜湖": "101220301",
+    "三亚": "101310201", "洛阳": "101180901", "桂林": "101300501",
+    "襄阳": "101200201", "徐州": "101190801", "扬州": "101190601",
+}
+
+
+async def _tool_weather(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查天气（国内城市）."""
+    import httpx
+
+    city = (args.get("city") or "").strip().replace("市", "").replace("省", "")
+    if not city:
+        return "需要城市名，如：上海、北京、杭州。"
+
+    code = _CITY_CODES.get(city)
+    if not code:
+        avail = "、".join(list(_CITY_CODES.keys())[:20]) + "…"
+        return f"暂不支持「{city}」，支持的城市：{avail}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"http://t.weather.itboy.net/api/weather/city/{code}")
+            data = resp.json()
+
+        if data.get("status") != 200:
+            return f"查询失败: {data.get('message', '未知错误')}"
+
+        info = data.get("data", {})
+        city_name = data.get("cityInfo", {}).get("city", city)
+        now_temp = info.get("wendu", "?")
+        humidity = info.get("shidu", "?")
+        quality = info.get("quality", "")
+        pm25 = info.get("pm25", "")
+
+        forecast = info.get("forecast", [])
+        lines = [f"{city_name} 当前 {now_temp}℃，湿度 {humidity}"]
+        if quality:
+            lines[0] += f"，空气{quality}"
+            if pm25:
+                lines[0] += f"(PM2.5:{pm25})"
+
+        days = min(int(args.get("days", 3)), 7)
+        for day in forecast[:days]:
+            high = day.get("high", "").replace("高温 ", "")
+            low = day.get("low", "").replace("低温 ", "")
+            weather_type = day.get("type", "")
+            wind = day.get("fx", "")
+            wind_level = day.get("fl", "")
+            date = day.get("ymd", "")
+            week = day.get("week", "")
+            lines.append(f"{date}({week}) {weather_type} {low}~{high} {wind}{wind_level}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"天气查询失败: {e}"
 
 
 # ── 飞书文档工具 ──
@@ -2047,6 +2236,9 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "create_feishu_event": _tool_create_feishu_event,
     "create_feishu_task": _tool_create_feishu_task,
     "list_feishu_tasks": _tool_list_feishu_tasks,
+    "complete_feishu_task": _tool_complete_feishu_task,
+    "feishu_chat_history": _tool_feishu_chat_history,
+    "weather": _tool_weather,
     # 飞书文档
     "search_feishu_docs": _tool_search_feishu_docs,
     "read_feishu_doc": _tool_read_feishu_doc,

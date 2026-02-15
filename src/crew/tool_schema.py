@@ -415,6 +415,58 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "complete_feishu_task": {
+        "name": "complete_feishu_task",
+        "description": "完成飞书待办任务。需要先用 list_feishu_tasks 查到 task_id。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要完成的任务 task_id",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "feishu_chat_history": {
+        "name": "feishu_chat_history",
+        "description": "读取飞书群/会话的最近消息。需要 chat_id，不知道就先用 list_feishu_groups 查。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": "飞书群聊 ID（形如 oc_xxxxx）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回消息条数，默认 10",
+                    "default": 10,
+                },
+            },
+            "required": ["chat_id"],
+        },
+    },
+    "weather": {
+        "name": "weather",
+        "description": "查国内城市天气。支持主要城市，返回当前温度和未来几天预报。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "城市名（如：上海、北京、杭州）",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "预报天数（1-7），默认 3",
+                    "default": 3,
+                },
+            },
+            "required": ["city"],
+        },
+    },
     "create_feishu_event": {
         "name": "create_feishu_event",
         "description": "在飞书日历创建日程。Kai 说安排日程、设提醒、记个时间时调用。",
@@ -623,7 +675,8 @@ AGENT_TOOLS = {
     "read_notes", "read_messages", "get_system_health",
     "mark_read", "update_agent",
     "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
-    "create_feishu_task", "list_feishu_tasks",
+    "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
+    "feishu_chat_history", "weather",
     # 飞书文档
     "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
     # GitHub
