@@ -127,6 +127,7 @@ def create_webhook_app(
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
         Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
+        Route("/api/employees/{identifier}/state", endpoint=_make_handler(ctx, _handle_employee_state), methods=["GET"]),
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
         Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
     ]
@@ -281,6 +282,65 @@ async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONRes
         "tool_schemas": tool_schemas,
         "system_prompt": system_prompt,
         "agent_id": employee.agent_id,
+    })
+
+
+async def _handle_employee_state(request: Request, ctx: _AppContext) -> JSONResponse:
+    """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
+    from crew.discovery import discover_employees
+    from crew.memory import MemoryStore
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir)
+
+    employee = None
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                employee = emp
+                break
+    except ValueError:
+        employee = result.employees.get(identifier)
+
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    limit = int(request.query_params.get("memory_limit", "10"))
+
+    # 读取 soul.md
+    soul = ""
+    if employee.source_path:
+        soul_path = employee.source_path / "soul.md"
+        if soul_path.exists():
+            soul = soul_path.read_text(encoding="utf-8")
+
+    # 读取最近记忆
+    store = MemoryStore(project_dir=ctx.project_dir)
+    memories = store.query(employee.name, limit=limit)
+    memory_list = [
+        {"category": m.category, "content": m.content, "created_at": m.created_at, "tags": m.tags}
+        for m in memories
+    ]
+
+    # 读取最近笔记
+    notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
+    recent_notes: list[dict] = []
+    if notes_dir.is_dir():
+        note_files = sorted(notes_dir.glob("*.md"), reverse=True)
+        for nf in note_files[:5]:
+            text = nf.read_text(encoding="utf-8")
+            # 只返回和该员工相关的笔记（文件名或内容中包含员工名）
+            if employee.character_name in text or employee.name in text:
+                recent_notes.append({"filename": nf.name, "content": text[:500]})
+
+    return JSONResponse({
+        "name": employee.name,
+        "character_name": employee.character_name,
+        "display_name": employee.display_name,
+        "soul": soul,
+        "memories": memory_list,
+        "notes": recent_notes,
     })
 
 
