@@ -570,15 +570,16 @@ class TestFeishuEventEndpoint:
         })
         assert resp.status_code == 401
 
-    def test_no_verification_token_rejects(self):
-        """未配置 verification_token 时应拒绝非 url_verification 事件."""
+    def test_no_verification_token_warns_but_allows(self):
+        """未配置 verification_token 时应跳过验证但放行."""
         config = FeishuConfig(app_id="id", app_secret="secret")
         client = _make_feishu_client(feishu_config=config)
         resp = client.post("/feishu/event", json={
             "header": {"event_type": "im.chat.member.bot.added_v1"},
             "event": {},
         })
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "ignored"
 
     def test_non_message_event_ignored(self):
         """非消息事件应被忽略."""

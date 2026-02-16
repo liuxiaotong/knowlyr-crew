@@ -565,15 +565,16 @@ async def _handle_feishu_event(request: Request, ctx: _AppContext) -> JSONRespon
     if ctx.feishu_config is None or ctx.feishu_token_mgr is None:
         return JSONResponse({"error": "飞书 Bot 未配置"}, status_code=501)
 
-    # 3. 验证 event token（未配置 verification_token 时拒绝所有事件）
+    # 3. 验证 event token（未配置时跳过但记录警告）
     header = payload.get("header", {})
     event_token = header.get("token", payload.get("token", ""))
-    if not ctx.feishu_config.verification_token:
-        return JSONResponse({"error": "verification_token not configured"}, status_code=403)
-    from crew.feishu import verify_feishu_event
+    if ctx.feishu_config.verification_token:
+        from crew.feishu import verify_feishu_event
 
-    if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
-        return JSONResponse({"error": "invalid token"}, status_code=401)
+        if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
+            return JSONResponse({"error": "invalid token"}, status_code=401)
+    else:
+        logger.warning("飞书 verification_token 未配置，跳过事件验证（建议设置 FEISHU_VERIFICATION_TOKEN）")
 
     # 4. 只处理消息事件
     event_type = header.get("event_type", "")
