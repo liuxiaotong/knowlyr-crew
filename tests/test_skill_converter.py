@@ -289,6 +289,36 @@ class TestEmployeeToSkill:
         result = employee_to_skill(emp)
         assert "argument-hint" not in result
 
+    def test_model_in_frontmatter(self):
+        """model 应出现在 frontmatter 中（而非仅在 metadata 注释）."""
+        emp = self._make_employee(model="claude-opus-4-6")
+        result = employee_to_skill(emp)
+        lines = result.split("\n")
+        # frontmatter 在两个 --- 之间
+        in_frontmatter = False
+        found = False
+        for line in lines:
+            if line.strip() == "---":
+                in_frontmatter = not in_frontmatter
+                continue
+            if in_frontmatter and line.startswith("model:"):
+                found = True
+                assert "claude-opus-4-6" in line
+        assert found, "model 未出现在 frontmatter 中"
+
+    def test_no_model_no_frontmatter_line(self):
+        """model 为空时不应有 model 行."""
+        emp = self._make_employee(model="")
+        result = employee_to_skill(emp)
+        lines = result.split("\n")
+        in_frontmatter = False
+        for line in lines:
+            if line.strip() == "---":
+                in_frontmatter = not in_frontmatter
+                continue
+            if in_frontmatter:
+                assert not line.startswith("model:"), "空 model 不应出现在 frontmatter"
+
 
 class TestWriteAndExport:
     """测试文件写入和导出."""
@@ -409,3 +439,17 @@ class TestRoundTrip:
         # 正文中命名变量应恢复
         assert "$target" in restored.body
         assert "$mode" in restored.body
+
+    def test_round_trip_model(self):
+        """model 应在 Employee -> SKILL.md -> Employee 往返中保留."""
+        original = Employee(
+            name="model-rt",
+            description="测试 model 往返",
+            model="claude-opus-4-6",
+            body="你好。",
+        )
+        skill_content = employee_to_skill(original)
+        assert "model: claude-opus-4-6" in skill_content
+
+        restored = parse_skill_string(skill_content, skill_name="model-rt")
+        assert restored.model == "claude-opus-4-6"

@@ -965,3 +965,140 @@ class TestStreamErrorHandling:
         )
         assert resp.status_code == 200
         assert "event: done" in resp.text
+
+
+class TestEmployeeUpdatePUT:
+    """PUT /api/employees/{identifier} — employee.yaml 唯一真相源."""
+
+    def _make_emp(self, tmp_path, name="test-emp", agent_id=3080):
+        """创建带 source_path 的 Employee + 真实 employee.yaml."""
+        from crew.models import Employee
+
+        emp_dir = tmp_path / f"{name}-{agent_id}"
+        emp_dir.mkdir(parents=True, exist_ok=True)
+        config = {
+            "name": name,
+            "description": f"{name} desc",
+            "agent_id": agent_id,
+            "model": "claude-sonnet-4-20250514",
+        }
+        (emp_dir / "employee.yaml").write_text(
+            yaml.dump(config, allow_unicode=True), encoding="utf-8",
+        )
+        emp = Employee(
+            name=name,
+            description=f"{name} desc",
+            body="test body",
+            agent_id=agent_id,
+            model="claude-sonnet-4-20250514",
+            source_path=emp_dir,
+        )
+        return emp, emp_dir
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.sync._write_yaml_field")
+    def test_update_model(self, mock_write, mock_discover, tmp_path):
+        """PUT 应更新 model 到 employee.yaml."""
+        from crew.models import DiscoveryResult
+
+        emp, emp_dir = self._make_emp(tmp_path)
+        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
+
+        client = _make_client(config=None, token=TOKEN)
+        resp = client.put(
+            f"/api/employees/{emp.name}",
+            json={"model": "claude-opus-4-6"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["updated"]["model"] == "claude-opus-4-6"
+        mock_write.assert_called_once_with(emp_dir, {"model": "claude-opus-4-6"})
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.sync._write_yaml_field")
+    def test_update_by_agent_id(self, mock_write, mock_discover, tmp_path):
+        """PUT 可通过 agent_id 查找员工."""
+        from crew.models import DiscoveryResult
+
+        emp, emp_dir = self._make_emp(tmp_path, agent_id=3081)
+        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
+
+        client = _make_client()
+        resp = client.put(
+            "/api/employees/3081",
+            json={"temperature": 0.8},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated"]["temperature"] == 0.8
+
+    @patch("crew.discovery.discover_employees")
+    def test_update_not_found(self, mock_discover):
+        """不存在的员工应返回 404."""
+        from crew.models import DiscoveryResult
+
+        mock_discover.return_value = DiscoveryResult(employees={})
+
+        client = _make_client()
+        resp = client.put(
+            "/api/employees/nonexistent",
+            json={"model": "gpt-4o"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 404
+
+    @patch("crew.discovery.discover_employees")
+    def test_update_invalid_field(self, mock_discover, tmp_path):
+        """不在白名单的字段应被拒绝."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(
+            name="emp", description="d", body="b",
+            agent_id=999, source_path=tmp_path,
+        )
+        mock_discover.return_value = DiscoveryResult(employees={"emp": emp})
+
+        client = _make_client()
+        resp = client.put(
+            "/api/employees/emp",
+            json={"name": "hacked", "description": "pwned"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 400
+        assert "No updatable fields" in resp.json()["error"]
+
+    def test_update_no_auth(self):
+        """PUT 无认证应返回 401."""
+        client = _make_client()
+        resp = client.put(
+            "/api/employees/some-emp",
+            json={"model": "gpt-4o"},
+        )
+        assert resp.status_code == 401
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.sync._write_yaml_field")
+    @patch("crew.id_client.aupdate_agent", new_callable=AsyncMock)
+    def test_update_syncs_to_id(self, mock_aupdate, mock_write, mock_discover, tmp_path):
+        """更新后应自动同步到 knowlyr-id."""
+        from crew.models import DiscoveryResult
+
+        emp, _ = self._make_emp(tmp_path, agent_id=3082)
+        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
+        mock_aupdate.return_value = True
+
+        client = _make_client()
+        resp = client.put(
+            f"/api/employees/{emp.name}",
+            json={"model": "gpt-4o", "temperature": 0.5},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["synced_to_id"] is True
+        mock_aupdate.assert_called_once_with(
+            agent_id=3082, model="gpt-4o", temperature=0.5,
+        )

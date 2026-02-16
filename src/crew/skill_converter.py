@@ -86,6 +86,10 @@ def _build_metadata_comment(employee: Employee) -> str:
         metadata["version"] = employee.version
     if employee.model:
         metadata["model"] = employee.model
+    if employee.base_url:
+        metadata["base_url"] = employee.base_url
+    if employee.fallback_model:
+        metadata["fallback_model"] = employee.fallback_model
     if employee.context:
         metadata["context"] = employee.context
     if employee.output and (employee.output.filename or employee.output.format != "markdown"):
@@ -119,6 +123,9 @@ def employee_to_skill(employee: Employee) -> str:
     argument_hint = _args_to_argument_hint(employee)
     if argument_hint:
         lines.append(f"argument-hint: {argument_hint}")
+
+    if employee.model:
+        lines.append(f"model: {employee.model}")
 
     lines.append("---")
     lines.append("")

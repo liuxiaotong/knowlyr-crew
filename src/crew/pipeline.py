@@ -291,7 +291,7 @@ def _execute_single_step(
         try:
             from crew.executor import execute_prompt
 
-            use_model = model or emp.model or "claude-sonnet-4-20250514"
+            use_model = emp.model or model or "claude-sonnet-4-20250514"
             t0 = time.monotonic()
             exec_result = execute_prompt(
                 system_prompt=prompt,
@@ -786,7 +786,7 @@ async def _aexecute_single_step(
     try:
         from crew.executor import aexecute_prompt
 
-        use_model = model or emp.model or "claude-sonnet-4-20250514"
+        use_model = emp.model or model or "claude-sonnet-4-20250514"
         t0 = time.monotonic()
         exec_result = await aexecute_prompt(
             system_prompt=prompt, api_key=api_key, model=use_model, stream=False,

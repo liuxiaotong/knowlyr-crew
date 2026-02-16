@@ -127,6 +127,7 @@ def create_webhook_app(
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
         Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
+        Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
     ]
 
     async def on_startup():
@@ -279,6 +280,86 @@ async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONRes
         "tool_schemas": tool_schemas,
         "system_prompt": system_prompt,
         "agent_id": employee.agent_id,
+    })
+
+
+# 允许通过 PUT API 更新的白名单字段
+_EMPLOYEE_UPDATABLE_FIELDS = {"model", "temperature", "max_tokens"}
+
+
+async def _handle_employee_update(request: Request, ctx: _AppContext) -> JSONResponse:
+    """更新员工配置（model 等）— employee.yaml 是唯一真相源."""
+    from crew.discovery import discover_employees
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir)
+
+    # 按 agent_id 或 name 查找
+    employee = None
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                employee = emp
+                break
+    except ValueError:
+        employee = result.employees.get(identifier)
+
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    if not employee.source_path:
+        return JSONResponse({"error": "Employee source path unknown"}, status_code=400)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    # 只允许白名单字段
+    updates = {}
+    for key in _EMPLOYEE_UPDATABLE_FIELDS:
+        if key in payload:
+            updates[key] = payload[key]
+
+    if not updates:
+        return JSONResponse(
+            {"error": f"No updatable fields. Allowed: {', '.join(sorted(_EMPLOYEE_UPDATABLE_FIELDS))}"},
+            status_code=400,
+        )
+
+    # 写回 employee.yaml
+    from crew.sync import _write_yaml_field
+
+    try:
+        _write_yaml_field(employee.source_path, updates)
+    except Exception as e:
+        logger.exception("更新 employee.yaml 失败: %s", identifier)
+        return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
+
+    # 同步到 knowlyr-id（如果有 agent_id）
+    synced = False
+    if employee.agent_id:
+        try:
+            from crew.id_client import aupdate_agent
+
+            sync_kwargs: dict = {}
+            if "model" in updates:
+                sync_kwargs["model"] = updates["model"]
+            if "temperature" in updates:
+                sync_kwargs["temperature"] = updates["temperature"]
+            if "max_tokens" in updates:
+                sync_kwargs["max_tokens"] = updates["max_tokens"]
+            if sync_kwargs:
+                synced = await aupdate_agent(agent_id=employee.agent_id, **sync_kwargs)
+        except Exception:
+            logger.warning("同步到 knowlyr-id 失败（更新已写入本地）: %s", identifier)
+
+    return JSONResponse({
+        "ok": True,
+        "updated": updates,
+        "synced_to_id": synced,
+        "employee": employee.name,
     })
 
 
@@ -1029,7 +1110,7 @@ async def _delegate_employee(
     try:
         from crew.executor import aexecute_prompt
 
-        use_model = model or target.model or "claude-sonnet-4-20250514"
+        use_model = target.model or model or "claude-sonnet-4-20250514"
         result = await aexecute_prompt(
             system_prompt=prompt,
             user_message=task,
@@ -5049,7 +5130,7 @@ async def _execute_employee_with_tools(
     tool_schemas, deferred_names = employee_tools_to_schemas(agent_tool_names)
     loaded_deferred: set[str] = set()  # 已加载的延迟工具
 
-    use_model = model or match.model or "claude-sonnet-4-20250514"
+    use_model = match.model or model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
     # base_url 强制走 OpenAI 兼容路径，消息格式也要对应
     is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
@@ -5325,7 +5406,7 @@ async def _execute_employee(
     try:
         from crew.executor import aexecute_prompt
 
-        use_model = model or match.model or "claude-sonnet-4-20250514"
+        use_model = match.model or model or "claude-sonnet-4-20250514"
         exec_kwargs = dict(
             system_prompt=prompt,
             api_key=match.api_key or None,
@@ -5397,7 +5478,7 @@ async def _stream_employee(
         try:
             from crew.executor import aexecute_prompt
 
-            use_model = model or match.model or "claude-sonnet-4-20250514"
+            use_model = match.model or model or "claude-sonnet-4-20250514"
             stream_iter = await asyncio.wait_for(
                 aexecute_prompt(
                     system_prompt=prompt,

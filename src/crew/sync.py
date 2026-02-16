@@ -238,6 +238,7 @@ def _push_employee(
         bio=bio,
         capabilities=capabilities,
         domains=domains,
+        model=config.get("model") or None,
         system_prompt=system_prompt,
         avatar_base64=avatar_b64,
         crew_name=name,
@@ -277,10 +278,8 @@ def _pull_employee(
                 memory_path.write_text(identity.memory.strip() + "\n", encoding="utf-8")
             pulled = True
 
-    # 拉取 model / temperature → employee.yaml
+    # 拉取 temperature → employee.yaml（model 不从 id 拉取 — crew 是唯一真相源）
     yaml_updates: dict = {}
-    if identity.model and identity.model != config.get("model", ""):
-        yaml_updates["model"] = identity.model
     if identity.temperature is not None and identity.temperature != config.get("temperature"):
         yaml_updates["temperature"] = identity.temperature
 

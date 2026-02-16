@@ -98,6 +98,33 @@ class TestSyncPush:
         assert len(update_calls) == 1
         assert update_calls[0][1]["avatar_base64"] is not None
 
+    def test_push_includes_model(self, tmp_path):
+        """push 时应包含 model 字段（crew 是 model 唯一真相源）."""
+        emp_dir = _make_employee_dir(tmp_path, "model-worker", agent_id=3052)
+        # 写入 model 到 employee.yaml
+        config_path = emp_dir / "employee.yaml"
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["model"] = "claude-opus-4-6"
+        config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        update_calls = []
+
+        def mock_update(agent_id, **kwargs):
+            update_calls.append((agent_id, kwargs))
+            return True
+
+        def mock_fetch(aid):
+            from crew.id_client import AgentIdentity
+            return AgentIdentity(agent_id=aid, nickname="m")
+
+        with patch("crew.sync.list_agents", return_value=[{"id": 3052, "status": "active"}]), \
+             patch("crew.sync.update_agent", mock_update), \
+             patch("crew.sync.fetch_agent_identity", mock_fetch):
+            report = sync_all(tmp_path, push=True, pull=True, force=True)
+
+        assert len(update_calls) == 1
+        assert update_calls[0][1]["model"] == "claude-opus-4-6"
+
 
 class TestSyncPull:
     """从 knowlyr-id 拉取运行时数据."""
@@ -127,8 +154,8 @@ class TestSyncPull:
         content = mem_path.read_text(encoding="utf-8")
         assert "暗色主题" in content
 
-    def test_pull_model(self, tmp_path):
-        """验证 model/temperature 回写 employee.yaml."""
+    def test_pull_temperature_not_model(self, tmp_path):
+        """验证 temperature 回写但 model 不从 id 拉取（crew 是 model 唯一真相源）."""
         emp_dir = _make_employee_dir(tmp_path, "model-worker", agent_id=3061)
 
         def mock_fetch(aid):
@@ -147,9 +174,9 @@ class TestSyncPull:
 
         assert len(report.pulled) == 1
 
-        # 检查 yaml
+        # 检查 yaml — temperature 回写，model 不变
         config = yaml.safe_load((emp_dir / "employee.yaml").read_text(encoding="utf-8"))
-        assert config["model"] == "gpt-4o"
+        assert "model" not in config or config.get("model") != "gpt-4o"
         assert config["temperature"] == 0.7
 
     def test_pull_no_change(self, tmp_path):
