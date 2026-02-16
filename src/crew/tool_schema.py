@@ -154,6 +154,107 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["employee_name", "task"],
         },
     },
+    "delegate_async": {
+        "name": "delegate_async",
+        "description": "异步委派任务给同事，立即返回任务 ID，不等待完成。适合并行派多个人做事。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "employee_name": {
+                    "type": "string",
+                    "description": "目标员工名称（如 code-reviewer、doc-writer）",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "委派的具体任务描述",
+                },
+            },
+            "required": ["employee_name", "task"],
+        },
+    },
+    "check_task": {
+        "name": "check_task",
+        "description": "查询异步任务的状态和结果（包括委派任务和会议）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "任务 ID（由 delegate_async 或 organize_meeting 返回）",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "list_tasks": {
+        "name": "list_tasks",
+        "description": "列出最近的异步任务，支持按状态或类型筛选。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "running", "completed", "failed"],
+                    "description": "按状态筛选（可选）",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["employee", "meeting", "pipeline"],
+                    "description": "按类型筛选（可选）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回数量上限（默认 10）",
+                    "default": 10,
+                },
+            },
+        },
+    },
+    "organize_meeting": {
+        "name": "organize_meeting",
+        "description": (
+            "组织多位同事的讨论会议，异步执行，立即返回会议 ID。"
+            "各参会者并行讨论多轮后综合结论。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "employees": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "参会员工名称列表（如 ['code-reviewer', 'test-engineer']）",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "会议议题",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "会议目标（可选）",
+                },
+                "rounds": {
+                    "type": "integer",
+                    "description": "讨论轮次（默认 2）",
+                    "default": 2,
+                },
+            },
+            "required": ["employees", "topic"],
+        },
+    },
+    "check_meeting": {
+        "name": "check_meeting",
+        "description": "查询会议进展和结果（check_task 的会议专用别名）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "会议 ID（由 organize_meeting 返回）",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
     "query_stats": {
         "name": "query_stats",
         "description": "查询公司实时业务数据。返回用户增长、消息活跃、AI团队状态、财务等数据。问业务问题前先调这个。",
@@ -1400,6 +1501,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 # 需要 agent loop 的工具（区别于 sandbox 工具）
 AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
+    "delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting",
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
     "mark_read", "update_agent",

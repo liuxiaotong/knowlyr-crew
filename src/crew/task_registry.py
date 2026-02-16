@@ -199,6 +199,20 @@ class TaskRegistry:
         )
         return sorted_records[:n]
 
+    def list_by_status(
+        self,
+        status: Literal["pending", "running", "completed", "failed"],
+        limit: int = 20,
+    ) -> list[TaskRecord]:
+        """按状态筛选任务，最新的在前."""
+        filtered = [r for r in self._tasks.values() if r.status == status]
+        return sorted(filtered, key=lambda r: r.created_at, reverse=True)[:limit]
+
+    def list_by_type(self, target_type: str, limit: int = 20) -> list[TaskRecord]:
+        """按目标类型筛选任务，最新的在前."""
+        filtered = [r for r in self._tasks.values() if r.target_type == target_type]
+        return sorted(filtered, key=lambda r: r.created_at, reverse=True)[:limit]
+
     async def wait(self, task_id: str, timeout: float = 300) -> TaskRecord | None:
         """等待任务完成（同步模式）."""
         event = self._events.get(task_id)

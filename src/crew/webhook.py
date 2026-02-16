@@ -944,6 +944,17 @@ async def _execute_task(
             result = await _execute_employee(
                 ctx, record.target_name, record.args, agent_id=agent_id, model=model,
             )
+        elif record.target_type == "meeting":
+            logger.info("执行 meeting [trace=%s] %s", trace_id, record.target_name)
+            employees = [e.strip() for e in record.args.get("employees", "").split(",") if e.strip()]
+            result = await _execute_meeting(
+                ctx,
+                task_id=task_id,
+                employees=employees,
+                topic=record.args.get("topic", ""),
+                goal=record.args.get("goal", ""),
+                rounds=int(record.args.get("rounds", "2")),
+            )
         else:
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
             return
@@ -1023,6 +1034,230 @@ async def _delegate_employee(
         return result.content
     except Exception as e:
         return f"委派执行失败: {e}"
+
+
+# ── 异步委派 & 会议编排 ──
+
+
+async def _tool_delegate_async(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """异步委派 — 立即返回 task_id，后台执行."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    employee_name = args.get("employee_name", "")
+    task_desc = args.get("task", "")
+
+    from crew.discovery import discover_employees
+
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    if discovery.get(employee_name) is None:
+        available = ", ".join(sorted(discovery.employees.keys()))
+        return f"错误：未找到员工 '{employee_name}'。可用员工：{available}"
+
+    record = ctx.registry.create(
+        trigger="delegate_async",
+        target_type="employee",
+        target_name=employee_name,
+        args={"task": task_desc},
+    )
+    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    return f"已异步委派给 {employee_name}。任务 ID: {record.task_id}"
+
+
+async def _tool_check_task(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查询任务状态和结果."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    task_id = args.get("task_id", "")
+    record = ctx.registry.get(task_id)
+    if record is None:
+        return f"未找到任务: {task_id}"
+
+    lines = [
+        f"任务 ID: {record.task_id}",
+        f"状态: {record.status}",
+        f"类型: {record.target_type}",
+        f"目标: {record.target_name}",
+        f"创建: {record.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
+    ]
+    if record.completed_at:
+        lines.append(f"完成: {record.completed_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    if record.status == "completed" and record.result:
+        if record.target_type == "meeting":
+            synthesis = record.result.get("synthesis", "")
+            lines.append(f"\n会议综合结论:\n{synthesis[:1000]}")
+        else:
+            content = record.result.get("content", "")
+            lines.append(f"\n执行结果:\n{content[:1000]}")
+    elif record.status == "failed":
+        lines.append(f"错误: {record.error}")
+
+    return "\n".join(lines)
+
+
+async def _tool_list_tasks(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """列出最近的任务."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    status_filter = args.get("status")
+    type_filter = args.get("type")
+    limit = int(args.get("limit", 10))
+
+    if status_filter:
+        tasks = ctx.registry.list_by_status(status_filter, limit=limit)
+    elif type_filter:
+        tasks = ctx.registry.list_by_type(type_filter, limit=limit)
+    else:
+        tasks = ctx.registry.list_recent(n=limit)
+
+    if not tasks:
+        return "暂无任务记录。"
+
+    _icons = {"pending": "⏳", "running": "▶️", "completed": "✅", "failed": "❌"}
+    lines = [f"最近任务（共 {len(tasks)} 条）:"]
+    for r in tasks:
+        icon = _icons.get(r.status, "•")
+        t = r.created_at.strftime("%m-%d %H:%M")
+        lines.append(f"{icon} [{r.task_id}] {r.target_name} ({r.status}) - {t}")
+    return "\n".join(lines)
+
+
+async def _execute_meeting(
+    ctx: _AppContext,
+    task_id: str,
+    employees: list[str],
+    topic: str,
+    goal: str = "",
+    rounds: int = 2,
+) -> dict[str, Any]:
+    """执行多员工会议（编排式讨论）— 每轮参会者并行."""
+    from crew.discussion import create_adhoc_discussion, render_discussion_plan
+    from crew.executor import aexecute_prompt
+
+    discussion = create_adhoc_discussion(
+        employees=employees, topic=topic, goal=goal, rounds=rounds,
+    )
+    plan = render_discussion_plan(
+        discussion, initial_args={}, project_dir=ctx.project_dir, smart_context=True,
+    )
+
+    all_rounds: list[dict[str, Any]] = []
+    previous_rounds_text = ""
+
+    for rp in plan.rounds:
+        logger.info(
+            "会议 %s 第 %d 轮 '%s' (%d 人)",
+            task_id, rp.round_number, rp.name, len(rp.participant_prompts),
+        )
+
+        # 替换 {previous_rounds} 并并行执行
+        coros = []
+        names = []
+        for pp in rp.participant_prompts:
+            prompt_text = pp.prompt.replace("{previous_rounds}", previous_rounds_text)
+            coros.append(aexecute_prompt(
+                system_prompt=prompt_text,
+                user_message="请开始。",
+                api_key=None,
+                model="claude-sonnet-4-20250514",
+                stream=False,
+            ))
+            names.append(pp.employee_name)
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
+        round_outputs = []
+        for i, out in enumerate(results):
+            content = f"[执行失败: {out}]" if isinstance(out, Exception) else out.content
+            round_outputs.append({"employee": names[i], "content": content})
+
+        all_rounds.append({
+            "round_num": rp.round_number,
+            "name": rp.name,
+            "outputs": round_outputs,
+        })
+
+        # 积累上下文
+        parts = [f"**{o['employee']}**: {o['content']}" for o in round_outputs]
+        previous_rounds_text += f"\n\n## 第 {rp.round_number} 轮: {rp.name}\n" + "\n\n".join(parts)
+
+    # 综合结论
+    synthesis_prompt = plan.synthesis_prompt.replace("{previous_rounds}", previous_rounds_text)
+    synthesis = await aexecute_prompt(
+        system_prompt=synthesis_prompt,
+        user_message="请综合以上讨论，给出最终结论。",
+        api_key=None,
+        model="claude-sonnet-4-20250514",
+        stream=False,
+    )
+
+    return {
+        "rounds": all_rounds,
+        "synthesis": synthesis.content,
+    }
+
+
+async def _tool_organize_meeting(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """组织多员工会议（异步）."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    employees_raw = args.get("employees", [])
+    if isinstance(employees_raw, str):
+        employees_list = [e.strip() for e in employees_raw.split(",") if e.strip()]
+    else:
+        employees_list = list(employees_raw)
+    topic = args.get("topic", "")
+    goal = args.get("goal", "")
+    rounds = int(args.get("rounds", 2))
+
+    if not employees_list or not topic:
+        return "错误: 必须提供 employees 和 topic"
+
+    from crew.discovery import discover_employees
+
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    missing = [e for e in employees_list if discovery.get(e) is None]
+    if missing:
+        available = ", ".join(sorted(discovery.employees.keys()))
+        return f"错误：未找到员工 {', '.join(missing)}。可用员工：{available}"
+
+    meeting_name = f"{'、'.join(employees_list[:3])}{'等' if len(employees_list) > 3 else ''}会议"
+    record = ctx.registry.create(
+        trigger="organize_meeting",
+        target_type="meeting",
+        target_name=meeting_name,
+        args={
+            "employees": ",".join(employees_list),
+            "topic": topic,
+            "goal": goal,
+            "rounds": str(rounds),
+        },
+    )
+    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    return (
+        f"已组织会议。会议 ID: {record.task_id}\n"
+        f"参会者: {', '.join(employees_list)}\n"
+        f"议题: {topic}\n"
+        f"轮次: {rounds}（异步执行中）"
+    )
+
+
+async def _tool_check_meeting(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查询会议进展（check_task 别名）."""
+    return await _tool_check_task(args, agent_id=agent_id, ctx=ctx)
 
 
 _MAX_TOOL_ROUNDS = 10
@@ -4340,6 +4575,12 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "express_track": _tool_express_track,
     "flight_info": _tool_flight_info,
     "aqi": _tool_aqi,
+    # 异步委派 & 会议编排
+    "delegate_async": _tool_delegate_async,
+    "check_task": _tool_check_task,
+    "list_tasks": _tool_list_tasks,
+    "organize_meeting": _tool_organize_meeting,
+    "check_meeting": _tool_check_meeting,
 }
 
 
