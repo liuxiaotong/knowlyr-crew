@@ -163,7 +163,7 @@ class CrewEngine:
             denied = set(employee.tools) - effective
             if denied:
                 parts.append(f"**已禁止工具**: {', '.join(sorted(denied))}")
-            parts.append("注意: 调用被禁止的工具会被系统拦截。")
+                parts.append("注意: 调用被禁止的工具会被系统拦截。")
         if employee.context:
             parts.append(f"**预读上下文**: {', '.join(employee.context)}")
 

@@ -1839,7 +1839,7 @@ def validate_permissions(employee: "Employee") -> list[str]:
         if role not in TOOL_ROLE_PRESETS:
             warnings.append(f"未知角色: '{role}'")
 
-    all_known = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob", "submit", "finish"}
+    all_known = TOOL_ROLE_PRESETS["all"] | {"submit", "finish"}
     for tool in policy.allow:
         if tool not in all_known:
             warnings.append(f"allow 中未知工具: '{tool}'")

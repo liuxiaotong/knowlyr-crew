@@ -171,6 +171,7 @@ class TestCreateCrewAgent:
         mock_emp.body = "test"
         mock_emp.args = []
         mock_emp.agent_id = None
+        mock_emp.permissions = None
 
         mock_discovery = MagicMock()
         mock_discovery.get.return_value = mock_emp
@@ -199,6 +200,7 @@ class TestCreateCrewAgent:
         mock_emp.body = "test"
         mock_emp.args = []
         mock_emp.agent_id = None
+        mock_emp.permissions = None
 
         mock_discovery = MagicMock()
         mock_discovery.get.return_value = mock_emp

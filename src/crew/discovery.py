@@ -41,6 +41,8 @@ def _scan_directory(
     Returns:
         成功解析的员工列表（跳过解析失败的文件）
     """
+    from crew.tool_schema import validate_permissions
+
     employees = []
     if not dir_path.is_dir():
         return employees
@@ -68,7 +70,6 @@ def _scan_directory(
                 continue
 
             # 权限配置校验（警告级别，不阻止加载）
-            from crew.tool_schema import validate_permissions
             for w in validate_permissions(emp):
                 logger.warning("权限配置 %s: %s", emp.name, w)
 

@@ -69,18 +69,19 @@ def create_crew_agent(
 
     # 3. 权限守卫
     from crew.permission import PermissionGuard
-    _guard = PermissionGuard(employee)
+    guard = PermissionGuard(employee)
 
     # 4. 生成 tool schemas
     tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
-    # 4. 闭包状态
+    # 5. 闭包状态
     messages: list[dict[str, Any]] = []
     step_count = 0
     last_tool_calls: list[ToolCall] = []
+    _deny_retries = 0  # 连续权限拒绝计数，防止无限递归
 
     def agent(observation: str) -> dict[str, Any]:
-        nonlocal step_count, last_tool_calls
+        nonlocal step_count, last_tool_calls, _deny_retries
 
         step_count += 1
 
@@ -165,11 +166,16 @@ def create_crew_agent(
             if is_finish_tool(tc.name):
                 return {"tool": "submit", "params": tc.arguments}
 
-            # 权限检查
-            denied_msg = _guard.check_soft(tc.name)
+            # 权限检查 — 拒绝时反馈给 LLM 让其自我纠正（最多重试 3 次）
+            denied_msg = guard.check_soft(tc.name)
             if denied_msg:
                 logger.warning("Agent bridge 权限拒绝: %s.%s", employee_name, tc.name)
-                return {"tool": "submit", "params": {"result": f"[权限拒绝] {denied_msg}"}}
+                _deny_retries += 1
+                if _deny_retries > 3:
+                    return {"tool": "submit", "params": {"result": f"[权限拒绝] {denied_msg}"}}
+                return agent(f"[权限拒绝] {denied_msg}")
+
+            _deny_retries = 0  # 成功通过，重置计数
 
             # 映射为 sandbox 格式
             return map_tool_call(tc.name, tc.arguments)
