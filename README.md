@@ -25,7 +25,7 @@ Crew 将 AI 员工的能力定义从代码中解耦为 **Markdown + YAML 声明�
 - **Markdown 即接口** — 每位员工是一个目录或 `.md` 文件，配置与提示词分离，版本可追踪
 - **MCP 协议互通** — Prompts / Resources / Tools 三原语，兼容 Claude Desktop、Cursor、Claude Code 及任何 MCP 客户端
 - **多智能体协商** — 结构化讨论会支持对抗性机制（预设立场、交叉盘问、分歧配额），避免"共识回声室"
-- **异步编排** — 并行委派多位员工 + 组织多人会议，通过任务注册表追踪进度和结果
+- **异步编排** — 并行委派、顺序链式委派、流水线执行、定时任务、多人会议，通过任务注册表追踪进度和结果
 - **经验持续进化** — 持久化记忆 + 决策评估闭环，跨会话积累经验并自动修正认知偏差
 
 ---
@@ -340,7 +340,36 @@ AI 员工可以**并行委派**多位同事执行任务，或**组织多人会�
 
 会议编排复用讨论引擎（`create_adhoc_discussion` + `render_discussion_plan`），每轮参会者通过 `asyncio.gather` 并行执行，最终自动生成综合结论。任务状态通过 `TaskRegistry` 持久化到 `.crew/tasks.jsonl`。
 
-### 5. Evaluation Loop
+### 5. Advanced Orchestration
+
+在异步委派之上，Crew 提供更高级的编排能力——链式委派、流水线触发、定时任务、文件操作、数据分析、智能日程。
+
+| 工具 | 说明 |
+|------|------|
+| `run_pipeline` | 触发预定义流水线（异步执行，返回 task_id） |
+| `delegate_chain` | 顺序委派链——先让 A 做 X，做完把结果自动传给 B 做 Y（`{prev}` 引用上一步输出） |
+| `schedule_task` | 动态创建定时任务（cron 表达式 + 员工 + 任务描述） |
+| `list_schedules` | 列出所有定时任务及下次触发时间 |
+| `cancel_schedule` | 取消定时任务 |
+| `agent_file_read` | 读取项目目录内文件（路径安全校验，防穿越） |
+| `agent_file_grep` | 搜索项目代码（grep -rn，结果自动截断） |
+| `query_data` | 细粒度业务数据查询（metric × period × group_by） |
+| `find_free_time` | 飞书忙闲查询，计算多人共同空闲时段 |
+
+```
+用户 → 姜墨言: "先让 code-reviewer 审查 auth.py，再让 doc-writer 根据结果写文档"
+
+姜墨言:
+  delegate_chain(steps=[
+    {employee: "code-reviewer", task: "审查 auth.py"},
+    {employee: "doc-writer", task: "根据审查结果写文档: {prev}"}
+  ])
+  → 任务 ID: 20260216-180000-c3d5e7f9（异步执行中）
+```
+
+**主动巡检 & 周复盘：** 通过 `.crew/cron.yaml` 配置定时触发——每天 9:00 自动巡检业务数据、待办、日程、系统状态并推送简报；每周五 18:00 自动汇总本周任务完成情况、反思记录和数据趋势，生成周报。
+
+### 6. Evaluation Loop
 
 追踪决策质量，回溯评估后自动将经验教训写入员工记忆——形成"决策→执行→复盘→改进"闭环：
 
@@ -605,7 +634,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-pytest -v    # 950+ test cases
+pytest -v    # 980+ test cases
 ```
 
 ## License
