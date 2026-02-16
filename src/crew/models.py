@@ -1,11 +1,13 @@
 """数据模型 — Employee / WorkLog / DiscoveryResult / Pipeline / AgentExecution."""
 
+import os
+import re
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ── Crew tools <-> Claude Code Skills allowed-tools 映射 ──
 
@@ -72,6 +74,17 @@ class Employee(BaseModel):
     source_layer: Literal["builtin", "global", "skill", "project", "private"] = Field(
         default="builtin", description="来源层"
     )
+
+    @model_validator(mode="after")
+    def _resolve_env_vars(self) -> "Employee":
+        """Resolve ${ENV_VAR} patterns in api_key / fallback_api_key fields."""
+        _env_re = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+        for attr in ("api_key", "fallback_api_key"):
+            val = getattr(self, attr, "")
+            if val and (m := _env_re.match(val)):
+                resolved = os.environ.get(m.group(1), "")
+                object.__setattr__(self, attr, resolved)
+        return self
 
     @property
     def effective_display_name(self) -> str:

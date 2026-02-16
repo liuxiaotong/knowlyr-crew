@@ -138,12 +138,15 @@ class EvaluationEngine:
             fd, tmp_path = tempfile.mkstemp(
                 dir=path.parent, suffix=".tmp",
             )
+            fd_closed = False
             try:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
+                fd_closed = True
                 os.replace(tmp_path, path)
             except Exception:
-                os.close(fd)
+                if not fd_closed:
+                    os.close(fd)
                 if Path(tmp_path).exists():
                     os.unlink(tmp_path)
                 raise

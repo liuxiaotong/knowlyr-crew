@@ -164,7 +164,7 @@ def create_webhook_app(
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
-            skip_paths=["/health", "/metrics", "/webhook/github", "/feishu/event"],
+            skip_paths=["/health", "/metrics", "/webhook/github"],
         )
 
     # 添加 CORS 中间件（后添加 = 先执行，确保 OPTIONS 预检不被认证拦截）
@@ -279,8 +279,6 @@ async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONRes
         "tool_schemas": tool_schemas,
         "system_prompt": system_prompt,
         "agent_id": employee.agent_id,
-        "api_key": employee.api_key or "",
-        "base_url": employee.base_url or "",
     })
 
 
@@ -565,14 +563,15 @@ async def _handle_feishu_event(request: Request, ctx: _AppContext) -> JSONRespon
     if ctx.feishu_config is None or ctx.feishu_token_mgr is None:
         return JSONResponse({"error": "飞书 Bot 未配置"}, status_code=501)
 
-    # 3. 验证 event token
+    # 3. 验证 event token（未配置 verification_token 时拒绝所有事件）
     header = payload.get("header", {})
     event_token = header.get("token", payload.get("token", ""))
-    if ctx.feishu_config.verification_token:
-        from crew.feishu import verify_feishu_event
+    if not ctx.feishu_config.verification_token:
+        return JSONResponse({"error": "verification_token not configured"}, status_code=403)
+    from crew.feishu import verify_feishu_event
 
-        if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
-            return JSONResponse({"error": "invalid token"}, status_code=401)
+    if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
+        return JSONResponse({"error": "invalid token"}, status_code=401)
 
     # 4. 只处理消息事件
     event_type = header.get("event_type", "")
@@ -2590,9 +2589,28 @@ async def _tool_read_url(
 
     import httpx
 
+    import ipaddress
+    from urllib.parse import urlparse
+
     url = (args.get("url") or "").strip()
     if not url:
         return "缺少 URL。"
+
+    # SSRF 防护：仅允许 http/https，阻止私有/保留 IP
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "仅支持 http/https 协议。"
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "无效 URL。"
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            return "不允许访问内网地址。"
+    except ValueError:
+        # hostname 不是 IP（域名），检查常见内网域名
+        if hostname in ("localhost", "metadata.google.internal"):
+            return "不允许访问内网地址。"
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:

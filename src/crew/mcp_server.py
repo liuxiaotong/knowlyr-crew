@@ -461,7 +461,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
             emp = result.get(emp_name)
             if emp is None:
                 return [TextContent(type="text", text=f"未找到员工: {emp_name}")]
-            data = emp.model_dump(mode="json", exclude={"source_path"})
+            data = emp.model_dump(mode="json", exclude={
+                "source_path", "api_key", "fallback_api_key", "fallback_base_url",
+            })
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         elif name == "run_employee":
@@ -521,6 +523,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "detect_project":
             arg_project_dir = arguments.get("project_dir")
+            if arg_project_dir:
+                p = Path(arg_project_dir).resolve()
+                if not p.is_relative_to(_project_dir):
+                    return [TextContent(type="text", text="路径不在项目目录范围内")]
             info = detect_project(Path(arg_project_dir) if arg_project_dir else _project_dir)
             data = info.model_dump(mode="json")
             data["display_label"] = info.display_label
@@ -553,6 +559,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
             # 查找流水线
             pl_path = Path(pl_name)
+            if pl_path.is_absolute() and not pl_path.resolve().is_relative_to(_project_dir):
+                return [TextContent(type="text", text="路径不在项目目录范围内")]
             if not pl_path.exists():
                 pipelines = discover_pipelines(project_dir=_project_dir)
                 if pl_name in pipelines:
@@ -639,6 +647,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 d_name = arguments["name"]
                 # 查找讨论会
                 d_path = Path(d_name)
+                if d_path.is_absolute() and not d_path.resolve().is_relative_to(_project_dir):
+                    return [TextContent(type="text", text="路径不在项目目录范围内")]
                 if not d_path.exists():
                     discussions = discover_discussions(project_dir=_project_dir)
                     if d_name in discussions:

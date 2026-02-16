@@ -570,12 +570,22 @@ class TestFeishuEventEndpoint:
         })
         assert resp.status_code == 401
 
-    def test_non_message_event_ignored(self):
-        """非消息事件应被忽略."""
+    def test_no_verification_token_rejects(self):
+        """未配置 verification_token 时应拒绝非 url_verification 事件."""
         config = FeishuConfig(app_id="id", app_secret="secret")
         client = _make_feishu_client(feishu_config=config)
         resp = client.post("/feishu/event", json={
             "header": {"event_type": "im.chat.member.bot.added_v1"},
+            "event": {},
+        })
+        assert resp.status_code == 403
+
+    def test_non_message_event_ignored(self):
+        """非消息事件应被忽略."""
+        config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
+        client = _make_feishu_client(feishu_config=config)
+        resp = client.post("/feishu/event", json={
+            "header": {"event_type": "im.chat.member.bot.added_v1", "token": "tok"},
             "event": {},
         })
         assert resp.status_code == 200
@@ -583,10 +593,10 @@ class TestFeishuEventEndpoint:
 
     def test_unsupported_message_type(self):
         """video 等不支持的消息类型应返回 unsupported."""
-        config = FeishuConfig(app_id="id", app_secret="secret")
+        config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
         resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.message.receive_v1"},
+            "header": {"event_type": "im.message.receive_v1", "token": "tok"},
             "event": {
                 "message": {
                     "message_id": "msg_vid",
@@ -603,10 +613,10 @@ class TestFeishuEventEndpoint:
     @patch("crew.webhook._feishu_dispatch", new_callable=AsyncMock)
     def test_message_dispatched(self, mock_dispatch):
         """合法消息事件应触发后台处理."""
-        config = FeishuConfig(app_id="id", app_secret="secret")
+        config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
         resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.message.receive_v1"},
+            "header": {"event_type": "im.message.receive_v1", "token": "tok"},
             "event": {
                 "message": {
                     "message_id": "msg_ok",
@@ -628,10 +638,10 @@ class TestFeishuEventEndpoint:
 
     def test_duplicate_event(self):
         """重复 message_id 应被去重."""
-        config = FeishuConfig(app_id="id", app_secret="secret")
+        config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
         event_payload = {
-            "header": {"event_type": "im.message.receive_v1"},
+            "header": {"event_type": "im.message.receive_v1", "token": "tok"},
             "event": {
                 "message": {
                     "message_id": "msg_dup",

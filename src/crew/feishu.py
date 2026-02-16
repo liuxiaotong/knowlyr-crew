@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json as _json
 import logging
 import os
@@ -73,7 +74,7 @@ def verify_feishu_event(verification_token: str, token_in_payload: str) -> bool:
     """验证飞书事件回调的 token."""
     if not verification_token or not token_in_payload:
         return False
-    return verification_token == token_in_payload
+    return hmac.compare_digest(verification_token, token_in_payload)
 
 
 # ── Token 管理 ──
