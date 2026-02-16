@@ -1853,7 +1853,7 @@ def pipeline_show(name: str):
         click.echo(f"未找到流水线: {name}{hint}", err=True)
         sys.exit(1)
 
-    from crew.models import ParallelGroup
+    from crew.models import ConditionalStep, LoopStep, ParallelGroup
 
     p = load_pipeline(pipelines[name])
     click.echo(f"流水线: {p.name}")
@@ -1867,6 +1867,27 @@ def pipeline_show(name: str):
                 id_str = f" id={sub.id}" if sub.id else ""
                 args_str = ", ".join(f"{k}={v}" for k, v in sub.args.items())
                 click.echo(f"     {i}.{j} {sub.employee}{id_str}" + (f" ({args_str})" if args_str else ""))
+        elif isinstance(item, ConditionalStep):
+            body = item.condition
+            matcher = f"contains '{body.contains}'" if body.contains else f"matches '{body.matches}'"
+            click.echo(f"  {i}. [条件] check={body.check} {matcher}")
+            click.echo(f"     then:")
+            for j, sub in enumerate(body.then, 1):
+                id_str = f" id={sub.id}" if sub.id else ""
+                click.echo(f"       {i}.T{j} {sub.employee}{id_str}")
+            if body.else_:
+                click.echo(f"     else:")
+                for j, sub in enumerate(body.else_, 1):
+                    id_str = f" id={sub.id}" if sub.id else ""
+                    click.echo(f"       {i}.E{j} {sub.employee}{id_str}")
+        elif isinstance(item, LoopStep):
+            body = item.loop
+            matcher = f"contains '{body.until.contains}'" if body.until.contains else f"matches '{body.until.matches}'"
+            click.echo(f"  {i}. [循环] max={body.max_iterations}")
+            for j, sub in enumerate(body.steps, 1):
+                id_str = f" id={sub.id}" if sub.id else ""
+                click.echo(f"     {i}.L{j} {sub.employee}{id_str}")
+            click.echo(f"     until: {matcher}")
         else:
             id_str = f" id={item.id}" if item.id else ""
             args_str = ", ".join(f"{k}={v}" for k, v in item.args.items())
@@ -2790,19 +2811,23 @@ def memory_list():
 @click.option("--category", type=click.Choice(["decision", "estimate", "finding", "correction"]),
               default=None, help="按类别过滤")
 @click.option("-n", "--limit", type=int, default=20, help="返回条数")
-def memory_show(employee: str, category: str | None, limit: int):
+@click.option("--include-expired", is_flag=True, help="包含已过期记忆")
+def memory_show(employee: str, category: str | None, limit: int, include_expired: bool):
     """查看员工记忆."""
     from crew.memory import MemoryStore
 
     store = MemoryStore()
-    entries = store.query(employee, category=category, limit=limit)
+    entries = store.query(employee, category=category, limit=limit, include_expired=include_expired)
     if not entries:
         click.echo(f"员工 '{employee}' 暂无记忆。")
         return
 
     for entry in entries:
         conf = f" [{entry.confidence:.0%}]" if entry.confidence < 1.0 else ""
-        click.echo(f"  [{entry.id}] ({entry.category}){conf} {entry.content}")
+        tags = f" {entry.tags}" if entry.tags else ""
+        shared = " [共享]" if entry.shared else ""
+        ttl = f" (TTL:{entry.ttl_days}d)" if entry.ttl_days > 0 else ""
+        click.echo(f"  [{entry.id}] ({entry.category}){conf}{tags}{shared}{ttl} {entry.content}")
 
 
 @memory.command("add")
@@ -2811,12 +2836,19 @@ def memory_show(employee: str, category: str | None, limit: int):
               type=click.Choice(["decision", "estimate", "finding", "correction"]),
               help="记忆类别")
 @click.option("--content", "-m", required=True, help="记忆内容")
-def memory_add(employee: str, category: str, content: str):
+@click.option("--ttl", type=int, default=0, help="生存期天数 (0=永不过期)")
+@click.option("--tags", type=str, default="", help="逗号分隔的语义标签")
+@click.option("--shared", is_flag=True, help="加入共享记忆池")
+def memory_add(employee: str, category: str, content: str, ttl: int, tags: str, shared: bool):
     """手动添加员工记忆."""
     from crew.memory import MemoryStore
 
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     store = MemoryStore()
-    entry = store.add(employee=employee, category=category, content=content)
+    entry = store.add(
+        employee=employee, category=category, content=content,
+        ttl_days=ttl, tags=tag_list, shared=shared,
+    )
     click.echo(f"已添加: [{entry.id}] ({entry.category}) {entry.content}")
 
 
@@ -2921,6 +2953,59 @@ def memory_search(query: str, employee: str | None, kind: str | None,
             click.echo(
                 f"[{item.get('kind','')}] {item.get('employee','')} - {item.get('title','')}\n  {snippet}"
             )
+
+
+@memory.command("shared")
+@click.option("--tags", type=str, default=None, help="按标签过滤（逗号分隔）")
+@click.option("-n", "--limit", type=int, default=10, help="返回条数")
+def memory_shared(tags: str | None, limit: int):
+    """查看共享记忆池."""
+    from crew.memory import MemoryStore
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    store = MemoryStore()
+    entries = store.query_shared(tags=tag_list, limit=limit)
+    if not entries:
+        click.echo("共享记忆池为空。")
+        return
+
+    for entry in entries:
+        conf = f" [{entry.confidence:.0%}]" if entry.confidence < 1.0 else ""
+        tag_str = f" {entry.tags}" if entry.tags else ""
+        click.echo(f"  [{entry.id}] ({entry.employee}/{entry.category}){conf}{tag_str} {entry.content}")
+
+
+@memory.command("config")
+@click.option("--ttl", type=int, default=None, help="默认 TTL 天数")
+@click.option("--max-entries", type=int, default=None, help="每员工最大条数")
+@click.option("--half-life", type=float, default=None, help="置信度衰减半衰期（天）")
+@click.option("--show", is_flag=True, help="显示当前配置")
+def memory_config(ttl: int | None, max_entries: int | None, half_life: float | None, show: bool):
+    """查看或设置记忆系统配置."""
+    from crew.memory import MemoryConfig, MemoryStore
+
+    store = MemoryStore()
+    config_path = store.memory_dir / "config.json"
+
+    if show or (ttl is None and max_entries is None and half_life is None):
+        click.echo(f"配置文件: {config_path}")
+        click.echo(f"  default_ttl_days:          {store.config.default_ttl_days}")
+        click.echo(f"  max_entries_per_employee:   {store.config.max_entries_per_employee}")
+        click.echo(f"  confidence_half_life_days:  {store.config.confidence_half_life_days}")
+        click.echo(f"  auto_index:                {store.config.auto_index}")
+        return
+
+    data = store.config.model_dump()
+    if ttl is not None:
+        data["default_ttl_days"] = ttl
+    if max_entries is not None:
+        data["max_entries_per_employee"] = max_entries
+    if half_life is not None:
+        data["confidence_half_life_days"] = half_life
+
+    store.memory_dir.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    click.echo(f"配置已保存到 {config_path}")
 
 
 # ── eval 子命令组 ──

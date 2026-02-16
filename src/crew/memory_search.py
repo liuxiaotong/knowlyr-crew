@@ -82,6 +82,11 @@ class SemanticMemoryIndex:
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_employee ON memory_vectors(employee)
                 """)
+                # Schema 升级：tags 列
+                try:
+                    conn.execute("ALTER TABLE memory_vectors ADD COLUMN tags TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # 列已存在
                 conn.commit()
             except Exception:
                 conn.close()
@@ -105,13 +110,25 @@ class SemanticMemoryIndex:
         if embedding is None:
             return False
 
+        tags_str = ",".join(entry.tags) if hasattr(entry, "tags") and entry.tags else ""
         conn = self._get_conn()
         conn.execute(
-            "INSERT OR REPLACE INTO memory_vectors (id, employee, embedding, content) VALUES (?, ?, ?, ?)",
-            (entry.id, entry.employee, _pack_embedding(embedding), entry.content),
+            "INSERT OR REPLACE INTO memory_vectors (id, employee, embedding, content, tags) VALUES (?, ?, ?, ?, ?)",
+            (entry.id, entry.employee, _pack_embedding(embedding), entry.content, tags_str),
         )
         conn.commit()
         return True
+
+    def remove(self, entry_id: str) -> bool:
+        """从索引中删除一条记忆.
+
+        Returns:
+            True 如果条目存在并被删除.
+        """
+        conn = self._get_conn()
+        cursor = conn.execute("DELETE FROM memory_vectors WHERE id = ?", (entry_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
     def search(self, employee: str, query: str, limit: int = 10, timeout: float = 10.0) -> list[tuple[str, str, float]]:
         """混合搜索：向量相似度 + 关键词匹配，加权合并.
@@ -167,6 +184,62 @@ class SemanticMemoryIndex:
             scored.append((row_id, content, final_score))
 
         scored.sort(key=lambda x: x[2], reverse=True)
+        return scored[:limit]
+
+    def search_cross_employee(
+        self,
+        query: str,
+        exclude_employee: str = "",
+        limit: int = 10,
+        timeout: float = 10.0,
+    ) -> list[tuple[str, str, str, float]]:
+        """跨员工搜索.
+
+        Returns:
+            [(id, employee, content, score), ...] 按分数降序.
+        """
+        conn = self._get_conn()
+        if exclude_employee:
+            rows = conn.execute(
+                "SELECT id, employee, embedding, content FROM memory_vectors WHERE employee != ?",
+                (exclude_employee,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, employee, embedding, content FROM memory_vectors",
+            ).fetchall()
+
+        if not rows:
+            return []
+
+        embedder = self._get_embedder()
+        try:
+            from concurrent.futures import TimeoutError as FuturesTimeout
+            future = _EMBED_POOL.submit(embedder.embed, query)
+            query_embedding = future.result(timeout=timeout)
+        except Exception as e:
+            logger.warning("跨员工搜索 embedding 失败: %s", e)
+            query_embedding = None
+
+        query_tokens = set(_tokenize(query))
+        scored: list[tuple[str, str, str, float]] = []
+        for row_id, emp, emb_bytes, content in rows:
+            vec_score = 0.0
+            if query_embedding is not None:
+                emb = _unpack_embedding(emb_bytes)
+                vec_score = _cosine_similarity(query_embedding, emb)
+
+            content_tokens = set(_tokenize(content))
+            kw_score = _keyword_score(query_tokens, content_tokens)
+
+            if query_embedding is not None:
+                final_score = self.VEC_WEIGHT * vec_score + self.KW_WEIGHT * kw_score
+            else:
+                final_score = kw_score
+
+            scored.append((row_id, emp, content, final_score))
+
+        scored.sort(key=lambda x: x[3], reverse=True)
         return scored[:limit]
 
     def reindex(self, employee: str, entries: list["MemoryEntry"]) -> int:

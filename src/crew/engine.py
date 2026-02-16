@@ -182,7 +182,9 @@ class CrewEngine:
         try:
             from crew.memory import MemoryStore
             memory_store = MemoryStore(project_dir=self.project_dir)
-            memory_text = memory_store.format_for_prompt(employee.name, query=rendered)
+            memory_text = memory_store.format_for_prompt(
+                employee.name, query=rendered, employee_tags=employee.tags,
+            )
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])
         except Exception as e:

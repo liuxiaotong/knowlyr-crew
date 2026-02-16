@@ -22,7 +22,14 @@ logger = logging.getLogger(__name__)
 from crew.context_detector import detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
-from crew.models import ParallelGroup, PipelineResult, PipelineStep, StepResult
+from crew.models import (
+    ConditionalStep,
+    LoopStep,
+    ParallelGroup,
+    PipelineResult,
+    PipelineStep,
+    StepResult,
+)
 
 if TYPE_CHECKING:
     from crew.context_detector import ProjectInfo
@@ -38,7 +45,9 @@ class Pipeline(BaseModel):
 
     name: str = Field(description="流水线名称")
     description: str = Field(default="", description="描述")
-    steps: list[PipelineStep | ParallelGroup] = Field(description="步骤列表")
+    steps: list[PipelineStep | ParallelGroup | ConditionalStep | LoopStep] = Field(
+        description="步骤列表"
+    )
 
 
 # ── 加载 / 校验 ──
@@ -54,12 +63,16 @@ def load_pipeline(path: Path) -> Pipeline:
     content = path.read_text(encoding="utf-8")
     data = yaml.safe_load(content)
 
-    # 标准化 steps：区分并行组与普通步骤
+    # 标准化 steps：区分并行组、条件分支、循环与普通步骤
     raw_steps = data.get("steps", [])
     normalized: list[dict] = []
     for item in raw_steps:
         if "parallel" in item:
             normalized.append({"parallel": item["parallel"]})
+        elif "condition" in item:
+            normalized.append({"condition": item["condition"]})
+        elif "loop" in item:
+            normalized.append({"loop": item["loop"]})
         else:
             normalized.append(item)
     data["steps"] = normalized
@@ -92,6 +105,20 @@ def validate_pipeline(
         if isinstance(item, ParallelGroup):
             for j, sub in enumerate(item.parallel):
                 _check_step(sub, f"步骤 {i + 1} 并行子步骤 {j + 1}")
+        elif isinstance(item, ConditionalStep):
+            body = item.condition
+            if not body.then:
+                errors.append(f"步骤 {i + 1}: condition.then 不能为空")
+            for j, sub in enumerate(body.then):
+                _check_step(sub, f"步骤 {i + 1} condition.then[{j + 1}]")
+            for j, sub in enumerate(body.else_):
+                _check_step(sub, f"步骤 {i + 1} condition.else[{j + 1}]")
+        elif isinstance(item, LoopStep):
+            body = item.loop
+            if not body.steps:
+                errors.append(f"步骤 {i + 1}: loop.steps 不能为空")
+            for j, sub in enumerate(body.steps):
+                _check_step(sub, f"步骤 {i + 1} loop.steps[{j + 1}]")
         else:
             _check_step(item, f"步骤 {i + 1}")
 
@@ -109,6 +136,8 @@ def pipeline_to_mermaid(pipeline: Pipeline) -> str:
 
     prev_nodes: list[str] = ["S"]
     parallel_count = 0
+    cond_count = 0
+    loop_count = 0
 
     for i, item in enumerate(pipeline.steps):
         if isinstance(item, ParallelGroup):
@@ -130,6 +159,65 @@ def pipeline_to_mermaid(pipeline: Pipeline) -> str:
                 sub_nodes.append(node_id)
 
             prev_nodes = [join]
+        elif isinstance(item, ConditionalStep):
+            cond_count += 1
+            body = item.condition
+            cond_id = f"C{cond_count}"
+            merge_id = f"CM{cond_count}"
+            label = f"contains '{body.contains}'" if body.contains else f"matches '{body.matches}'"
+            lines.append(f'  {cond_id}{{"{label}"}}')
+            for prev in prev_nodes:
+                lines.append(f"  {prev} --> {cond_id}")
+
+            # then 分支
+            then_prev = cond_id
+            for j, sub in enumerate(body.then):
+                nid = sub.id or f"ct{cond_count}_{j}"
+                lines.append(f'  {nid}["{sub.employee}"]')
+                edge = " -->|then| " if j == 0 else " --> "
+                lines.append(f"  {then_prev}{edge}{nid}")
+                then_prev = nid
+            then_last = then_prev
+
+            # else 分支
+            if body.else_:
+                else_prev = cond_id
+                for j, sub in enumerate(body.else_):
+                    nid = sub.id or f"ce{cond_count}_{j}"
+                    lines.append(f'  {nid}["{sub.employee}"]')
+                    edge = " -->|else| " if j == 0 else " --> "
+                    lines.append(f"  {else_prev}{edge}{nid}")
+                    else_prev = nid
+                else_last = else_prev
+            else:
+                else_last = cond_id
+
+            lines.append(f'  {merge_id}(["合并"])')
+            lines.append(f"  {then_last} --> {merge_id}")
+            if else_last != cond_id or body.else_:
+                lines.append(f"  {else_last} --> {merge_id}")
+            prev_nodes = [merge_id]
+        elif isinstance(item, LoopStep):
+            loop_count += 1
+            body = item.loop
+            loop_id = f"L{loop_count}"
+            check_id = f"LC{loop_count}"
+            lines.append(f'  {loop_id}[["循环 (max {body.max_iterations})"]]')
+            for prev in prev_nodes:
+                lines.append(f"  {prev} --> {loop_id}")
+
+            loop_prev = loop_id
+            for j, sub in enumerate(body.steps):
+                nid = sub.id or f"ls{loop_count}_{j}"
+                lines.append(f'  {nid}["{sub.employee}"]')
+                lines.append(f"  {loop_prev} --> {nid}")
+                loop_prev = nid
+
+            label = f"contains '{body.until.contains}'" if body.until.contains else f"matches '{body.until.matches}'"
+            lines.append(f'  {check_id}{{"{label}"}}')
+            lines.append(f"  {loop_prev} --> {check_id}")
+            lines.append(f'  {check_id} -->|"继续"| {loop_id}')
+            prev_nodes = [check_id]
         else:
             node_id = item.id or f"s{i}"
             lines.append(f'  {node_id}["{item.employee}"]')
@@ -191,6 +279,30 @@ def _resolve_output_refs(
 
     value = re.sub(r"\{steps\.([^.]+)\.output\}", _replace_ref, value)
     return value
+
+
+# ── 条件评估 ──
+
+
+def _evaluate_check(
+    check: str,
+    contains: str,
+    matches: str,
+    outputs_by_id: dict[str, str],
+    outputs_by_index: dict[int, str],
+    prev_output: str,
+    execute: bool,
+) -> bool:
+    """解析条件中的输出引用并评估.
+
+    prompt-only 模式总是返回 True（走 then 分支 / 继续循环一次）。
+    """
+    if not execute:
+        return True
+    resolved = _resolve_output_refs(check, outputs_by_id, outputs_by_index, prev_output, execute)
+    if contains:
+        return contains in resolved
+    return bool(re.search(matches, resolved))
 
 
 # ── 单步执行 ──
@@ -447,6 +559,75 @@ def run_pipeline(
             group_results.sort(key=lambda r: r.step_index)
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
+        elif isinstance(item, ConditionalStep):
+            body = item.condition
+            took_then = _evaluate_check(
+                body.check, body.contains, body.matches,
+                outputs_by_id, outputs_by_index, prev_output, execute,
+            )
+            branch_steps = body.then if took_then else body.else_
+            branch_label = "then" if took_then else "else"
+
+            branch_results: list[StepResult] = []
+            for sub in branch_steps:
+                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                r = _execute_single_step(
+                    sub, flat_index, engine, employees, initial_args,
+                    outputs_by_id, outputs_by_index, prev_output,
+                    agent_identity, project_info,
+                    execute, api_key, model, ex_prompt,
+                )
+                r.branch = branch_label
+                if r.step_id:
+                    outputs_by_id[r.step_id] = r.output
+                outputs_by_index[flat_index] = r.output
+                flat_index += 1
+                branch_results.append(r)
+                prev_output = r.output
+                if on_step_complete:
+                    on_step_complete(r)
+
+            if branch_results:
+                step_results.append(
+                    branch_results if len(branch_results) > 1 else branch_results[0],
+                )
+        elif isinstance(item, LoopStep):
+            body = item.loop
+            loop_all_results: list[StepResult] = []
+
+            for iteration in range(body.max_iterations):
+                for sub in body.steps:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                    r = _execute_single_step(
+                        sub, flat_index, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        execute, api_key, model, ex_prompt,
+                    )
+                    r.branch = f"loop-{iteration}"
+                    if r.step_id:
+                        outputs_by_id[r.step_id] = r.output
+                    outputs_by_index[flat_index] = r.output
+                    flat_index += 1
+                    loop_all_results.append(r)
+                    prev_output = r.output
+                    if on_step_complete:
+                        on_step_complete(r)
+
+                # 检查终止条件
+                should_stop = _evaluate_check(
+                    body.until.check, body.until.contains, body.until.matches,
+                    outputs_by_id, outputs_by_index, prev_output, execute,
+                )
+                if should_stop:
+                    break
+                if not execute:
+                    break  # prompt-only 只执行一次
+
+            if loop_all_results:
+                step_results.append(
+                    loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
+                )
         else:
             ex_prompt = _resolve_exemplars(agent_id, item.employee)
             r = _execute_single_step(
@@ -582,6 +763,96 @@ async def arun_pipeline(
                 )
                 for r in group_results:
                     on_step_complete(r, checkpoint)
+        elif isinstance(item, ConditionalStep):
+            body = item.condition
+            took_then = _evaluate_check(
+                body.check, body.contains, body.matches,
+                outputs_by_id, outputs_by_index, prev_output, execute,
+            )
+            branch_steps = body.then if took_then else body.else_
+            branch_label = "then" if took_then else "else"
+
+            branch_results: list[StepResult] = []
+            for sub in branch_steps:
+                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                if execute:
+                    r = await _aexecute_single_step(
+                        sub, flat_index, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        api_key, model, ex_prompt,
+                    )
+                else:
+                    r = _execute_single_step(
+                        sub, flat_index, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        False, None, None, ex_prompt,
+                    )
+                r.branch = branch_label
+                if r.step_id:
+                    outputs_by_id[r.step_id] = r.output
+                outputs_by_index[flat_index] = r.output
+                flat_index += 1
+                branch_results.append(r)
+                prev_output = r.output
+                if on_step_complete:
+                    checkpoint = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    )
+                    on_step_complete(r, checkpoint)
+
+            if branch_results:
+                step_results.append(
+                    branch_results if len(branch_results) > 1 else branch_results[0],
+                )
+        elif isinstance(item, LoopStep):
+            body = item.loop
+            loop_all_results: list[StepResult] = []
+
+            for iteration in range(body.max_iterations):
+                for sub in body.steps:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                    if execute:
+                        r = await _aexecute_single_step(
+                            sub, flat_index, engine, employees, initial_args,
+                            outputs_by_id, outputs_by_index, prev_output,
+                            agent_identity, project_info,
+                            api_key, model, ex_prompt,
+                        )
+                    else:
+                        r = _execute_single_step(
+                            sub, flat_index, engine, employees, initial_args,
+                            outputs_by_id, outputs_by_index, prev_output,
+                            agent_identity, project_info,
+                            False, None, None, ex_prompt,
+                        )
+                    r.branch = f"loop-{iteration}"
+                    if r.step_id:
+                        outputs_by_id[r.step_id] = r.output
+                    outputs_by_index[flat_index] = r.output
+                    flat_index += 1
+                    loop_all_results.append(r)
+                    prev_output = r.output
+                    if on_step_complete:
+                        checkpoint = _build_checkpoint(
+                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                        )
+                        on_step_complete(r, checkpoint)
+
+                should_stop = _evaluate_check(
+                    body.until.check, body.until.contains, body.until.matches,
+                    outputs_by_id, outputs_by_index, prev_output, execute,
+                )
+                if should_stop:
+                    break
+                if not execute:
+                    break
+
+            if loop_all_results:
+                step_results.append(
+                    loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
+                )
         else:
             ex_prompt = _resolve_exemplars(agent_id, item.employee)
             if execute:
@@ -710,6 +981,78 @@ async def aresume_pipeline(
                 )
                 for r in group_results:
                     on_step_complete(r, cp)
+        elif isinstance(item, ConditionalStep):
+            body = item.condition
+            took_then = _evaluate_check(
+                body.check, body.contains, body.matches,
+                outputs_by_id, outputs_by_index, prev_output, True,
+            )
+            branch_steps = body.then if took_then else body.else_
+            branch_label = "then" if took_then else "else"
+
+            branch_results: list[StepResult] = []
+            for sub in branch_steps:
+                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                r = await _aexecute_single_step(
+                    sub, flat_index, engine, employees, initial_args,
+                    outputs_by_id, outputs_by_index, prev_output,
+                    agent_identity, project_info,
+                    api_key, model, ex_prompt,
+                )
+                r.branch = branch_label
+                if r.step_id:
+                    outputs_by_id[r.step_id] = r.output
+                outputs_by_index[flat_index] = r.output
+                flat_index += 1
+                branch_results.append(r)
+                prev_output = r.output
+                if on_step_complete:
+                    cp = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    )
+                    on_step_complete(r, cp)
+
+            if branch_results:
+                step_results.append(
+                    branch_results if len(branch_results) > 1 else branch_results[0],
+                )
+        elif isinstance(item, LoopStep):
+            body = item.loop
+            loop_all_results: list[StepResult] = []
+
+            for iteration in range(body.max_iterations):
+                for sub in body.steps:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                    r = await _aexecute_single_step(
+                        sub, flat_index, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        api_key, model, ex_prompt,
+                    )
+                    r.branch = f"loop-{iteration}"
+                    if r.step_id:
+                        outputs_by_id[r.step_id] = r.output
+                    outputs_by_index[flat_index] = r.output
+                    flat_index += 1
+                    loop_all_results.append(r)
+                    prev_output = r.output
+                    if on_step_complete:
+                        cp = _build_checkpoint(
+                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                        )
+                        on_step_complete(r, cp)
+
+                should_stop = _evaluate_check(
+                    body.until.check, body.until.contains, body.until.matches,
+                    outputs_by_id, outputs_by_index, prev_output, True,
+                )
+                if should_stop:
+                    break
+
+            if loop_all_results:
+                step_results.append(
+                    loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
+                )
         else:
             ex_prompt = _resolve_exemplars(agent_id, item.employee)
             r = await _aexecute_single_step(

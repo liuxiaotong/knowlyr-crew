@@ -7,10 +7,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from crew.models import ParallelGroup, PipelineStep, StepResult
+from crew.models import (
+    Condition,
+    ConditionalBody,
+    ConditionalStep,
+    LoopBody,
+    LoopStep,
+    ParallelGroup,
+    PipelineStep,
+    StepResult,
+)
 from crew.pipeline import (
     Pipeline,
     _build_checkpoint,
+    _evaluate_check,
     _resolve_output_refs,
     aresume_pipeline,
     arun_pipeline,
@@ -719,3 +729,615 @@ class TestAsyncGatherTimeout:
         from crew.pipeline import _ASYNC_STEP_TIMEOUT
         assert _ASYNC_STEP_TIMEOUT > 0
         assert _ASYNC_STEP_TIMEOUT <= 3600  # 不超过 1 小时
+
+
+# ── 条件分支 + 循环测试 ──
+
+
+class TestConditionModel:
+    """测试 Condition / ConditionalBody 数据模型."""
+
+    def test_condition_contains(self):
+        c = Condition(check="{prev}", contains="critical")
+        assert c.contains == "critical"
+        assert c.matches == ""
+
+    def test_condition_matches(self):
+        c = Condition(check="{prev}", matches=r"LGTM|approved")
+        assert c.matches == r"LGTM|approved"
+
+    def test_condition_both_raises(self):
+        with pytest.raises(ValueError, match="之一"):
+            Condition(check="{prev}", contains="a", matches="b")
+
+    def test_condition_neither_raises(self):
+        with pytest.raises(ValueError, match="之一"):
+            Condition(check="{prev}")
+
+    def test_evaluate_contains_true(self):
+        c = Condition(check="{prev}", contains="LGTM")
+        assert c.evaluate("代码审查: LGTM，可以合并") is True
+
+    def test_evaluate_contains_false(self):
+        c = Condition(check="{prev}", contains="LGTM")
+        assert c.evaluate("需要修改") is False
+
+    def test_evaluate_matches_true(self):
+        c = Condition(check="{prev}", matches=r"score:\s*\d+")
+        assert c.evaluate("score: 95") is True
+
+    def test_evaluate_matches_false(self):
+        c = Condition(check="{prev}", matches=r"score:\s*\d+")
+        assert c.evaluate("no score here") is False
+
+    def test_conditional_body(self):
+        body = ConditionalBody(
+            check="{prev}",
+            contains="critical",
+            then=[PipelineStep(employee="security-auditor")],
+            **{"else": [PipelineStep(employee="code-reviewer")]},
+        )
+        assert len(body.then) == 1
+        assert len(body.else_) == 1
+        assert body.evaluate("this is critical") is True
+        assert body.evaluate("all good") is False
+
+    def test_conditional_body_no_else(self):
+        body = ConditionalBody(
+            check="{prev}",
+            contains="x",
+            then=[PipelineStep(employee="a")],
+        )
+        assert body.else_ == []
+
+    def test_conditional_step(self):
+        step = ConditionalStep(condition=ConditionalBody(
+            check="{prev}", contains="yes",
+            then=[PipelineStep(employee="a")],
+        ))
+        assert step.condition.check == "{prev}"
+
+    def test_loop_body(self):
+        body = LoopBody(
+            steps=[PipelineStep(employee="code-reviewer", id="review")],
+            until=Condition(check="{steps.review.output}", contains="LGTM"),
+            max_iterations=3,
+        )
+        assert body.max_iterations == 3
+        assert len(body.steps) == 1
+
+    def test_loop_step(self):
+        step = LoopStep(loop=LoopBody(
+            steps=[PipelineStep(employee="a")],
+            until=Condition(check="{prev}", contains="done"),
+        ))
+        assert step.loop.max_iterations == 5  # default
+
+    def test_loop_max_iterations_bounds(self):
+        with pytest.raises(Exception):
+            LoopBody(
+                steps=[PipelineStep(employee="a")],
+                until=Condition(check="{prev}", contains="x"),
+                max_iterations=0,
+            )
+        with pytest.raises(Exception):
+            LoopBody(
+                steps=[PipelineStep(employee="a")],
+                until=Condition(check="{prev}", contains="x"),
+                max_iterations=51,
+            )
+
+    def test_step_result_branch_field(self):
+        r = StepResult(employee="a", step_index=0, args={}, prompt="p")
+        assert r.branch == ""
+        r2 = StepResult(employee="a", step_index=0, args={}, prompt="p", branch="then")
+        assert r2.branch == "then"
+
+
+class TestEvaluateCheck:
+    """测试 _evaluate_check 辅助函数."""
+
+    def test_prompt_only_always_true(self):
+        assert _evaluate_check("{prev}", "x", "", {}, {}, "", execute=False) is True
+
+    def test_contains_match(self):
+        assert _evaluate_check("{prev}", "ok", "", {}, {}, "all ok", execute=True) is True
+
+    def test_contains_no_match(self):
+        assert _evaluate_check("{prev}", "ok", "", {}, {}, "bad", execute=True) is False
+
+    def test_matches_regex(self):
+        assert _evaluate_check("{prev}", "", r"\d+", {}, {}, "score: 42", execute=True) is True
+
+    def test_matches_no_match(self):
+        assert _evaluate_check("{prev}", "", r"\d+", {}, {}, "no numbers", execute=True) is False
+
+    def test_resolves_step_ref(self):
+        assert _evaluate_check(
+            "{steps.review.output}", "LGTM", "",
+            {"review": "LGTM, ship it"}, {}, "", execute=True,
+        ) is True
+
+
+class TestLoadPipelineConditionLoop:
+    """测试从 YAML 加载条件/循环步骤."""
+
+    def test_load_condition(self, tmp_path):
+        data = {
+            "name": "cond-test",
+            "steps": [
+                {"employee": "classifier", "id": "classify"},
+                {"condition": {
+                    "check": "{steps.classify.output}",
+                    "contains": "critical",
+                    "then": [{"employee": "security-auditor"}],
+                    "else": [{"employee": "code-reviewer"}],
+                }},
+            ],
+        }
+        f = tmp_path / "cond.yaml"
+        f.write_text(yaml.dump(data, allow_unicode=True))
+        pl = load_pipeline(f)
+        assert len(pl.steps) == 2
+        assert isinstance(pl.steps[0], PipelineStep)
+        assert isinstance(pl.steps[1], ConditionalStep)
+        assert pl.steps[1].condition.contains == "critical"
+        assert len(pl.steps[1].condition.then) == 1
+        assert len(pl.steps[1].condition.else_) == 1
+
+    def test_load_condition_no_else(self, tmp_path):
+        data = {
+            "name": "cond-no-else",
+            "steps": [
+                {"condition": {
+                    "check": "{prev}",
+                    "contains": "skip",
+                    "then": [{"employee": "code-reviewer"}],
+                }},
+            ],
+        }
+        f = tmp_path / "cond2.yaml"
+        f.write_text(yaml.dump(data, allow_unicode=True))
+        pl = load_pipeline(f)
+        assert isinstance(pl.steps[0], ConditionalStep)
+        assert pl.steps[0].condition.else_ == []
+
+    def test_load_loop(self, tmp_path):
+        data = {
+            "name": "loop-test",
+            "steps": [
+                {"loop": {
+                    "steps": [
+                        {"employee": "code-reviewer", "id": "review"},
+                    ],
+                    "until": {"check": "{steps.review.output}", "contains": "LGTM"},
+                    "max_iterations": 3,
+                }},
+            ],
+        }
+        f = tmp_path / "loop.yaml"
+        f.write_text(yaml.dump(data, allow_unicode=True))
+        pl = load_pipeline(f)
+        assert len(pl.steps) == 1
+        assert isinstance(pl.steps[0], LoopStep)
+        assert pl.steps[0].loop.max_iterations == 3
+        assert pl.steps[0].loop.until.contains == "LGTM"
+
+    def test_load_mixed_all_types(self, tmp_path):
+        data = {
+            "name": "mixed",
+            "steps": [
+                {"employee": "classifier", "id": "c"},
+                {"parallel": [
+                    {"employee": "a"},
+                    {"employee": "b"},
+                ]},
+                {"condition": {
+                    "check": "{prev}",
+                    "contains": "yes",
+                    "then": [{"employee": "x"}],
+                }},
+                {"loop": {
+                    "steps": [{"employee": "y"}],
+                    "until": {"check": "{prev}", "contains": "done"},
+                }},
+                {"employee": "z"},
+            ],
+        }
+        f = tmp_path / "mixed.yaml"
+        f.write_text(yaml.dump(data, allow_unicode=True))
+        pl = load_pipeline(f)
+        assert len(pl.steps) == 5
+        assert isinstance(pl.steps[0], PipelineStep)
+        assert isinstance(pl.steps[1], ParallelGroup)
+        assert isinstance(pl.steps[2], ConditionalStep)
+        assert isinstance(pl.steps[3], LoopStep)
+        assert isinstance(pl.steps[4], PipelineStep)
+
+
+class TestValidateConditionLoop:
+    """测试条件/循环步骤的校验."""
+
+    def test_validate_condition_unknown_employee(self):
+        pl = Pipeline(
+            name="bad",
+            steps=[ConditionalStep(condition=ConditionalBody(
+                check="{prev}", contains="x",
+                then=[PipelineStep(employee="nonexistent-worker")],
+            ))],
+        )
+        errors = validate_pipeline(pl)
+        assert any("nonexistent-worker" in e for e in errors)
+
+    def test_validate_condition_else_unknown(self):
+        pl = Pipeline(
+            name="bad2",
+            steps=[ConditionalStep(condition=ConditionalBody(
+                check="{prev}", contains="x",
+                then=[PipelineStep(employee="code-reviewer")],
+                **{"else": [PipelineStep(employee="nonexistent-worker")]},
+            ))],
+        )
+        errors = validate_pipeline(pl)
+        assert any("nonexistent-worker" in e for e in errors)
+
+    def test_validate_loop_unknown_employee(self):
+        pl = Pipeline(
+            name="bad3",
+            steps=[LoopStep(loop=LoopBody(
+                steps=[PipelineStep(employee="nonexistent-worker")],
+                until=Condition(check="{prev}", contains="x"),
+            ))],
+        )
+        errors = validate_pipeline(pl)
+        assert any("nonexistent-worker" in e for e in errors)
+
+    def test_validate_condition_valid(self):
+        pl = Pipeline(
+            name="ok",
+            steps=[ConditionalStep(condition=ConditionalBody(
+                check="{prev}", contains="x",
+                then=[PipelineStep(employee="code-reviewer")],
+            ))],
+        )
+        errors = validate_pipeline(pl)
+        assert errors == []
+
+    def test_validate_loop_valid(self):
+        pl = Pipeline(
+            name="ok",
+            steps=[LoopStep(loop=LoopBody(
+                steps=[PipelineStep(employee="code-reviewer")],
+                until=Condition(check="{prev}", contains="x"),
+            ))],
+        )
+        errors = validate_pipeline(pl)
+        assert errors == []
+
+
+class TestRunPipelineCondition:
+    """测试条件分支执行."""
+
+    def test_condition_prompt_only_defaults_then(self):
+        """prompt-only 模式默认走 then 分支."""
+        pl = Pipeline(
+            name="cond-prompt",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}",
+                    contains="critical",
+                    then=[PipelineStep(employee="test-engineer", args={"target": "main"})],
+                    **{"else": [PipelineStep(employee="doc-writer", args={"target": "main"})]},
+                )),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        assert result.pipeline_name == "cond-prompt"
+        # prompt-only 默认走 then → test-engineer
+        flat = [r for item in result.steps for r in (item if isinstance(item, list) else [item])]
+        employees = [r.employee for r in flat]
+        assert "test-engineer" in employees
+        assert "doc-writer" not in employees
+
+    def test_condition_then_branch_value(self):
+        """条件分支中的步骤应有 branch='then' 标记."""
+        pl = Pipeline(
+            name="branch-label",
+            steps=[
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}",
+                    contains="x",
+                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                )),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        step = result.steps[0]
+        if isinstance(step, list):
+            step = step[0]
+        assert step.branch == "then"
+
+    def test_condition_flat_index(self):
+        """条件分支后的 flat_index 应正确递增."""
+        pl = Pipeline(
+            name="idx",
+            steps=[
+                PipelineStep(employee="code-reviewer"),  # flat=0
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}", contains="x",
+                    then=[
+                        PipelineStep(employee="test-engineer"),  # flat=1
+                        PipelineStep(employee="doc-writer"),  # flat=2
+                    ],
+                )),
+                PipelineStep(employee="code-reviewer"),  # flat=3
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        assert result.steps[0].step_index == 0
+        # 条件分支产生 2 个步骤
+        group = result.steps[1]
+        assert isinstance(group, list)
+        assert len(group) == 2
+        assert {r.step_index for r in group} == {1, 2}
+        # 最后一步
+        assert result.steps[2].step_index == 3
+
+    def test_prev_after_condition(self):
+        """条件分支后 {prev} 指向分支最后一步的输出."""
+        pl = Pipeline(
+            name="prev-cond",
+            steps=[
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}", contains="x",
+                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                )),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        # 两步都应成功执行（prompt-only）
+        flat = [r for item in result.steps for r in (item if isinstance(item, list) else [item])]
+        assert len(flat) == 2
+
+
+class TestRunPipelineLoop:
+    """测试循环执行."""
+
+    def test_loop_prompt_only_single_iteration(self):
+        """prompt-only 模式只执行一次迭代."""
+        pl = Pipeline(
+            name="loop-prompt",
+            steps=[
+                LoopStep(loop=LoopBody(
+                    steps=[
+                        PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                        PipelineStep(employee="test-engineer", args={"target": "main"}),
+                    ],
+                    until=Condition(check="{prev}", contains="LGTM"),
+                    max_iterations=5,
+                )),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        # prompt-only: 只执行一次迭代 = 2 个步骤
+        flat = [r for item in result.steps for r in (item if isinstance(item, list) else [item])]
+        assert len(flat) == 2
+
+    def test_loop_branch_label(self):
+        """循环内步骤应有 branch='loop-N' 标记."""
+        pl = Pipeline(
+            name="loop-label",
+            steps=[
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    until=Condition(check="{prev}", contains="LGTM"),
+                    max_iterations=1,
+                )),
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        step = result.steps[0]
+        if isinstance(step, list):
+            step = step[0]
+        assert step.branch == "loop-0"
+
+    def test_loop_flat_index(self):
+        """循环步骤的 flat_index 应正确递增."""
+        pl = Pipeline(
+            name="loop-idx",
+            steps=[
+                PipelineStep(employee="code-reviewer"),  # flat=0
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="test-engineer")],  # flat=1 (single iteration prompt-only)
+                    until=Condition(check="{prev}", contains="done"),
+                )),
+                PipelineStep(employee="code-reviewer"),  # flat=2
+            ],
+        )
+        result = run_pipeline(pl, smart_context=False)
+        assert result.steps[0].step_index == 0
+        # loop 产生 1 步（单次迭代）
+        loop_step = result.steps[1]
+        if isinstance(loop_step, list):
+            assert loop_step[0].step_index == 1
+        else:
+            assert loop_step.step_index == 1
+        assert result.steps[2].step_index == 2
+
+
+class TestAsyncConditionLoop:
+    """测试异步版本的条件/循环."""
+
+    def test_async_condition(self):
+        pl = Pipeline(
+            name="async-cond",
+            steps=[
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}", contains="x",
+                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                )),
+            ],
+        )
+        result = _run(arun_pipeline(pl, smart_context=False))
+        flat = [r for item in result.steps for r in (item if isinstance(item, list) else [item])]
+        assert len(flat) == 1
+        assert flat[0].employee == "code-reviewer"
+
+    def test_async_loop(self):
+        pl = Pipeline(
+            name="async-loop",
+            steps=[
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    until=Condition(check="{prev}", contains="LGTM"),
+                    max_iterations=2,
+                )),
+            ],
+        )
+        result = _run(arun_pipeline(pl, smart_context=False))
+        flat = [r for item in result.steps for r in (item if isinstance(item, list) else [item])]
+        assert len(flat) >= 1
+
+    def test_async_checkpoint_after_condition(self):
+        """条件分支后 checkpoint 应正确保存."""
+        pl = Pipeline(
+            name="cp-cond",
+            steps=[
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}", contains="x",
+                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                )),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        checkpoints = []
+
+        def on_complete(step_result, checkpoint):
+            checkpoints.append(checkpoint)
+
+        _run(arun_pipeline(pl, smart_context=False, on_step_complete=on_complete))
+        assert len(checkpoints) == 2
+
+
+class TestMermaidConditionLoop:
+    """测试条件/循环的 Mermaid 流程图生成."""
+
+    def test_mermaid_condition(self):
+        pl = Pipeline(
+            name="cond",
+            steps=[
+                PipelineStep(employee="classifier", id="classify"),
+                ConditionalStep(condition=ConditionalBody(
+                    check="{steps.classify.output}",
+                    contains="critical",
+                    then=[PipelineStep(employee="security-auditor")],
+                    **{"else": [PipelineStep(employee="code-reviewer")]},
+                )),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "contains 'critical'" in mermaid
+        assert '"security-auditor"' in mermaid
+        assert '"code-reviewer"' in mermaid
+        assert "then" in mermaid
+        assert "else" in mermaid
+        assert "合并" in mermaid
+
+    def test_mermaid_condition_no_else(self):
+        pl = Pipeline(
+            name="cond-no-else",
+            steps=[
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}",
+                    contains="skip",
+                    then=[PipelineStep(employee="code-reviewer")],
+                )),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "contains 'skip'" in mermaid
+        assert '"code-reviewer"' in mermaid
+        assert "then" in mermaid
+
+    def test_mermaid_loop(self):
+        pl = Pipeline(
+            name="loop",
+            steps=[
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="code-reviewer", id="review")],
+                    until=Condition(check="{steps.review.output}", contains="LGTM"),
+                    max_iterations=3,
+                )),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "循环 (max 3)" in mermaid
+        assert '"code-reviewer"' in mermaid
+        assert "contains 'LGTM'" in mermaid
+        assert "继续" in mermaid
+
+    def test_mermaid_mixed(self):
+        """混合所有类型的完整流程图."""
+        pl = Pipeline(
+            name="mixed",
+            steps=[
+                PipelineStep(employee="start-worker", id="start"),
+                ParallelGroup(parallel=[
+                    PipelineStep(employee="a"),
+                    PipelineStep(employee="b"),
+                ]),
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}",
+                    contains="yes",
+                    then=[PipelineStep(employee="x")],
+                    **{"else": [PipelineStep(employee="y")]},
+                )),
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="z")],
+                    until=Condition(check="{prev}", contains="done"),
+                    max_iterations=2,
+                )),
+            ],
+        )
+        mermaid = pipeline_to_mermaid(pl)
+        assert "graph LR" in mermaid
+        assert "开始" in mermaid
+        assert "结束" in mermaid
+        assert "并行" in mermaid
+        assert "合并" in mermaid  # both parallel and condition merges
+        assert "循环" in mermaid
+        assert "继续" in mermaid
+
+
+class TestPipelineWithConditionLoop:
+    """测试 Pipeline 模型直接构造条件/循环."""
+
+    def test_pipeline_with_condition(self):
+        pl = Pipeline(
+            name="test",
+            steps=[
+                PipelineStep(employee="a"),
+                ConditionalStep(condition=ConditionalBody(
+                    check="{prev}", contains="x",
+                    then=[PipelineStep(employee="b")],
+                )),
+            ],
+        )
+        assert len(pl.steps) == 2
+        assert isinstance(pl.steps[1], ConditionalStep)
+
+    def test_pipeline_with_loop(self):
+        pl = Pipeline(
+            name="test",
+            steps=[
+                LoopStep(loop=LoopBody(
+                    steps=[PipelineStep(employee="a")],
+                    until=Condition(check="{prev}", contains="done"),
+                )),
+                PipelineStep(employee="b"),
+            ],
+        )
+        assert len(pl.steps) == 2
+        assert isinstance(pl.steps[0], LoopStep)

@@ -277,7 +277,10 @@ class TestMemoryStoreSemanticIntegration:
         assert "finding" in result.lower() or "发现" in result
 
     def test_format_for_prompt_no_index_fallback(self, tmp_path):
-        store = MemoryStore(memory_dir=tmp_path)
+        from crew.memory import MemoryConfig
+
+        config = MemoryConfig(auto_index=False)
+        store = MemoryStore(memory_dir=tmp_path, config=config)
         store.add("bot", "finding", "some finding")
 
         # 传 query 但无索引，降级到原始逻辑
@@ -511,3 +514,97 @@ class TestConnectionSafety:
                 embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
         assert "OpenAI embedding 不可用" in caplog.text
+
+
+class TestRemove:
+    """测试向量删除."""
+
+    def test_remove_existing_entry(self, tmp_path):
+        entry = MemoryEntry(employee="pm", category="finding", content="测试内容")
+        with SemanticMemoryIndex(tmp_path) as idx:
+            idx.index(entry)
+            assert idx.has_index("pm")
+            removed = idx.remove(entry.id)
+            assert removed is True
+            assert not idx.has_index("pm")
+
+    def test_remove_nonexistent_entry(self, tmp_path):
+        with SemanticMemoryIndex(tmp_path) as idx:
+            removed = idx.remove("nonexistent")
+            assert removed is False
+
+
+class TestSearchCrossEmployee:
+    """测试跨员工搜索."""
+
+    def test_search_cross_employee(self, tmp_path):
+        entries = [
+            MemoryEntry(employee="pm", category="decision", content="使用 REST API 架构"),
+            MemoryEntry(employee="cr", category="finding", content="发现 CSS 问题"),
+            MemoryEntry(employee="test", category="finding", content="API 测试覆盖不足"),
+        ]
+        with SemanticMemoryIndex(tmp_path) as idx:
+            for e in entries:
+                idx.index(e)
+            results = idx.search_cross_employee("API")
+            assert len(results) > 0
+            employees = {r[1] for r in results}
+            assert len(employees) > 1  # 跨越多个员工
+
+    def test_search_excludes_self(self, tmp_path):
+        entries = [
+            MemoryEntry(employee="pm", category="decision", content="API 架构决策"),
+            MemoryEntry(employee="cr", category="finding", content="API 代码审查"),
+        ]
+        with SemanticMemoryIndex(tmp_path) as idx:
+            for e in entries:
+                idx.index(e)
+            results = idx.search_cross_employee("API", exclude_employee="pm")
+            employees = {r[1] for r in results}
+            assert "pm" not in employees
+
+
+class TestAutoIndex:
+    """测试自动索引."""
+
+    def test_add_auto_indexes(self, tmp_path):
+        """add() 后自动建索引."""
+        from crew.memory import MemoryConfig
+
+        config = MemoryConfig(auto_index=True)
+        store = MemoryStore(memory_dir=tmp_path / "memory", config=config)
+        store.add("pm", "finding", "自动索引测试")
+
+        with SemanticMemoryIndex(tmp_path / "memory") as idx:
+            assert idx.has_index("pm")
+
+    def test_auto_index_disabled(self, tmp_path):
+        """auto_index=False 时不自动索引."""
+        from crew.memory import MemoryConfig
+
+        config = MemoryConfig(auto_index=False)
+        store = MemoryStore(memory_dir=tmp_path / "memory", config=config)
+        store.add("pm", "finding", "不索引")
+
+        with SemanticMemoryIndex(tmp_path / "memory") as idx:
+            assert not idx.has_index("pm")
+
+    def test_correct_updates_index(self, tmp_path):
+        """correct() 删旧索引建新索引."""
+        from crew.memory import MemoryConfig
+
+        config = MemoryConfig(auto_index=True)
+        store = MemoryStore(memory_dir=tmp_path / "memory", config=config)
+        e = store.add("pm", "finding", "原始")
+        old_id = e.id
+
+        new_e = store.correct("pm", old_id, "纠正后")
+        assert new_e is not None
+
+        with SemanticMemoryIndex(tmp_path / "memory") as idx:
+            # 旧条目被删除，新条目被索引
+            assert idx.has_index("pm")
+            results = idx.search("pm", "纠正后")
+            if results:
+                ids = {r[0] for r in results}
+                assert old_id not in ids

@@ -265,6 +265,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "string",
                             "description": "来源 session ID（可选）",
                         },
+                        "ttl_days": {
+                            "type": "integer",
+                            "description": "生存期天数 (0=永不过期，默认 0)",
+                            "default": 0,
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "语义标签列表（可选）",
+                        },
+                        "shared": {
+                            "type": "boolean",
+                            "description": "是否加入共享记忆池（默认 false）",
+                            "default": False,
+                        },
                     },
                     "required": ["employee", "category", "content"],
                 },
@@ -539,14 +554,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
             data = []
             for pname, ppath in pipelines.items():
                 pl = load_pipeline(ppath)
+                def _step_summary(s):
+                    if hasattr(s, "employee"):
+                        return s.employee
+                    if hasattr(s, "parallel"):
+                        return [sub.employee for sub in s.parallel]
+                    if hasattr(s, "condition"):
+                        return {"condition": [sub.employee for sub in s.condition.then]}
+                    if hasattr(s, "loop"):
+                        return {"loop": [sub.employee for sub in s.loop.steps]}
+                    return "unknown"
+
                 data.append({
                     "name": pname,
                     "description": pl.description,
-                    "steps": [
-                        s.employee if hasattr(s, "employee")
-                        else [sub.employee for sub in s.parallel]
-                        for s in pl.steps
-                    ],
+                    "steps": [_step_summary(s) for s in pl.steps],
                     "path": str(ppath),
                 })
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
@@ -695,6 +717,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 category=arguments["category"],
                 content=arguments["content"],
                 source_session=arguments.get("source_session", ""),
+                ttl_days=arguments.get("ttl_days", 0),
+                tags=arguments.get("tags"),
+                shared=arguments.get("shared", False),
             )
             return [TextContent(
                 type="text",

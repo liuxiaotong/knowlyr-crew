@@ -33,11 +33,16 @@ except PackageNotFoundError:  # pragma: no cover - editable install
     __version__ = _load_local_version()
 
 from crew.models import (
+    Condition,
+    ConditionalBody,
+    ConditionalStep,
     DiscoveryResult,
     DiscussionPlan,
     Employee,
     EmployeeArg,
     EmployeeOutput,
+    LoopBody,
+    LoopStep,
     ParallelGroup,
     ParticipantPrompt,
     PipelineResult,
@@ -50,11 +55,16 @@ from crew.models import (
 )
 
 __all__ = [
+    "Condition",
+    "ConditionalBody",
+    "ConditionalStep",
     "DiscoveryResult",
     "DiscussionPlan",
     "Employee",
     "EmployeeArg",
     "EmployeeOutput",
+    "LoopBody",
+    "LoopStep",
     "ParallelGroup",
     "ParticipantPrompt",
     "PipelineResult",

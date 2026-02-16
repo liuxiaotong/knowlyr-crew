@@ -214,6 +214,74 @@ class ParallelGroup(BaseModel):
     parallel: list[PipelineStep] = Field(description="并行执行的步骤列表")
 
 
+class Condition(BaseModel):
+    """条件定义 — 字符串包含或正则匹配."""
+
+    check: str = Field(description="待检查的值（支持 {prev}, {steps.<id>.output} 占位符）")
+    contains: str = Field(default="", description="包含子串（与 matches 互斥）")
+    matches: str = Field(default="", description="正则表达式（与 contains 互斥）")
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "Condition":
+        if bool(self.contains) == bool(self.matches):
+            raise ValueError("Condition 必须设置 contains 或 matches 之一（不可同时设置或同时为空）")
+        return self
+
+    def evaluate(self, resolved_check: str) -> bool:
+        """评估条件是否满足."""
+        if self.contains:
+            return self.contains in resolved_check
+        return bool(re.search(self.matches, resolved_check))
+
+
+class ConditionalBody(BaseModel):
+    """条件分支的内部结构."""
+
+    check: str = Field(description="待检查的值")
+    contains: str = Field(default="", description="包含子串")
+    matches: str = Field(default="", description="正则表达式")
+    then: list[PipelineStep] = Field(description="条件为真时执行的步骤")
+    else_: list[PipelineStep] = Field(
+        default_factory=list,
+        alias="else",
+        description="条件为假时执行的步骤（可选）",
+    )
+
+    model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _exactly_one_matcher(self) -> "ConditionalBody":
+        if bool(self.contains) == bool(self.matches):
+            raise ValueError("必须设置 contains 或 matches 之一")
+        return self
+
+    def evaluate(self, resolved_check: str) -> bool:
+        """评估条件是否满足."""
+        if self.contains:
+            return self.contains in resolved_check
+        return bool(re.search(self.matches, resolved_check))
+
+
+class ConditionalStep(BaseModel):
+    """条件分支步骤."""
+
+    condition: ConditionalBody = Field(description="条件分支定义")
+
+
+class LoopBody(BaseModel):
+    """循环的内部结构."""
+
+    steps: list[PipelineStep] = Field(description="每次迭代执行的步骤")
+    until: Condition = Field(description="终止条件")
+    max_iterations: int = Field(default=5, ge=1, le=50, description="最大迭代次数")
+
+
+class LoopStep(BaseModel):
+    """循环步骤."""
+
+    loop: LoopBody = Field(description="循环定义")
+
+
 class StepResult(BaseModel):
     """单步执行结果."""
 
@@ -229,6 +297,7 @@ class StepResult(BaseModel):
     input_tokens: int = Field(default=0, description="输入 token 数")
     output_tokens: int = Field(default=0, description="输出 token 数")
     duration_ms: int = Field(default=0, description="执行耗时 (ms)")
+    branch: str = Field(default="", description="分支标记: then/else/loop-N（空为普通步骤）")
 
 
 class PipelineResult(BaseModel):

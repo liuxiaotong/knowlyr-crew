@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,15 @@ from pydantic import BaseModel, Field
 from crew.paths import file_lock, resolve_project_dir
 
 logger = logging.getLogger(__name__)
+
+
+class MemoryConfig(BaseModel):
+    """记忆系统配置."""
+
+    default_ttl_days: int = Field(default=0, description="默认 TTL 天数 (0=永不过期)")
+    max_entries_per_employee: int = Field(default=500, description="每员工最大记忆条数 (0=不限)")
+    confidence_half_life_days: float = Field(default=90.0, description="置信度衰减半衰期（天）")
+    auto_index: bool = Field(default=True, description="写入时自动更新语义索引")
 
 
 class MemoryEntry(BaseModel):
@@ -29,6 +39,11 @@ class MemoryEntry(BaseModel):
     source_session: str = Field(default="", description="来源 session ID")
     confidence: float = Field(default=1.0, description="置信度（被纠正后降低）")
     superseded_by: str = Field(default="", description="被哪条记忆覆盖")
+    # Enhancement 1: 衰减 + 容量
+    ttl_days: int = Field(default=0, description="生存期天数，0=永不过期")
+    # Enhancement 3: 跨员工共享
+    tags: list[str] = Field(default_factory=list, description="语义标签")
+    shared: bool = Field(default=False, description="是否加入共享记忆池")
 
 
 class MemoryStore:
@@ -37,10 +52,131 @@ class MemoryStore:
     存储结构:
       {memory_dir}/
         {employee_name}.jsonl   — 每个员工一个文件
+        config.json             — 可选配置
     """
 
-    def __init__(self, memory_dir: Path | None = None, *, project_dir: Path | None = None):
+    def __init__(
+        self,
+        memory_dir: Path | None = None,
+        *,
+        project_dir: Path | None = None,
+        config: MemoryConfig | None = None,
+    ):
         self.memory_dir = memory_dir if memory_dir is not None else resolve_project_dir(project_dir) / ".crew" / "memory"
+        self.config = config or self._load_config()
+        self._semantic_index = None  # lazy
+
+    def _load_config(self) -> MemoryConfig:
+        """从 config.json 加载配置，不存在则返回默认值."""
+        config_path = self.memory_dir / "config.json"
+        if config_path.is_file():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                return MemoryConfig(**data)
+            except Exception as e:
+                logger.debug("记忆配置加载失败，使用默认值: %s", e)
+        return MemoryConfig()
+
+    def _get_semantic_index(self):
+        """懒初始化语义索引."""
+        if self._semantic_index is None:
+            try:
+                from crew.memory_search import SemanticMemoryIndex
+                self._semantic_index = SemanticMemoryIndex(self.memory_dir)
+            except Exception as e:
+                logger.debug("语义索引初始化失败: %s", e)
+        return self._semantic_index
+
+    def _auto_index(self, entry: MemoryEntry) -> None:
+        """写入时自动索引（best-effort）."""
+        if not self.config.auto_index:
+            return
+        try:
+            idx = self._get_semantic_index()
+            if idx is not None:
+                idx.index(entry)
+        except Exception as e:
+            logger.debug("自动索引失败（不影响写入）: %s", e)
+
+    def _auto_remove_index(self, entry_id: str) -> None:
+        """从索引中删除条目（best-effort）."""
+        if not self.config.auto_index:
+            return
+        try:
+            idx = self._get_semantic_index()
+            if idx is not None:
+                idx.remove(entry_id)
+        except Exception as e:
+            logger.debug("自动删除索引失败（不影响操作）: %s", e)
+
+    def _apply_decay(self, entry: MemoryEntry) -> MemoryEntry:
+        """计算时间衰减后的有效置信度（纯函数，不改原始数据）."""
+        half_life = self.config.confidence_half_life_days
+        if half_life <= 0:
+            return entry
+        try:
+            created = datetime.fromisoformat(entry.created_at)
+            age_days = (datetime.now() - created).total_seconds() / 86400
+            if age_days <= 0:
+                return entry
+            decay_factor = 0.5 ** (age_days / half_life)
+            effective = entry.confidence * decay_factor
+            return entry.model_copy(update={"confidence": effective})
+        except (ValueError, TypeError):
+            return entry
+
+    def _is_expired(self, entry: MemoryEntry) -> bool:
+        """检查记忆是否已过期."""
+        ttl = entry.ttl_days
+        if ttl <= 0:
+            return False
+        try:
+            created = datetime.fromisoformat(entry.created_at)
+            age_days = (datetime.now() - created).total_seconds() / 86400
+            return age_days > ttl
+        except (ValueError, TypeError):
+            return False
+
+    def _enforce_capacity(self, employee: str) -> int:
+        """超限时裁剪低有效置信度条目，返回裁剪数量."""
+        max_entries = self.config.max_entries_per_employee
+        if max_entries <= 0:
+            return 0
+
+        path = self._employee_file(employee)
+        if not path.exists():
+            return 0
+
+        with file_lock(path):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            entries_with_lines: list[tuple[MemoryEntry, str]] = []
+            other_lines: list[str] = []
+
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+                    entries_with_lines.append((entry, stripped))
+                except (json.JSONDecodeError, ValueError):
+                    other_lines.append(stripped)
+
+            active = [(e, ln) for e, ln in entries_with_lines if not e.superseded_by]
+            superseded = [(e, ln) for e, ln in entries_with_lines if e.superseded_by]
+
+            if len(active) <= max_entries:
+                return 0
+
+            # 按有效置信度排序，保留高分
+            scored = [(self._apply_decay(e).confidence, e, ln) for e, ln in active]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            keep = scored[:max_entries]
+            pruned = len(scored) - max_entries
+
+            kept_lines = other_lines + [ln for _, ln in superseded] + [ln for _, _, ln in keep]
+            path.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+            return pruned
 
     def _ensure_dir(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -56,18 +192,27 @@ class MemoryStore:
         content: str,
         source_session: str = "",
         confidence: float = 1.0,
+        ttl_days: int = 0,
+        tags: list[str] | None = None,
+        shared: bool = False,
     ) -> MemoryEntry:
         """添加一条记忆."""
         self._ensure_dir()
+        effective_ttl = ttl_days if ttl_days > 0 else self.config.default_ttl_days
         entry = MemoryEntry(
             employee=employee,
             category=category,
             content=content,
             source_session=source_session,
             confidence=confidence,
+            ttl_days=effective_ttl,
+            tags=tags or [],
+            shared=shared,
         )
         with self._employee_file(employee).open("a", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")
+        self._auto_index(entry)
+        self._enforce_capacity(employee)
         return entry
 
     def add_from_session(
@@ -92,6 +237,7 @@ class MemoryStore:
         category: str | None = None,
         limit: int = 20,
         min_confidence: float = 0.0,
+        include_expired: bool = False,
     ) -> list[MemoryEntry]:
         """查询员工记忆.
 
@@ -99,10 +245,11 @@ class MemoryStore:
             employee: 员工名称
             category: 按类别过滤（可选）
             limit: 最大返回条数
-            min_confidence: 最低置信度
+            min_confidence: 最低置信度（对比衰减后的有效值）
+            include_expired: 是否包含已过期条目
 
         Returns:
-            记忆列表（最新在前）
+            记忆列表（最新在前，置信度为衰减后的有效值）
         """
         path = self._employee_file(employee)
         if not path.exists():
@@ -123,13 +270,19 @@ class MemoryStore:
             if entry.superseded_by:
                 continue
 
+            # TTL 过期检查
+            if not include_expired and self._is_expired(entry):
+                continue
+
             if category and entry.category != category:
                 continue
 
-            if entry.confidence < min_confidence:
+            # 应用衰减后检查置信度
+            decayed = self._apply_decay(entry)
+            if decayed.confidence < min_confidence:
                 continue
 
-            entries.append(entry)
+            entries.append(decayed)
 
         entries.reverse()
         return entries[:limit]
@@ -201,6 +354,11 @@ class MemoryStore:
             # 重写文件
             path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
+        # 锁外维护索引（best-effort）
+        if new_entry is not None:
+            self._auto_remove_index(old_id)
+            self._auto_index(new_entry)
+
         return new_entry
 
     def format_for_prompt(
@@ -208,6 +366,7 @@ class MemoryStore:
         employee: str,
         limit: int = 10,
         query: str = "",
+        employee_tags: list[str] | None = None,
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
@@ -215,11 +374,15 @@ class MemoryStore:
             employee: 员工名称
             limit: 最大条数
             query: 查询上下文（有值时使用语义搜索优先返回相关记忆）
+            employee_tags: 员工标签（用于匹配共享记忆）
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
         """
+        parts: list[str] = []
+
         # 尝试语义搜索
+        own_found = False
         if query:
             try:
                 from crew.memory_search import SemanticMemoryIndex
@@ -231,14 +394,28 @@ class MemoryStore:
                             lines = []
                             for _id, content, score in results:
                                 lines.append(f"- {content}")
-                            return "\n".join(lines)
+                            parts.append("\n".join(lines))
+                            own_found = True
             except Exception as e:
                 logger.debug("语义搜索降级: %s", e)
 
-        entries = self.query(employee, limit=limit)
-        if not entries:
-            return ""
+        if not own_found:
+            entries = self.query(employee, limit=limit)
+            if entries:
+                parts.append(self._format_entries(entries))
 
+        # 跨员工共享记忆
+        shared_text = self._get_shared_memories(
+            employee, query=query, employee_tags=employee_tags, limit=max(3, limit // 3),
+        )
+        if shared_text:
+            parts.append(f"\n### 团队共享经验\n\n{shared_text}")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_entries(entries: list[MemoryEntry]) -> str:
+        """格式化记忆条目列表为 Markdown."""
         lines = []
         for entry in entries:
             category_label = {
@@ -249,8 +426,95 @@ class MemoryStore:
             }.get(entry.category, entry.category)
             conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
             lines.append(f"- [{category_label}]{conf} {entry.content}")
-
         return "\n".join(lines)
+
+    def _get_shared_memories(
+        self,
+        employee: str,
+        query: str = "",
+        employee_tags: list[str] | None = None,
+        limit: int = 5,
+    ) -> str:
+        """获取其他员工的共享记忆."""
+        shared_entries = self.query_shared(
+            tags=employee_tags,
+            exclude_employee=employee,
+            limit=limit,
+        )
+        if not shared_entries:
+            return ""
+
+        lines = []
+        for entry in shared_entries:
+            tag_str = f" [{', '.join(entry.tags)}]" if entry.tags else ""
+            category_label = {
+                "decision": "决策",
+                "estimate": "估算",
+                "finding": "发现",
+                "correction": "纠正",
+            }.get(entry.category, entry.category)
+            conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
+            lines.append(f"- [{category_label}]{conf}{tag_str} ({entry.employee}) {entry.content}")
+        return "\n".join(lines)
+
+    def query_shared(
+        self,
+        tags: list[str] | None = None,
+        exclude_employee: str = "",
+        limit: int = 10,
+        min_confidence: float = 0.3,
+    ) -> list[MemoryEntry]:
+        """查询跨员工的共享记忆.
+
+        Args:
+            tags: 按标签过滤（任一匹配即可）
+            exclude_employee: 排除指定员工
+            limit: 最大返回条数
+            min_confidence: 最低有效置信度
+
+        Returns:
+            共享记忆列表（最新在前）
+        """
+        if not self.memory_dir.is_dir():
+            return []
+
+        tag_set = set(tags) if tags else None
+        all_shared: list[MemoryEntry] = []
+
+        for jsonl_file in self.memory_dir.glob("*.jsonl"):
+            employee_name = jsonl_file.stem
+            if employee_name == exclude_employee:
+                continue
+
+            for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+                if not entry.shared:
+                    continue
+                if entry.superseded_by:
+                    continue
+                if self._is_expired(entry):
+                    continue
+
+                # 标签过滤：有标签要求时取交集
+                if tag_set and not (tag_set & set(entry.tags)):
+                    continue
+
+                decayed = self._apply_decay(entry)
+                if decayed.confidence < min_confidence:
+                    continue
+
+                all_shared.append(decayed)
+
+        # 按创建时间降序
+        all_shared.sort(key=lambda e: e.created_at, reverse=True)
+        return all_shared[:limit]
 
     def list_employees(self) -> list[str]:
         """列出有记忆的员工."""
