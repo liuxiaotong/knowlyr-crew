@@ -219,12 +219,16 @@ class Condition(BaseModel):
 
     check: str = Field(description="待检查的值（支持 {prev}, {steps.<id>.output} 占位符）")
     contains: str = Field(default="", description="包含子串（与 matches 互斥）")
-    matches: str = Field(default="", description="正则表达式（与 contains 互斥）")
+    matches: str = Field(default="", description="正则表达式（与 contains 互斥，最长 256 字符）")
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "Condition":
         if bool(self.contains) == bool(self.matches):
             raise ValueError("Condition 必须设置 contains 或 matches 之一（不可同时设置或同时为空）")
+        if self.matches:
+            if len(self.matches) > 256:
+                raise ValueError("matches 正则表达式最长 256 字符")
+            re.compile(self.matches)  # 预编译校验
         return self
 
     def evaluate(self, resolved_check: str) -> bool:
@@ -253,6 +257,10 @@ class ConditionalBody(BaseModel):
     def _exactly_one_matcher(self) -> "ConditionalBody":
         if bool(self.contains) == bool(self.matches):
             raise ValueError("必须设置 contains 或 matches 之一")
+        if self.matches:
+            if len(self.matches) > 256:
+                raise ValueError("matches 正则表达式最长 256 字符")
+            re.compile(self.matches)  # 预编译校验
         return self
 
     def evaluate(self, resolved_check: str) -> bool:

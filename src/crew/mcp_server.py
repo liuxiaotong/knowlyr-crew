@@ -551,20 +551,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "list_pipelines":
             pipelines = discover_pipelines(project_dir=_project_dir)
+            def _step_summary(s):
+                if hasattr(s, "employee"):
+                    return s.employee
+                if hasattr(s, "parallel"):
+                    return [sub.employee for sub in s.parallel]
+                if hasattr(s, "condition"):
+                    return {"condition": [sub.employee for sub in s.condition.then]}
+                if hasattr(s, "loop"):
+                    return {"loop": [sub.employee for sub in s.loop.steps]}
+                return "unknown"
+
             data = []
             for pname, ppath in pipelines.items():
                 pl = load_pipeline(ppath)
-                def _step_summary(s):
-                    if hasattr(s, "employee"):
-                        return s.employee
-                    if hasattr(s, "parallel"):
-                        return [sub.employee for sub in s.parallel]
-                    if hasattr(s, "condition"):
-                        return {"condition": [sub.employee for sub in s.condition.then]}
-                    if hasattr(s, "loop"):
-                        return {"loop": [sub.employee for sub in s.loop.steps]}
-                    return "unknown"
-
                 data.append({
                     "name": pname,
                     "description": pl.description,

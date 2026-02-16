@@ -284,6 +284,9 @@ def _resolve_output_refs(
 # ── 条件评估 ──
 
 
+_REGEX_TIMEOUT = 2.0  # 正则匹配最大秒数
+
+
 def _evaluate_check(
     check: str,
     contains: str,
@@ -296,13 +299,20 @@ def _evaluate_check(
     """解析条件中的输出引用并评估.
 
     prompt-only 模式总是返回 True（走 then 分支 / 继续循环一次）。
+    正则匹配有 2 秒超时防护，超时视为不匹配。
     """
     if not execute:
         return True
     resolved = _resolve_output_refs(check, outputs_by_id, outputs_by_index, prev_output, execute)
     if contains:
         return contains in resolved
-    return bool(re.search(matches, resolved))
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            return bool(pool.submit(re.search, matches, resolved).result(timeout=_REGEX_TIMEOUT))
+        except FuturesTimeout:
+            logger.warning("正则匹配超时 (%.1fs)，视为不匹配: %s", _REGEX_TIMEOUT, matches[:80])
+            return False
 
 
 # ── 单步执行 ──
