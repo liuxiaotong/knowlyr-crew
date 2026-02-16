@@ -28,6 +28,9 @@ htmlcov/
 CLAUDE.md
 .claude/settings.local.json
 
+# Secrets
+.env
+
 # OS
 .DS_Store
 Thumbs.db
