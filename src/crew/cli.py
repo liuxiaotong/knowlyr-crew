@@ -2027,14 +2027,16 @@ def checkpoint_resume(task_id: str, model: str | None, retry_failed: bool, no_fa
     total_steps = len(p.steps)
     restored = checkpoint.get("next_step_i", 0)
 
-    step_counter = [0]  # mutable for closure
+    last_step_i = [restored]  # 按 checkpoint 的 next_step_i 跟踪顶层步骤
 
     def _on_step(step_result, checkpoint_data):
         registry.update_checkpoint(task_id, checkpoint_data)
-        step_counter[0] += 1
+        current_step = checkpoint_data.get("next_step_i", last_step_i[0])
         branch = f" [{step_result.branch}]" if step_result.branch else ""
         status = " [失败]" if step_result.error else ""
-        click.echo(f"  步骤 {restored + step_counter[0]}/{total_steps}: {step_result.employee}{branch}{status}")
+        if current_step != last_step_i[0]:
+            last_step_i[0] = current_step
+        click.echo(f"  步骤 {current_step}/{total_steps}: {step_result.employee}{branch}{status}")
 
     click.echo(f"恢复 pipeline: {pipeline_name} (task={task_id})")
     if restored > 0:

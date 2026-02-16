@@ -641,17 +641,6 @@ class TestFailFast:
             ],
         )
 
-        def _patched_exec(step, index, engine, employees, *args, **kwargs):
-            if step.employee == "code-reviewer":
-                return StepResult(
-                    employee=step.employee, step_id=step.id, step_index=index,
-                    args=step.args, prompt="p", output="",
-                    error=True, error_message="mock failure",
-                )
-            from crew.pipeline import _execute_single_step as _real
-            return _real(step, index, engine, employees, *args, **kwargs)
-
-        # 重新导入获取真正的函数
         import crew.pipeline as _pl_mod
         real_exec = _pl_mod._execute_single_step
         call_count = [0]

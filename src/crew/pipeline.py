@@ -570,14 +570,10 @@ def run_pipeline(
             group_results.sort(key=lambda r: r.step_index)
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
-            if on_step_complete:
-                cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                for r in group_results:
-                    on_step_complete(r, cp)
-            if fail_fast and any(r.error for r in group_results):
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(group_results, fail_fast, on_step_complete, cp)
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
@@ -603,12 +599,10 @@ def run_pipeline(
                 flat_index += 1
                 branch_results.append(r)
                 prev_output = r.output
-                if on_step_complete:
-                    cp = _build_checkpoint(
-                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                    )
-                    on_step_complete(r, cp)
-                if fail_fast and r.error:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                )
+                if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                     _aborted = True
                     break
 
@@ -636,12 +630,10 @@ def run_pipeline(
                     flat_index += 1
                     loop_all_results.append(r)
                     prev_output = r.output
-                    if on_step_complete:
-                        cp = _build_checkpoint(
-                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                        )
-                        on_step_complete(r, cp)
-                    if fail_fast and r.error:
+                    cp = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                    )
+                    if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                         _aborted = True
                         break
 
@@ -675,13 +667,10 @@ def run_pipeline(
             flat_index += 1
             step_results.append(r)
             prev_output = r.output
-            if on_step_complete:
-                cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                on_step_complete(r, cp)
-            if fail_fast and r.error:
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(r, fail_fast, on_step_complete, cp)
 
         if _aborted:
             break
@@ -801,15 +790,10 @@ async def arun_pipeline(
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
 
-            if on_step_complete:
-                checkpoint = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                for r in group_results:
-                    on_step_complete(r, checkpoint)
-
-            if fail_fast and any(r.error for r in group_results):
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(group_results, fail_fast, on_step_complete, cp)
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
@@ -843,12 +827,10 @@ async def arun_pipeline(
                 flat_index += 1
                 branch_results.append(r)
                 prev_output = r.output
-                if on_step_complete:
-                    checkpoint = _build_checkpoint(
-                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                    )
-                    on_step_complete(r, checkpoint)
-                if fail_fast and r.error:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                )
+                if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                     _aborted = True
                     break
 
@@ -884,12 +866,10 @@ async def arun_pipeline(
                     flat_index += 1
                     loop_all_results.append(r)
                     prev_output = r.output
-                    if on_step_complete:
-                        checkpoint = _build_checkpoint(
-                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                        )
-                        on_step_complete(r, checkpoint)
-                    if fail_fast and r.error:
+                    cp = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                    )
+                    if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                         _aborted = True
                         break
 
@@ -931,14 +911,10 @@ async def arun_pipeline(
             step_results.append(r)
             prev_output = r.output
 
-            if on_step_complete:
-                checkpoint = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                on_step_complete(r, checkpoint)
-
-            if fail_fast and r.error:
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(r, fail_fast, on_step_complete, cp)
 
         if _aborted:
             break
@@ -1016,25 +992,25 @@ async def aresume_pipeline(
     _steps_hash = _compute_steps_hash(pipeline)
     _aborted = False
 
-    # 从 next_step_i 开始继续执行
-    for step_i in range(next_step_i, len(pipeline.steps)):
-        item = pipeline.steps[step_i]
-
-        # 辅助：根据 execute 选择同步/异步执行
-        async def _run_step(sub, idx, ex_prompt):
-            if execute:
-                return await _aexecute_single_step(
-                    sub, idx, engine, employees, initial_args,
-                    outputs_by_id, outputs_by_index, prev_output,
-                    agent_identity, project_info,
-                    api_key, model, ex_prompt,
-                )
-            return _execute_single_step(
+    # 辅助：根据 execute 选择同步/异步执行
+    async def _run_step(sub, idx, ex_prompt):
+        if execute:
+            return await _aexecute_single_step(
                 sub, idx, engine, employees, initial_args,
                 outputs_by_id, outputs_by_index, prev_output,
                 agent_identity, project_info,
-                False, None, None, ex_prompt,
+                api_key, model, ex_prompt,
             )
+        return _execute_single_step(
+            sub, idx, engine, employees, initial_args,
+            outputs_by_id, outputs_by_index, prev_output,
+            agent_identity, project_info,
+            False, None, None, ex_prompt,
+        )
+
+    # 从 next_step_i 开始继续执行
+    for step_i in range(next_step_i, len(pipeline.steps)):
+        item = pipeline.steps[step_i]
 
         if isinstance(item, ParallelGroup):
             if execute:
@@ -1042,14 +1018,7 @@ async def aresume_pipeline(
                 for sub in item.parallel:
                     idx = flat_index
                     ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    tasks.append(
-                        _aexecute_single_step(
-                            sub, idx, engine, employees, initial_args,
-                            outputs_by_id, outputs_by_index, prev_output,
-                            agent_identity, project_info,
-                            api_key, model, ex_prompt,
-                        )
-                    )
+                    tasks.append(_run_step(sub, idx, ex_prompt))
                     flat_index += 1
                 group_results = list(
                     await asyncio.wait_for(
@@ -1061,12 +1030,7 @@ async def aresume_pipeline(
                 group_results = []
                 for sub in item.parallel:
                     ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    r = _execute_single_step(
-                        sub, flat_index, engine, employees, initial_args,
-                        outputs_by_id, outputs_by_index, prev_output,
-                        agent_identity, project_info,
-                        False, None, None, ex_prompt,
-                    )
+                    r = await _run_step(sub, flat_index, ex_prompt)
                     group_results.append(r)
                     flat_index += 1
             group_results.sort(key=lambda r: r.step_index)
@@ -1078,15 +1042,10 @@ async def aresume_pipeline(
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
 
-            if on_step_complete:
-                cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                for r in group_results:
-                    on_step_complete(r, cp)
-
-            if fail_fast and any(r.error for r in group_results):
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(group_results, fail_fast, on_step_complete, cp)
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
@@ -1107,12 +1066,10 @@ async def aresume_pipeline(
                 flat_index += 1
                 branch_results.append(r)
                 prev_output = r.output
-                if on_step_complete:
-                    cp = _build_checkpoint(
-                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                    )
-                    on_step_complete(r, cp)
-                if fail_fast and r.error:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                )
+                if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                     _aborted = True
                     break
 
@@ -1135,12 +1092,10 @@ async def aresume_pipeline(
                     flat_index += 1
                     loop_all_results.append(r)
                     prev_output = r.output
-                    if on_step_complete:
-                        cp = _build_checkpoint(
-                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                        )
-                        on_step_complete(r, cp)
-                    if fail_fast and r.error:
+                    cp = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                    )
+                    if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
                         _aborted = True
                         break
 
@@ -1169,14 +1124,10 @@ async def aresume_pipeline(
             step_results.append(r)
             prev_output = r.output
 
-            if on_step_complete:
-                cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
-                )
-                on_step_complete(r, cp)
-
-            if fail_fast and r.error:
-                _aborted = True
+            cp = _build_checkpoint(
+                pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+            )
+            _aborted = _notify_and_check_abort(r, fail_fast, on_step_complete, cp)
 
         if _aborted:
             break
@@ -1276,10 +1227,33 @@ def _flatten_results(
 
 
 def _compute_steps_hash(pipeline: Pipeline) -> str:
-    """计算 pipeline 步骤定义的 sha256 摘要."""
+    """计算 pipeline 步骤定义的 sha256 摘要（16 字符 hex）.
+
+    涵盖所有步骤属性（employee、args、id、条件、循环等），
+    仅排除 Pipeline 顶层的 name 和 description。
+    因此，即使只修改步骤 id 也会导致 hash 变化。
+    """
     data = pipeline.model_dump(mode="json", exclude={"name", "description"})
     raw = _json.dumps(data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _notify_and_check_abort(
+    results: StepResult | list[StepResult],
+    fail_fast: bool,
+    on_step_complete: Callable[[StepResult, dict], None] | None,
+    checkpoint: dict,
+) -> bool:
+    """通知回调 + 检查是否需要中止.
+
+    Returns:
+        True 表示应中止执行.
+    """
+    rs = results if isinstance(results, list) else [results]
+    if on_step_complete:
+        for r in rs:
+            on_step_complete(r, checkpoint)
+    return fail_fast and any(r.error for r in rs)
 
 
 def _build_checkpoint(
