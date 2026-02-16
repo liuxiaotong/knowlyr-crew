@@ -2791,6 +2791,47 @@ def discuss_view(meeting_id: str):
     click.echo(content)
 
 
+@discuss.command("ingest")
+@click.argument("json_file", required=False, type=click.Path(exists=True))
+@click.option("--stdin", "use_stdin", is_flag=True, help="从 stdin 读取 JSON")
+def discuss_ingest(json_file: str | None, use_stdin: bool):
+    """导入外部讨论（如 Claude Code 会话）到员工记忆.
+
+    接受 JSON 格式的讨论数据，写入每位参与者的记忆并保存会议记录。
+    支持从文件或 stdin 读取。
+    """
+    import json as _json
+
+    from crew.discussion_ingest import DiscussionIngestor, DiscussionInput
+
+    if use_stdin:
+        raw = sys.stdin.read()
+    elif json_file:
+        raw = Path(json_file).read_text(encoding="utf-8")
+    else:
+        click.echo("请指定 JSON 文件路径或使用 --stdin 从标准输入读取。", err=True)
+        sys.exit(1)
+
+    try:
+        data = DiscussionInput(**_json.loads(raw))
+    except Exception as e:
+        click.echo(f"JSON 解析失败: {e}", err=True)
+        sys.exit(1)
+
+    ingestor = DiscussionIngestor()
+    results = ingestor.ingest(data)
+
+    click.echo(f"讨论已保存: {data.topic}")
+    click.echo(f"  会议 ID: {results.get('meeting_id', 'N/A')}")
+    click.echo(f"  本地记忆: {results['memories_written']} 条")
+    if results.get("synced_to_crew"):
+        click.echo("  线上同步: 已同步 (crew.knowlyr.com)")
+    elif results["memories_written"] > 0:
+        click.echo("  线上同步: 未同步 (检查 CREW_REMOTE_URL / CREW_API_TOKEN)")
+    for p in results["participants"]:
+        click.echo(f"    - {p['name']} ({p['slug']})")
+
+
 # ── meetings 子命令组 ──
 
 

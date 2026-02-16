@@ -128,6 +128,7 @@ def create_webhook_app(
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
         Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
+        Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
     ]
 
     async def on_startup():
@@ -361,6 +362,31 @@ async def _handle_employee_update(request: Request, ctx: _AppContext) -> JSONRes
         "synced_to_id": synced,
         "employee": employee.name,
     })
+
+
+async def _handle_memory_ingest(request: Request, ctx: _AppContext) -> JSONResponse:
+    """接收外部讨论数据，写入参与者记忆和会议记录."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    try:
+        from crew.discussion_ingest import DiscussionIngestor, DiscussionInput
+
+        data = DiscussionInput(**payload)
+        ingestor = DiscussionIngestor(project_dir=ctx.project_dir)
+        results = ingestor.ingest(data)
+        return JSONResponse({
+            "ok": True,
+            "topic": data.topic,
+            "memories_written": results["memories_written"],
+            "meeting_id": results.get("meeting_id"),
+            "participants": results["participants"],
+        })
+    except Exception as e:
+        logger.exception("记忆导入失败")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def _handle_github(request: Request, ctx: _AppContext) -> JSONResponse:

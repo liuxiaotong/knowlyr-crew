@@ -1,0 +1,220 @@
+"""外部讨论导入 — 将 Claude Code 等外部对话中的员工讨论写入记忆和会议记录."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, Field
+
+from crew.memory import MemoryStore
+from crew.paths import resolve_project_dir
+
+logger = logging.getLogger(__name__)
+
+
+class ParticipantInput(BaseModel):
+    """单个参与者的讨论输入."""
+
+    name: str = Field(description="员工角色名，如 姜墨言")
+    slug: str = Field(default="", description="员工 slug，为空时自动解析")
+    contributions: list[str] = Field(default_factory=list, description="该员工的发言/观点")
+    action_items: list[str] = Field(default_factory=list, description="该员工的待办事项")
+
+
+class DiscussionInput(BaseModel):
+    """一次外部讨论的完整输入."""
+
+    topic: str = Field(description="讨论主题")
+    date: str = Field(default="", description="日期 (YYYY-MM-DD)，默认今天")
+    source: str = Field(default="claude-code", description="讨论来源")
+    context: str = Field(default="", description="讨论背景")
+    participants: list[ParticipantInput] = Field(default_factory=list)
+    shared_conclusions: list[str] = Field(default_factory=list, description="团队共识")
+
+
+def sync_to_crew_server(data: dict) -> bool:
+    """将讨论数据同步到线上 crew 服务（crew.knowlyr.com）.
+
+    通过 POST /api/memory/ingest 写入服务端的 .crew/memory/ 和 .crew/meetings/。
+    需要 CREW_REMOTE_URL 和 CREW_API_TOKEN 环境变量。
+
+    Returns:
+        True 成功, False 失败（不抛异常）
+    """
+    crew_url = os.environ.get("CREW_REMOTE_URL", "")
+    crew_token = os.environ.get("CREW_API_TOKEN", "")
+    if not crew_url or not crew_token:
+        logger.info("CREW_REMOTE_URL 或 CREW_API_TOKEN 未设置，跳过线上同步")
+        return False
+
+    try:
+        import httpx
+    except ImportError:
+        logger.warning("httpx 未安装，无法同步到线上 crew")
+        return False
+
+    url = f"{crew_url.rstrip('/')}/api/memory/ingest"
+    try:
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {crew_token}"},
+            json=data,
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        logger.info("线上同步成功: %d 条记忆", result.get("memories_written", 0))
+        return True
+    except Exception as e:
+        logger.warning("同步到线上 crew 失败: %s", e)
+        return False
+
+
+class DiscussionIngestor:
+    """将外部讨论数据写入 Crew 记忆系统."""
+
+    def __init__(self, project_dir: Path | None = None):
+        self.project_dir = resolve_project_dir(project_dir)
+        self.store = MemoryStore(project_dir=project_dir)
+        self._name_to_slug: dict[str, str] = {}
+        self._load_name_map()
+
+    def _load_name_map(self) -> None:
+        """从 global 员工目录构建 character_name → slug 映射."""
+        global_dir = self.project_dir / ".crew" / "global"
+        if not global_dir.is_dir():
+            return
+        for emp_dir in global_dir.iterdir():
+            if not emp_dir.is_dir():
+                continue
+            yaml_path = emp_dir / "employee.yaml"
+            if not yaml_path.exists():
+                continue
+            try:
+                config = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(config, dict):
+                continue
+            name = config.get("name", "")
+            character_name = config.get("character_name", "")
+            if character_name and name:
+                self._name_to_slug[character_name] = name
+
+    def resolve_slug(self, name: str) -> str:
+        """将角色名解析为 slug，找不到则原样返回."""
+        return self._name_to_slug.get(name, name)
+
+    def ingest(self, data: DiscussionInput) -> dict:
+        """导入一次讨论，返回写入结果摘要."""
+        date = data.date or datetime.now().strftime("%Y-%m-%d")
+        session_id = f"external-{date}-{uuid.uuid4().hex[:8]}"
+
+        results: dict = {
+            "memories_written": 0,
+            "synced_to_crew": False,
+            "meeting_saved": False,
+            "participants": [],
+        }
+
+        # 为每位参与者写入本地记忆
+        for p in data.participants:
+            slug = p.slug or self.resolve_slug(p.name)
+            if not slug:
+                logger.warning("无法解析员工: %s，跳过", p.name)
+                continue
+
+            parts = [f"参与讨论：{data.topic}"]
+            if data.context:
+                parts.append(f"背景：{data.context}")
+            if p.contributions:
+                parts.append("我的观点：")
+                for c in p.contributions:
+                    parts.append(f"- {c}")
+            if data.shared_conclusions:
+                parts.append("团队共识：")
+                for c in data.shared_conclusions:
+                    parts.append(f"- {c}")
+            if p.action_items:
+                parts.append("我的待办：")
+                for a in p.action_items:
+                    parts.append(f"- {a}")
+
+            content = "\n".join(parts)
+
+            self.store.add(
+                employee=slug,
+                category="finding",
+                content=content,
+                source_session=session_id,
+                tags=["discussion", data.source],
+                shared=True,
+            )
+            results["memories_written"] += 1
+            results["participants"].append({"name": p.name, "slug": slug})
+
+        # 保存本地会议记录
+        meetings_dir = self.project_dir / ".crew" / "meetings"
+        meetings_dir.mkdir(parents=True, exist_ok=True)
+
+        meeting_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+
+        index_entry = {
+            "meeting_id": meeting_id,
+            "name": f"external-{data.source}",
+            "topic": data.topic,
+            "participants": [
+                p.slug or self.resolve_slug(p.name) for p in data.participants
+            ],
+            "mode": "external-ingest",
+            "rounds": 1,
+            "output_format": "memory",
+            "started_at": datetime.now().isoformat(),
+            "args": {"source": data.source, "date": date},
+        }
+
+        index_path = meetings_dir / "index.jsonl"
+        with index_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(index_entry, ensure_ascii=False) + "\n")
+
+        # 写入完整讨论内容
+        content_parts = [
+            f"# {data.topic}\n",
+            f"日期: {date}",
+            f"来源: {data.source}\n",
+        ]
+        if data.context:
+            content_parts.append(f"## 背景\n\n{data.context}\n")
+        for p in data.participants:
+            content_parts.append(f"## {p.name}\n")
+            for c in p.contributions:
+                content_parts.append(f"- {c}")
+            if p.action_items:
+                content_parts.append("\n待办：")
+                for a in p.action_items:
+                    content_parts.append(f"- {a}")
+            content_parts.append("")
+        if data.shared_conclusions:
+            content_parts.append("## 共识\n")
+            for c in data.shared_conclusions:
+                content_parts.append(f"- {c}")
+
+        prompt_path = meetings_dir / f"{meeting_id}.md"
+        prompt_path.write_text("\n".join(content_parts), encoding="utf-8")
+
+        results["meeting_saved"] = True
+        results["meeting_id"] = meeting_id
+
+        # 同步到线上 crew 服务
+        results["synced_to_crew"] = sync_to_crew_server(data.model_dump())
+
+        return results
+
+
+__all__ = ["DiscussionInput", "DiscussionIngestor", "ParticipantInput", "sync_to_crew_server"]
