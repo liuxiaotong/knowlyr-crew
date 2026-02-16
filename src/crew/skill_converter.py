@@ -148,7 +148,10 @@ def write_skill(employee: Employee, skills_dir: Path) -> Path:
     Returns:
         写入的文件路径
     """
-    skill_dir = skills_dir / employee.name
+    safe_name = employee.name.replace("/", "_").replace("..", "_")
+    skill_dir = skills_dir / safe_name
+    if not skill_dir.resolve().is_relative_to(skills_dir.resolve()):
+        raise ValueError(f"不安全的员工名称: {employee.name}")
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     skill_path = skill_dir / "SKILL.md"

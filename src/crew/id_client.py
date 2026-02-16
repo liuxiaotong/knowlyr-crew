@@ -96,7 +96,7 @@ class AgentIdentity(BaseModel):
     bio: str = ""
     domains: list[str] = Field(default_factory=list)
     model: str = ""
-    api_key: str = ""
+    api_key: str = Field(default="", exclude=True, repr=False)
     temperature: float | None = None
     max_tokens: int | None = None
     agent_status: str = "active"
@@ -528,6 +528,10 @@ async def aregister_agent(
     model: str = "",
     system_prompt: str = "",
     avatar_base64: str | None = None,
+    crew_name: str = "",
+    bio: str = "",
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> int | None:
     """register_agent 的异步版本."""
     if _breaker.is_open():
@@ -555,6 +559,14 @@ async def aregister_agent(
         payload["system_prompt"] = system_prompt
     if avatar_base64 is not None:
         payload["avatar_base64"] = avatar_base64
+    if crew_name:
+        payload["crew_name"] = crew_name
+    if bio:
+        payload["bio"] = bio
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, headers=_headers(token), json=payload, timeout=10.0)
@@ -571,6 +583,7 @@ async def aupdate_agent(
     agent_id: int,
     nickname: str | None = None,
     title: str | None = None,
+    bio: str | None = None,
     capabilities: str | None = None,
     domains: list[str] | None = None,
     model: str | None = None,
@@ -581,6 +594,7 @@ async def aupdate_agent(
     temperature: float | None = None,
     max_tokens: int | None = None,
     agent_status: str | None = None,
+    crew_name: str | None = None,
 ) -> bool:
     """update_agent 的异步版本."""
     if _breaker.is_open():
@@ -596,6 +610,8 @@ async def aupdate_agent(
         payload["nickname"] = nickname
     if title is not None:
         payload["title"] = title[:100]
+    if bio is not None:
+        payload["bio"] = bio
     if capabilities is not None:
         payload["capabilities"] = capabilities
     if domains is not None:
@@ -616,6 +632,8 @@ async def aupdate_agent(
         payload["max_tokens"] = max_tokens
     if agent_status is not None:
         payload["agent_status"] = agent_status
+    if crew_name is not None:
+        payload["crew_name"] = crew_name
     if not payload:
         return True
     try:

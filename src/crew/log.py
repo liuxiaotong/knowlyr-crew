@@ -34,7 +34,8 @@ class WorkLogger:
 
     def _session_file(self, session_id: str) -> Path:
         """返回 session 文件路径."""
-        return self.log_dir / f"{session_id}.jsonl"
+        safe_id = session_id.replace("/", "_").replace("..", "_")
+        return self.log_dir / f"{safe_id}.jsonl"
 
     def create_session(
         self,

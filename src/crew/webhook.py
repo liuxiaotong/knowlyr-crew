@@ -292,11 +292,13 @@ async def _handle_github(request: Request, ctx: _AppContext) -> JSONResponse:
 
     body = await request.body()
 
-    # 签名验证
+    # 签名验证（未配置 secret 时记录警告并拒绝）
     signature = request.headers.get("x-hub-signature-256")
-    if ctx.config.github_secret:
-        if not verify_github_signature(body, signature, ctx.config.github_secret):
-            return JSONResponse({"error": "invalid signature"}, status_code=401)
+    if not ctx.config.github_secret:
+        logger.warning("GitHub webhook secret 未配置，拒绝请求")
+        return JSONResponse({"error": "webhook secret not configured"}, status_code=403)
+    if not verify_github_signature(body, signature, ctx.config.github_secret):
+        return JSONResponse({"error": "invalid signature"}, status_code=401)
 
     event_type = request.headers.get("x-github-event", "")
     if not event_type:
@@ -483,7 +485,7 @@ async def _handle_agent_run(request: Request, ctx: _AppContext):
                     ts = env.step(action)
                 return ts
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             final_ts = await loop.run_in_executor(None, _run_loop)
 
             # 尝试获取 trajectory
@@ -850,7 +852,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     except Exception as e:
         logger.exception("飞书消息处理失败: %s", e)
         try:
-            error_text = f"出了点问题：{e}"
+            error_text = "处理时出了点问题，请稍后再试。"
             if msg_event.chat_type == "group":
                 await send_feishu_reply(
                     ctx.feishu_token_mgr,
@@ -1033,6 +1035,12 @@ _ID_API_BASE = _os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
 _ID_API_TOKEN = _os.environ.get("AGENT_API_TOKEN", "")
 _GITHUB_TOKEN = _os.environ.get("GITHUB_TOKEN", "")
 _GITHUB_API_BASE = "https://api.github.com"
+_GITHUB_REPO_RE = __import__("re").compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _is_valid_github_repo(repo: str) -> bool:
+    """验证 GitHub repo 格式，防止路径穿越."""
+    return bool(_GITHUB_REPO_RE.match(repo))
 _NOTION_API_KEY = _os.environ.get("NOTION_API_KEY", "")
 _NOTION_API_BASE = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
@@ -2303,6 +2311,8 @@ async def _tool_github_prs(
     limit = min(args.get("limit", 10), 30)
     if not repo or "/" not in repo:
         return "repo 格式错误，应为 owner/repo。"
+    if not _is_valid_github_repo(repo):
+        return "repo 格式错误，应为 owner/repo（仅允许字母数字、-、_、.）。"
 
     headers = {"Authorization": f"token {_GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -2341,6 +2351,8 @@ async def _tool_github_issues(
     limit = min(args.get("limit", 10), 30)
     if not repo or "/" not in repo:
         return "repo 格式错误，应为 owner/repo。"
+    if not _is_valid_github_repo(repo):
+        return "repo 格式错误，应为 owner/repo（仅允许字母数字、-、_、.）。"
 
     params: dict = {"state": state, "per_page": limit}
     if labels:
@@ -2385,6 +2397,8 @@ async def _tool_github_repo_activity(
     days = args.get("days", 7)
     if not repo or "/" not in repo:
         return "repo 格式错误，应为 owner/repo。"
+    if not _is_valid_github_repo(repo):
+        return "repo 格式错误，应为 owner/repo（仅允许字母数字、-、_、.）。"
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     headers = {"Authorization": f"token {_GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}

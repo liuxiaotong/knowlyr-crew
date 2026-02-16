@@ -106,28 +106,28 @@ class TaskRegistry:
                 del self._tasks[r.task_id]
                 self._events.pop(r.task_id, None)
             keep = sorted_records[len(to_remove):]
-        # 原子写入：先写临时文件再 rename（锁外执行 I/O）
-        try:
-            lines = [r.model_dump_json() for r in keep]
-            content = "\n".join(lines) + "\n"
-            fd, tmp_path = tempfile.mkstemp(
-                dir=self._persist_path.parent,
-                suffix=".tmp",
-            )
-            fd_closed = False
+            # 原子写入（锁内执行，避免 TOCTOU 竞态）
             try:
-                os.write(fd, content.encode("utf-8"))
-                os.close(fd)
-                fd_closed = True
-                os.replace(tmp_path, self._persist_path)
-            except Exception:
-                if not fd_closed:
+                lines = [r.model_dump_json() for r in keep]
+                content = "\n".join(lines) + "\n"
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=self._persist_path.parent,
+                    suffix=".tmp",
+                )
+                fd_closed = False
+                try:
+                    os.write(fd, content.encode("utf-8"))
                     os.close(fd)
-                if Path(tmp_path).exists():
-                    os.unlink(tmp_path)
-                raise
-        except Exception as e:
-            logger.warning("任务记录压缩失败: %s", e)
+                    fd_closed = True
+                    os.replace(tmp_path, self._persist_path)
+                except Exception:
+                    if not fd_closed:
+                        os.close(fd)
+                    if Path(tmp_path).exists():
+                        os.unlink(tmp_path)
+                    raise
+            except Exception as e:
+                logger.warning("任务记录压缩失败: %s", e)
 
     def create(
         self,

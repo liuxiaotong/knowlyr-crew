@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import random
+import threading
 import time
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
@@ -25,6 +26,7 @@ from crew.providers import (
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
+_gemini_lock = threading.Lock()
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -341,18 +343,19 @@ def _gemini_execute(
     if genai is None:
         raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
 
-    genai.configure(api_key=api_key)
     gen_config = {}
     if temperature is not None:
         gen_config["temperature"] = temperature
     if max_tokens is not None:
         gen_config["max_output_tokens"] = max_tokens
 
-    client = genai.GenerativeModel(
-        model_name=model,
-        system_instruction=system_prompt,
-        generation_config=gen_config or None,
-    )
+    with _gemini_lock:
+        genai.configure(api_key=api_key)
+        client = genai.GenerativeModel(
+            model_name=model,
+            system_instruction=system_prompt,
+            generation_config=gen_config or None,
+        )
 
     if stream and on_chunk:
         response = client.generate_content(user_message, stream=True)
@@ -395,18 +398,19 @@ async def _gemini_aexecute(
     if genai is None:
         raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
 
-    genai.configure(api_key=api_key)
     gen_config = {}
     if temperature is not None:
         gen_config["temperature"] = temperature
     if max_tokens is not None:
         gen_config["max_output_tokens"] = max_tokens
 
-    client = genai.GenerativeModel(
-        model_name=model,
-        system_instruction=system_prompt,
-        generation_config=gen_config or None,
-    )
+    with _gemini_lock:
+        genai.configure(api_key=api_key)
+        client = genai.GenerativeModel(
+            model_name=model,
+            system_instruction=system_prompt,
+            generation_config=gen_config or None,
+        )
 
     if stream:
         async def _stream() -> AsyncIterator[str]:

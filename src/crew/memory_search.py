@@ -6,6 +6,7 @@ import logging
 import math
 import sqlite3
 import struct
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
     from crew.memory import MemoryEntry
 
 logger = logging.getLogger(__name__)
+
+_EMBED_POOL = ThreadPoolExecutor(max_workers=1)
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -66,6 +69,7 @@ class SemanticMemoryIndex:
         if self._conn is None:
             self.memory_dir.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(self._db_path)
+            conn.execute("PRAGMA journal_mode=WAL")
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS memory_vectors (
@@ -130,11 +134,10 @@ class SemanticMemoryIndex:
         # 向量搜索（带超时保护）
         embedder = self._get_embedder()
         try:
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+            from concurrent.futures import TimeoutError as FuturesTimeout
 
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(embedder.embed, query)
-                query_embedding = future.result(timeout=timeout)
+            future = _EMBED_POOL.submit(embedder.embed, query)
+            query_embedding = future.result(timeout=timeout)
         except (FuturesTimeout, Exception) as e:
             logger.warning("Embedding 超时或失败，降级为关键词搜索: %s", e)
             query_embedding = None

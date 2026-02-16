@@ -24,7 +24,8 @@ class SessionRecorder:
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
     def _session_path(self, session_id: str) -> Path:
-        return self.session_dir / f"{session_id}.jsonl"
+        safe_id = session_id.replace("/", "_").replace("..", "_")
+        return self.session_dir / f"{safe_id}.jsonl"
 
     def start(
         self,

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
+
+
+_MAX_LATENCY_SAMPLES = 10000
 
 
 class MetricsCollector:
@@ -22,8 +26,8 @@ class MetricsCollector:
         self._output_tokens = 0
         self._by_employee: dict[str, dict[str, int]] = {}
         self._by_provider: dict[str, dict] = {}
-        self._latency_samples: list[float] = []
-        self._latency_by_provider: dict[str, list[float]] = {}
+        self._latency_samples: deque[float] = deque(maxlen=_MAX_LATENCY_SAMPLES)
+        self._latency_by_provider: dict[str, deque[float]] = {}
 
     def record_call(
         self,
@@ -70,10 +74,12 @@ class MetricsCollector:
         with self._lock:
             self._latency_samples.append(latency_ms)
             if provider:
-                self._latency_by_provider.setdefault(provider, []).append(latency_ms)
+                if provider not in self._latency_by_provider:
+                    self._latency_by_provider[provider] = deque(maxlen=_MAX_LATENCY_SAMPLES)
+                self._latency_by_provider[provider].append(latency_ms)
 
     @staticmethod
-    def _latency_stats(samples: list[float]) -> dict:
+    def _latency_stats(samples: "deque[float] | list[float]") -> dict:
         """计算延迟统计信息."""
         if not samples:
             return {"count": 0, "mean_ms": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +51,7 @@ class MeetingLogger:
         from crew.discussion import _resolve_rounds
 
         now = datetime.now()
-        meeting_id = now.strftime("%Y%m%d_%H%M%S")
+        meeting_id = now.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
 
         self.meetings_dir.mkdir(parents=True, exist_ok=True)
 

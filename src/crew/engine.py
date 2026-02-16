@@ -18,6 +18,7 @@ def _get_git_branch() -> str:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=5,
+            cwd=resolve_project_dir(None),
         )
         return result.stdout.strip() if result.returncode == 0 else ""
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:

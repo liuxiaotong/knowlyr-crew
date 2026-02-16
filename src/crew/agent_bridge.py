@@ -112,15 +112,15 @@ def create_crew_agent(
                     })
                 messages.append({"role": "assistant", "content": assistant_content})
 
-                # 构建 tool result message
-                messages.append({
-                    "role": "user",
-                    "content": [{
+                # 构建 tool result message（每个 tool_use 都需要对应的 tool_result）
+                tool_results = []
+                for tc in last_tool_calls:
+                    tool_results.append({
                         "type": "tool_result",
-                        "tool_use_id": last_tool_calls[0].id,
-                        "content": observation[:10000],  # 截断过长输出
-                    }],
-                })
+                        "tool_use_id": tc.id,
+                        "content": observation[:10000] if tc is last_tool_calls[0] else "",
+                    })
+                messages.append({"role": "user", "content": tool_results})
             else:
                 messages.append({"role": "user", "content": observation[:10000]})
 

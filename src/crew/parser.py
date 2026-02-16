@@ -399,8 +399,8 @@ def _convert_skill_variables(body: str, args: list[EmployeeArg]) -> str:
 
     # $ARGUMENTS → 所有参数名的组合（保留原样，仅供参考）
     # $0, $1, ... → $argname
-    for i, arg in enumerate(args):
-        result = result.replace(f"${i}", f"${arg.name}")
+    for i in range(len(args) - 1, -1, -1):
+        result = result.replace(f"${i}", f"${args[i].name}")
 
     return result
 

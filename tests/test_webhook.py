@@ -432,12 +432,25 @@ class TestGithubWebhook:
         resp = client.post("/webhook/github", content=body, headers=headers)
         assert resp.status_code == 401
 
-    def test_missing_event_header(self):
+    def test_no_secret_rejects(self):
+        """未配置 github_secret 时应拒绝请求."""
         config = WebhookConfig()
         client = _make_client(config=config)
         resp = client.post(
             "/webhook/github",
             json={"ref": "main"},
+        )
+        assert resp.status_code == 403
+
+    def test_missing_event_header(self):
+        config = WebhookConfig(github_secret="test-secret")
+        client = _make_client(config=config)
+        body = b'{"ref": "main"}'
+        sig = "sha256=" + hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
+        resp = client.post(
+            "/webhook/github",
+            content=body,
+            headers={"x-hub-signature-256": sig, "content-type": "application/json"},
         )
         assert resp.status_code == 400
 

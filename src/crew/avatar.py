@@ -146,9 +146,12 @@ def generate_avatar(
                 logger.error("任务成功但无图片 URL")
                 return None
 
-            # 下载图片
+            # 下载图片（仅允许 HTTPS）
             output_path = output_dir / "avatar_raw.png"
             try:
+                if not img_url.startswith("https://"):
+                    logger.error("头像 URL 必须使用 HTTPS: %s", img_url)
+                    return None
                 urllib.request.urlretrieve(img_url, str(output_path))
                 if not output_path.exists() or output_path.stat().st_size == 0:
                     logger.error("下载的图片文件为空")

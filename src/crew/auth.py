@@ -53,6 +53,14 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                     {"error": "invalid content-length"},
                     status_code=400,
                 )
+        # 无 Content-Length 时（chunked transfer），限制实际 body 大小
+        if request.method in ("POST", "PUT", "PATCH") and not content_length:
+            body = await request.body()
+            if len(body) > self.max_bytes:
+                return JSONResponse(
+                    {"error": "request too large"},
+                    status_code=413,
+                )
         return await call_next(request)
 
 

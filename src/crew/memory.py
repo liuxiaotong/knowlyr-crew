@@ -46,7 +46,8 @@ class MemoryStore:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
     def _employee_file(self, employee: str) -> Path:
-        return self.memory_dir / f"{employee}.jsonl"
+        safe_name = employee.replace("/", "_").replace("..", "_")
+        return self.memory_dir / f"{safe_name}.jsonl"
 
     def add(
         self,

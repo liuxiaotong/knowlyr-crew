@@ -60,10 +60,21 @@ def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
     if not isinstance(config, dict):
         return
     config.update(updates)
-    config_path.write_text(
-        yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
-    )
+    import os
+    import tempfile
+    content = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    fd, tmp = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    fd_closed = False
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        fd_closed = True
+        os.replace(tmp, config_path)
+    except Exception:
+        if not fd_closed:
+            os.close(fd)
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _write_agent_id(emp_dir: Path, agent_id: int) -> None:

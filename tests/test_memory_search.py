@@ -470,7 +470,17 @@ class TestConnectionSafety:
 
         with patch("crew.memory_search.sqlite3.connect") as mock_connect:
             mock_conn = MagicMock()
-            mock_conn.execute.side_effect = sqlite3.OperationalError("disk error")
+            # PRAGMA journal_mode=WAL 成功，CREATE TABLE 时失败
+            call_count = 0
+
+            def _side_effect(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return MagicMock()  # PRAGMA 成功
+                raise sqlite3.OperationalError("disk error")
+
+            mock_conn.execute.side_effect = _side_effect
             mock_connect.return_value = mock_conn
 
             with pytest.raises(sqlite3.OperationalError):

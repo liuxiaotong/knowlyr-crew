@@ -89,10 +89,21 @@ def check_and_bump(dir_path: Path) -> tuple[str, bool]:
     config["_content_hash"] = current_hash
 
     try:
-        config_path.write_text(
-            yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False),
-            encoding="utf-8",
-        )
+        import os
+        import tempfile
+        content = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        fd, tmp = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+        fd_closed = False
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd_closed = True
+            os.replace(tmp, config_path)
+        except Exception:
+            if not fd_closed:
+                os.close(fd)
+            Path(tmp).unlink(missing_ok=True)
+            raise
         logger.info("版本 bump: %s → %s (hash: %s)", version, new_version, current_hash)
     except OSError as e:
         logger.warning("无法回写 %s: %s", config_path, e)
