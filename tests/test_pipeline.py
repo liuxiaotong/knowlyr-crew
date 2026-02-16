@@ -20,6 +20,7 @@ from crew.models import (
 from crew.pipeline import (
     Pipeline,
     _build_checkpoint,
+    _compute_steps_hash,
     _evaluate_check,
     _resolve_output_refs,
     aresume_pipeline,
@@ -340,7 +341,7 @@ class TestRunPipeline:
         callback_results = []
         result = run_pipeline(
             pl, smart_context=False,
-            on_step_complete=lambda r: callback_results.append(r.employee),
+            on_step_complete=lambda r, cp: callback_results.append(r.employee),
         )
         assert len(callback_results) == 2
         assert "code-reviewer" in callback_results
@@ -543,6 +544,303 @@ class TestResumePipeline:
         result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False))
         assert len(result.steps) == 1
         assert result.steps[0].employee == "code-reviewer"
+
+
+class TestResumeExecuteParam:
+    """测试 aresume_pipeline 的 execute 参数."""
+
+    def test_resume_prompt_only(self):
+        """execute=False 时走 prompt-only 模式."""
+        r0 = StepResult(
+            employee="code-reviewer", step_index=0,
+            args={"target": "main"}, prompt="p0", output="o0",
+        )
+        checkpoint = _build_checkpoint("test", [r0], {}, {0: "o0"}, 1, 1)
+        pl = Pipeline(
+            name="test",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=False))
+        assert result.mode == "prompt"
+        assert len(result.steps) == 2
+
+    def test_resume_execute_mode(self):
+        """execute=True（默认）时 mode='execute'."""
+        checkpoint = {
+            "pipeline_name": "test",
+            "completed_steps": [],
+            "outputs_by_id": {},
+            "outputs_by_index": {},
+            "next_flat_index": 0,
+            "next_step_i": 0,
+        }
+        pl = Pipeline(
+            name="test",
+            steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+        )
+        # execute=True 但无 API key → prompt-only 实际，但 mode 仍为 execute
+        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=True))
+        assert result.mode == "execute"
+
+
+class TestFailFast:
+    """测试 fail_fast 步骤失败中止."""
+
+    def _make_error_step(self, employee, error_msg="test error"):
+        """创建一个会返回错误的 StepResult."""
+        return StepResult(
+            employee=employee, step_index=0,
+            args={}, prompt="p", output="",
+            error=True, error_message=error_msg,
+        )
+
+    def test_fail_fast_stops_pipeline(self):
+        """fail_fast=True 时步骤失败后中止."""
+        pl = Pipeline(
+            name="ff-test",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+                PipelineStep(employee="doc-writer", args={"target": "main"}),
+            ],
+        )
+        # 用 mock 让第 2 步失败
+        original_exec = None
+
+        def _patched_exec(step, index, engine, employees, *args, **kwargs):
+            if step.employee == "test-engineer":
+                return StepResult(
+                    employee=step.employee, step_id=step.id, step_index=index,
+                    args=step.args, prompt="p", output="",
+                    error=True, error_message="mock failure",
+                )
+            return original_exec(step, index, engine, employees, *args, **kwargs)
+
+        import crew.pipeline as _pl_mod
+        original_exec = _pl_mod._execute_single_step
+        with patch.object(_pl_mod, "_execute_single_step", side_effect=_patched_exec):
+            result = run_pipeline(pl, smart_context=False, fail_fast=True)
+
+        # 第 3 步（doc-writer）不应被执行
+        flat = [r for r in result.steps if not isinstance(r, list)]
+        employees = [r.employee for r in flat]
+        assert "code-reviewer" in employees
+        assert "test-engineer" in employees
+        assert "doc-writer" not in employees
+
+    def test_fail_fast_disabled(self):
+        """fail_fast=False 时步骤失败后继续."""
+        pl = Pipeline(
+            name="ff-off",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+
+        def _patched_exec(step, index, engine, employees, *args, **kwargs):
+            if step.employee == "code-reviewer":
+                return StepResult(
+                    employee=step.employee, step_id=step.id, step_index=index,
+                    args=step.args, prompt="p", output="",
+                    error=True, error_message="mock failure",
+                )
+            from crew.pipeline import _execute_single_step as _real
+            return _real(step, index, engine, employees, *args, **kwargs)
+
+        # 重新导入获取真正的函数
+        import crew.pipeline as _pl_mod
+        real_exec = _pl_mod._execute_single_step
+        call_count = [0]
+
+        def _counting_exec(step, index, engine, employees, *a, **kw):
+            call_count[0] += 1
+            if step.employee == "code-reviewer":
+                return StepResult(
+                    employee=step.employee, step_id=step.id, step_index=index,
+                    args=step.args, prompt="p", output="",
+                    error=True, error_message="mock failure",
+                )
+            return real_exec(step, index, engine, employees, *a, **kw)
+
+        with patch.object(_pl_mod, "_execute_single_step", side_effect=_counting_exec):
+            result = run_pipeline(pl, smart_context=False, fail_fast=False)
+
+        assert call_count[0] == 2  # 两步都执行了
+
+    def test_fail_fast_saves_checkpoint(self):
+        """fail_fast 失败时 checkpoint 包含已完成步骤."""
+        pl = Pipeline(
+            name="ff-cp",
+            steps=[
+                PipelineStep(employee="code-reviewer", id="r1", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        checkpoints = []
+
+        import crew.pipeline as _pl_mod
+        real_exec = _pl_mod._execute_single_step
+
+        def _failing_exec(step, index, engine, employees, *a, **kw):
+            if step.employee == "test-engineer":
+                return StepResult(
+                    employee=step.employee, step_id=step.id, step_index=index,
+                    args=step.args, prompt="p", output="",
+                    error=True, error_message="fail",
+                )
+            return real_exec(step, index, engine, employees, *a, **kw)
+
+        with patch.object(_pl_mod, "_execute_single_step", side_effect=_failing_exec):
+            result = run_pipeline(
+                pl, smart_context=False, fail_fast=True,
+                on_step_complete=lambda r, cp: checkpoints.append(cp),
+            )
+
+        # 应该有 2 个 checkpoint（两步都被记录了，只是第二步是失败的）
+        assert len(checkpoints) == 2
+        last_cp = checkpoints[-1]
+        assert last_cp["next_step_i"] == 2
+
+
+class TestSyncCheckpointCallback:
+    """测试 run_pipeline 的 checkpoint 回调."""
+
+    def test_checkpoint_callback(self):
+        """run_pipeline 的 on_step_complete 接收 checkpoint."""
+        pl = Pipeline(
+            name="sync-cp",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        checkpoints = []
+        result = run_pipeline(
+            pl, smart_context=False,
+            on_step_complete=lambda r, cp: checkpoints.append((r.employee, cp)),
+        )
+        assert len(checkpoints) == 2
+        assert checkpoints[0][1]["next_step_i"] == 1
+        assert checkpoints[1][1]["next_step_i"] == 2
+
+
+class TestStepsHash:
+    """测试 Pipeline 定义变更检测."""
+
+    def test_steps_hash_in_checkpoint(self):
+        """checkpoint 包含 steps_hash."""
+        pl = Pipeline(
+            name="hash-test",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+            ],
+        )
+        checkpoints = []
+        run_pipeline(
+            pl, smart_context=False,
+            on_step_complete=lambda r, cp: checkpoints.append(cp),
+        )
+        assert "steps_hash" in checkpoints[0]
+        assert len(checkpoints[0]["steps_hash"]) == 16
+
+    def test_hash_changes_with_steps(self):
+        """步骤不同时 hash 不同."""
+        pl1 = Pipeline(
+            name="h1",
+            steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+        )
+        pl2 = Pipeline(
+            name="h1",
+            steps=[PipelineStep(employee="test-engineer", args={"target": "main"})],
+        )
+        assert _compute_steps_hash(pl1) != _compute_steps_hash(pl2)
+
+    def test_hash_stable(self):
+        """相同步骤的 hash 应该稳定."""
+        pl = Pipeline(
+            name="stable",
+            steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+        )
+        assert _compute_steps_hash(pl) == _compute_steps_hash(pl)
+
+    def test_resume_with_changed_pipeline(self):
+        """Pipeline 定义变更时正常恢复（不阻止）."""
+        r0 = StepResult(
+            employee="code-reviewer", step_index=0,
+            args={"target": "main"}, prompt="p0", output="o0",
+        )
+        # 用旧 pipeline 的 hash 构建 checkpoint
+        old_pl = Pipeline(
+            name="changed",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="test-engineer", args={"target": "main"}),
+            ],
+        )
+        old_hash = _compute_steps_hash(old_pl)
+        checkpoint = _build_checkpoint("changed", [r0], {}, {0: "o0"}, 1, 1, old_hash)
+
+        # 用修改后的 pipeline 恢复
+        new_pl = Pipeline(
+            name="changed",
+            steps=[
+                PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                PipelineStep(employee="doc-writer", args={"target": "main"}),
+            ],
+        )
+
+        result = _run(aresume_pipeline(new_pl, checkpoint=checkpoint, smart_context=False, execute=False))
+        assert len(result.steps) == 2
+        assert result.steps[1].employee == "doc-writer"
+
+
+class TestRetryFailed:
+    """测试 --retry-failed 逻辑."""
+
+    def test_retry_rollback_to_first_error(self):
+        """回退到第一个失败步骤."""
+        # 模拟 checkpoint: 步骤 0 成功，步骤 1 失败
+        r0 = StepResult(
+            employee="code-reviewer", step_index=0,
+            args={"target": "main"}, prompt="p0", output="o0",
+        ).model_dump(mode="json")
+        r1 = StepResult(
+            employee="test-engineer", step_index=1,
+            args={"target": "main"}, prompt="p1", output="",
+            error=True, error_message="original failure",
+        ).model_dump(mode="json")
+
+        checkpoint = {
+            "pipeline_name": "retry-test",
+            "completed_steps": [r0, r1],
+            "outputs_by_id": {},
+            "outputs_by_index": {"0": "o0", "1": ""},
+            "next_flat_index": 2,
+            "next_step_i": 2,
+        }
+
+        # 模拟 CLI retry-failed 逻辑
+        completed = checkpoint["completed_steps"]
+        first_error_idx = None
+        for idx, item in enumerate(completed):
+            entries = item if isinstance(item, list) else [item]
+            if any(e.get("error") for e in entries):
+                first_error_idx = idx
+                break
+
+        assert first_error_idx == 1
+        checkpoint["completed_steps"] = completed[:first_error_idx]
+        checkpoint["next_step_i"] = first_error_idx
+        flat = sum(len(item) if isinstance(item, list) else 1 for item in checkpoint["completed_steps"])
+        checkpoint["next_flat_index"] = flat
+
+        assert checkpoint["next_step_i"] == 1
+        assert checkpoint["next_flat_index"] == 1
+        assert len(checkpoint["completed_steps"]) == 1
 
 
 class TestPipelineToMermaid:

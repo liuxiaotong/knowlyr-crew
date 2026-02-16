@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json as _json
 import logging
 import re
 import time
@@ -457,9 +459,10 @@ def run_pipeline(
     smart_context: bool = True,
     *,
     execute: bool = False,
+    fail_fast: bool = True,
     api_key: str | None = None,
     model: str | None = None,
-    on_step_complete: Callable[[StepResult], None] | None = None,
+    on_step_complete: Callable[[StepResult, dict], None] | None = None,
 ) -> PipelineResult:
     """执行流水线.
 
@@ -507,8 +510,10 @@ def run_pipeline(
     step_results: list[StepResult | list[StepResult]] = []
     flat_index = 0
     t0 = time.monotonic()
+    _steps_hash = _compute_steps_hash(pipeline)
+    _aborted = False
 
-    for item in pipeline.steps:
+    for step_i, item in enumerate(pipeline.steps):
         if isinstance(item, ParallelGroup):
             group_results: list[StepResult] = []
 
@@ -540,8 +545,6 @@ def run_pipeline(
                         if r.step_id:
                             outputs_by_id[r.step_id] = r.output
                         outputs_by_index[r.step_index] = r.output
-                        if on_step_complete:
-                            on_step_complete(r)
             else:
                 # prompt-only 模式顺序生成
                 for sub in item.parallel:
@@ -562,13 +565,19 @@ def run_pipeline(
                         outputs_by_id[r.step_id] = r.output
                     outputs_by_index[flat_index] = r.output
                     flat_index += 1
-                    if on_step_complete:
-                        on_step_complete(r)
 
             # 按 step_index 排序确保结果顺序稳定
             group_results.sort(key=lambda r: r.step_index)
             step_results.append(group_results)
             prev_output = "\n\n---\n\n".join(r.output for r in group_results)
+            if on_step_complete:
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                )
+                for r in group_results:
+                    on_step_complete(r, cp)
+            if fail_fast and any(r.error for r in group_results):
+                _aborted = True
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
@@ -595,7 +604,13 @@ def run_pipeline(
                 branch_results.append(r)
                 prev_output = r.output
                 if on_step_complete:
-                    on_step_complete(r)
+                    cp = _build_checkpoint(
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                    )
+                    on_step_complete(r, cp)
+                if fail_fast and r.error:
+                    _aborted = True
+                    break
 
             if branch_results:
                 step_results.append(
@@ -622,8 +637,16 @@ def run_pipeline(
                     loop_all_results.append(r)
                     prev_output = r.output
                     if on_step_complete:
-                        on_step_complete(r)
+                        cp = _build_checkpoint(
+                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                        )
+                        on_step_complete(r, cp)
+                    if fail_fast and r.error:
+                        _aborted = True
+                        break
 
+                if _aborted:
+                    break
                 # 检查终止条件
                 should_stop = _evaluate_check(
                     body.until.check, body.until.contains, body.until.matches,
@@ -653,7 +676,15 @@ def run_pipeline(
             step_results.append(r)
             prev_output = r.output
             if on_step_complete:
-                on_step_complete(r)
+                cp = _build_checkpoint(
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
+                )
+                on_step_complete(r, cp)
+            if fail_fast and r.error:
+                _aborted = True
+
+        if _aborted:
+            break
 
     total_ms = int((time.monotonic() - t0) * 1000)
 
@@ -691,6 +722,7 @@ async def arun_pipeline(
     smart_context: bool = True,
     *,
     execute: bool = False,
+    fail_fast: bool = True,
     api_key: str | None = None,
     model: str | None = None,
     on_step_complete: Callable[[StepResult, dict], None] | None = None,
@@ -715,6 +747,8 @@ async def arun_pipeline(
     step_results: list[StepResult | list[StepResult]] = []
     flat_index = 0
     t0 = time.monotonic()
+    _steps_hash = _compute_steps_hash(pipeline)
+    _aborted = False
 
     for step_i, item in enumerate(pipeline.steps):
         if isinstance(item, ParallelGroup):
@@ -769,10 +803,13 @@ async def arun_pipeline(
 
             if on_step_complete:
                 checkpoint = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                 )
                 for r in group_results:
                     on_step_complete(r, checkpoint)
+
+            if fail_fast and any(r.error for r in group_results):
+                _aborted = True
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
@@ -808,9 +845,12 @@ async def arun_pipeline(
                 prev_output = r.output
                 if on_step_complete:
                     checkpoint = _build_checkpoint(
-                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                     )
                     on_step_complete(r, checkpoint)
+                if fail_fast and r.error:
+                    _aborted = True
+                    break
 
             if branch_results:
                 step_results.append(
@@ -846,10 +886,15 @@ async def arun_pipeline(
                     prev_output = r.output
                     if on_step_complete:
                         checkpoint = _build_checkpoint(
-                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                         )
                         on_step_complete(r, checkpoint)
+                    if fail_fast and r.error:
+                        _aborted = True
+                        break
 
+                if _aborted:
+                    break
                 should_stop = _evaluate_check(
                     body.until.check, body.until.contains, body.until.matches,
                     outputs_by_id, outputs_by_index, prev_output, execute,
@@ -888,9 +933,15 @@ async def arun_pipeline(
 
             if on_step_complete:
                 checkpoint = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                 )
                 on_step_complete(r, checkpoint)
+
+            if fail_fast and r.error:
+                _aborted = True
+
+        if _aborted:
+            break
 
     total_ms = int((time.monotonic() - t0) * 1000)
     all_results = _flatten_results(step_results)
@@ -912,6 +963,8 @@ async def aresume_pipeline(
     agent_id: int | None = None,
     smart_context: bool = True,
     *,
+    execute: bool = True,
+    fail_fast: bool = True,
     api_key: str | None = None,
     model: str | None = None,
     on_step_complete: Callable[[StepResult, dict], None] | None = None,
@@ -921,6 +974,8 @@ async def aresume_pipeline(
     Args:
         pipeline: 流水线定义.
         checkpoint: 上次保存的断点数据.
+        execute: 启用 execute 模式（调用 LLM），False 则 prompt-only.
+        fail_fast: 步骤失败时立即中止（默认 True）.
         on_step_complete: 每步完成后的回调.
     """
     initial_args = initial_args or {}
@@ -929,6 +984,13 @@ async def aresume_pipeline(
     project_info = detect_project(project_dir) if smart_context else None
     agent_identity = _resolve_agent_identity(agent_id)
     _check_agent_active(agent_identity, agent_id)
+
+    # 检测 pipeline 定义是否变更
+    saved_hash = checkpoint.get("steps_hash", "")
+    if saved_hash:
+        current_hash = _compute_steps_hash(pipeline)
+        if current_hash != saved_hash:
+            logger.warning("Pipeline 定义已变更（hash 不匹配），恢复可能不一致")
 
     # 从 checkpoint 恢复状态
     completed_steps_data = checkpoint.get("completed_steps", [])
@@ -951,31 +1013,62 @@ async def aresume_pipeline(
 
     flat_index = next_flat_index
     t0 = time.monotonic()
+    _steps_hash = _compute_steps_hash(pipeline)
+    _aborted = False
 
     # 从 next_step_i 开始继续执行
     for step_i in range(next_step_i, len(pipeline.steps)):
         item = pipeline.steps[step_i]
 
+        # 辅助：根据 execute 选择同步/异步执行
+        async def _run_step(sub, idx, ex_prompt):
+            if execute:
+                return await _aexecute_single_step(
+                    sub, idx, engine, employees, initial_args,
+                    outputs_by_id, outputs_by_index, prev_output,
+                    agent_identity, project_info,
+                    api_key, model, ex_prompt,
+                )
+            return _execute_single_step(
+                sub, idx, engine, employees, initial_args,
+                outputs_by_id, outputs_by_index, prev_output,
+                agent_identity, project_info,
+                False, None, None, ex_prompt,
+            )
+
         if isinstance(item, ParallelGroup):
-            tasks = []
-            for sub in item.parallel:
-                idx = flat_index
-                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                tasks.append(
-                    _aexecute_single_step(
-                        sub, idx, engine, employees, initial_args,
-                        outputs_by_id, outputs_by_index, prev_output,
-                        agent_identity, project_info,
-                        api_key, model, ex_prompt,
+            if execute:
+                tasks = []
+                for sub in item.parallel:
+                    idx = flat_index
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                    tasks.append(
+                        _aexecute_single_step(
+                            sub, idx, engine, employees, initial_args,
+                            outputs_by_id, outputs_by_index, prev_output,
+                            agent_identity, project_info,
+                            api_key, model, ex_prompt,
+                        )
+                    )
+                    flat_index += 1
+                group_results = list(
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks),
+                        timeout=_ASYNC_STEP_TIMEOUT,
                     )
                 )
-                flat_index += 1
-            group_results = list(
-                await asyncio.wait_for(
-                    asyncio.gather(*tasks),
-                    timeout=_ASYNC_STEP_TIMEOUT,
-                )
-            )
+            else:
+                group_results = []
+                for sub in item.parallel:
+                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
+                    r = _execute_single_step(
+                        sub, flat_index, engine, employees, initial_args,
+                        outputs_by_id, outputs_by_index, prev_output,
+                        agent_identity, project_info,
+                        False, None, None, ex_prompt,
+                    )
+                    group_results.append(r)
+                    flat_index += 1
             group_results.sort(key=lambda r: r.step_index)
 
             for r in group_results:
@@ -987,15 +1080,18 @@ async def aresume_pipeline(
 
             if on_step_complete:
                 cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                 )
                 for r in group_results:
                     on_step_complete(r, cp)
+
+            if fail_fast and any(r.error for r in group_results):
+                _aborted = True
         elif isinstance(item, ConditionalStep):
             body = item.condition
             took_then = _evaluate_check(
                 body.check, body.contains, body.matches,
-                outputs_by_id, outputs_by_index, prev_output, True,
+                outputs_by_id, outputs_by_index, prev_output, execute,
             )
             branch_steps = body.then if took_then else body.else_
             branch_label = "then" if took_then else "else"
@@ -1003,12 +1099,7 @@ async def aresume_pipeline(
             branch_results: list[StepResult] = []
             for sub in branch_steps:
                 ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                r = await _aexecute_single_step(
-                    sub, flat_index, engine, employees, initial_args,
-                    outputs_by_id, outputs_by_index, prev_output,
-                    agent_identity, project_info,
-                    api_key, model, ex_prompt,
-                )
+                r = await _run_step(sub, flat_index, ex_prompt)
                 r.branch = branch_label
                 if r.step_id:
                     outputs_by_id[r.step_id] = r.output
@@ -1018,9 +1109,12 @@ async def aresume_pipeline(
                 prev_output = r.output
                 if on_step_complete:
                     cp = _build_checkpoint(
-                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                        pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                     )
                     on_step_complete(r, cp)
+                if fail_fast and r.error:
+                    _aborted = True
+                    break
 
             if branch_results:
                 step_results.append(
@@ -1033,12 +1127,7 @@ async def aresume_pipeline(
             for iteration in range(body.max_iterations):
                 for sub in body.steps:
                     ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    r = await _aexecute_single_step(
-                        sub, flat_index, engine, employees, initial_args,
-                        outputs_by_id, outputs_by_index, prev_output,
-                        agent_identity, project_info,
-                        api_key, model, ex_prompt,
-                    )
+                    r = await _run_step(sub, flat_index, ex_prompt)
                     r.branch = f"loop-{iteration}"
                     if r.step_id:
                         outputs_by_id[r.step_id] = r.output
@@ -1048,16 +1137,23 @@ async def aresume_pipeline(
                     prev_output = r.output
                     if on_step_complete:
                         cp = _build_checkpoint(
-                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                            pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                         )
                         on_step_complete(r, cp)
+                    if fail_fast and r.error:
+                        _aborted = True
+                        break
 
+                if _aborted:
+                    break
                 should_stop = _evaluate_check(
                     body.until.check, body.until.contains, body.until.matches,
-                    outputs_by_id, outputs_by_index, prev_output, True,
+                    outputs_by_id, outputs_by_index, prev_output, execute,
                 )
                 if should_stop:
                     break
+                if not execute:
+                    break  # prompt-only 只执行一次
 
             if loop_all_results:
                 step_results.append(
@@ -1065,12 +1161,7 @@ async def aresume_pipeline(
                 )
         else:
             ex_prompt = _resolve_exemplars(agent_id, item.employee)
-            r = await _aexecute_single_step(
-                item, flat_index, engine, employees, initial_args,
-                outputs_by_id, outputs_by_index, prev_output,
-                agent_identity, project_info,
-                api_key, model, ex_prompt,
-            )
+            r = await _run_step(item, flat_index, ex_prompt)
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
             outputs_by_index[flat_index] = r.output
@@ -1080,15 +1171,21 @@ async def aresume_pipeline(
 
             if on_step_complete:
                 cp = _build_checkpoint(
-                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1,
+                    pipeline.name, step_results, outputs_by_id, outputs_by_index, flat_index, step_i + 1, _steps_hash,
                 )
                 on_step_complete(r, cp)
+
+            if fail_fast and r.error:
+                _aborted = True
+
+        if _aborted:
+            break
 
     total_ms = int((time.monotonic() - t0) * 1000)
     all_results = _flatten_results(step_results)
     return PipelineResult(
         pipeline_name=pipeline.name,
-        mode="execute",
+        mode="execute" if execute else "prompt",
         steps=step_results,
         total_duration_ms=total_ms,
         total_input_tokens=sum(r.input_tokens for r in all_results),
@@ -1178,6 +1275,13 @@ def _flatten_results(
     return flat
 
 
+def _compute_steps_hash(pipeline: Pipeline) -> str:
+    """计算 pipeline 步骤定义的 sha256 摘要."""
+    data = pipeline.model_dump(mode="json", exclude={"name", "description"})
+    raw = _json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 def _build_checkpoint(
     pipeline_name: str,
     step_results: list[StepResult | list[StepResult]],
@@ -1185,6 +1289,7 @@ def _build_checkpoint(
     outputs_by_index: dict[int, str],
     next_flat_index: int,
     next_step_i: int,
+    steps_hash: str = "",
 ) -> dict:
     """构建断点数据 — 包含恢复所需的完整状态."""
     completed = []
@@ -1193,7 +1298,7 @@ def _build_checkpoint(
             completed.append([r.model_dump(mode="json") for r in item])
         else:
             completed.append(item.model_dump(mode="json"))
-    return {
+    result = {
         "pipeline_name": pipeline_name,
         "completed_steps": completed,
         "outputs_by_id": dict(outputs_by_id),
@@ -1201,6 +1306,9 @@ def _build_checkpoint(
         "next_flat_index": next_flat_index,
         "next_step_i": next_step_i,
     }
+    if steps_hash:
+        result["steps_hash"] = steps_hash
+    return result
 
 
 # ── 内置流水线发现 ──

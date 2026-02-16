@@ -1968,8 +1968,10 @@ def checkpoint_list(project_dir):
 @pipeline_checkpoint.command("resume")
 @click.argument("task_id")
 @click.option("--model", type=str, default=None, help="LLM 模型标识符")
+@click.option("--retry-failed", is_flag=True, help="从第一个失败步骤重新执行")
+@click.option("--no-fail-fast", is_flag=True, help="步骤失败时继续执行后续步骤")
 @click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
-def checkpoint_resume(task_id: str, model: str | None, project_dir):
+def checkpoint_resume(task_id: str, model: str | None, retry_failed: bool, no_fail_fast: bool, project_dir):
     """从断点恢复 pipeline 执行."""
     import asyncio
 
@@ -1992,30 +1994,73 @@ def checkpoint_resume(task_id: str, model: str | None, project_dir):
         click.echo("该任务没有断点数据", err=True)
         sys.exit(1)
 
-    pipeline_name = record.checkpoint.get("pipeline_name", record.target_name)
+    checkpoint = dict(record.checkpoint)
+
+    # --retry-failed: 回退到第一个失败步骤
+    if retry_failed:
+        completed = checkpoint.get("completed_steps", [])
+        first_error_idx = None
+        for idx, item in enumerate(completed):
+            entries = item if isinstance(item, list) else [item]
+            if any(e.get("error") for e in entries):
+                first_error_idx = idx
+                break
+        if first_error_idx is not None:
+            checkpoint["completed_steps"] = completed[:first_error_idx]
+            checkpoint["next_step_i"] = first_error_idx
+            # 重算 flat_index
+            flat = 0
+            for item in checkpoint["completed_steps"]:
+                flat += len(item) if isinstance(item, list) else 1
+            checkpoint["next_flat_index"] = flat
+            click.echo(f"回退到步骤 {first_error_idx + 1}（第一个失败步骤）")
+        else:
+            click.echo("没有找到失败步骤，从上次断点继续")
+
+    pipeline_name = checkpoint.get("pipeline_name", record.target_name)
     pipelines = discover_pipelines(project_dir=base)
     if pipeline_name not in pipelines:
         click.echo(f"未找到 pipeline: {pipeline_name}", err=True)
         sys.exit(1)
 
     p = load_pipeline(pipelines[pipeline_name])
+    total_steps = len(p.steps)
+    restored = checkpoint.get("next_step_i", 0)
+
+    step_counter = [0]  # mutable for closure
 
     def _on_step(step_result, checkpoint_data):
         registry.update_checkpoint(task_id, checkpoint_data)
-        click.echo(f"  步骤完成: {step_result.employee}")
+        step_counter[0] += 1
+        branch = f" [{step_result.branch}]" if step_result.branch else ""
+        status = " [失败]" if step_result.error else ""
+        click.echo(f"  步骤 {restored + step_counter[0]}/{total_steps}: {step_result.employee}{branch}{status}")
 
     click.echo(f"恢复 pipeline: {pipeline_name} (task={task_id})")
+    if restored > 0:
+        click.echo(f"  已恢复 {restored} 步，从步骤 {restored + 1} 继续")
     result = asyncio.run(aresume_pipeline(
         p,
-        checkpoint=record.checkpoint,
+        checkpoint=checkpoint,
         initial_args=record.args,
         project_dir=base,
-        execute=model is not None,
+        execute=bool(model),
+        fail_fast=not no_fail_fast,
         model=model,
         on_step_complete=_on_step,
     ))
-    registry.update(task_id, "completed", result=result.model_dump(mode="json"))
-    click.echo(f"完成! 共 {len(result.steps)} 步")
+
+    has_errors = any(
+        (r.error if not isinstance(r, list) else any(sub.error for sub in r))
+        for r in result.steps
+    )
+    if has_errors:
+        registry.update(task_id, "failed", result=result.model_dump(mode="json"))
+        click.echo(f"Pipeline 执行有失败步骤 (共 {len(result.steps)} 步)", err=True)
+        sys.exit(1)
+    else:
+        registry.update(task_id, "completed", result=result.model_dump(mode="json"))
+        click.echo(f"完成! 共 {len(result.steps)} 步")
 
 
 @pipeline.command("run")
@@ -2085,7 +2130,7 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
             },
         )
 
-        def _on_step(r):
+        def _on_step(r, _checkpoint=None):
             status = "✗" if r.error else "✓"
             suffix = ""
             if execute and not r.error:
