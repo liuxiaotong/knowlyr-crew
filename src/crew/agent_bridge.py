@@ -68,7 +68,7 @@ def create_crew_agent(
     system_prompt = engine.prompt(employee, project_info=project_info)
 
     # 3. 生成 tool schemas
-    tool_schemas = employee_tools_to_schemas(employee.tools)
+    tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
     # 4. 闭包状态
     messages: list[dict[str, Any]] = []

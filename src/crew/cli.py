@@ -714,6 +714,45 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         "send_feishu_dm": '私聊消息已发送给 ou_xxx。',
         "feishu_group_members": '刘凯 [open_id=ou_de186aad7faf2c2b72b78223577e2bd9]',
         "create_note": '{"status": "saved", "note_id": "note_001"}',
+        "translate": "The quarterly financial report shows a 15% increase in revenue.",
+        "countdown": "距离「产品发布」还有 12 天 6 小时。",
+        "trending": "🔥 微博热搜\n\n1. AI大模型重大突破 [热]  (2,345,678)\n2. 春季新品发布会  (1,234,567)\n3. 教育改革新政策  (987,654)",
+        "read_feishu_sheet": "姓名 | 部门 | 职级\n---|---|---\n张三 | 产品 | P6\n李四 | 技术 | P7\n王五 | 设计 | P5",
+        "update_feishu_sheet": "写入成功，更新了 6 个单元格。",
+        "list_feishu_approvals": "⏳ [报销审批] 02-15 14:30 (instance=inst_001)\n⏳ [请假审批] 02-14 10:00 (instance=inst_002)",
+        "unit_convert": "100 km = 62.14 mi",
+        "random_pick": "🎯 选中了：火锅",
+        "holidays": "📅 2026年节假日安排\n\n01-01 🟢 放假 元旦\n01-26 🟢 放假 春节\n01-27 🟢 放假 春节",
+        "timestamp_convert": "时间戳 1708012800 = 2024-02-16 00:00:00 周五（北京时间）",
+        "create_feishu_spreadsheet": "表格已创建: Q1数据表\ntoken: shtcnXXXXXX\nhttps://abc.feishu.cn/sheets/shtcnXXXXXX",
+        "feishu_contacts": "张三 (产品部) [open_id=ou_abc123]\n李四 (技术部) [open_id=ou_def456]",
+        "text_extract": "【邮箱】\n  kai@example.com\n【手机号】\n  13800138000\n【URL】\n  https://example.com",
+        "json_format": '{\n  "name": "Kai",\n  "role": "CEO"\n}',
+        "password_gen": "🔐 随机密码（16位）：\n\n1. Kx9$mP2vLq@nR5wT\n2. hJ7&bN4cYs#fA8eD\n3. Wt6*kM3pZx!gU9rQ",
+        "ip_lookup": "IP: 8.8.8.8\n位置: 美国 弗吉尼亚 阿什本\n运营商: Google LLC",
+        "short_url": "短链接: https://cleanuri.com/abc123\n原链接: https://example.com/very-long-url",
+        "word_count": "字符: 256（不含空格 210） | 中文: 180 字 | 英文: 12 词 | 行: 8 | 段落: 3",
+        "base64_codec": "编码结果:\nSGVsbG8gV29ybGQ=",
+        "color_convert": "HEX: #FF5733\nRGB: rgb(255, 87, 51)\nHSL: hsl(11, 100%, 60%)",
+        "cron_explain": "cron: 0 9 * * 1-5\n\n  分钟: 0\n  小时: 9\n  日: 每日\n  月: 每月\n  星期: 周一 到 周五",
+        "regex_test": "找到 3 个匹配：\n\n1. 「abc」 位置 0-3\n2. 「abc」 位置 10-13\n3. 「abc」 位置 20-23",
+        "hash_gen": "SHA256: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "url_codec": "编码结果:\n%E4%BD%A0%E5%A5%BD%E4%B8%96%E7%95%8C",
+        "load_tools": "已加载。现在可以直接调用这些工具。",
+        "feishu_bitable": "共 5 条记录：\n1. 姓名: 张三 | 部门: 产品 | 状态: 在职\n2. 姓名: 李四 | 部门: 技术 | 状态: 在职\n3. 姓名: 王五 | 部门: 设计 | 状态: 离职",
+        "feishu_wiki": "- 产品需求文档 PRD v2.0 [产品知识库]\n  https://abc.feishu.cn/wiki/xxx\n- API 接口规范 [技术知识库]\n  https://abc.feishu.cn/wiki/yyy",
+        "approve_feishu": "审批已通过。",
+        "summarize": "[摘要任务] 请用要点列表总结以下内容：\n\n(原文内容)",
+        "sentiment": "[情感分析任务] 请分析以下文本的情感倾向：\n\n(原文内容)",
+        "email_send": "邮件功能尚未配置 SMTP，暂时无法发送。",
+        "qrcode": "二维码已生成：\nhttps://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https%3A%2F%2Fexample.com\n\n内容: https://example.com",
+        "diff_text": "--- 原文\n+++ 修改后\n@@ -1,3 +1,3 @@\n 第一行\n-第二行\n+第二行（已修改）\n 第三行",
+        "whois": "域名: example.com\n注册商: GoDaddy\n注册日期: 1995-08-14\n到期日期: 2026-08-13\nDNS: ns1.example.com, ns2.example.com",
+        "dns_lookup": "DNS 解析 example.com：\n  A: 93.184.216.34\n  AAAA: 2606:2800:220:1:248:1893:25c8:1946",
+        "http_check": "✅ 可用\nURL: https://example.com\n状态码: 200\n响应时间: 156ms\n服务器: nginx",
+        "express_track": "📦 顺丰 SF1234567890 [派件中]\n\n  02-16 09:30  快件已到达【上海浦东新区营业点】\n  02-15 18:00  快件已发出【杭州转运中心】\n  02-15 14:20  快件已揽收",
+        "flight_info": "航班查询功能开发中。请使用 web_search 搜索航班动态。",
+        "aqi": "🌍 上海\nAQI: 68 良 🟡\nPM2.5: 42\nPM10: 58\nO₃: 35\n温度: 8℃\n湿度: 72%\n更新: 2026-02-16 10:00",
     }
     return _SIMPLE.get(tool_name, f'{{"status": "ok", "tool": "{tool_name}"}}')
 
@@ -746,7 +785,7 @@ def _execute_with_tool_loop(
     from crew.tool_schema import AGENT_TOOLS, employee_tools_to_schemas, is_finish_tool
 
     agent_tool_names = [t for t in (emp.tools or []) if t in AGENT_TOOLS]
-    tool_schemas = employee_tools_to_schemas(agent_tool_names)
+    tool_schemas, _ = employee_tools_to_schemas(agent_tool_names, defer=False)
 
     provider = detect_provider(model)
     # base_url 强制走 OpenAI 兼容路径，消息格式也要对应

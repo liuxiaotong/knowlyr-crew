@@ -34,6 +34,7 @@ class FeishuConfig(BaseModel):
     encrypt_key: str = Field(default="", description="事件加密密钥（预留）")
     default_employee: str = Field(default="", description="未匹配 @mention 时的默认员工")
     calendar_id: str = Field(default="", description="飞书日历 ID（创建日程用）")
+    owner_open_id: str = Field(default="", description="日历所有者 open_id（创建日程后自动邀请）")
 
 
 def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
@@ -184,6 +185,42 @@ def parse_message_event(payload: dict[str, Any]) -> FeishuMessageEvent | None:
             image_key=image_key,
         )
 
+    if msg_type == "post":
+        # 富文本消息：可以同时包含 @mention + 图片 + 文字
+        content_str = message.get("content", "{}")
+        try:
+            content = _json.loads(content_str)
+        except _json.JSONDecodeError:
+            content = {}
+
+        # 提取文字和图片
+        text_parts: list[str] = []
+        first_image_key = ""
+        for paragraph in content.get("content", []):
+            if not isinstance(paragraph, list):
+                continue
+            for elem in paragraph:
+                tag = elem.get("tag", "")
+                if tag == "text":
+                    text_parts.append(elem.get("text", ""))
+                elif tag == "img" and not first_image_key:
+                    first_image_key = elem.get("image_key", "")
+
+        raw_mentions = message.get("mentions", [])
+        joined_text = " ".join(text_parts).strip()
+        mentions = _parse_mentions(raw_mentions, joined_text)
+        # 移除 @mention 占位符
+        for m in mentions:
+            if m["key"]:
+                joined_text = joined_text.replace(m["key"], "").strip()
+
+        return FeishuMessageEvent(
+            **common_kwargs,
+            text=joined_text,
+            mentions=mentions,
+            image_key=first_image_key,
+        )
+
     if msg_type != "text":
         return None
 
@@ -277,25 +314,51 @@ def resolve_employee_from_mention(
 async def download_feishu_image(
     token_manager: FeishuTokenManager,
     image_key: str,
+    message_id: str = "",
 ) -> tuple[bytes, str]:
     """下载飞书图片，返回 (image_bytes, media_type).
 
-    使用 GET /im/v1/images/{image_key} 接口。
+    优先使用消息资源接口 GET /im/v1/messages/{message_id}/resources/{file_key}，
+    回退到图片接口 GET /im/v1/images/{image_key}。
     """
     import httpx
 
     token = await token_manager.get_token()
-    url = f"{FEISHU_API_BASE}/im/v1/images/{image_key}"
+    headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        resp.raise_for_status()
+        # 优先：消息资源下载（支持 v3 image_key）
+        if message_id:
+            url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/resources/{image_key}"
+            resp = await client.get(url, headers=headers, params={"type": "image"})
+            if resp.status_code == 200:
+                content_type = resp.headers.get("content-type", "")
+                if "json" not in content_type:
+                    # 成功拿到二进制图片
+                    return _parse_image_response(resp)
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "飞书消息资源下载失败: status=%s body=%s",
+                resp.status_code, resp.text[:300],
+            )
 
+        # 回退：图片接口
+        url = f"{FEISHU_API_BASE}/im/v1/images/{image_key}"
+        resp = await client.get(url, headers=headers, params={"image_type": "message"})
+        if resp.status_code != 200:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "飞书图片下载响应: status=%s body=%s",
+                resp.status_code, resp.text[:300],
+            )
+            resp.raise_for_status()
+
+    return _parse_image_response(resp)
+
+
+def _parse_image_response(resp: "httpx.Response") -> tuple[bytes, str]:
+    """从 httpx 响应中提取图片 bytes 和 media_type."""
     content_type = resp.headers.get("content-type", "image/png")
-    # 飞书通常返回 image/png 或 image/jpeg
     if "jpeg" in content_type or "jpg" in content_type:
         media_type = "image/jpeg"
     elif "gif" in content_type:
@@ -304,7 +367,6 @@ async def download_feishu_image(
         media_type = "image/webp"
     else:
         media_type = "image/png"
-
     return resp.content, media_type
 
 
@@ -472,6 +534,55 @@ async def create_calendar_event(
             }
     except Exception as e:
         logger.error("飞书创建日程失败: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+async def add_attendees_to_event(
+    token_mgr: "FeishuTokenManager",
+    calendar_id: str,
+    event_id: str,
+    attendee_open_ids: list[str],
+) -> dict[str, Any]:
+    """为飞书日历日程添加参与者.
+
+    Args:
+        token_mgr: FeishuTokenManager 实例
+        calendar_id: 日历 ID
+        event_id: 日程 ID
+        attendee_open_ids: 参与者 open_id 列表
+
+    Returns:
+        {"ok": True} 或 {"ok": False, "error": "..."}
+    """
+    import httpx
+
+    if not attendee_open_ids:
+        return {"ok": True}
+
+    token = await token_mgr.get_token()
+    attendees = [
+        {"type": "user", "user_id": oid} for oid in attendee_open_ids
+    ]
+    body = {"attendees": attendees, "need_notification": True}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{FEISHU_API_BASE}/calendar/v4/calendars/{calendar_id}"
+                f"/events/{event_id}/attendees?user_id_type=open_id",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.warning("添加日程参与者失败: %s", data.get("msg"))
+                return {"ok": False, "error": data.get("msg", "未知错误")}
+            return {"ok": True}
+    except Exception as e:
+        logger.error("添加日程参与者异常: %s", e)
         return {"ok": False, "error": str(e)}
 
 

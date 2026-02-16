@@ -249,7 +249,7 @@ async def _handle_employee_prompt(request: Request, ctx: _AppContext) -> JSONRes
     # 渲染 prompt（不传 agent_identity → 不含 DB 记忆）
     engine = CrewEngine(ctx.project_dir)
     system_prompt = engine.prompt(employee)
-    tool_schemas = employee_tools_to_schemas(employee.tools)
+    tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
     # 从 YAML 读取 Employee model 之外的字段（bio, temperature 等）
     bio = ""
@@ -577,6 +577,7 @@ async def _handle_feishu_event(request: Request, ctx: _AppContext) -> JSONRespon
     # 4. 只处理消息事件
     event_type = header.get("event_type", "")
     if event_type != "im.message.receive_v1":
+        logger.warning("飞书事件忽略: event_type=%s", event_type)
         return JSONResponse({"message": "ignored", "event_type": event_type})
 
     # 5. 解析消息
@@ -584,16 +585,75 @@ async def _handle_feishu_event(request: Request, ctx: _AppContext) -> JSONRespon
 
     msg_event = parse_message_event(payload)
     if msg_event is None:
+        msg_type = payload.get("event", {}).get("message", {}).get("message_type", "?")
+        logger.warning("飞书消息类型不支持: msg_type=%s", msg_type)
         return JSONResponse({"message": "unsupported message type"})
+
+    logger.warning(
+        "飞书消息: type=%s chat=%s text=%s image_key=%s mentions=%d",
+        msg_event.msg_type, msg_event.chat_type,
+        msg_event.text[:50] if msg_event.text else "(empty)",
+        msg_event.image_key or "-",
+        len(msg_event.mentions),
+    )
 
     # 6. 去重
     if ctx.feishu_dedup and ctx.feishu_dedup.is_duplicate(msg_event.message_id):
+        logger.warning("飞书消息去重: %s", msg_event.message_id)
         return JSONResponse({"message": "duplicate"})
 
     # 7. 后台处理（飞书要求 3s 内响应）
     asyncio.create_task(_feishu_dispatch(ctx, msg_event))
 
     return JSONResponse({"message": "ok"})
+
+
+async def _find_recent_image_in_chat(
+    token_mgr: Any,
+    chat_id: str,
+    sender_id: str,
+    max_messages: int = 5,
+) -> tuple[str, str] | None:
+    """在群聊历史中查找同一发送者最近发的图片，返回 (image_key, message_id)."""
+    import httpx
+    import json as _json
+
+    token = await token_mgr.get_token()
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    params = {
+        "container_id_type": "chat",
+        "container_id": chat_id,
+        "page_size": max_messages,
+        "sort_type": "ByCreateTimeDesc",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
+        data = resp.json()
+
+    if data.get("code", -1) != 0:
+        logger.warning("查群消息失败: %s", data.get("msg", ""))
+        return None
+
+    for item in data.get("data", {}).get("items", []):
+        if item.get("msg_type") != "image":
+            continue
+        msg_sender = item.get("sender", {}).get("id", "")
+        if msg_sender != sender_id:
+            continue
+        try:
+            content = _json.loads(item.get("body", {}).get("content", "{}"))
+        except _json.JSONDecodeError:
+            continue
+        img_key = content.get("image_key", "")
+        msg_id = item.get("message_id", "")
+        if img_key and msg_id:
+            return img_key, msg_id
+
+    return None
 
 
 async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
@@ -630,12 +690,35 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         emp = discovery.get(employee_name)
 
-        # 图片消息 → 下载图片 + vision
+        # 图片 → 下载图片 + vision
+        # 来源：(a) image/post 消息自带 image_key
+        #       (b) 群聊文本消息 → 往前找同一发送者的最近图片
+        image_key = msg_event.image_key
+        image_message_id = msg_event.message_id
+
+        if (
+            not image_key
+            and msg_event.chat_type == "group"
+            and msg_event.msg_type == "text"
+        ):
+            # 群聊纯文本 @bot：尝试往前查最近一条同人图片
+            try:
+                found = await _find_recent_image_in_chat(
+                    ctx.feishu_token_mgr,
+                    msg_event.chat_id,
+                    msg_event.sender_id,
+                )
+                if found:
+                    image_key, image_message_id = found
+            except Exception as exc:
+                logger.warning("查找群聊近期图片失败: %s", exc)
+
         image_data: tuple[bytes, str] | None = None
-        if msg_event.msg_type == "image" and msg_event.image_key:
+        if image_key:
             try:
                 image_data = await download_feishu_image(
-                    ctx.feishu_token_mgr, msg_event.image_key,
+                    ctx.feishu_token_mgr, image_key,
+                    message_id=image_message_id,
                 )
             except Exception as exc:
                 logger.warning("飞书图片下载失败: %s", exc)
@@ -1255,7 +1338,7 @@ async def _tool_create_feishu_event(
 
     end_time = start_time + timedelta(minutes=max(duration, 15))
 
-    from crew.feishu import create_calendar_event
+    from crew.feishu import add_attendees_to_event, create_calendar_event
 
     cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or ""
     result = await create_calendar_event(
@@ -1268,6 +1351,18 @@ async def _tool_create_feishu_event(
     )
 
     if result.get("ok"):
+        event_id = result.get("event_id", "")
+        # 自动邀请日历所有者（让日程出现在他/她的日历上）
+        owner_id = (ctx.feishu_config.owner_open_id if ctx.feishu_config else "") or ""
+        if owner_id and event_id and cal_id:
+            att_result = await add_attendees_to_event(
+                token_mgr=ctx.feishu_token_mgr,
+                calendar_id=cal_id,
+                event_id=event_id,
+                attendee_open_ids=[owner_id],
+            )
+            if not att_result.get("ok"):
+                logger.warning("日程创建成功但邀请参与者失败: %s", att_result.get("error"))
         end_str = end_time.strftime("%H:%M")
         start_str = start_time.strftime("%H:%M")
         return f"日程已创建：{date_str} {start_str}-{end_str}《{summary}》"
@@ -2578,6 +2673,1546 @@ async def _tool_rss_read(
     return "\n---\n".join(entries[:limit])
 
 
+# ── 生活助手工具 ──
+
+
+async def _tool_translate(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """中英互译（MyMemory API）."""
+    import httpx
+
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "需要翻译的文本。"
+    if len(text) > 2000:
+        return "文本过长，最多 2000 字符。"
+
+    from_lang = (args.get("from_lang") or "auto").strip().lower()
+    to_lang = (args.get("to_lang") or "").strip().lower()
+
+    # 自动检测：CJK 占比 > 30% → 中→英，否则英→中
+    if from_lang == "auto":
+        cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+        if cjk / max(len(text), 1) > 0.3:
+            from_lang, to_lang = "zh-CN", to_lang or "en-GB"
+        else:
+            from_lang, to_lang = "en-GB", to_lang or "zh-CN"
+    else:
+        _lang_map = {
+            "zh": "zh-CN", "en": "en-GB", "ja": "ja-JP",
+            "ko": "ko-KR", "fr": "fr-FR", "de": "de-DE",
+        }
+        from_lang = _lang_map.get(from_lang, from_lang)
+        to_lang = _lang_map.get(to_lang, to_lang) if to_lang else (
+            "en-GB" if "zh" in from_lang else "zh-CN"
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.mymemory.translated.net/get",
+                params={"q": text, "langpair": f"{from_lang}|{to_lang}"},
+            )
+            data = resp.json()
+        translated = data.get("responseData", {}).get("translatedText", "")
+        if not translated:
+            return "翻译失败，未获得结果。"
+        return translated
+    except Exception as e:
+        return f"翻译失败: {e}"
+
+
+async def _tool_countdown(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """计算距离目标日期的倒计时."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    tz_cn = _tz(timedelta(hours=8))
+    date_str = (args.get("date") or "").strip()
+    event = (args.get("event") or "").strip()
+
+    if not date_str:
+        return "需要目标日期，格式 YYYY-MM-DD。"
+
+    try:
+        target = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz_cn)
+    except ValueError:
+        return f"日期格式不对: {date_str}，需要 YYYY-MM-DD。"
+
+    now = datetime.now(tz_cn)
+    delta = target - now
+    label = f"「{event}」" if event else date_str
+
+    if delta.total_seconds() < 0:
+        days = abs(delta.days)
+        return f"{label} 已经过去了 {days} 天。"
+
+    days = delta.days
+    hours = delta.seconds // 3600
+    if days == 0:
+        return f"距离 {label} 还有 {hours} 小时。"
+    return f"距离 {label} 还有 {days} 天 {hours} 小时。"
+
+
+async def _tool_trending(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """热搜聚合（微博 / 知乎）."""
+    import httpx
+
+    platform = (args.get("platform") or "weibo").strip().lower()
+    limit = min(args.get("limit", 15) or 15, 30)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if platform == "zhihu":
+                resp = await client.get(
+                    "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                data = resp.json()
+                items = data.get("data", [])[:limit]
+                if not items:
+                    return "知乎热榜暂无数据。"
+                lines = []
+                for i, item in enumerate(items, 1):
+                    target = item.get("target", {})
+                    title = target.get("title", "")
+                    excerpt = target.get("excerpt", "")[:60]
+                    lines.append(f"{i}. {title}\n   {excerpt}")
+                return "📊 知乎热榜\n\n" + "\n".join(lines)
+            else:
+                # 微博热搜
+                resp = await client.get(
+                    "https://weibo.com/ajax/side/hotSearch",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                data = resp.json()
+                items = data.get("data", {}).get("realtime", [])[:limit]
+                if not items:
+                    return "微博热搜暂无数据。"
+                lines = []
+                for i, item in enumerate(items, 1):
+                    word = item.get("word", "")
+                    num = item.get("num", 0)
+                    label_name = item.get("label_name", "")
+                    tag = f" [{label_name}]" if label_name else ""
+                    lines.append(f"{i}. {word}{tag}  ({num:,})")
+                return "🔥 微博热搜\n\n" + "\n".join(lines)
+    except Exception as e:
+        return f"获取热搜失败: {e}"
+
+
+# ── 飞书表格工具 ──
+
+
+async def _tool_read_feishu_sheet(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取飞书表格数据."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    ss_token = (args.get("spreadsheet_token") or "").strip()
+    if not ss_token:
+        return "缺少 spreadsheet_token。"
+
+    sheet_id = (args.get("sheet_id") or "").strip()
+    range_str = (args.get("range") or "A1:Z100").strip()
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if not sheet_id:
+                meta_resp = await client.get(
+                    f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
+                    headers=headers,
+                )
+                meta = meta_resp.json()
+                sheets = meta.get("data", {}).get("sheets", [])
+                if not sheets:
+                    return "该表格没有工作表。"
+                sheet_id = sheets[0].get("sheet_id", "")
+
+            full_range = f"{sheet_id}!{range_str}"
+            resp = await client.get(
+                f"{base}/sheets/v2/spreadsheets/{ss_token}/values/{full_range}",
+                headers=headers,
+                params={"valueRenderOption": "ToString"},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"读取失败: {data.get('msg', '未知错误')}"
+
+        values = data.get("data", {}).get("valueRange", {}).get("values", [])
+        if not values:
+            return "表格为空或指定范围无数据。"
+
+        lines = []
+        for i, row in enumerate(values[:100]):
+            cells = [str(c) if c is not None else "" for c in row]
+            lines.append(" | ".join(cells))
+            if i == 0:
+                lines.append("-" * min(len(lines[0]), 80))
+        result = "\n".join(lines)
+        if len(result) > 9500:
+            result = result[:9500] + "\n\n[数据已截断]"
+        return result
+    except Exception as e:
+        return f"读取表格失败: {e}"
+
+
+async def _tool_update_feishu_sheet(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """写入飞书表格数据."""
+    import httpx
+    import json as _json
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    ss_token = (args.get("spreadsheet_token") or "").strip()
+    range_str = (args.get("range") or "").strip()
+    values_str = (args.get("values") or "").strip()
+    sheet_id = (args.get("sheet_id") or "").strip()
+
+    if not ss_token:
+        return "缺少 spreadsheet_token。"
+    if not range_str:
+        return "缺少 range（如 A1:C3）。"
+    if not values_str:
+        return "缺少 values（JSON 二维数组）。"
+
+    try:
+        values = _json.loads(values_str)
+        if not isinstance(values, list):
+            return "values 必须是二维数组。"
+    except _json.JSONDecodeError as e:
+        return f"values JSON 解析失败: {e}"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if not sheet_id:
+                meta_resp = await client.get(
+                    f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                meta = meta_resp.json()
+                sheets = meta.get("data", {}).get("sheets", [])
+                if not sheets:
+                    return "该表格没有工作表。"
+                sheet_id = sheets[0].get("sheet_id", "")
+
+            full_range = f"{sheet_id}!{range_str}"
+            resp = await client.put(
+                f"{base}/sheets/v2/spreadsheets/{ss_token}/values",
+                headers=headers,
+                json={
+                    "valueRange": {
+                        "range": full_range,
+                        "values": values,
+                    },
+                },
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"写入失败: {data.get('msg', '未知错误')}"
+
+        updated = data.get("data", {}).get("updatedCells", 0)
+        return f"写入成功，更新了 {updated} 个单元格。"
+    except Exception as e:
+        return f"写入表格失败: {e}"
+
+
+# ── 飞书审批工具 ──
+
+
+async def _tool_list_feishu_approvals(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查看飞书审批列表."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    status = (args.get("status") or "PENDING").strip().upper()
+    limit = min(args.get("limit", 10) or 10, 20)
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 先获取审批定义列表
+            resp = await client.get(
+                f"{base}/approval/v4/approvals",
+                headers=headers,
+                params={"page_size": 20},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"获取审批失败: {data.get('msg', '未知错误')}"
+
+        approvals = data.get("data", {}).get("approval_list", [])
+        if not approvals:
+            return "没有找到审批流程。"
+
+        # 遍历审批定义，查实例
+        all_instances: list[str] = []
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for appr in approvals[:5]:  # 只查前 5 个审批定义
+                code = appr.get("approval_code", "")
+                name = appr.get("approval_name", "未命名")
+                if not code:
+                    continue
+                params: dict[str, Any] = {
+                    "approval_code": code,
+                    "page_size": limit,
+                }
+                if status != "ALL":
+                    params["status"] = status
+                inst_resp = await client.get(
+                    f"{base}/approval/v4/instances",
+                    headers=headers,
+                    params=params,
+                )
+                inst_data = inst_resp.json()
+                instances = inst_data.get("data", {}).get("instance_list", [])
+                for inst in instances:
+                    inst_code = inst.get("instance_code", "")
+                    inst_status = inst.get("status", "")
+                    start_time = inst.get("start_time", "")
+                    # 转换时间戳
+                    ts_str = ""
+                    if start_time:
+                        try:
+                            from datetime import datetime, timedelta, timezone as _tz
+                            ts = int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
+                            dt = datetime.fromtimestamp(ts, _tz(timedelta(hours=8)))
+                            ts_str = dt.strftime("%m-%d %H:%M")
+                        except (ValueError, OSError):
+                            ts_str = start_time
+                    status_icon = {"PENDING": "⏳", "APPROVED": "✅", "REJECTED": "❌"}.get(
+                        inst_status, "📋"
+                    )
+                    all_instances.append(
+                        f"{status_icon} [{name}] {ts_str} (instance={inst_code})"
+                    )
+                    if len(all_instances) >= limit:
+                        break
+                if len(all_instances) >= limit:
+                    break
+
+        if not all_instances:
+            label = {"PENDING": "待审批", "APPROVED": "已通过", "REJECTED": "已拒绝"}.get(
+                status, ""
+            )
+            return f"没有{label}的审批。"
+
+        return "\n".join(all_instances)
+    except Exception as e:
+        return f"获取审批失败: {e}"
+
+
+# ── 实用工具 ──
+
+# 单位换算表：(from, to) → multiplier  或  callable
+_UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {
+    # 长度
+    ("km", "mi"): 0.621371, ("mi", "km"): 1.60934,
+    ("m", "ft"): 3.28084, ("ft", "m"): 0.3048,
+    ("cm", "in"): 0.393701, ("in", "cm"): 2.54,
+    ("km", "m"): 1000, ("m", "km"): 0.001,
+    ("m", "cm"): 100, ("cm", "m"): 0.01,
+    ("mi", "ft"): 5280, ("ft", "mi"): 1 / 5280,
+    # 重量
+    ("kg", "lb"): 2.20462, ("lb", "kg"): 0.453592,
+    ("kg", "g"): 1000, ("g", "kg"): 0.001,
+    ("kg", "oz"): 35.274, ("oz", "kg"): 0.0283495,
+    ("lb", "oz"): 16, ("oz", "lb"): 0.0625,
+    ("g", "mg"): 1000, ("mg", "g"): 0.001,
+    # 面积
+    ("sqm", "sqft"): 10.7639, ("sqft", "sqm"): 0.092903,
+    ("mu", "sqm"): 666.667, ("sqm", "mu"): 0.0015,
+    ("ha", "mu"): 15, ("mu", "ha"): 1 / 15,
+    ("ha", "sqm"): 10000, ("sqm", "ha"): 0.0001,
+    # 体积
+    ("l", "gal"): 0.264172, ("gal", "l"): 3.78541,
+    ("l", "ml"): 1000, ("ml", "l"): 0.001,
+    # 数据
+    ("gb", "mb"): 1024, ("mb", "gb"): 1 / 1024,
+    ("tb", "gb"): 1024, ("gb", "tb"): 1 / 1024,
+    ("mb", "kb"): 1024, ("kb", "mb"): 1 / 1024,
+    # 速度
+    ("kmh", "mph"): 0.621371, ("mph", "kmh"): 1.60934,
+    ("ms", "kmh"): 3.6, ("kmh", "ms"): 1 / 3.6,
+}
+
+
+async def _tool_unit_convert(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """单位换算."""
+    value = args.get("value")
+    if value is None:
+        return "缺少数值。"
+    value = float(value)
+
+    from_u = (args.get("from_unit") or "").strip().lower().replace("°", "").replace(" ", "")
+    to_u = (args.get("to_unit") or "").strip().lower().replace("°", "").replace(" ", "")
+
+    if not from_u or not to_u:
+        return "需要原单位和目标单位。"
+
+    # 温度特殊处理
+    if from_u in ("c", "celsius") and to_u in ("f", "fahrenheit"):
+        result = value * 9 / 5 + 32
+        return f"{value}°C = {result:.2f}°F"
+    if from_u in ("f", "fahrenheit") and to_u in ("c", "celsius"):
+        result = (value - 32) * 5 / 9
+        return f"{value}°F = {result:.2f}°C"
+
+    key = (from_u, to_u)
+    factor = _UNIT_CONVERSIONS.get(key)
+    if factor is None:
+        return f"不支持 {from_u} → {to_u} 的换算。支持：km/mi, m/ft, kg/lb, l/gal, gb/mb, c/f 等。"
+
+    result = value * factor
+    if result == int(result) and abs(result) < 1e15:
+        return f"{value} {from_u} = {int(result)} {to_u}"
+    return f"{value} {from_u} = {result:,.4g} {to_u}"
+
+
+async def _tool_random_pick(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """随机选择 / 掷骰子."""
+    import random
+
+    options_str = (args.get("options") or "").strip()
+    count = max(args.get("count", 1) or 1, 1)
+
+    if not options_str:
+        # 掷骰子
+        result = random.randint(1, 6)
+        return f"🎲 掷出了 {result} 点！"
+
+    options = [o.strip() for o in options_str.replace("，", ",").split(",") if o.strip()]
+    if len(options) < 2:
+        return "至少需要两个选项。"
+
+    count = min(count, len(options))
+    picks = random.sample(options, count)
+    if count == 1:
+        return f"🎯 选中了：{picks[0]}"
+    return f"🎯 选中了：{'、'.join(picks)}"
+
+
+async def _tool_holidays(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查询中国法定节假日."""
+    import httpx
+    from datetime import datetime, timedelta, timezone as _tz
+
+    tz_cn = _tz(timedelta(hours=8))
+    now = datetime.now(tz_cn)
+    year = args.get("year") or now.year
+    month = args.get("month") or 0
+
+    # 使用 timor.tech 免费节假日 API（国内可用）
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if month:
+                resp = await client.get(
+                    f"https://timor.tech/api/holiday/year/{year}/{month:02d}",
+                )
+            else:
+                resp = await client.get(
+                    f"https://timor.tech/api/holiday/year/{year}",
+                )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+
+        holidays_data = data.get("holiday", {})
+        if not holidays_data:
+            return f"{year}年{'%d月' % month if month else ''}没有节假日数据。"
+
+        lines = []
+        for date_str, info in sorted(holidays_data.items()):
+            name = info.get("name", "")
+            is_holiday = info.get("holiday", False)
+            tag = "🟢 放假" if is_holiday else "🔴 补班"
+            lines.append(f"{date_str} {tag} {name}")
+
+        if not lines:
+            return "没有找到节假日信息。"
+
+        header = f"📅 {year}年{'%d月' % month if month else ''}节假日安排"
+        return f"{header}\n\n" + "\n".join(lines)
+    except Exception as e:
+        return f"查询节假日失败: {e}"
+
+
+async def _tool_timestamp_convert(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """Unix 时间戳 ↔ 可读时间互转."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    tz_cn = _tz(timedelta(hours=8))
+    input_str = (args.get("input") or "").strip()
+    if not input_str:
+        return "需要时间戳或日期时间。"
+
+    # 尝试解析为数字（时间戳）
+    try:
+        ts = int(input_str)
+        # 毫秒级 → 秒级
+        if ts > 1e12:
+            ts = ts // 1000
+        dt = datetime.fromtimestamp(ts, tz_cn)
+        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.weekday()]
+        return f"时间戳 {input_str} = {dt.strftime('%Y-%m-%d %H:%M:%S')} {weekday}（北京时间）"
+    except (ValueError, OSError):
+        pass
+
+    # 尝试解析为日期时间
+    fmts = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d"]
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(input_str, fmt).replace(tzinfo=tz_cn)
+            ts = int(dt.timestamp())
+            return f"{input_str} = 时间戳 {ts}（秒）/ {ts * 1000}（毫秒）"
+        except ValueError:
+            continue
+
+    return f"无法解析: {input_str}。支持格式：Unix 时间戳 或 YYYY-MM-DD HH:MM:SS"
+
+
+# ── 飞书表格创建 ──
+
+
+async def _tool_create_feishu_spreadsheet(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在飞书创建新表格."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    title = (args.get("title") or "").strip()
+    folder_token = (args.get("folder_token") or "").strip()
+    if not title:
+        return "需要表格标题。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    try:
+        body: dict[str, Any] = {"title": title}
+        if folder_token:
+            body["folder_token"] = folder_token
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/sheets/v3/spreadsheets",
+                headers=headers,
+                json=body,
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"创建失败: {data.get('msg', '未知错误')}"
+
+        ss = data.get("data", {}).get("spreadsheet", {})
+        ss_token = ss.get("spreadsheet_token", "")
+        url = ss.get("url", "")
+        return f"表格已创建: {title}\ntoken: {ss_token}\n{url}"
+    except Exception as e:
+        return f"创建表格失败: {e}"
+
+
+# ── 飞书通讯录搜索 ──
+
+
+async def _tool_feishu_contacts(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """飞书通讯录搜索."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    query = (args.get("query") or "").strip()
+    limit = min(args.get("limit", 5) or 5, 20)
+    if not query:
+        return "需要搜索关键词。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/search/v1/user",
+                headers=headers,
+                json={"query": query, "page_size": limit},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            # 如果没有搜索权限，回退到群成员查找
+            return f"通讯录搜索暂不可用({data.get('code')}): {data.get('msg', '')}。可以用 feishu_group_members 从群里查人。"
+
+        users = data.get("data", {}).get("users", [])
+        if not users:
+            return f"未找到「{query}」。"
+
+        lines = []
+        for u in users:
+            name = u.get("name", "未知")
+            dept = u.get("department", {}).get("name", "")
+            open_id = u.get("open_id", "")
+            line = f"{name}"
+            if dept:
+                line += f" ({dept})"
+            if open_id:
+                line += f" [open_id={open_id}]"
+            lines.append(line)
+        return "\n".join(lines)
+    except Exception as e:
+        return f"搜索通讯录失败: {e}"
+
+
+# ── 文本 & 开发工具 ──
+
+
+async def _tool_text_extract(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """从文本中提取邮箱、手机号、URL、金额等."""
+    import re
+
+    text = args.get("text") or ""
+    if not text:
+        return "需要文本。"
+
+    extract_type = (args.get("extract_type") or "all").strip().lower()
+
+    results: dict[str, list[str]] = {}
+
+    if extract_type in ("email", "all"):
+        emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+        if emails:
+            results["邮箱"] = list(dict.fromkeys(emails))
+
+    if extract_type in ("phone", "all"):
+        phones = re.findall(r"1[3-9]\d{9}", text)
+        # 也匹配带分隔的号码
+        phones += re.findall(r"\+?\d{1,4}[-\s]?\d{3,4}[-\s]?\d{4}", text)
+        if phones:
+            results["手机号"] = list(dict.fromkeys(phones))
+
+    if extract_type in ("url", "all"):
+        urls = re.findall(r"https?://[^\s<>\"']+", text)
+        if urls:
+            results["URL"] = list(dict.fromkeys(urls))
+
+    if extract_type in ("money", "all"):
+        money = re.findall(r"[¥$￥]\s?[\d,]+\.?\d*|[\d,]+\.?\d*\s?(?:元|万|亿|美元|万元|亿元|USD|CNY|RMB)", text)
+        if money:
+            results["金额"] = list(dict.fromkeys(money))
+
+    if not results:
+        return "未提取到信息。"
+
+    lines = []
+    for category, items in results.items():
+        lines.append(f"【{category}】")
+        for item in items[:20]:
+            lines.append(f"  {item}")
+    return "\n".join(lines)
+
+
+async def _tool_json_format(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """格式化 JSON."""
+    import json as _json
+    import re
+
+    text = args.get("text") or ""
+    if not text:
+        return "需要 JSON 文本。"
+
+    compact = args.get("compact", False)
+
+    # 尝试直接解析
+    try:
+        obj = _json.loads(text)
+    except _json.JSONDecodeError:
+        # 尝试从文本中提取 JSON
+        match = re.search(r"[\[{].*[\]}]", text, re.DOTALL)
+        if not match:
+            return "未找到有效的 JSON。"
+        try:
+            obj = _json.loads(match.group())
+        except _json.JSONDecodeError as e:
+            return f"JSON 解析失败: {e}"
+
+    if compact:
+        result = _json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    else:
+        result = _json.dumps(obj, ensure_ascii=False, indent=2)
+
+    if len(result) > 9500:
+        result = result[:9500] + "\n\n[已截断]"
+    return result
+
+
+async def _tool_password_gen(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """生成安全随机密码."""
+    import secrets
+    import string
+
+    length = max(min(args.get("length", 16) or 16, 128), 8)
+    count = max(min(args.get("count", 3) or 3, 10), 1)
+    no_symbols = args.get("no_symbols", False)
+
+    chars = string.ascii_letters + string.digits
+    if not no_symbols:
+        chars += "!@#$%&*-_=+"
+
+    passwords = []
+    for _ in range(count):
+        pw = "".join(secrets.choice(chars) for _ in range(length))
+        passwords.append(pw)
+
+    lines = [f"🔐 随机密码（{length}位）：", ""]
+    for i, pw in enumerate(passwords, 1):
+        lines.append(f"{i}. {pw}")
+    return "\n".join(lines)
+
+
+async def _tool_ip_lookup(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查询 IP 地址归属地."""
+    import httpx
+
+    ip = (args.get("ip") or "").strip()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if ip:
+                resp = await client.get(f"http://ip-api.com/json/{ip}?lang=zh-CN")
+            else:
+                resp = await client.get("http://ip-api.com/json/?lang=zh-CN")
+            data = resp.json()
+
+        if data.get("status") != "success":
+            return f"查询失败: {data.get('message', '未知错误')}"
+
+        query_ip = data.get("query", ip or "本机")
+        country = data.get("country", "")
+        region = data.get("regionName", "")
+        city = data.get("city", "")
+        isp = data.get("isp", "")
+        org = data.get("org", "")
+
+        location = " ".join(filter(None, [country, region, city]))
+        lines = [f"IP: {query_ip}", f"位置: {location}"]
+        if isp:
+            lines.append(f"运营商: {isp}")
+        if org and org != isp:
+            lines.append(f"组织: {org}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"查询 IP 失败: {e}"
+
+
+async def _tool_short_url(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """生成短链接（cleanuri.com 免费 API）."""
+    import httpx
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return "需要 URL。"
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://cleanuri.com/api/v1/shorten",
+                data={"url": url},
+            )
+            data = resp.json()
+
+        short = data.get("result_url", "")
+        if short:
+            return f"短链接: {short}\n原链接: {url}"
+        return f"生成失败: {data.get('error', '未知错误')}"
+    except Exception as e:
+        return f"生成短链接失败: {e}"
+
+
+async def _tool_word_count(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """统计文本字数."""
+    text = args.get("text") or ""
+    if not text:
+        return "需要文本。"
+
+    # 总字符数（含空格）
+    total_chars = len(text)
+    # 不含空格
+    no_space = len(text.replace(" ", "").replace("\n", "").replace("\t", ""))
+    # 中文字数
+    cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    # 英文单词数
+    import re
+    words = len(re.findall(r"[a-zA-Z]+", text))
+    # 数字个数
+    numbers = len(re.findall(r"\d+", text))
+    # 行数
+    lines = text.count("\n") + 1
+    # 段落数
+    paragraphs = len([p for p in text.split("\n\n") if p.strip()])
+
+    parts = [
+        f"字符: {total_chars}（不含空格 {no_space}）",
+        f"中文: {cjk} 字",
+        f"英文: {words} 词",
+    ]
+    if numbers:
+        parts.append(f"数字: {numbers} 个")
+    parts.append(f"行: {lines}")
+    parts.append(f"段落: {paragraphs}")
+
+    return " | ".join(parts)
+
+
+# ── 编码 & 开发辅助工具 ──
+
+
+async def _tool_base64_codec(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """Base64 编解码."""
+    import base64
+
+    text = args.get("text") or ""
+    if not text:
+        return "需要文本。"
+
+    decode = args.get("decode", False)
+    try:
+        if decode:
+            result = base64.b64decode(text).decode("utf-8", errors="replace")
+            return f"解码结果:\n{result}"
+        else:
+            result = base64.b64encode(text.encode("utf-8")).decode()
+            return f"编码结果:\n{result}"
+    except Exception as e:
+        return f"Base64 {'解码' if decode else '编码'}失败: {e}"
+
+
+async def _tool_color_convert(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """颜色格式转换."""
+    import re
+
+    color = (args.get("color") or "").strip()
+    if not color:
+        return "需要颜色值。"
+
+    r = g = b = 0
+
+    # HEX
+    hex_match = re.match(r"^#?([0-9a-fA-F]{6})$", color)
+    if hex_match:
+        h = hex_match.group(1)
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    else:
+        # RGB
+        rgb_match = re.match(r"rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", color, re.I)
+        if rgb_match:
+            r, g, b = int(rgb_match.group(1)), int(rgb_match.group(2)), int(rgb_match.group(3))
+        else:
+            # 3位 HEX
+            short_match = re.match(r"^#?([0-9a-fA-F]{3})$", color)
+            if short_match:
+                h = short_match.group(1)
+                r, g, b = int(h[0]*2, 16), int(h[1]*2, 16), int(h[2]*2, 16)
+            else:
+                return f"无法解析颜色: {color}。支持 #FF5733、rgb(255,87,51) 格式。"
+
+    # RGB → HSL
+    r1, g1, b1 = r / 255, g / 255, b / 255
+    mx, mn = max(r1, g1, b1), min(r1, g1, b1)
+    l = (mx + mn) / 2
+    if mx == mn:
+        h_val = s = 0.0
+    else:
+        d = mx - mn
+        s = d / (2 - mx - mn) if l > 0.5 else d / (mx + mn)
+        if mx == r1:
+            h_val = (g1 - b1) / d + (6 if g1 < b1 else 0)
+        elif mx == g1:
+            h_val = (b1 - r1) / d + 2
+        else:
+            h_val = (r1 - g1) / d + 4
+        h_val /= 6
+
+    hex_str = f"#{r:02X}{g:02X}{b:02X}"
+    rgb_str = f"rgb({r}, {g}, {b})"
+    hsl_str = f"hsl({int(h_val * 360)}, {int(s * 100)}%, {int(l * 100)}%)"
+
+    return f"HEX: {hex_str}\nRGB: {rgb_str}\nHSL: {hsl_str}"
+
+
+async def _tool_cron_explain(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """解释 cron 表达式."""
+    expr = (args.get("expression") or "").strip()
+    if not expr:
+        return "需要 cron 表达式或自然语言描述。"
+
+    # 简单自然语言 → cron 映射
+    _NL_MAP = {
+        "每分钟": "* * * * *",
+        "每小时": "0 * * * *",
+        "每天": "0 0 * * *",
+        "每天早上9点": "0 9 * * *",
+        "每天晚上10点": "0 22 * * *",
+        "每周一": "0 0 * * 1",
+        "工作日": "0 9 * * 1-5",
+        "工作日早上9点": "0 9 * * 1-5",
+        "每月1号": "0 0 1 * *",
+        "每月15号": "0 0 15 * *",
+    }
+
+    for key, cron in _NL_MAP.items():
+        if key in expr:
+            return f"「{expr}」对应的 cron:\n{cron}"
+
+    # 解析 cron 表达式
+    parts = expr.split()
+    if len(parts) not in (5, 6):
+        return f"无法解析: {expr}。标准 cron 是 5 段（分 时 日 月 周），如 0 9 * * 1-5"
+
+    fields = ["分钟", "小时", "日", "月", "星期"]
+    if len(parts) == 6:
+        fields = ["秒"] + fields
+
+    _WEEKDAYS = {"0": "日", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
+
+    lines = []
+    for i, (p, name) in enumerate(zip(parts, fields)):
+        if p == "*":
+            lines.append(f"  {name}: 每{name}")
+        elif p.startswith("*/"):
+            lines.append(f"  {name}: 每 {p[2:]} {name}")
+        elif name == "星期" and "-" in p:
+            start, end = p.split("-", 1)
+            lines.append(f"  {name}: 周{_WEEKDAYS.get(start, start)} 到 周{_WEEKDAYS.get(end, end)}")
+        elif name == "星期":
+            days = [f"周{_WEEKDAYS.get(d.strip(), d.strip())}" for d in p.split(",")]
+            lines.append(f"  {name}: {','.join(days)}")
+        else:
+            lines.append(f"  {name}: {p}")
+
+    return f"cron: {expr}\n\n" + "\n".join(lines)
+
+
+async def _tool_regex_test(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """测试正则表达式."""
+    import re
+
+    pattern = args.get("pattern") or ""
+    text = args.get("text") or ""
+    replace = args.get("replace") or ""
+
+    if not pattern:
+        return "需要正则表达式。"
+    if not text:
+        return "需要测试文本。"
+
+    try:
+        compiled = re.compile(pattern)
+    except re.error as e:
+        return f"正则语法错误: {e}"
+
+    if replace:
+        result = compiled.sub(replace, text)
+        return f"替换结果:\n{result}"
+
+    matches = list(compiled.finditer(text))
+    if not matches:
+        return "没有匹配。"
+
+    lines = [f"找到 {len(matches)} 个匹配：", ""]
+    for i, m in enumerate(matches[:20], 1):
+        groups = m.groups()
+        if groups:
+            lines.append(f"{i}. 「{m.group()}」 groups={groups}")
+        else:
+            lines.append(f"{i}. 「{m.group()}」 位置 {m.start()}-{m.end()}")
+    return "\n".join(lines)
+
+
+async def _tool_hash_gen(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """计算文本哈希值."""
+    import hashlib
+
+    text = args.get("text") or ""
+    if not text:
+        return "需要文本。"
+
+    algo = (args.get("algorithm") or "sha256").strip().lower()
+    data = text.encode("utf-8")
+
+    results = []
+    if algo == "all" or algo == "md5":
+        results.append(f"MD5:    {hashlib.md5(data).hexdigest()}")
+    if algo == "all" or algo == "sha1":
+        results.append(f"SHA1:   {hashlib.sha1(data).hexdigest()}")
+    if algo == "all" or algo == "sha256":
+        results.append(f"SHA256: {hashlib.sha256(data).hexdigest()}")
+
+    if not results:
+        # 默认 sha256
+        results.append(f"SHA256: {hashlib.sha256(data).hexdigest()}")
+
+    return "\n".join(results)
+
+
+async def _tool_url_codec(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """URL 编解码."""
+    from urllib.parse import quote, unquote
+
+    text = args.get("text") or ""
+    if not text:
+        return "需要文本。"
+
+    decode = args.get("decode", False)
+    if decode:
+        result = unquote(text)
+        return f"解码结果:\n{result}"
+    else:
+        result = quote(text, safe="")
+        return f"编码结果:\n{result}"
+
+
+# ── 第 5 批工具 handler ──
+
+
+async def _tool_feishu_bitable(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """读取飞书多维表格."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    app_token = (args.get("app_token") or "").strip()
+    table_id = (args.get("table_id") or "").strip()
+    if not app_token or not table_id:
+        return "需要 app_token 和 table_id。"
+
+    limit = min(args.get("limit", 20) or 20, 100)
+    filter_str = (args.get("filter") or "").strip()
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        params: dict[str, Any] = {"page_size": limit}
+        if filter_str:
+            params["filter"] = filter_str
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{base}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
+                headers=headers,
+                params=params,
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"读取多维表格失败: {data.get('msg', '未知错误')}"
+
+        records = data.get("data", {}).get("items", [])
+        if not records:
+            return "表格中没有数据。"
+
+        lines: list[str] = []
+        for i, rec in enumerate(records, 1):
+            fields = rec.get("fields", {})
+            parts = [f"{k}: {v}" for k, v in fields.items()]
+            lines.append(f"{i}. {' | '.join(parts)}")
+
+        total = data.get("data", {}).get("total", len(records))
+        lines.insert(0, f"共 {total} 条记录（显示前 {len(records)} 条）：\n")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"读取多维表格失败: {e}"
+
+
+async def _tool_feishu_wiki(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """搜索飞书知识库."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "需要搜索关键词。"
+
+    limit = min(args.get("limit", 10) or 10, 20)
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/wiki/v2/spaces/search",
+                headers=headers,
+                json={"query": query, "page_size": limit},
+            )
+            data = resp.json()
+
+        if data.get("code") != 0:
+            return f"搜索知识库失败: {data.get('msg', '未知错误')}"
+
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return f"知识库中没有找到「{query}」相关内容。"
+
+        lines: list[str] = []
+        for item in items:
+            title = item.get("title", "无标题")
+            url = item.get("url", "")
+            space = item.get("space_name", "")
+            line = f"- {title}"
+            if space:
+                line += f" [{space}]"
+            if url:
+                line += f"\n  {url}"
+            lines.append(line)
+        return "\n".join(lines)
+    except Exception as e:
+        return f"搜索知识库失败: {e}"
+
+
+async def _tool_approve_feishu(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """操作飞书审批."""
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置。"
+
+    instance_id = (args.get("instance_id") or "").strip()
+    action = (args.get("action") or "").strip().lower()
+    comment = (args.get("comment") or "").strip()
+
+    if not instance_id:
+        return "需要审批实例 ID。"
+    if action not in ("approve", "reject"):
+        return "action 必须是 approve 或 reject。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        body: dict[str, Any] = {"approval_code": "", "instance_code": instance_id}
+        if action == "approve":
+            body["status"] = "APPROVED"
+        else:
+            body["status"] = "REJECTED"
+        if comment:
+            body["comment"] = comment
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/approval/v4/instances/{instance_id}/comments",
+                headers=headers,
+                json={"content": comment or ("同意" if action == "approve" else "拒绝")},
+            )
+            data = resp.json()
+
+        action_cn = "通过" if action == "approve" else "拒绝"
+        if data.get("code") == 0:
+            return f"审批已{action_cn}。"
+        return f"审批操作失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"审批操作失败: {e}"
+
+
+async def _tool_summarize(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """长文摘要（由模型自身完成）."""
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "需要文本。"
+    if len(text) > 50000:
+        text = text[:50000] + "...(已截断)"
+
+    style = (args.get("style") or "bullet").strip().lower()
+    style_map = {
+        "bullet": "用要点列表总结",
+        "paragraph": "用一段话总结",
+        "oneline": "用一句话总结",
+    }
+    instruction = style_map.get(style, style_map["bullet"])
+    return f"[摘要任务] 请{instruction}以下内容：\n\n{text}"
+
+
+async def _tool_sentiment(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """情感分析（由模型自身完成）."""
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "需要文本。"
+    if len(text) > 10000:
+        text = text[:10000] + "...(已截断)"
+
+    return f"[情感分析任务] 请分析以下文本的情感倾向（正面/负面/中性）、语气和关键情绪词：\n\n{text}"
+
+
+async def _tool_email_send(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """发送邮件（暂未对接 SMTP）."""
+    to = (args.get("to") or "").strip()
+    subject = (args.get("subject") or "").strip()
+    if not to or not subject:
+        return "需要收件人和主题。"
+    return "邮件功能尚未配置 SMTP，暂时无法发送。请直接通过飞书或其他方式联系。"
+
+
+async def _tool_qrcode(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """生成二维码."""
+    from urllib.parse import quote
+
+    data = (args.get("data") or "").strip()
+    if not data:
+        return "需要编码内容。"
+
+    size = args.get("size", 300) or 300
+    encoded = quote(data, safe="")
+    url = f"https://api.qrserver.com/v1/create-qr-code/?size={size}x{size}&data={encoded}"
+    return f"二维码已生成：\n{url}\n\n内容: {data}"
+
+
+async def _tool_diff_text(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """文本对比."""
+    import difflib
+
+    text1 = args.get("text1") or ""
+    text2 = args.get("text2") or ""
+    if not text1 and not text2:
+        return "需要两段文本。"
+
+    lines1 = text1.splitlines(keepends=True)
+    lines2 = text2.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(lines1, lines2, fromfile="原文", tofile="修改后", lineterm=""))
+
+    if not diff:
+        return "两段文本完全相同。"
+    return "\n".join(diff[:200])
+
+
+async def _tool_whois(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """WHOIS 域名查询."""
+    import httpx
+
+    domain = (args.get("domain") or "").strip().lower()
+    if not domain:
+        return "需要域名。"
+    # 去掉 http:// 等前缀
+    domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"https://whois.freeaitools.xyz/api/{domain}")
+            if resp.status_code != 200:
+                return f"WHOIS 查询失败 (HTTP {resp.status_code})"
+            data = resp.json()
+
+        lines = [f"域名: {domain}"]
+        for key in ("registrar", "creation_date", "expiration_date", "name_servers", "status"):
+            val = data.get(key)
+            if val:
+                if isinstance(val, list):
+                    val = ", ".join(str(v) for v in val)
+                label = {
+                    "registrar": "注册商",
+                    "creation_date": "注册日期",
+                    "expiration_date": "到期日期",
+                    "name_servers": "DNS",
+                    "status": "状态",
+                }.get(key, key)
+                lines.append(f"{label}: {val}")
+        return "\n".join(lines) if len(lines) > 1 else f"未找到 {domain} 的 WHOIS 信息。"
+    except Exception as e:
+        return f"WHOIS 查询失败: {e}"
+
+
+async def _tool_dns_lookup(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """DNS 解析."""
+    import asyncio
+    import socket
+
+    domain = (args.get("domain") or "").strip().lower()
+    if not domain:
+        return "需要域名。"
+    domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
+
+    try:
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: socket.getaddrinfo(domain, None, socket.AF_UNSPEC, socket.SOCK_STREAM),
+        )
+        seen: set[str] = set()
+        lines = [f"DNS 解析 {domain}："]
+        for family, _type, _proto, _canon, addr in results:
+            ip = addr[0]
+            if ip in seen:
+                continue
+            seen.add(ip)
+            record_type = "A" if family == socket.AF_INET else "AAAA"
+            lines.append(f"  {record_type}: {ip}")
+        return "\n".join(lines) if len(lines) > 1 else f"未找到 {domain} 的 DNS 记录。"
+    except socket.gaierror:
+        return f"无法解析域名: {domain}"
+    except Exception as e:
+        return f"DNS 查询失败: {e}"
+
+
+async def _tool_http_check(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """网站可用性检查."""
+    import httpx
+    import time
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return "需要 URL。"
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    try:
+        start = time.monotonic()
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.head(url)
+        elapsed = (time.monotonic() - start) * 1000
+
+        status = resp.status_code
+        ok = "✅ 可用" if 200 <= status < 400 else "❌ 异常"
+        lines = [
+            f"{ok}",
+            f"URL: {url}",
+            f"状态码: {status}",
+            f"响应时间: {elapsed:.0f}ms",
+        ]
+        if resp.headers.get("server"):
+            lines.append(f"服务器: {resp.headers['server']}")
+        return "\n".join(lines)
+    except httpx.ConnectTimeout:
+        return f"❌ 连接超时: {url}"
+    except httpx.ConnectError:
+        return f"❌ 无法连接: {url}"
+    except Exception as e:
+        return f"❌ 检查失败: {e}"
+
+
+async def _tool_express_track(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """快递物流查询."""
+    import httpx
+
+    number = (args.get("number") or "").strip()
+    if not number:
+        return "需要快递单号。"
+
+    company = (args.get("company") or "").strip()
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # 快递100 auto API
+            url = f"https://www.kuaidi100.com/query"
+            params = {"type": company or "auto", "postid": number}
+            resp = await client.get(url, params=params)
+            data = resp.json()
+
+        if data.get("status") != "200" and not data.get("data"):
+            # 尝试备用格式
+            msg = data.get("message") or data.get("msg") or "未查到物流信息"
+            return f"查询失败: {msg}"
+
+        traces = data.get("data", [])
+        if not traces:
+            return f"快递单号 {number} 暂无物流信息。"
+
+        com_name = data.get("com", company or "未知")
+        state_map = {"0": "运输中", "1": "揽收", "2": "疑难", "3": "已签收", "4": "退签", "5": "派件中", "6": "退回"}
+        state = state_map.get(str(data.get("state", "")), "未知")
+
+        lines = [f"📦 {com_name} {number} [{state}]", ""]
+        for t in traces[:10]:
+            time_str = t.get("ftime") or t.get("time", "")
+            context = t.get("context", "")
+            lines.append(f"  {time_str}  {context}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"快递查询失败: {e}"
+
+
+async def _tool_flight_info(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """航班查询（暂用 web_search 代理）."""
+    flight_no = (args.get("flight_no") or "").strip().upper()
+    if not flight_no:
+        return "需要航班号。"
+
+    date = (args.get("date") or "").strip()
+    return f"航班查询功能开发中。请使用 web_search 搜索「{flight_no} {date} 航班动态」获取信息。"
+
+
+async def _tool_aqi(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """空气质量查询."""
+    import httpx
+
+    city = (args.get("city") or "").strip()
+    if not city:
+        return "需要城市名。"
+
+    # 中文城市名映射
+    city_map = {
+        "上海": "shanghai", "北京": "beijing", "广州": "guangzhou",
+        "深圳": "shenzhen", "杭州": "hangzhou", "成都": "chengdu",
+        "重庆": "chongqing", "武汉": "wuhan", "南京": "nanjing",
+        "西安": "xian", "苏州": "suzhou", "天津": "tianjin",
+        "长沙": "changsha", "郑州": "zhengzhou", "青岛": "qingdao",
+        "大连": "dalian", "厦门": "xiamen", "昆明": "kunming",
+        "合肥": "hefei", "福州": "fuzhou",
+    }
+    query = city_map.get(city, city)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.waqi.info/feed/{query}/",
+                params={"token": "demo"},
+            )
+            data = resp.json()
+
+        if data.get("status") != "ok":
+            return f"未找到 {city} 的空气质量数据。"
+
+        d = data["data"]
+        aqi_val = d.get("aqi", "N/A")
+        station = d.get("city", {}).get("name", city)
+        time_str = d.get("time", {}).get("s", "")
+
+        # AQI 等级
+        if isinstance(aqi_val, int):
+            if aqi_val <= 50:
+                level = "优 🟢"
+            elif aqi_val <= 100:
+                level = "良 🟡"
+            elif aqi_val <= 150:
+                level = "轻度污染 🟠"
+            elif aqi_val <= 200:
+                level = "中度污染 🔴"
+            elif aqi_val <= 300:
+                level = "重度污染 🟤"
+            else:
+                level = "严重污染 ⚫"
+        else:
+            level = ""
+
+        iaqi = d.get("iaqi", {})
+        lines = [f"🌍 {station}", f"AQI: {aqi_val} {level}"]
+        if iaqi.get("pm25"):
+            lines.append(f"PM2.5: {iaqi['pm25'].get('v', 'N/A')}")
+        if iaqi.get("pm10"):
+            lines.append(f"PM10: {iaqi['pm10'].get('v', 'N/A')}")
+        if iaqi.get("o3"):
+            lines.append(f"O₃: {iaqi['o3'].get('v', 'N/A')}")
+        if iaqi.get("t"):
+            lines.append(f"温度: {iaqi['t'].get('v', 'N/A')}℃")
+        if iaqi.get("h"):
+            lines.append(f"湿度: {iaqi['h'].get('v', 'N/A')}%")
+        if time_str:
+            lines.append(f"更新: {time_str}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"空气质量查询失败: {e}"
+
+
 _TOOL_HANDLERS: dict[str, Any] = {
     "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
@@ -2624,6 +4259,54 @@ _TOOL_HANDLERS: dict[str, Any] = {
     # 信息采集
     "read_url": _tool_read_url,
     "rss_read": _tool_rss_read,
+    # 生活助手
+    "translate": _tool_translate,
+    "countdown": _tool_countdown,
+    "trending": _tool_trending,
+    # 飞书表格 & 审批
+    "read_feishu_sheet": _tool_read_feishu_sheet,
+    "update_feishu_sheet": _tool_update_feishu_sheet,
+    "list_feishu_approvals": _tool_list_feishu_approvals,
+    # 实用工具
+    "unit_convert": _tool_unit_convert,
+    "random_pick": _tool_random_pick,
+    "holidays": _tool_holidays,
+    "timestamp_convert": _tool_timestamp_convert,
+    "create_feishu_spreadsheet": _tool_create_feishu_spreadsheet,
+    "feishu_contacts": _tool_feishu_contacts,
+    # 文本 & 开发
+    "text_extract": _tool_text_extract,
+    "json_format": _tool_json_format,
+    "password_gen": _tool_password_gen,
+    "ip_lookup": _tool_ip_lookup,
+    "short_url": _tool_short_url,
+    "word_count": _tool_word_count,
+    # 编码 & 开发辅助
+    "base64_codec": _tool_base64_codec,
+    "color_convert": _tool_color_convert,
+    "cron_explain": _tool_cron_explain,
+    "regex_test": _tool_regex_test,
+    "hash_gen": _tool_hash_gen,
+    "url_codec": _tool_url_codec,
+    # 飞书增强
+    "feishu_bitable": _tool_feishu_bitable,
+    "feishu_wiki": _tool_feishu_wiki,
+    "approve_feishu": _tool_approve_feishu,
+    # AI 能力
+    "summarize": _tool_summarize,
+    "sentiment": _tool_sentiment,
+    # 效率工具
+    "email_send": _tool_email_send,
+    "qrcode": _tool_qrcode,
+    "diff_text": _tool_diff_text,
+    # 数据查询
+    "whois": _tool_whois,
+    "dns_lookup": _tool_dns_lookup,
+    "http_check": _tool_http_check,
+    # 生活服务
+    "express_track": _tool_express_track,
+    "flight_info": _tool_flight_info,
+    "aqi": _tool_aqi,
 }
 
 
@@ -2642,7 +4325,10 @@ async def _execute_employee_with_tools(
     from crew.engine import CrewEngine
     from crew.executor import aexecute_with_tools
     from crew.providers import Provider, detect_provider
-    from crew.tool_schema import AGENT_TOOLS, employee_tools_to_schemas, is_finish_tool
+    from crew.tool_schema import (
+        AGENT_TOOLS, DEFERRED_TOOLS, employee_tools_to_schemas,
+        get_tool_schema, is_finish_tool, _make_load_tools_schema,
+    )
 
     discovery = discover_employees(project_dir=ctx.project_dir)
     match = discovery.get(name)
@@ -2675,7 +4361,8 @@ async def _execute_employee_with_tools(
 
     # 从 employee 的 tools 列表中筛选 agent tools
     agent_tool_names = [t for t in (match.tools or []) if t in AGENT_TOOLS]
-    tool_schemas = employee_tools_to_schemas(agent_tool_names)
+    tool_schemas, deferred_names = employee_tools_to_schemas(agent_tool_names)
+    loaded_deferred: set[str] = set()  # 已加载的延迟工具
 
     use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
@@ -2736,6 +4423,31 @@ async def _execute_employee_with_tools(
             tool_results: list[dict[str, Any]] = []
             finished = False
             for tc in result.tool_calls:
+                if tc.name == "load_tools":
+                    # ── 延迟加载工具 ──
+                    requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+                    newly = []
+                    for tn in sorted(requested):
+                        if tn in deferred_names and tn not in loaded_deferred:
+                            schema = get_tool_schema(tn)
+                            if schema:
+                                tool_schemas.append(schema)
+                                loaded_deferred.add(tn)
+                                newly.append(tn)
+                    remaining = deferred_names - loaded_deferred
+                    if not remaining:
+                        tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
+                    else:
+                        for s in tool_schemas:
+                            if s["name"] == "load_tools":
+                                s["description"] = f"加载额外工具后才能调用。可用: {', '.join(sorted(remaining))}"
+                    load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": load_msg,
+                    })
+                    continue
                 tool_output = await _handle_tool_call(
                     ctx, name, tc.name, tc.arguments, effective_agent_id,
                 )
@@ -2779,6 +4491,31 @@ async def _execute_employee_with_tools(
 
             finished = False
             for tc in result.tool_calls:
+                if tc.name == "load_tools":
+                    # ── 延迟加载工具 ──
+                    requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+                    newly = []
+                    for tn in sorted(requested):
+                        if tn in deferred_names and tn not in loaded_deferred:
+                            schema = get_tool_schema(tn)
+                            if schema:
+                                tool_schemas.append(schema)
+                                loaded_deferred.add(tn)
+                                newly.append(tn)
+                    remaining = deferred_names - loaded_deferred
+                    if not remaining:
+                        tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
+                    else:
+                        for s in tool_schemas:
+                            if s["name"] == "load_tools":
+                                s["description"] = f"加载额外工具后才能调用。可用: {', '.join(sorted(remaining))}"
+                    load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": load_msg,
+                    })
+                    continue
                 tool_output = await _handle_tool_call(
                     ctx, name, tc.name, tc.arguments, effective_agent_id,
                 )

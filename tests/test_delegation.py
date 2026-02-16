@@ -86,13 +86,23 @@ class TestDelegateSchema:
         assert schema["input_schema"]["required"] == ["employee_name", "task"]
 
     def test_employee_tools_to_schemas_includes_delegate(self):
-        schemas = employee_tools_to_schemas(["delegate"])
+        # defer=False: delegate 直接在 schemas 中
+        schemas, _ = employee_tools_to_schemas(["delegate"], defer=False)
         names = {s["name"] for s in schemas}
         assert "delegate" in names
         assert "submit" in names
 
+    def test_employee_tools_to_schemas_defers_delegate(self):
+        # defer=True: delegate 在 deferred 集合中，schemas 只有 load_tools + submit
+        schemas, deferred = employee_tools_to_schemas(["delegate"])
+        names = {s["name"] for s in schemas}
+        assert "delegate" not in names
+        assert "delegate" in deferred
+        assert "load_tools" in names
+        assert "submit" in names
+
     def test_employee_tools_to_schemas_without_delegate(self):
-        schemas = employee_tools_to_schemas(["file_read"])
+        schemas, _ = employee_tools_to_schemas(["file_read"], defer=False)
         names = {s["name"] for s in schemas}
         assert "delegate" not in names
         assert "file_read" in names

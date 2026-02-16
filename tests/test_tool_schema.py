@@ -10,30 +10,30 @@ from crew.tool_schema import (
 
 class TestEmployeeToolsToSchemas:
     def test_basic_tools(self):
-        schemas = employee_tools_to_schemas(["file_read", "bash"])
+        schemas, _ = employee_tools_to_schemas(["file_read", "bash"])
         names = {s["name"] for s in schemas}
         assert "file_read" in names
         assert "bash" in names
         assert "submit" in names  # 始终包含
 
     def test_always_includes_submit(self):
-        schemas = employee_tools_to_schemas([])
+        schemas, _ = employee_tools_to_schemas([])
         assert len(schemas) == 1
         assert schemas[0]["name"] == "submit"
 
     def test_no_duplicates(self):
-        schemas = employee_tools_to_schemas(["file_read", "file_read", "bash"])
+        schemas, _ = employee_tools_to_schemas(["file_read", "file_read", "bash"])
         names = [s["name"] for s in schemas]
         assert names.count("file_read") == 1
 
     def test_all_tools(self):
         all_tools = ["file_read", "file_write", "bash", "git", "grep", "glob"]
-        schemas = employee_tools_to_schemas(all_tools)
+        schemas, _ = employee_tools_to_schemas(all_tools)
         # 6 tools + submit
         assert len(schemas) == 7
 
     def test_schema_format(self):
-        schemas = employee_tools_to_schemas(["file_read"])
+        schemas, _ = employee_tools_to_schemas(["file_read"])
         schema = [s for s in schemas if s["name"] == "file_read"][0]
         assert "description" in schema
         assert "input_schema" in schema
@@ -41,7 +41,7 @@ class TestEmployeeToolsToSchemas:
         assert "path" in schema["input_schema"]["properties"]
 
     def test_unknown_tool_skipped(self):
-        schemas = employee_tools_to_schemas(["file_read", "nonexistent"])
+        schemas, _ = employee_tools_to_schemas(["file_read", "nonexistent"])
         names = {s["name"] for s in schemas}
         assert "nonexistent" not in names
         assert "file_read" in names
