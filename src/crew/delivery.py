@@ -271,6 +271,22 @@ def _build_feishu_card(
         {"tag": "markdown", "content": content},
     ]
 
+    # metadata note（员工、模型、耗时）
+    if task_result:
+        meta_parts: list[str] = []
+        if task_result.get("employee"):
+            meta_parts.append(task_result["employee"])
+        if task_result.get("model"):
+            meta_parts.append(task_result["model"])
+        if task_result.get("duration_ms") is not None:
+            ms = task_result["duration_ms"]
+            meta_parts.append(f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms")
+        if meta_parts:
+            elements.append({
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": " · ".join(meta_parts)}],
+            })
+
     return {
         "msg_type": "interactive",
         "card": {
