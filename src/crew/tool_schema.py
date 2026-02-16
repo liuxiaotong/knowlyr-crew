@@ -1743,6 +1743,118 @@ AGENT_TOOLS = {
 # 所有 agent 工具都延迟加载，首轮只有 load_tools + submit
 DEFERRED_TOOLS = AGENT_TOOLS
 
+# ── 工具角色预设 ──
+
+TOOL_ROLE_PRESETS: dict[str, set[str]] = {
+    "readonly": {"file_read", "grep", "glob"},
+    "developer": {"file_read", "file_write", "bash", "git", "grep", "glob"},
+    "agent-core": {"submit", "delegate", "delegate_async", "check_task", "list_tasks"},
+    "meeting": {"organize_meeting", "check_meeting"},
+    "pipeline": {"run_pipeline", "delegate_chain"},
+    "scheduling": {"schedule_task", "list_schedules", "cancel_schedule"},
+    "feishu-read": {
+        "read_feishu_calendar", "list_feishu_tasks", "feishu_chat_history",
+        "list_feishu_groups", "feishu_group_members", "feishu_contacts",
+        "search_feishu_docs", "read_feishu_doc", "read_feishu_sheet",
+        "list_feishu_approvals", "feishu_bitable", "feishu_wiki",
+    },
+    "feishu-write": {
+        "create_feishu_event", "delete_feishu_event",
+        "create_feishu_task", "complete_feishu_task", "delete_feishu_task",
+        "update_feishu_task", "create_feishu_doc", "send_feishu_group",
+        "send_feishu_dm", "update_feishu_sheet", "create_feishu_spreadsheet",
+        "approve_feishu",
+    },
+    "github": {"github_prs", "github_issues", "github_repo_activity"},
+    "notion": {"notion_search", "notion_read", "notion_create"},
+    "web": {"web_search", "read_url", "rss_read"},
+    "memory": {"add_memory", "create_note", "read_notes"},
+    "knowlyr-admin": {
+        "query_stats", "send_message", "list_agents", "lookup_user",
+        "query_agent_work", "read_messages", "get_system_health",
+        "mark_read", "update_agent",
+    },
+    "utilities": {
+        "get_datetime", "calculate", "weather", "translate", "countdown",
+        "trending", "exchange_rate", "stock_price", "unit_convert",
+        "random_pick", "holidays", "timestamp_convert",
+    },
+    "dev-tools": {
+        "base64_codec", "color_convert", "cron_explain", "regex_test",
+        "hash_gen", "url_codec", "text_extract", "json_format",
+        "password_gen", "ip_lookup", "short_url", "word_count",
+        "diff_text", "whois", "dns_lookup", "http_check",
+        "summarize", "sentiment", "qrcode",
+    },
+    "life": {"express_track", "flight_info", "aqi", "email_send"},
+}
+
+# 组合角色
+TOOL_ROLE_PRESETS["feishu-admin"] = (
+    TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["feishu-write"]
+)
+TOOL_ROLE_PRESETS["all-agent"] = AGENT_TOOLS.copy()
+TOOL_ROLE_PRESETS["all"] = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob"}
+
+
+def resolve_effective_tools(employee: "Employee") -> set[str]:
+    """计算员工的有效工具集.
+
+    逻辑:
+    1. permissions 为 None → 直接使用 employee.tools（向后兼容）
+    2. permissions 存在 → 展开 roles + allow - deny，与 tools 取交集
+    """
+    if employee.permissions is None:
+        return set(employee.tools)
+
+    policy = employee.permissions
+
+    # 展开角色
+    from_roles: set[str] = set()
+    for role_name in policy.roles:
+        preset = TOOL_ROLE_PRESETS.get(role_name)
+        if preset is not None:
+            from_roles |= preset
+
+    # 合并 allow，减去 deny
+    effective = from_roles | set(policy.allow)
+    effective -= set(policy.deny)
+
+    # 与 tools 声明取交集（tools 是 LLM 可见的上限）
+    if employee.tools:
+        effective &= set(employee.tools)
+
+    return effective
+
+
+def validate_permissions(employee: "Employee") -> list[str]:
+    """校验权限配置，返回警告列表."""
+    warnings: list[str] = []
+    if employee.permissions is None:
+        return warnings
+
+    policy = employee.permissions
+
+    for role in policy.roles:
+        if role not in TOOL_ROLE_PRESETS:
+            warnings.append(f"未知角色: '{role}'")
+
+    all_known = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob", "submit", "finish"}
+    for tool in policy.allow:
+        if tool not in all_known:
+            warnings.append(f"allow 中未知工具: '{tool}'")
+    for tool in policy.deny:
+        if tool not in all_known:
+            warnings.append(f"deny 中未知工具: '{tool}'")
+
+    # tools 中被 deny 排除的工具
+    effective = resolve_effective_tools(employee)
+    denied_from_tools = set(employee.tools) - effective
+    if denied_from_tools and employee.tools:
+        warnings.append(f"以下已声明工具被权限排除: {', '.join(sorted(denied_from_tools))}")
+
+    return warnings
+
 
 def _make_load_tools_schema(available: set[str]) -> dict[str, Any]:
     """构建 load_tools 元工具 schema."""

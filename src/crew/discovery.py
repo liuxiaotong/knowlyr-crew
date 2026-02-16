@@ -67,6 +67,11 @@ def _scan_directory(
                 logger.warning("跳过 %s: %s", item, "; ".join(errors))
                 continue
 
+            # 权限配置校验（警告级别，不阻止加载）
+            from crew.tool_schema import validate_permissions
+            for w in validate_permissions(emp):
+                logger.warning("权限配置 %s: %s", emp.name, w)
+
             employees.append(emp)
             seen_names.add(emp.name)
         except ValueError as e:

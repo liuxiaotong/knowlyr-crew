@@ -157,6 +157,13 @@ class CrewEngine:
             parts.append(f"**标签**: {', '.join(employee.tags)}")
         if employee.tools:
             parts.append(f"**需要工具**: {', '.join(employee.tools)}")
+        if employee.permissions is not None:
+            from crew.tool_schema import resolve_effective_tools
+            effective = resolve_effective_tools(employee)
+            denied = set(employee.tools) - effective
+            if denied:
+                parts.append(f"**已禁止工具**: {', '.join(sorted(denied))}")
+            parts.append("注意: 调用被禁止的工具会被系统拦截。")
         if employee.context:
             parts.append(f"**预读上下文**: {', '.join(employee.context)}")
 

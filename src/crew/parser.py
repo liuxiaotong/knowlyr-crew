@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from crew.models import Employee, EmployeeArg, EmployeeOutput, SKILL_TO_TOOL
+from crew.models import Employee, EmployeeArg, EmployeeOutput, PermissionPolicy, SKILL_TO_TOOL
 
 # name 格式：仅小写字母、数字、连字符，不以连字符开头或结尾
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -109,6 +109,10 @@ def parse_employee_string(
     raw_context = frontmatter.get("context", [])
     context = raw_context if isinstance(raw_context, list) else []
 
+    # 解析 permissions
+    raw_perm = frontmatter.get("permissions")
+    permissions = PermissionPolicy(**raw_perm) if isinstance(raw_perm, dict) else None
+
     return Employee(
         name=name,
         display_name=frontmatter.get("display_name", ""),
@@ -131,6 +135,7 @@ def parse_employee_string(
         fallback_base_url=str(frontmatter.get("fallback_base_url", "")),
         agent_id=frontmatter.get("agent_id"),
         avatar_prompt=frontmatter.get("avatar_prompt", ""),
+        permissions=permissions,
         body=body,
         source_path=source_path,
         source_layer=source_layer,
@@ -214,6 +219,10 @@ def parse_employee_dir(
     raw_context = config.get("context", [])
     context = raw_context if isinstance(raw_context, list) else []
 
+    # 解析 permissions
+    raw_perm = config.get("permissions")
+    permissions = PermissionPolicy(**raw_perm) if isinstance(raw_perm, dict) else None
+
     version = str(config.get("version", "1.0"))
 
     return Employee(
@@ -238,6 +247,7 @@ def parse_employee_dir(
         fallback_base_url=str(config.get("fallback_base_url", "")),
         agent_id=config.get("agent_id"),
         avatar_prompt=config.get("avatar_prompt", ""),
+        permissions=permissions,
         body=body,
         source_path=dir_path,
         source_layer=source_layer,

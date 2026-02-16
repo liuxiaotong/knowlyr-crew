@@ -354,6 +354,46 @@ def lint_cmd(paths: tuple[Path, ...]):
     click.echo("Lint 通过 ✓")
 
 
+@main.command("permissions")
+@click.argument("name")
+def permissions_cmd(name: str):
+    """显示员工权限详情（角色、有效工具、被禁止工具）。"""
+    from crew.tool_schema import resolve_effective_tools, validate_permissions
+
+    result = discover_employees(project_dir=Path.cwd(), cache_ttl=0)
+    emp = result.get(name)
+    if emp is None:
+        click.echo(f"未找到员工: {name}", err=True)
+        sys.exit(1)
+
+    click.echo(f"员工: {emp.name}")
+    click.echo(f"声明工具 ({len(emp.tools)}): {', '.join(sorted(emp.tools)) or '(无)'}")
+
+    if emp.permissions is None:
+        click.echo("权限策略: (未配置 — 使用 tools 原样)")
+        return
+
+    p = emp.permissions
+    if p.roles:
+        click.echo(f"角色: {', '.join(p.roles)}")
+    if p.allow:
+        click.echo(f"额外允许: {', '.join(p.allow)}")
+    if p.deny:
+        click.echo(f"显式禁止: {', '.join(p.deny)}")
+
+    effective = resolve_effective_tools(emp)
+    denied = set(emp.tools) - effective
+    click.echo(f"有效工具 ({len(effective)}): {', '.join(sorted(effective)) or '(无)'}")
+    if denied:
+        click.echo(f"被禁止工具 ({len(denied)}): {', '.join(sorted(denied))}")
+
+    warnings = validate_permissions(emp)
+    if warnings:
+        click.echo("警告:")
+        for w in warnings:
+            click.echo(f"  - {w}")
+
+
 @main.command("check")
 @click.option("--no-lint", is_flag=True, default=False, help="跳过 lint 检查")
 @click.option("--no-logs", is_flag=True, default=False, help="跳过日志质量检查")
@@ -781,9 +821,11 @@ def _execute_with_tool_loop(
 ) -> Any:
     """CLI 端带工具调用的 agent loop."""
     from crew.executor import ExecutionResult, execute_with_tools
+    from crew.permission import PermissionGuard
     from crew.providers import Provider, detect_provider
     from crew.tool_schema import AGENT_TOOLS, employee_tools_to_schemas, is_finish_tool
 
+    guard = PermissionGuard(emp)
     agent_tool_names = [t for t in (emp.tools or []) if t in AGENT_TOOLS]
     tool_schemas, _ = employee_tools_to_schemas(agent_tool_names, defer=False)
 
@@ -852,7 +894,11 @@ def _execute_with_tool_loop(
                     })
                     finished = True
                 else:
-                    tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    denied_msg = guard.check_soft(tc.name)
+                    if denied_msg:
+                        tool_output = f"[权限拒绝] {denied_msg}"
+                    else:
+                        tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
                     # 记录工具调用到轨迹
                     if traj_collector is not None:
                         traj_collector.add_tool_step(
@@ -901,7 +947,11 @@ def _execute_with_tool_loop(
                     })
                     finished = True
                 else:
-                    tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
+                    denied_msg = guard.check_soft(tc.name)
+                    if denied_msg:
+                        tool_output = f"[权限拒绝] {denied_msg}"
+                    else:
+                        tool_output = _cli_handle_tool_call(tc.name, tc.arguments)
                     # 记录工具调用到轨迹
                     if traj_collector is not None:
                         traj_collector.add_tool_step(

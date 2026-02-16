@@ -67,6 +67,7 @@ def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent
     emp.fallback_model = ""
     emp.fallback_api_key = ""
     emp.fallback_base_url = ""
+    emp.permissions = None
     return emp
 
 
@@ -412,7 +413,7 @@ class TestExecuteEmployeeWithTools:
             # 验证 tool result 消息包含错误提示
             second_msgs = mock_exec.call_args_list[1].kwargs["messages"]
             tool_msg = next(m for m in second_msgs if m.get("role") == "tool")
-            assert "不可用" in tool_msg["content"]
+            assert "权限拒绝" in tool_msg["content"] or "不可用" in tool_msg["content"]
 
 
 # ── Step 2c: routing tests ──

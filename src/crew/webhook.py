@@ -5125,6 +5125,10 @@ async def _execute_employee_with_tools(
                 roster_lines
             )
 
+    from crew.permission import PermissionGuard
+
+    guard = PermissionGuard(match)
+
     # 从 employee 的 tools 列表中筛选 agent tools
     agent_tool_names = [t for t in (match.tools or []) if t in AGENT_TOOLS]
     tool_schemas, deferred_names = employee_tools_to_schemas(agent_tool_names)
@@ -5215,7 +5219,7 @@ async def _execute_employee_with_tools(
                     })
                     continue
                 tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                    ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
                 )
                 if tool_output is None:
                     # finish tool
@@ -5283,7 +5287,7 @@ async def _execute_employee_with_tools(
                     })
                     continue
                 tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                    ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
@@ -5321,12 +5325,20 @@ async def _handle_tool_call(
     tool_name: str,
     arguments: dict[str, Any],
     agent_id: int | None,
+    guard: Any | None = None,
 ) -> str | None:
     """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
     from crew.tool_schema import is_finish_tool
 
     if is_finish_tool(tool_name):
         return None
+
+    # 权限检查
+    if guard is not None:
+        denied_msg = guard.check_soft(tool_name)
+        if denied_msg:
+            logger.warning("权限拒绝: %s.%s", employee_name, tool_name)
+            return f"[权限拒绝] {denied_msg}"
 
     if tool_name == "add_memory":
         from crew.memory import MemoryStore

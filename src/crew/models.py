@@ -42,6 +42,14 @@ class EmployeeOutput(BaseModel):
     dir: str = Field(default=".crew/logs", description="输出目录")
 
 
+class PermissionPolicy(BaseModel):
+    """员工权限策略 — 控制可用工具集."""
+
+    roles: list[str] = Field(default_factory=list, description="工具角色预设名")
+    allow: list[str] = Field(default_factory=list, description="额外允许的工具")
+    deny: list[str] = Field(default_factory=list, description="显式禁止的工具（最高优先级）")
+
+
 class Employee(BaseModel):
     """数字员工定义 — 对应一个 EMPLOYEE.md 文件."""
 
@@ -69,6 +77,7 @@ class Employee(BaseModel):
     research_instructions: str = Field(
         default="", description="讨论前预研指令（编排式讨论的 round 0）"
     )
+    permissions: PermissionPolicy | None = Field(default=None, description="权限策略")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
     source_layer: Literal["builtin", "global", "skill", "project", "private"] = Field(

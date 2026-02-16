@@ -67,7 +67,11 @@ def create_crew_agent(
 
     system_prompt = engine.prompt(employee, project_info=project_info)
 
-    # 3. 生成 tool schemas
+    # 3. 权限守卫
+    from crew.permission import PermissionGuard
+    _guard = PermissionGuard(employee)
+
+    # 4. 生成 tool schemas
     tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
     # 4. 闭包状态
@@ -160,6 +164,12 @@ def create_crew_agent(
             # 终止工具
             if is_finish_tool(tc.name):
                 return {"tool": "submit", "params": tc.arguments}
+
+            # 权限检查
+            denied_msg = _guard.check_soft(tc.name)
+            if denied_msg:
+                logger.warning("Agent bridge 权限拒绝: %s.%s", employee_name, tc.name)
+                return {"tool": "submit", "params": {"result": f"[权限拒绝] {denied_msg}"}}
 
             # 映射为 sandbox 格式
             return map_tool_call(tc.name, tc.arguments)
