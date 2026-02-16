@@ -72,7 +72,7 @@ def _scan_directory(
         except ValueError as e:
             logger.warning("跳过 %s: %s", item, e)
         except Exception as e:
-            logger.warning("跳过 %s: 未知错误 %s", item, e)
+            logger.warning("跳过 %s: 未知错误 %s", item, e, exc_info=True)
 
     # 2. 扫描文件格式的员工（向后兼容），跳过已被目录覆盖的
     for md_file in sorted(dir_path.glob("*.md")):
@@ -94,7 +94,7 @@ def _scan_directory(
         except ValueError as e:
             logger.warning("跳过 %s: %s", md_file, e)
         except Exception as e:
-            logger.warning("跳过 %s: 未知错误 %s", md_file, e)
+            logger.warning("跳过 %s: 未知错误 %s", md_file, e, exc_info=True)
 
     return employees
 
@@ -136,7 +136,7 @@ def _scan_skills_directory(
         except ValueError as e:
             logger.warning("跳过 %s: %s", skill_file, e)
         except Exception as e:
-            logger.warning("跳过 %s: 未知错误 %s", skill_file, e)
+            logger.warning("跳过 %s: 未知错误 %s", skill_file, e, exc_info=True)
 
     return employees
 

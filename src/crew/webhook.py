@@ -866,7 +866,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                     error_text,
                 )
         except Exception:
-            logger.exception("飞书错误回复发送失败")
+            logger.warning("飞书错误回复发送失败", exc_info=True)
 
 
 async def _handle_cron_status(request: Request, ctx: _AppContext) -> JSONResponse:

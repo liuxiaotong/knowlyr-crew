@@ -52,6 +52,13 @@ class LaneLock:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.release()
 
+    def __del__(self) -> None:
+        if self._fh is not None:
+            try:
+                self.release()
+            except Exception:
+                pass
+
 
 @contextmanager
 def lane_lock(lane_name: str, enabled: bool = True, *, project_dir: Path | None = None) -> Iterator[None]:

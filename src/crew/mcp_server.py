@@ -429,6 +429,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
         logger.info("tool_call: %s", name)
         try:
             return await _handle_tool(name, arguments)
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             logger.exception("tool_call_error: %s", name)
             return [TextContent(type="text", text=f"内部错误: {name}")]
