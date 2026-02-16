@@ -255,6 +255,196 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["task_id"],
         },
     },
+    "run_pipeline": {
+        "name": "run_pipeline",
+        "description": "执行预定义的多员工流水线（如安全审计、产品发布）。异步执行，返回任务 ID。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "流水线名称（如 security-test、product-launch）",
+                },
+                "args": {
+                    "type": "object",
+                    "description": "流水线参数（如 {\"target\": \"auth.py\"}）",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    "delegate_chain": {
+        "name": "delegate_chain",
+        "description": "按顺序委派多位同事，前一步的结果自动传给下一步。异步执行，返回任务 ID。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "employee_name": {
+                                "type": "string",
+                                "description": "目标员工名称",
+                            },
+                            "task": {
+                                "type": "string",
+                                "description": "任务描述，可用 {prev} 引用上一步结果",
+                            },
+                        },
+                        "required": ["employee_name", "task"],
+                    },
+                    "description": "按顺序执行的步骤列表",
+                },
+            },
+            "required": ["steps"],
+        },
+    },
+    "schedule_task": {
+        "name": "schedule_task",
+        "description": "创建定时任务（如每天早上发简报、每周五写周报）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "任务名称（唯一标识）",
+                },
+                "cron": {
+                    "type": "string",
+                    "description": "cron 表达式（如 '0 9 * * *' 表示每天 9 点）",
+                },
+                "employee_name": {
+                    "type": "string",
+                    "description": "执行的员工名称",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "任务描述",
+                },
+            },
+            "required": ["name", "cron", "employee_name", "task"],
+        },
+    },
+    "list_schedules": {
+        "name": "list_schedules",
+        "description": "列出所有定时任务及下次执行时间。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    "cancel_schedule": {
+        "name": "cancel_schedule",
+        "description": "取消一个定时任务。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "要取消的定时任务名称",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    "agent_file_read": {
+        "name": "agent_file_read",
+        "description": "读取项目目录内的文件内容（只读，不能写入）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（相对于项目根目录）",
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "起始行号（可选，默认从头开始）",
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "结束行号（可选，默认读到尾）",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    "agent_file_grep": {
+        "name": "agent_file_grep",
+        "description": "在项目目录内搜索文件内容（正则匹配）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "搜索模式（正则表达式）",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "搜索目录（相对于项目根目录，默认整个项目）",
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "文件名过滤（如 '*.py'）",
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
+    "query_data": {
+        "name": "query_data",
+        "description": "查询细粒度业务数据（按指标、时间段、分组维度）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "metric": {
+                    "type": "string",
+                    "enum": ["users", "messages", "agents", "revenue", "tasks"],
+                    "description": "查询指标",
+                },
+                "period": {
+                    "type": "string",
+                    "enum": ["today", "week", "month", "quarter"],
+                    "description": "时间段（默认 week）",
+                    "default": "week",
+                },
+                "group_by": {
+                    "type": "string",
+                    "enum": ["day", "week", "agent"],
+                    "description": "分组维度（可选）",
+                },
+            },
+            "required": ["metric"],
+        },
+    },
+    "find_free_time": {
+        "name": "find_free_time",
+        "description": "查询多位飞书用户的共同空闲时间段。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "飞书用户 open_id 列表",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "查询未来几天（默认 7）",
+                    "default": 7,
+                },
+                "duration_minutes": {
+                    "type": "integer",
+                    "description": "需要的时长（分钟，默认 60）",
+                    "default": 60,
+                },
+            },
+            "required": ["user_ids"],
+        },
+    },
     "query_stats": {
         "name": "query_stats",
         "description": "查询公司实时业务数据。返回用户增长、消息活跃、AI团队状态、财务等数据。问业务问题前先调这个。",
@@ -1502,6 +1692,10 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting",
+    "run_pipeline", "delegate_chain",
+    "schedule_task", "list_schedules", "cancel_schedule",
+    "agent_file_read", "agent_file_grep",
+    "query_data", "find_free_time",
     "web_search", "create_note", "lookup_user", "query_agent_work",
     "read_notes", "read_messages", "get_system_health",
     "mark_read", "update_agent",

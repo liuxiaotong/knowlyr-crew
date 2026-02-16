@@ -110,6 +110,37 @@ class CronScheduler:
         """调度器是否运行中."""
         return self._running
 
+    async def add_schedule(self, schedule: "CronSchedule") -> None:
+        """动态添加定时任务."""
+        self._config.schedules.append(schedule)
+        if self._running:
+            task = asyncio.create_task(
+                self._run_schedule(schedule),
+                name=f"cron-{schedule.name}",
+            )
+            self._tasks.append(task)
+            logger.info("动态添加 cron 任务: %s (%s)", schedule.name, schedule.cron)
+
+    async def remove_schedule(self, name: str) -> bool:
+        """移除定时任务."""
+        found = None
+        for s in self._config.schedules:
+            if s.name == name:
+                found = s
+                break
+        if found is None:
+            return False
+
+        self._config.schedules.remove(found)
+        # 取消对应的 asyncio.Task
+        for task in self._tasks:
+            if task.get_name() == f"cron-{name}":
+                task.cancel()
+                self._tasks.remove(task)
+                break
+        logger.info("已移除 cron 任务: %s", name)
+        return True
+
     def get_next_runs(self) -> list[dict]:
         """获取各任务的下次触发时间."""
         result = []

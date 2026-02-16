@@ -587,6 +587,53 @@ async def add_attendees_to_event(
         return {"ok": False, "error": str(e)}
 
 
+# ── 忙闲查询 ──
+
+
+async def get_freebusy(
+    token_mgr: FeishuTokenManager,
+    user_ids: list[str],
+    start_time: int,
+    end_time: int,
+) -> dict:
+    """查询飞书用户忙闲状态.
+
+    Parameters
+    ----------
+    token_mgr : FeishuTokenManager
+    user_ids : list[str]  — open_id 列表
+    start_time : int — unix timestamp
+    end_time : int — unix timestamp
+
+    Returns
+    -------
+    dict — 飞书 API 原始结果或 {"error": ...}
+    """
+    import httpx
+
+    token = await token_mgr.get_token()
+    url = f"{FEISHU_API_BASE}/calendar/v4/freebusy/list"
+    payload = {
+        "time_min": str(start_time),
+        "time_max": str(end_time),
+        "user_id_type": "open_id",
+        "user_ids": user_ids,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            data = resp.json()
+            if data.get("code", -1) != 0:
+                return {"error": data.get("msg", f"HTTP {resp.status_code}")}
+            return data.get("data", {})
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── 事件去重 ──
 
 
