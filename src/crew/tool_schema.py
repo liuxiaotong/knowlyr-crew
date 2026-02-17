@@ -1864,6 +1864,33 @@ TOOL_ROLE_PRESETS["feishu-admin"] = (
 TOOL_ROLE_PRESETS["all-agent"] = AGENT_TOOLS.copy()
 TOOL_ROLE_PRESETS["all"] = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob"}
 
+# ── 职能档位 — 按员工角色分组 ──
+
+TOOL_ROLE_PRESETS["profile-engineer"] = (
+    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["knowlyr-admin"]
+    | TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["github"]
+    | TOOL_ROLE_PRESETS["web"] | TOOL_ROLE_PRESETS["utilities"]
+    | {"delegate"}
+)
+TOOL_ROLE_PRESETS["profile-researcher"] = (
+    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["feishu-read"]
+    | TOOL_ROLE_PRESETS["web"] | TOOL_ROLE_PRESETS["utilities"]
+)
+TOOL_ROLE_PRESETS["profile-business"] = (
+    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["knowlyr-admin"]
+    | TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["feishu-write"]
+    | TOOL_ROLE_PRESETS["notion"] | TOOL_ROLE_PRESETS["web"]
+    | TOOL_ROLE_PRESETS["utilities"]
+)
+TOOL_ROLE_PRESETS["profile-product"] = (
+    TOOL_ROLE_PRESETS["profile-business"] | TOOL_ROLE_PRESETS["github"]
+    | TOOL_ROLE_PRESETS["agent-core"]
+)
+TOOL_ROLE_PRESETS["profile-security"] = (
+    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["feishu-read"]
+    | TOOL_ROLE_PRESETS["github"] | TOOL_ROLE_PRESETS["web"]
+)
+
 
 def resolve_effective_tools(employee: "Employee") -> set[str]:
     """计算员工的有效工具集.

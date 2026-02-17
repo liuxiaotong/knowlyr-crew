@@ -436,6 +436,55 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     },
                 },
             ),
+            Tool(
+                name="list_tool_schemas",
+                description="列出所有可用的工具定义（名称和描述）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "role": {
+                            "type": "string",
+                            "description": "按角色预设过滤（如 profile-engineer, memory, github）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="get_permission_matrix",
+                description="查看员工权限矩阵 — 每位员工的有效工具集和权限策略",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee": {
+                            "type": "string",
+                            "description": "查询指定员工（可选，不传则列出所有）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="get_audit_log",
+                description="查询工具调用审计日志",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee": {
+                            "type": "string",
+                            "description": "按员工过滤（可选）",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "返回条数（默认 50）",
+                            "default": 50,
+                        },
+                        "denied_only": {
+                            "type": "boolean",
+                            "description": "仅返回被拒绝的调用（默认 false）",
+                            "default": False,
+                        },
+                    },
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -827,6 +876,85 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 if agents is None:
                     return [TextContent(type="text", text="查询失败 — 请检查 knowlyr-id 连接")]
                 return [TextContent(type="text", text=json.dumps(agents, ensure_ascii=False, indent=2))]
+
+        elif name == "list_tool_schemas":
+            from crew.tool_schema import _TOOL_SCHEMAS, TOOL_ROLE_PRESETS
+            role = arguments.get("role")
+            if role:
+                preset = TOOL_ROLE_PRESETS.get(role)
+                if preset is None:
+                    available = sorted(TOOL_ROLE_PRESETS.keys())
+                    return [TextContent(
+                        type="text",
+                        text=f"未知角色: {role}\n可用角色: {', '.join(available)}",
+                    )]
+                tool_names = sorted(preset)
+            else:
+                tool_names = sorted(_TOOL_SCHEMAS.keys())
+            data = [
+                {"name": t, "description": _TOOL_SCHEMAS[t]["description"]}
+                for t in tool_names if t in _TOOL_SCHEMAS
+            ]
+            return [TextContent(
+                type="text",
+                text=json.dumps(data, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "get_permission_matrix":
+            from crew.tool_schema import resolve_effective_tools, TOOL_ROLE_PRESETS
+            result = discover_employees(project_dir=_project_dir)
+            emp_name = arguments.get("employee")
+            employees = list(result.employees.values())
+            if emp_name:
+                emp = result.get(emp_name)
+                if emp is None:
+                    return [TextContent(type="text", text=f"未找到员工: {emp_name}")]
+                employees = [emp]
+            matrix = []
+            for emp in employees:
+                effective = resolve_effective_tools(emp)
+                entry = {
+                    "name": emp.name,
+                    "display_name": emp.effective_display_name,
+                    "tools_declared": len(emp.tools),
+                    "tools_effective": len(effective),
+                    "permissions": (
+                        emp.permissions.model_dump(mode="json")
+                        if emp.permissions else None
+                    ),
+                    "effective_tools": sorted(effective),
+                }
+                matrix.append(entry)
+            return [TextContent(
+                type="text",
+                text=json.dumps(matrix, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "get_audit_log":
+            from crew.permission import get_audit_logger
+            audit = get_audit_logger()
+            log_path = audit._ensure_dir()
+            if not log_path.exists():
+                return [TextContent(type="text", text="暂无审计日志")]
+            emp_filter = arguments.get("employee")
+            limit = arguments.get("limit", 50)
+            denied_only = arguments.get("denied_only", False)
+            records = []
+            for line in log_path.read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if emp_filter and record.get("employee") != emp_filter:
+                    continue
+                if denied_only and record.get("allowed", True):
+                    continue
+                records.append(record)
+            records = records[-limit:]
+            return [TextContent(
+                type="text",
+                text=json.dumps(records, ensure_ascii=False, indent=2),
+            )]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 
