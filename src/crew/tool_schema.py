@@ -594,6 +594,21 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "project_status": {
+        "name": "project_status",
+        "description": "查询 knowlyr 生态所有项目的开发状态（版本、PyPI、测试、Git）。默认读缓存（快），传 refresh=true 实时刷新（3-5 秒）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "refresh": {
+                    "type": "boolean",
+                    "description": "true=运行脚本实时刷新，false=读缓存（默认 false）",
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
+    },
     "mark_read": {
         "name": "mark_read",
         "description": "把 Kai 的未读消息标为已读。可以标某个人发的，也可以全部标已读。",
@@ -1697,7 +1712,7 @@ AGENT_TOOLS = {
     "agent_file_read", "agent_file_grep",
     "query_data", "find_free_time",
     "web_search", "create_note", "lookup_user", "query_agent_work",
-    "read_notes", "read_messages", "get_system_health",
+    "read_notes", "read_messages", "get_system_health", "project_status",
     "mark_read", "update_agent",
     "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
     "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
@@ -1772,7 +1787,7 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
     "knowlyr-admin": {
         "query_stats", "send_message", "list_agents", "lookup_user",
         "query_agent_work", "read_messages", "get_system_health",
-        "mark_read", "update_agent",
+        "project_status", "mark_read", "update_agent",
     },
     "utilities": {
         "get_datetime", "calculate", "weather", "translate", "countdown",
