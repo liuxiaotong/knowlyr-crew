@@ -645,10 +645,88 @@ async def _tool_create_feishu_doc(
 
 
 
+_URL_RE = re.compile(r"https?://\S+")
+
+
+async def _fetch_og_meta(url: str) -> dict[str, str]:
+    """抓取页面 Open Graph 元数据（title / description / image）."""
+    import httpx
+
+    meta: dict[str, str] = {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            html = resp.text[:20_000]  # 只看前 20k，够提取 meta 了
+
+        # og:title / og:description / og:image
+        for prop in ("title", "description", "image"):
+            m = re.search(
+                rf'<meta\s[^>]*property=["\']og:{prop}["\'][^>]*content=["\']([^"\']+)["\']',
+                html, re.IGNORECASE,
+            )
+            if not m:
+                m = re.search(
+                    rf'<meta\s[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:{prop}["\']',
+                    html, re.IGNORECASE,
+                )
+            if m:
+                meta[prop] = m.group(1).strip()
+
+        # 兜底：用 <title> 标签
+        if "title" not in meta:
+            m = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+            if m:
+                meta["title"] = m.group(1).strip()
+    except Exception:
+        pass
+    return meta
+
+
+def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> dict:
+    """根据链接和 OG 元数据构建飞书卡片."""
+    og = og or {}
+    is_feishu = "feishu.cn/" in url
+
+    # 标题优先级：消息附带文字 > og:title > 兜底
+    user_title = text.replace(url, "").strip().strip("：:—\n")
+    title = user_title or og.get("title") or ("飞书文档" if is_feishu else url.split("//")[-1].split("?")[0])
+    description = og.get("description", "")
+
+    btn_label = "打开文档" if is_feishu else "打开链接"
+    color = "blue" if is_feishu else "grey"
+
+    elements: list[dict] = []
+    if description:
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "plain_text", "content": description[:200]},
+        })
+    elements.append({
+        "tag": "action",
+        "actions": [
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": btn_label},
+                "url": url,
+                "type": "primary",
+            },
+        ],
+    })
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": color,
+        },
+        "elements": elements,
+    }
+
+
 async def _tool_send_feishu_group(
     args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
 ) -> str:
-    """发消息到飞书群."""
+    """发消息到飞书群（含链接时自动发卡片，带页面预览）."""
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置，无法发群消息。"
 
@@ -657,8 +735,20 @@ async def _tool_send_feishu_group(
     if not chat_id or not text:
         return "需要 chat_id 和 text。"
 
-    from crew.feishu import send_feishu_text
-    result = await send_feishu_text(ctx.feishu_token_mgr, chat_id, text)
+    from crew.feishu import send_feishu_message, send_feishu_text
+
+    # 检测链接 — 有则抓取页面元数据并发卡片，无则发纯文本
+    m = _URL_RE.search(text)
+    if m:
+        url = m.group(0)
+        og = await _fetch_og_meta(url)
+        card = _build_link_card(url, text, og)
+        result = await send_feishu_message(
+            ctx.feishu_token_mgr, chat_id, content=card, msg_type="interactive",
+        )
+    else:
+        result = await send_feishu_text(ctx.feishu_token_mgr, chat_id, text)
+
     if result.get("code") == 0 or result.get("ok"):
         return f"消息已发送到群 {chat_id}。"
     return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
