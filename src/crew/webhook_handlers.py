@@ -68,6 +68,16 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
             temperature = yaml_config.get("temperature")
             max_tokens = yaml_config.get("max_tokens")
 
+    # 组织架构信息（团队、权限、成本）
+    from crew.organization import load_organization, get_effective_authority
+    org = load_organization(project_dir=ctx.project_dir)
+    team = org.get_team(employee.name)
+    authority = get_effective_authority(org, employee.name, project_dir=ctx.project_dir)
+
+    # 7 天成本
+    from crew.cost import query_cost_summary
+    cost_summary = query_cost_summary(ctx.registry, employee=employee.name, days=7)
+
     return JSONResponse({
         "name": employee.name,
         "character_name": employee.character_name,
@@ -82,6 +92,9 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
         "tool_schemas": tool_schemas,
         "system_prompt": system_prompt,
         "agent_id": employee.agent_id,
+        "team": team,
+        "authority": authority,
+        "cost_7d": cost_summary,
     })
 
 
@@ -582,4 +595,116 @@ async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
         "enabled": True,
         "running": ctx.scheduler.running,
         "schedules": ctx.scheduler.get_next_runs(),
+    })
+
+
+async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
+    """成本汇总 — GET /api/cost/summary?days=7&employee=xxx."""
+    from starlette.responses import JSONResponse
+    from crew.cost import query_cost_summary
+
+    days = int(request.query_params.get("days", "7"))
+    employee = request.query_params.get("employee")
+
+    summary = query_cost_summary(ctx.registry, employee=employee, days=days)
+    return JSONResponse(summary)
+
+
+async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
+    """恢复员工权限 — POST /api/employees/{identifier}/authority/restore."""
+    from starlette.responses import JSONResponse
+    from crew.discovery import discover_employees
+    from crew.organization import (
+        load_organization,
+        get_effective_authority,
+        _load_overrides,
+        _save_overrides,
+        _authority_overrides,
+    )
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir)
+
+    employee = None
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                employee = emp
+                break
+    except ValueError:
+        employee = result.employees.get(identifier)
+
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    _load_overrides(ctx.project_dir)
+    override = _authority_overrides.pop(employee.name, None)
+    if override is None:
+        org = load_organization(project_dir=ctx.project_dir)
+        current = org.get_authority(employee.name)
+        return JSONResponse({
+            "ok": True,
+            "employee": employee.name,
+            "authority": current,
+            "message": "无覆盖记录，权限未变更",
+        })
+
+    _save_overrides(ctx.project_dir)
+    org = load_organization(project_dir=ctx.project_dir)
+    restored = org.get_authority(employee.name)
+
+    return JSONResponse({
+        "ok": True,
+        "employee": employee.name,
+        "authority": restored,
+        "previous_override": override,
+        "message": f"权限已恢复: {override['level']} → {restored}",
+    })
+
+
+async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
+    """项目状态概览 — 组织架构 + 成本 + 员工列表."""
+    from starlette.responses import JSONResponse
+    from crew.discovery import discover_employees
+    from crew.organization import load_organization, get_effective_authority
+    from crew.cost import query_cost_summary
+
+    result = discover_employees(ctx.project_dir)
+    org = load_organization(project_dir=ctx.project_dir)
+    cost = query_cost_summary(ctx.registry, days=7)
+
+    employees_info = []
+    for name, emp in sorted(result.employees.items()):
+        team = org.get_team(name)
+        authority = get_effective_authority(org, name, project_dir=ctx.project_dir)
+        employees_info.append({
+            "name": name,
+            "character_name": emp.character_name,
+            "display_name": emp.display_name,
+            "description": emp.description,
+            "model": emp.model,
+            "agent_id": emp.agent_id,
+            "team": team,
+            "authority": authority,
+        })
+
+    # 团队汇总
+    teams_info = {}
+    for tid, team in org.teams.items():
+        teams_info[tid] = {
+            "label": team.label,
+            "member_count": len(team.members),
+            "members": team.members,
+        }
+
+    return JSONResponse({
+        "total_employees": len(result.employees),
+        "teams": teams_info,
+        "authority_levels": {
+            level: {"label": auth.label, "count": len(auth.members)}
+            for level, auth in org.authority.items()
+        },
+        "cost_7d": cost,
+        "employees": employees_info,
     })

@@ -90,6 +90,8 @@ from crew.webhook_executor import (  # noqa: F401
 # ── re-export: HTTP handler ──
 from crew.webhook_handlers import (  # noqa: F401
     _handle_agent_run,
+    _handle_authority_restore,
+    _handle_cost_summary,
     _handle_cron_status,
     _handle_employee_delete,
     _handle_employee_prompt,
@@ -99,6 +101,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_github,
     _handle_memory_ingest,
     _handle_openclaw,
+    _handle_project_status,
     _handle_run_employee,
     _handle_run_pipeline,
     _handle_task_replay,
@@ -219,7 +222,10 @@ def create_webhook_app(
         Route("/api/employees/{identifier}/state", endpoint=_make_handler(ctx, _handle_employee_state), methods=["GET"]),
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_delete), methods=["DELETE"]),
+        Route("/api/employees/{identifier}/authority/restore", endpoint=_make_handler(ctx, _handle_authority_restore), methods=["POST"]),
         Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
+        Route("/api/cost/summary", endpoint=_make_handler(ctx, _handle_cost_summary), methods=["GET"]),
+        Route("/api/project/status", endpoint=_make_handler(ctx, _handle_project_status), methods=["GET"]),
     ]
 
     async def on_startup():

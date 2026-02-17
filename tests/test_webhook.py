@@ -1102,3 +1102,103 @@ class TestEmployeeUpdatePUT:
         mock_aupdate.assert_called_once_with(
             agent_id=3082, model="gpt-4o", temperature=0.5,
         )
+
+
+class TestCostSummaryEndpoint:
+    """GET /api/cost/summary — 成本汇总."""
+
+    def test_cost_summary_returns_json(self):
+        """成本汇总应返回有效 JSON."""
+        client = _make_client()
+        resp = client.get(
+            "/api/cost/summary",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total_cost_usd" in data
+        assert "by_employee" in data
+        assert "by_model" in data
+        assert "period_days" in data
+
+    def test_cost_summary_with_days(self):
+        """应支持 days 参数."""
+        client = _make_client()
+        resp = client.get(
+            "/api/cost/summary?days=30",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["period_days"] == 30
+
+    def test_cost_summary_requires_auth(self):
+        """成本汇总需要认证."""
+        client = _make_client()
+        resp = client.get("/api/cost/summary")
+        assert resp.status_code == 401
+
+
+class TestProjectStatusEndpoint:
+    """GET /api/project/status — 项目状态概览."""
+
+    def test_project_status_returns_json(self):
+        """项目状态应返回有效 JSON."""
+        client = _make_client()
+        resp = client.get(
+            "/api/project/status",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total_employees" in data
+        assert "teams" in data
+        assert "employees" in data
+        assert "cost_7d" in data
+
+    def test_project_status_requires_auth(self):
+        """项目状态需要认证."""
+        client = _make_client()
+        resp = client.get("/api/project/status")
+        assert resp.status_code == 401
+
+
+class TestAuthorityRestoreEndpoint:
+    """POST /api/employees/{id}/authority/restore — 权限恢复."""
+
+    @patch("crew.discovery.discover_employees")
+    def test_restore_no_override(self, mock_discover):
+        """无覆盖记录时返回当前权限."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(name="test-emp", display_name="Test", description="d", body="b")
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+
+        client = _make_client()
+        resp = client.post(
+            "/api/employees/test-emp/authority/restore",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "无覆盖记录" in data["message"]
+
+    @patch("crew.discovery.discover_employees")
+    def test_restore_not_found(self, mock_discover):
+        """不存在的员工应返回 404."""
+        from crew.models import DiscoveryResult
+
+        mock_discover.return_value = DiscoveryResult(employees={})
+
+        client = _make_client()
+        resp = client.post(
+            "/api/employees/nonexistent/authority/restore",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 404
+
+    def test_restore_requires_auth(self):
+        """权限恢复需要认证."""
+        client = _make_client()
+        resp = client.post("/api/employees/test-emp/authority/restore")
+        assert resp.status_code == 401
