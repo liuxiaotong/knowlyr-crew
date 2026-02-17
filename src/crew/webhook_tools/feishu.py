@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
@@ -265,7 +268,7 @@ async def _tool_list_feishu_tasks(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                "https://open.feishu.cn/open-apis/task/v1/tasks",
+                "https://open.feishu.cn/open-apis/task/v2/tasks",
                 headers={"Authorization": f"Bearer {token}"},
                 params={"page_size": limit},
             )
@@ -282,14 +285,14 @@ async def _tool_list_feishu_tasks(
         lines = []
         for task in items:
             summary = task.get("summary", "无标题")
-            complete_time = task.get("complete_time", "0")
-            status = "✅" if complete_time and complete_time != "0" else "⬜"
+            completed_at = task.get("completed_at", "0")
+            status = "✅" if completed_at and completed_at != "0" else "⬜"
             due = task.get("due", {})
             due_str = ""
-            if due and due.get("time") and due["time"] != "0":
-                due_dt = datetime.fromtimestamp(int(due["time"]), tz=tz_cn)
+            if due and due.get("timestamp") and due["timestamp"] != "0":
+                due_dt = datetime.fromtimestamp(int(due["timestamp"]), tz=tz_cn)
                 due_str = f" 截止{due_dt.strftime('%m-%d')}"
-            task_id = task.get("id", "")
+            task_id = task.get("guid", "")
             lines.append(f"{status} {summary}{due_str} [task_id={task_id}]")
 
         return "\n".join(lines)
@@ -315,7 +318,7 @@ async def _tool_complete_feishu_task(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}/complete",
+                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}/complete",
                 headers={"Authorization": f"Bearer {token}"},
             )
             data = resp.json()
@@ -345,7 +348,7 @@ async def _tool_delete_feishu_task(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.delete(
-                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}",
+                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {token}"},
             )
             data = resp.json()
@@ -389,7 +392,7 @@ async def _tool_update_feishu_task(
         tz_cn = _tz(timedelta(hours=8))
         try:
             due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=tz_cn)
-            body["due"] = {"time": str(int(due_dt.timestamp()))}
+            body["due"] = {"timestamp": str(int(due_dt.timestamp())), "is_all_day": True}
             update_fields.append("due")
         except ValueError:
             return f"截止日期格式不对: {due_str}，需要 YYYY-MM-DD。"
@@ -401,9 +404,10 @@ async def _tool_update_feishu_task(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.patch(
-                f"https://open.feishu.cn/open-apis/task/v1/tasks/{task_id}",
+                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"task": body, "update_fields": update_fields},
+                params={"update_fields": ",".join(update_fields)},
+                json=body,
             )
             data = resp.json()
 
@@ -1249,7 +1253,7 @@ async def _tool_feishu_wiki(
 async def _tool_approve_feishu(
     args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
 ) -> str:
-    """操作飞书审批."""
+    """操作飞书审批（通过/拒绝）."""
     import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
@@ -1265,27 +1269,52 @@ async def _tool_approve_feishu(
         return "action 必须是 approve 或 reject。"
 
     token = await ctx.feishu_token_mgr.get_token()
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     base = "https://open.feishu.cn/open-apis"
+    action_cn = "通过" if action == "approve" else "拒绝"
 
     try:
-        body: dict[str, Any] = {"approval_code": "", "instance_code": instance_id}
-        if action == "approve":
-            body["status"] = "APPROVED"
-        else:
-            body["status"] = "REJECTED"
-        if comment:
-            body["comment"] = comment
-
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # 1. 获取审批实例详情，拿到 approval_code 和待处理任务节点
+            inst_resp = await client.get(
+                f"{base}/approval/v4/instances/{instance_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            inst_data = inst_resp.json()
+            if inst_data.get("code") != 0:
+                return f"获取审批实例失败: {inst_data.get('msg', '未知错误')}"
+
+            instance = inst_data.get("data", {})
+            approval_code = instance.get("approval_code", "")
+
+            # 2. 从 task_list 找 PENDING 状态的审批节点
+            task_list = instance.get("task_list", [])
+            pending_task = None
+            for t in task_list:
+                if t.get("status") == "PENDING":
+                    pending_task = t
+                    break
+
+            if not pending_task:
+                return "没有待处理的审批节点，可能已被处理。"
+
+            task_node_id = pending_task.get("id", "")
+            user_id = pending_task.get("user_id", "")
+
+            # 3. 调用审批/拒绝 API
             resp = await client.post(
-                f"{base}/approval/v4/instances/{instance_id}/comments",
+                f"{base}/approval/v4/tasks/{action}",
                 headers=headers,
-                json={"content": comment or ("同意" if action == "approve" else "拒绝")},
+                json={
+                    "approval_code": approval_code,
+                    "instance_code": instance_id,
+                    "user_id": user_id,
+                    "task_id": task_node_id,
+                    "comment": comment or action_cn,
+                },
             )
             data = resp.json()
 
-        action_cn = "通过" if action == "approve" else "拒绝"
         if data.get("code") == 0:
             return f"审批已{action_cn}。"
         return f"审批操作失败: {data.get('msg', '未知错误')}"
