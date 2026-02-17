@@ -302,6 +302,28 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["steps"],
         },
     },
+    "route": {
+        "name": "route",
+        "description": "按预定义的协作路由模板发起委派链。比手动编排 delegate_chain 更快。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "description": "路由模板名称（如 code_change、new_feature、security_audit、performance、data_pipeline、external_content）",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "任务描述，会传递给链中每一步",
+                },
+                "overrides": {
+                    "type": "object",
+                    "description": "覆盖模板中的员工选择，格式 {role: employee_name}",
+                },
+            },
+            "required": ["template", "task"],
+        },
+    },
     "schedule_task": {
         "name": "schedule_task",
         "description": "创建定时任务（如每天早上发简报、每周五写周报）。",
@@ -1707,7 +1729,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting",
-    "run_pipeline", "delegate_chain",
+    "run_pipeline", "delegate_chain", "route",
     "schedule_task", "list_schedules", "cancel_schedule",
     "agent_file_read", "agent_file_grep",
     "query_data", "find_free_time",
@@ -1765,7 +1787,7 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
     "developer": {"file_read", "file_write", "bash", "git", "grep", "glob"},
     "agent-core": {"submit", "delegate", "delegate_async", "check_task", "list_tasks"},
     "meeting": {"organize_meeting", "check_meeting"},
-    "pipeline": {"run_pipeline", "delegate_chain"},
+    "pipeline": {"run_pipeline", "delegate_chain", "route"},
     "scheduling": {"schedule_task", "list_schedules", "cancel_schedule"},
     "feishu-read": {
         "read_feishu_calendar", "list_feishu_tasks", "feishu_chat_history",

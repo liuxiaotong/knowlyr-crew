@@ -69,6 +69,9 @@ async def _tool_check_task(
     if record.completed_at:
         lines.append(f"完成: {record.completed_at.strftime('%Y-%m-%d %H:%M:%S')}")
     if record.status == "completed" and record.result:
+        # 权限标记
+        if record.result.get("needs_kai_approval"):
+            lines.append(f"\n⚠️ {record.result.get('authority_note', '需 Kai 确认')}")
         if record.target_type == "meeting":
             synthesis = record.result.get("synthesis", "")
             lines.append(f"\n会议综合结论:\n{synthesis[:1000]}")
@@ -538,6 +541,62 @@ async def _tool_find_free_time(
 
 
 
+async def _tool_route(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """按路由模板发起委派链."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    from crew.organization import load_organization
+
+    org = load_organization(project_dir=ctx.project_dir)
+
+    template_name = args.get("template", "")
+    task_desc = args.get("task", "")
+    overrides = args.get("overrides", {}) or {}
+
+    if not template_name or not task_desc:
+        return "错误: 必须提供 template 和 task"
+
+    tmpl = org.routing_templates.get(template_name)
+    if tmpl is None:
+        available = ", ".join(sorted(org.routing_templates.keys()))
+        return f"错误：未找到路由模板 '{template_name}'。可用：{available}"
+
+    # 展开模板为 delegate_chain steps
+    steps: list[dict[str, str]] = []
+    for step in tmpl.steps:
+        if step.optional and step.role not in overrides:
+            continue
+
+        emp_name = overrides.get(step.role)
+        if not emp_name:
+            if step.employee:
+                emp_name = step.employee
+            elif step.employees:
+                emp_name = step.employees[0]
+            elif step.team:
+                members = org.get_team_members(step.team)
+                emp_name = members[0] if members else None
+
+        if not emp_name:
+            continue
+
+        step_task = f"[{step.role}] {task_desc}"
+        if len(steps) > 0:
+            step_task += "\n\n上一步结果: {prev}"
+
+        steps.append({"employee_name": emp_name, "task": step_task})
+
+    if not steps:
+        return f"错误: 模板 '{template_name}' 展开后没有有效步骤"
+
+    return await _tool_delegate_chain(
+        {"steps": steps}, agent_id=agent_id, ctx=ctx,
+    )
+
+
 HANDLERS: dict[str, object] = {
     "delegate_async": _tool_delegate_async,
     "check_task": _tool_check_task,
@@ -553,4 +612,5 @@ HANDLERS: dict[str, object] = {
     "agent_file_grep": _tool_agent_file_grep,
     "query_data": _tool_query_data,
     "find_free_time": _tool_find_free_time,
+    "route": _tool_route,
 }

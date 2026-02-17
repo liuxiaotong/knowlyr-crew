@@ -108,6 +108,22 @@ async def _execute_task(
 
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
+
+        # B 类权限标记：结果需 Kai 过目
+        if record.target_type == "employee" and isinstance(result, dict):
+            try:
+                from crew.organization import load_organization
+
+                org = load_organization(project_dir=ctx.project_dir)
+                auth = org.get_authority(record.target_name)
+                if auth == "B":
+                    result["needs_kai_approval"] = True
+                    result["authority_note"] = (
+                        "此员工为 B 类（需 Kai 确认），"
+                        "结果仅供参考，请 Kai 过目后再决定下一步。"
+                    )
+            except Exception:
+                pass  # 组织架构加载失败不影响任务完成
     except Exception as e:
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
@@ -341,16 +357,48 @@ async def _execute_employee_with_tools(
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
 
-    # 如果有 delegate 工具，追加同事名单
+    # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
-        roster_lines: list[str] = []
+        from crew.organization import load_organization
+
+        org = load_organization(project_dir=ctx.project_dir)
+
+        team_rosters: dict[str, list[str]] = {}
+        ungrouped: list[str] = []
+
         for emp_name, emp in discovery.employees.items():
-            if emp_name != name:
-                label = emp.character_name or emp.effective_display_name
-                roster_lines.append(f"- {emp_name}（{label}）：{emp.description}")
-        if roster_lines:
-            prompt += "\n\n---\n\n## 可委派的同事\n\n使用 delegate 工具调用他们。\n\n" + "\n".join(
-                roster_lines
+            if emp_name == name:
+                continue
+            label = emp.character_name or emp.effective_display_name
+            auth = org.get_authority(emp_name) or "?"
+            line = f"- {emp_name}（{label}，{auth}类）：{emp.description}"
+            team_id = org.get_team(emp_name)
+            if team_id:
+                team_rosters.setdefault(team_id, []).append(line)
+            else:
+                ungrouped.append(line)
+
+        sections: list[str] = []
+        for tid, lines in team_rosters.items():
+            team_def = org.teams.get(tid)
+            team_label = team_def.label if team_def else tid
+            sections.append(f"### {team_label}\n" + "\n".join(lines))
+        if ungrouped:
+            sections.append("### 其他\n" + "\n".join(ungrouped))
+
+        authority_note = (
+            "\n\n权限级别说明：A类=自主执行可直接交付，"
+            "B类=需 Kai 确认后才能决定下一步，"
+            "C类=简单任务直接做/复杂任务需确认。"
+        )
+
+        if sections:
+            prompt += (
+                "\n\n---\n\n## 可委派的同事\n\n"
+                "使用 delegate/delegate_async/delegate_chain/route 工具调用他们。\n"
+                + authority_note
+                + "\n\n"
+                + "\n\n".join(sections)
             )
 
     from crew.permission import PermissionGuard

@@ -357,3 +357,70 @@ class ToolExecutionResult:
     def has_tool_calls(self) -> bool:
         """是否包含工具调用."""
         return len(self.tool_calls) > 0
+
+
+# ── 组织架构模型 ──
+
+
+class TeamDef(BaseModel):
+    """团队定义."""
+
+    label: str = Field(description="团队显示名")
+    members: list[str] = Field(description="成员 employee name 列表")
+
+
+class AuthorityLevel(BaseModel):
+    """权限级别定义."""
+
+    label: str = Field(description="级别显示名")
+    description: str = Field(default="", description="说明")
+    members: list[str] = Field(description="该级别的 employee name 列表")
+
+
+class RoutingStep(BaseModel):
+    """路由模板中的一步."""
+
+    role: str = Field(description="步骤角色（如 review、test）")
+    employee: str | None = Field(default=None, description="指定单个员工")
+    employees: list[str] | None = Field(default=None, description="指定多个员工")
+    team: str | None = Field(default=None, description="指定团队")
+    description: str = Field(default="", description="步骤说明")
+    optional: bool = Field(default=False, description="是否可选步骤")
+
+
+class RoutingTemplate(BaseModel):
+    """协作路由模板."""
+
+    label: str = Field(description="模板显示名")
+    steps: list[RoutingStep] = Field(description="步骤列表")
+
+
+class Organization(BaseModel):
+    """组织架构定义."""
+
+    teams: dict[str, TeamDef] = Field(default_factory=dict, description="团队")
+    authority: dict[str, AuthorityLevel] = Field(
+        default_factory=dict, description="权限级别"
+    )
+    routing_templates: dict[str, RoutingTemplate] = Field(
+        default_factory=dict, description="路由模板"
+    )
+
+    def get_team(self, employee_name: str) -> str | None:
+        """返回员工所属团队 ID，找不到返回 None."""
+        for tid, team in self.teams.items():
+            if employee_name in team.members:
+                return tid
+        return None
+
+    def get_authority(self, employee_name: str) -> str | None:
+        """返回员工权限级别（A/B/C），找不到返回 None."""
+        for level, auth in self.authority.items():
+            if employee_name in auth.members:
+                return level
+        return None
+
+    def get_team_members(self, team_id: str) -> list[str]:
+        """返回团队成员列表."""
+        team = self.teams.get(team_id)
+        return team.members if team else []
