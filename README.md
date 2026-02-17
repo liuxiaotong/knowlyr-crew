@@ -604,13 +604,16 @@ graph LR
     Synth --> Check["Check<br/>Quality"]
     Label --> Check
     Check --> Audit["Audit<br/>Model Audit"]
-    Audit --> Agent["Agent<br/>Toolchain"]
     Crew["Crew<br/>AI Employee Engine"]
+    Agent["Agent<br/>RL Framework"]
     ID["ID<br/>Identity Runtime"]
     Crew -.->|能力定义| ID
     ID -.->|身份 + 记忆| Crew
+    Crew -.->|轨迹 + 奖励| Agent
+    Agent -.->|优化策略| Crew
     style Crew fill:#0969da,color:#fff,stroke:#0969da
     style ID fill:#2da44e,color:#fff,stroke:#2da44e
+    style Agent fill:#8b5cf6,color:#fff,stroke:#8b5cf6
 ```
 
 </details>
@@ -623,8 +626,8 @@ graph LR
 | Quality | **DataCheck** | 规则验证、重复检测、分布分析 | [GitHub](https://github.com/liuxiaotong/data-check) |
 | Audit | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | Identity | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
-| Skills | **Crew** | 声明式 AI 员工引擎 | You are here |
-| Agent | **knowlyr-agent** | 沙箱 + 轨迹录制 + Reward + 编排 | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
+| 协作 | **Crew** | AI 员工定义 · MCP 互通 · 多智能体协商 · 经验进化 | You are here |
+| Agent 训练 | **knowlyr-agent** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO 训练 | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
 
 ---
 
