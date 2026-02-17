@@ -122,8 +122,8 @@ async def _execute_task(
                         "此员工为 B 类（需 Kai 确认），"
                         "结果仅供参考，请 Kai 过目后再决定下一步。"
                     )
-            except Exception:
-                pass  # 组织架构加载失败不影响任务完成
+            except Exception as e:
+                logger.warning("B 类权限标记失败 (employee=%s): %s", record.target_name, e)
     except Exception as e:
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
@@ -336,7 +336,7 @@ async def _execute_employee_with_tools(
     from crew.executor import aexecute_with_tools
     from crew.providers import Provider, detect_provider
     from crew.tool_schema import (
-        AGENT_TOOLS, DEFERRED_TOOLS, employee_tools_to_schemas,
+        AGENT_TOOLS, employee_tools_to_schemas,
         get_tool_schema, is_finish_tool, _make_load_tools_schema,
     )
 
@@ -351,8 +351,8 @@ async def _execute_employee_with_tools(
         try:
             from crew.id_client import afetch_agent_identity
             agent_identity = await afetch_agent_identity(agent_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
 
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
@@ -688,8 +688,8 @@ async def _execute_employee(
         try:
             from crew.id_client import afetch_agent_identity
             agent_identity = await afetch_agent_identity(agent_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
 
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
@@ -761,8 +761,8 @@ async def _stream_employee(
             from crew.id_client import afetch_agent_identity
 
             agent_identity = await afetch_agent_identity(agent_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
 
     engine = CrewEngine(project_dir=ctx.project_dir)
     prompt = engine.prompt(match, args=args, agent_identity=agent_identity)

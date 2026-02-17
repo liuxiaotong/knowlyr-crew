@@ -188,11 +188,23 @@ def parse_employee_dir(
     if soul_path.exists():
         parts.append(soul_path.read_text(encoding="utf-8"))
 
+    # 共享模板目录：员工目录的父目录下的 _templates/
+    templates_dir = dir_path.parent / "_templates"
+
     for subdir in ("workflows", "adaptors"):
         sub_path = dir_path / subdir
+        # 收集员工自有文件
+        local_files: dict[str, Path] = {}
         if sub_path.is_dir():
             for md_file in sorted(sub_path.glob("*.md")):
-                parts.append(md_file.read_text(encoding="utf-8"))
+                local_files[md_file.name] = md_file
+        # 共享模板补充缺失的文件（员工自有优先）
+        if templates_dir.is_dir():
+            for md_file in sorted(templates_dir.glob("*.md")):
+                if md_file.name not in local_files:
+                    local_files[md_file.name] = md_file
+        for md_file in sorted(local_files.values(), key=lambda p: p.name):
+            parts.append(md_file.read_text(encoding="utf-8"))
 
     body = "\n\n".join(parts)
 

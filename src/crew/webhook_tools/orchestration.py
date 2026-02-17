@@ -566,8 +566,10 @@ async def _tool_route(
 
     # 展开模板为 delegate_chain steps
     steps: list[dict[str, str]] = []
+    skipped: list[str] = []
     for step in tmpl.steps:
         if step.optional and step.role not in overrides:
+            skipped.append(f"{step.role}（可选，未指定）")
             continue
 
         emp_name = overrides.get(step.role)
@@ -581,6 +583,7 @@ async def _tool_route(
                 emp_name = members[0] if members else None
 
         if not emp_name:
+            skipped.append(f"{step.role}（无可用执行人）")
             continue
 
         step_task = f"[{step.role}] {task_desc}"
@@ -592,9 +595,12 @@ async def _tool_route(
     if not steps:
         return f"错误: 模板 '{template_name}' 展开后没有有效步骤"
 
-    return await _tool_delegate_chain(
+    result = await _tool_delegate_chain(
         {"steps": steps}, agent_id=agent_id, ctx=ctx,
     )
+    if skipped:
+        result += f"\n\n跳过的步骤: {', '.join(skipped)}"
+    return result
 
 
 HANDLERS: dict[str, object] = {
