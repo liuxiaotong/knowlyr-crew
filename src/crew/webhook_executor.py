@@ -626,6 +626,7 @@ async def _execute_employee_with_tools(
         "input_tokens": total_input,
         "output_tokens": total_output,
         "tool_rounds": rounds,
+        "base_url": match.base_url or "",
     }
 
 
@@ -755,6 +756,7 @@ async def _execute_employee(
             "model": result.model,
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
+            "base_url": match.base_url or "",
         }
 
     return {"employee": name, "prompt": prompt, "output": ""}

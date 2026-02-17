@@ -599,14 +599,15 @@ async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
-    """成本汇总 — GET /api/cost/summary?days=7&employee=xxx."""
+    """成本汇总 — GET /api/cost/summary?days=7&employee=xxx&source=work."""
     from starlette.responses import JSONResponse
     from crew.cost import query_cost_summary
 
     days = int(request.query_params.get("days", "7"))
     employee = request.query_params.get("employee")
+    source = request.query_params.get("source")
 
-    summary = query_cost_summary(ctx.registry, employee=employee, days=days)
+    summary = query_cost_summary(ctx.registry, employee=employee, days=days, source=source)
     return JSONResponse(summary)
 
 
@@ -707,4 +708,21 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
         },
         "cost_7d": cost,
         "employees": employees_info,
+        "routing_templates": {
+            name: {
+                "label": tmpl.label,
+                "steps": [
+                    {
+                        "role": step.role,
+                        "employee": step.employee,
+                        "employees": step.employees or [],
+                        "team": step.team,
+                        "description": step.description,
+                        "optional": step.optional,
+                    }
+                    for step in tmpl.steps
+                ],
+            }
+            for name, tmpl in org.routing_templates.items()
+        },
     })

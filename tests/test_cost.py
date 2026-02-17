@@ -2,6 +2,7 @@
 
 from crew.cost import (
     COST_PER_1K,
+    PROXY_PRICE_OVERRIDES,
     enrich_result_with_cost,
     estimate_cost,
     parse_quality_score,
@@ -15,8 +16,22 @@ class TestEstimateCost:
     def test_known_model(self):
         """已知模型应按单价计算."""
         cost = estimate_cost("claude-opus-4-6", input_tokens=1000, output_tokens=500)
-        expected = (1000 * 0.015 + 500 * 0.075) / 1000
+        expected = (1000 * 0.005 + 500 * 0.025) / 1000
         assert abs(cost - expected) < 1e-6
+
+    def test_proxy_pricing(self):
+        """代理商价格应覆盖官方价格."""
+        official = estimate_cost("claude-opus-4-6", 1000, 1000)
+        proxy = estimate_cost("claude-opus-4-6", 1000, 1000, base_url="https://aiberm.com/v1")
+        assert proxy < official
+        # aiberm: (1000 * 0.00095 + 1000 * 0.00475) / 1000 = 0.0057
+        assert abs(proxy - 0.0057) < 1e-6
+
+    def test_proxy_unknown_model_falls_back(self):
+        """代理商不在覆盖表中的模型用官方价格."""
+        cost_proxy = estimate_cost("kimi-k2.5", 1000, 1000, base_url="https://aiberm.com/v1")
+        cost_direct = estimate_cost("kimi-k2.5", 1000, 1000)
+        assert cost_proxy == cost_direct
 
     def test_cheap_model(self):
         """便宜模型成本应更低."""
@@ -64,6 +79,18 @@ class TestEnrichResult:
         }
         enriched = enrich_result_with_cost(result)
         assert enriched["employee"] == "test"
+
+    def test_uses_base_url_for_proxy_pricing(self):
+        """有 base_url 时使用代理价格."""
+        result = {
+            "model": "claude-opus-4-6",
+            "input_tokens": 1000,
+            "output_tokens": 1000,
+            "base_url": "https://aiberm.com/v1",
+        }
+        enriched = enrich_result_with_cost(result)
+        # 代理价: (1000 * 0.00095 + 1000 * 0.00475) / 1000 = 0.0057
+        assert abs(enriched["cost_usd"] - 0.0057) < 1e-6
 
 
 class TestQueryCostSummary:
@@ -119,6 +146,50 @@ class TestQueryCostSummary:
             )
         summary = query_cost_summary(registry, employee="code-reviewer")
         assert summary["total_tasks"] == 1
+
+    def test_filter_by_source_work(self):
+        """source=work 过滤掉 feishu 闲聊."""
+        from crew.task_registry import TaskRegistry
+
+        registry = TaskRegistry()
+        # 正式任务
+        r1 = registry.create(trigger="direct", target_type="employee", target_name="cr")
+        registry.update(r1.task_id, "completed", result={
+            "employee": "cr", "model": "kimi-k2.5",
+            "input_tokens": 1000, "output_tokens": 500,
+        })
+        # 飞书闲聊
+        r2 = registry.create(trigger="feishu", target_type="employee", target_name="cr")
+        registry.update(r2.task_id, "completed", result={
+            "employee": "cr", "model": "kimi-k2.5",
+            "input_tokens": 1000, "output_tokens": 500,
+        })
+        # source=work 应只有 1 条
+        summary = query_cost_summary(registry, source="work")
+        assert summary["total_tasks"] == 1
+        # source=chat 应只有 1 条
+        summary_chat = query_cost_summary(registry, source="chat")
+        assert summary_chat["total_tasks"] == 1
+        # 无过滤应有 2 条
+        summary_all = query_cost_summary(registry)
+        assert summary_all["total_tasks"] == 2
+
+    def test_by_trigger_in_output(self):
+        """返回值中包含 by_trigger 分组."""
+        from crew.task_registry import TaskRegistry
+
+        registry = TaskRegistry()
+        for trigger in ["direct", "feishu", "github"]:
+            r = registry.create(trigger=trigger, target_type="employee", target_name="cr")
+            registry.update(r.task_id, "completed", result={
+                "employee": "cr", "model": "kimi-k2.5",
+                "input_tokens": 100, "output_tokens": 50,
+            })
+        summary = query_cost_summary(registry)
+        assert "by_trigger" in summary
+        assert "direct" in summary["by_trigger"]
+        assert "feishu" in summary["by_trigger"]
+        assert "github" in summary["by_trigger"]
 
 
 class TestParseQualityScore:
@@ -177,3 +248,12 @@ class TestCostPriceTable:
         assert "claude-opus-4-6" in COST_PER_1K
         assert "kimi-k2.5" in COST_PER_1K
         assert "gpt-4o" in COST_PER_1K
+        assert "moonshot-v1-32k" in COST_PER_1K
+        assert "moonshot-v1-8k" in COST_PER_1K
+
+    def test_proxy_overrides_present(self):
+        """代理商覆盖表包含 aiberm."""
+        assert "https://aiberm.com/v1" in PROXY_PRICE_OVERRIDES
+        aiberm = PROXY_PRICE_OVERRIDES["https://aiberm.com/v1"]
+        assert "claude-opus-4-6" in aiberm
+        assert aiberm["claude-opus-4-6"]["input"] < COST_PER_1K["claude-opus-4-6"]["input"]

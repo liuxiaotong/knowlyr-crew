@@ -1864,32 +1864,26 @@ TOOL_ROLE_PRESETS["feishu-admin"] = (
 TOOL_ROLE_PRESETS["all-agent"] = AGENT_TOOLS.copy()
 TOOL_ROLE_PRESETS["all"] = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob"}
 
-# ── 职能档位 — 按员工角色分组 ──
+# ── 职能档位 — 以 all-agent 为基线，用 deny 精准控制 ──
+# 所有档位共享同一个基线（全部 agent 工具），差异通过 deny 列表体现
+# 这样每个档位只减少不合适的工具，不会意外丢失基础能力
 
-TOOL_ROLE_PRESETS["profile-engineer"] = (
-    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["knowlyr-admin"]
-    | TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["github"]
-    | TOOL_ROLE_PRESETS["web"] | TOOL_ROLE_PRESETS["utilities"]
-    | {"delegate"}
-)
-TOOL_ROLE_PRESETS["profile-researcher"] = (
-    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["feishu-read"]
-    | TOOL_ROLE_PRESETS["web"] | TOOL_ROLE_PRESETS["utilities"]
-)
-TOOL_ROLE_PRESETS["profile-business"] = (
-    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["knowlyr-admin"]
-    | TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["feishu-write"]
-    | TOOL_ROLE_PRESETS["notion"] | TOOL_ROLE_PRESETS["web"]
-    | TOOL_ROLE_PRESETS["utilities"]
-)
-TOOL_ROLE_PRESETS["profile-product"] = (
-    TOOL_ROLE_PRESETS["profile-business"] | TOOL_ROLE_PRESETS["github"]
-    | TOOL_ROLE_PRESETS["agent-core"]
-)
-TOOL_ROLE_PRESETS["profile-security"] = (
-    TOOL_ROLE_PRESETS["memory"] | TOOL_ROLE_PRESETS["feishu-read"]
-    | TOOL_ROLE_PRESETS["github"] | TOOL_ROLE_PRESETS["web"]
-)
+TOOL_ROLE_PRESETS["profile-base"] = AGENT_TOOLS.copy()
+
+# 工程师: 去掉与工程无关的生活/商务工具
+DENY_ENGINEER = {"weather", "exchange_rate", "stock_price", "flight_info", "aqi", "express_track"}
+
+# 研究员: 去掉管理后台写操作和委派
+DENY_RESEARCHER = {"update_agent", "delegate_async", "delegate_chain", "route"}
+
+# 商务: 去掉 GitHub 和代码相关
+DENY_BUSINESS = {"github_prs", "github_issues", "github_repo_activity"}
+
+# 安全审计: 去掉可能影响审计独立性的写操作
+DENY_SECURITY = {
+    "update_agent", "delegate", "delegate_async",
+    "delegate_chain", "route", "send_feishu_dm",
+}
 
 
 def resolve_effective_tools(employee: "Employee") -> set[str]:
