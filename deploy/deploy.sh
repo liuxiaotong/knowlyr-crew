@@ -43,6 +43,12 @@ sync_data() {
         "$LOCAL_CREW/pipelines/" \
         "$SERVER:$PROJECT/.crew/pipelines/"
 
+    # 定时任务
+    if [ -f ".crew/cron.yaml" ]; then
+        echo "  同步定时任务..."
+        rsync -av .crew/cron.yaml "$SERVER:$PROJECT/.crew/cron.yaml"
+    fi
+
     # 服务器端 git 提交
     echo "  记录版本..."
     ssh "$SERVER" "cd $PROJECT && git add -A && \
