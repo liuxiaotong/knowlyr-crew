@@ -32,7 +32,7 @@ class TestResolveProjectDir:
 class TestGetGlobalDir:
     def test_default_location(self, tmp_path):
         result = get_global_dir(tmp_path)
-        assert result == tmp_path / ".crew" / "global"
+        assert result == tmp_path / "private" / "employees"
 
     def test_env_override(self, tmp_path, monkeypatch):
         custom_dir = tmp_path / "custom-global"
@@ -49,13 +49,13 @@ class TestGetGlobalDir:
 class TestGetGlobalTemplatesDir:
     def test_location(self, tmp_path):
         result = get_global_templates_dir(tmp_path)
-        assert result == tmp_path / ".crew" / "global" / "templates"
+        assert result == tmp_path / "private" / "employees" / "templates"
 
 
 class TestGetGlobalDiscussionsDir:
     def test_location(self, tmp_path):
         result = get_global_discussions_dir(tmp_path)
-        assert result == tmp_path / ".crew" / "global" / "discussions"
+        assert result == tmp_path / "private" / "employees" / "discussions"
 
 
 class TestFileLock:
@@ -73,12 +73,13 @@ class TestFileLock:
             assert target.parent.exists()
 
     def test_reentrant_same_process(self, tmp_path):
-        """同一进程不死锁（fcntl 可重入）."""
-        target = tmp_path / "data.json"
-        target.write_text("{}", encoding="utf-8")
-        with file_lock(target):
-            # 嵌套不应死锁
-            with file_lock(target):
+        """同进程嵌套不同文件不死锁."""
+        target_a = tmp_path / "a.json"
+        target_b = tmp_path / "b.json"
+        target_a.write_text("{}", encoding="utf-8")
+        target_b.write_text("{}", encoding="utf-8")
+        with file_lock(target_a):
+            with file_lock(target_b):
                 pass
 
     def test_body_executes(self, tmp_path):
