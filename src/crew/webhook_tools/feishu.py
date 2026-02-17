@@ -755,6 +755,66 @@ async def _tool_send_feishu_group(
 
 
 
+async def _tool_send_feishu_file(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """上传文件并发送到飞书群."""
+    import json as _json
+
+    import httpx
+
+    if not ctx or not ctx.feishu_token_mgr:
+        return "飞书未配置，无法发文件。"
+
+    chat_id = (args.get("chat_id") or "").strip()
+    file_name = (args.get("file_name") or "").strip()
+    content = args.get("content", "")
+    if not chat_id or not file_name or not content:
+        return "需要 chat_id、file_name 和 content。"
+
+    token = await ctx.feishu_token_mgr.get_token()
+    base = "https://open.feishu.cn/open-apis"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 1. 上传文件
+            resp = await client.post(
+                f"{base}/im/v1/files",
+                headers={"Authorization": f"Bearer {token}"},
+                data={"file_type": "stream", "file_name": file_name},
+                files={"file": (file_name, content.encode("utf-8"))},
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                return f"文件上传失败: {data.get('msg', '未知错误')}"
+
+            file_key = data.get("data", {}).get("file_key", "")
+            if not file_key:
+                return "文件上传成功但未返回 file_key。"
+
+            # 2. 发送文件消息到群
+            resp = await client.post(
+                f"{base}/im/v1/messages",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                params={"receive_id_type": "chat_id"},
+                json={
+                    "receive_id": chat_id,
+                    "msg_type": "file",
+                    "content": _json.dumps({"file_key": file_key}),
+                },
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            return f"文件 {file_name} 已发送到群 {chat_id}。"
+        return f"文件发送失败: {data.get('msg', '未知错误')}"
+    except Exception as e:
+        return f"发送文件失败: {e}"
+
+
 async def _tool_list_feishu_groups(
     args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
 ) -> str:
@@ -1427,6 +1487,7 @@ HANDLERS: dict[str, object] = {
     "read_feishu_doc": _tool_read_feishu_doc,
     "create_feishu_doc": _tool_create_feishu_doc,
     "send_feishu_group": _tool_send_feishu_group,
+    "send_feishu_file": _tool_send_feishu_file,
     "list_feishu_groups": _tool_list_feishu_groups,
     "send_feishu_dm": _tool_send_feishu_dm,
     "feishu_group_members": _tool_feishu_group_members,

@@ -948,6 +948,19 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["chat_id", "text"],
         },
     },
+    "send_feishu_file": {
+        "name": "send_feishu_file",
+        "description": "上传文件并发送到飞书群。传入群聊 ID、文件名和文件内容。支持 .md、.txt、.csv、.json 等文本文件。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "string", "description": "飞书群聊 ID（形如 oc_xxxxx）"},
+                "file_name": {"type": "string", "description": "文件名（含扩展名，如 report.md）"},
+                "content": {"type": "string", "description": "文件内容（文本）"},
+            },
+            "required": ["chat_id", "file_name", "content"],
+        },
+    },
     "list_feishu_groups": {
         "name": "list_feishu_groups",
         "description": "列出机器人加入的所有飞书群，返回群名和 chat_id。发群消息前用这个查 chat_id。",
@@ -1746,7 +1759,7 @@ AGENT_TOOLS = {
     # 记忆
     "add_memory",
     # 飞书文档
-    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "list_feishu_groups",
+    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc", "send_feishu_group", "send_feishu_file", "list_feishu_groups",
     # GitHub
     "github_prs", "github_issues", "github_repo_activity",
     # Notion
@@ -1798,7 +1811,7 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
     "feishu-write": {
         "create_feishu_event", "delete_feishu_event",
         "create_feishu_task", "complete_feishu_task", "delete_feishu_task",
-        "update_feishu_task", "create_feishu_doc", "send_feishu_group",
+        "update_feishu_task", "create_feishu_doc", "send_feishu_group", "send_feishu_file",
         "send_feishu_dm", "update_feishu_sheet", "create_feishu_spreadsheet",
         "approve_feishu",
     },
