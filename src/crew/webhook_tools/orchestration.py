@@ -69,6 +69,23 @@ async def _tool_check_task(
     if record.completed_at:
         lines.append(f"完成: {record.completed_at.strftime('%Y-%m-%d %H:%M:%S')}")
     if record.status == "completed" and record.result:
+        # 成本信息
+        cost = record.result.get("cost_usd")
+        if cost:
+            model = record.result.get("model", "")
+            inp = record.result.get("input_tokens", 0)
+            out = record.result.get("output_tokens", 0)
+            lines.append(f"成本: ${cost:.4f} ({model}, {inp}+{out} tokens)")
+        # 质量评分
+        qscore = record.result.get("quality_score")
+        if qscore:
+            score = qscore.get("score", "?")
+            detail_parts = []
+            for k in ("critical", "warning", "suggestion"):
+                if k in qscore:
+                    detail_parts.append(f"{k}={qscore[k]}")
+            detail = ", ".join(detail_parts)
+            lines.append(f"质量评分: {score}/100" + (f" ({detail})" if detail else ""))
         # 权限标记
         if record.result.get("needs_kai_approval"):
             lines.append(f"\n⚠️ {record.result.get('authority_note', '需 Kai 确认')}")
@@ -541,6 +558,41 @@ async def _tool_find_free_time(
 
 
 
+async def _tool_query_cost(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """查询 token 消耗和成本汇总."""
+    if ctx is None:
+        return "错误: 上下文不可用"
+
+    from crew.cost import query_cost_summary
+
+    employee = args.get("employee") or None
+    days = int(args.get("days", 7))
+
+    summary = query_cost_summary(ctx.registry, employee=employee, days=days)
+
+    lines = [f"📊 成本汇总（近 {days} 天）"]
+    lines.append(f"总任务数: {summary['total_tasks']}")
+    lines.append(f"总成本: ${summary['total_cost_usd']:.4f}")
+
+    if summary["by_employee"]:
+        lines.append("\n按员工:")
+        for emp, data in summary["by_employee"].items():
+            lines.append(
+                f"  {emp}: ${data['cost_usd']:.4f} "
+                f"({data['tasks']}次, {data['input_tokens']}+{data['output_tokens']} tokens)"
+            )
+
+    if summary["by_model"]:
+        lines.append("\n按模型:")
+        for model, data in summary["by_model"].items():
+            lines.append(f"  {model}: ${data['cost_usd']:.4f} ({data['tasks']}次)")
+
+    return "\n".join(lines)
+
+
+
 async def _tool_route(
     args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
 ) -> str:
@@ -619,4 +671,5 @@ HANDLERS: dict[str, object] = {
     "query_data": _tool_query_data,
     "find_free_time": _tool_find_free_time,
     "route": _tool_route,
+    "query_cost": _tool_query_cost,
 }

@@ -6,7 +6,14 @@ from pathlib import Path
 import yaml
 
 from crew.models import Organization, RoutingStep, RoutingTemplate
-from crew.organization import invalidate_cache, load_organization
+from crew.organization import (
+    get_effective_authority,
+    invalidate_cache,
+    load_organization,
+    record_task_outcome,
+    reset_overrides,
+    set_cache,
+)
 
 
 def _make_org_yaml() -> dict:
@@ -295,3 +302,98 @@ class TestRealOrganization:
                     f"{member} 同时在 {seen[member]} 和 {level}"
                 )
                 seen[member] = level
+
+
+class TestAuthorityDowngrade:
+    """自动降级测试."""
+
+    def setup_method(self):
+        invalidate_cache()
+        reset_overrides()
+        # 注入测试用 org 到缓存，让 record_task_outcome 能找到权限
+        self._org = Organization(**_make_org_yaml())
+        set_cache(self._org)
+
+    def teardown_method(self):
+        invalidate_cache()
+        reset_overrides()
+
+    def test_success_resets_counter(self):
+        """成功执行重置失败计数."""
+        # 2 次失败 + 1 次成功 → 不降级
+        record_task_outcome("code-reviewer", success=False)
+        record_task_outcome("code-reviewer", success=False)
+        record_task_outcome("code-reviewer", success=True)
+        # 再 2 次失败也不触发（因为计数被重置了）
+        record_task_outcome("code-reviewer", success=False)
+        record_task_outcome("code-reviewer", success=False)
+        assert get_effective_authority(self._org, "code-reviewer") == "A"
+
+    def test_downgrade_after_consecutive_failures(self):
+        """连续 3 次失败触发降级."""
+        record_task_outcome("code-reviewer", success=False)
+        record_task_outcome("code-reviewer", success=False)
+        result = record_task_outcome("code-reviewer", success=False)
+        assert result is not None  # 返回降级信息
+        assert get_effective_authority(self._org, "code-reviewer") == "C"
+
+    def test_no_downgrade_for_b_level(self):
+        """B 类降到 C."""
+        for _ in range(3):
+            record_task_outcome("dba", success=False)
+        assert get_effective_authority(self._org, "dba") == "C"
+
+    def test_no_downgrade_for_c_level(self):
+        """C 类不再降."""
+        for _ in range(5):
+            record_task_outcome("backend-engineer", success=False)
+        # C 类没有降级目标
+        assert get_effective_authority(self._org, "backend-engineer") == "C"
+
+    def test_override_not_duplicated(self):
+        """已降级的不再重复降级."""
+        for _ in range(3):
+            record_task_outcome("code-reviewer", success=False)
+        # 再来 3 次失败不会再触发
+        for _ in range(3):
+            record_task_outcome("code-reviewer", success=False)
+        assert get_effective_authority(self._org, "code-reviewer") == "C"
+
+    def test_unknown_employee_no_crash(self):
+        """未知员工不崩溃."""
+        result = record_task_outcome("nonexistent", success=False)
+        assert result is None
+
+    def test_effective_authority_without_override(self):
+        """无覆盖时返回原始权限."""
+        assert get_effective_authority(self._org, "code-reviewer") == "A"
+        assert get_effective_authority(self._org, "backend-engineer") == "C"
+
+    def test_persist_and_load_overrides(self):
+        """覆盖应能持久化和加载."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            priv = project_dir / "private"
+            priv.mkdir()
+            org_data = _make_org_yaml()
+            (priv / "organization.yaml").write_text(
+                yaml.dump(org_data, allow_unicode=True), encoding="utf-8",
+            )
+
+            invalidate_cache()
+            org = load_organization(project_dir=project_dir)
+
+            # 触发降级并持久化
+            for _ in range(3):
+                record_task_outcome("code-reviewer", success=False, project_dir=project_dir)
+
+            # 验证文件存在
+            override_file = priv / "authority_overrides.json"
+            assert override_file.exists()
+
+            # 读取并验证
+            import json
+            data = json.loads(override_file.read_text(encoding="utf-8"))
+            assert "code-reviewer" in data
+            assert data["code-reviewer"]["level"] == "C"
+            assert data["code-reviewer"]["original"] == "A"

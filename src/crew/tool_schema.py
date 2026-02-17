@@ -324,6 +324,24 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["template", "task"],
         },
     },
+    "query_cost": {
+        "name": "query_cost",
+        "description": "查询员工的 token 消耗和成本汇总。可按员工、按时间段筛选。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "employee": {
+                    "type": "string",
+                    "description": "员工名称（可选，不填则查全部）",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "查询天数（默认 7）",
+                },
+            },
+            "required": [],
+        },
+    },
     "schedule_task": {
         "name": "schedule_task",
         "description": "创建定时任务（如每天早上发简报、每周五写周报）。",
@@ -1742,7 +1760,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 AGENT_TOOLS = {
     "query_stats", "send_message", "list_agents", "delegate",
     "delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting",
-    "run_pipeline", "delegate_chain", "route",
+    "run_pipeline", "delegate_chain", "route", "query_cost",
     "schedule_task", "list_schedules", "cancel_schedule",
     "agent_file_read", "agent_file_grep",
     "query_data", "find_free_time",

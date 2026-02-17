@@ -106,13 +106,21 @@ async def _execute_task(
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
             return
 
+        # 成本追踪：向结果追加 cost_usd
+        if isinstance(result, dict):
+            try:
+                from crew.cost import enrich_result_with_cost
+                enrich_result_with_cost(result)
+            except Exception as e:
+                logger.debug("成本追踪失败: %s", e)
+
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
 
-        # B 类权限标记：结果需 Kai 过目
+        # B 类权限标记 + 质量评分 + 自动降级检查
         if record.target_type == "employee" and isinstance(result, dict):
             try:
-                from crew.organization import load_organization
+                from crew.organization import load_organization, record_task_outcome
 
                 org = load_organization(project_dir=ctx.project_dir)
                 auth = org.get_authority(record.target_name)
@@ -122,11 +130,35 @@ async def _execute_task(
                         "此员工为 B 类（需 Kai 确认），"
                         "结果仅供参考，请 Kai 过目后再决定下一步。"
                     )
+
+                # 质量评分解析
+                output_text = result.get("output", "")
+                if output_text:
+                    from crew.cost import parse_quality_score
+                    qscore = parse_quality_score(output_text)
+                    if qscore:
+                        result["quality_score"] = qscore
+
+                # 自动降级检查（记录成功）
+                record_task_outcome(
+                    record.target_name, success=True,
+                    project_dir=ctx.project_dir,
+                )
             except Exception as e:
-                logger.warning("B 类权限标记失败 (employee=%s): %s", record.target_name, e)
+                logger.warning("任务后处理失败 (employee=%s): %s", record.target_name, e)
     except Exception as e:
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
+        # 自动降级检查（记录失败）
+        if record.target_type == "employee":
+            try:
+                from crew.organization import record_task_outcome
+                record_task_outcome(
+                    record.target_name, success=False,
+                    project_dir=ctx.project_dir,
+                )
+            except Exception:
+                pass
 
 
 async def _execute_pipeline(
@@ -359,7 +391,7 @@ async def _execute_employee_with_tools(
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
-        from crew.organization import load_organization
+        from crew.organization import load_organization, get_effective_authority
 
         org = load_organization(project_dir=ctx.project_dir)
 
@@ -370,7 +402,7 @@ async def _execute_employee_with_tools(
             if emp_name == name:
                 continue
             label = emp.character_name or emp.effective_display_name
-            auth = org.get_authority(emp_name) or "?"
+            auth = get_effective_authority(org, emp_name, project_dir=ctx.project_dir) or "?"
             line = f"- {emp_name}（{label}，{auth}类）：{emp.description}"
             team_id = org.get_team(emp_name)
             if team_id:
