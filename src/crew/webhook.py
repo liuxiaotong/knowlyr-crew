@@ -91,6 +91,7 @@ from crew.webhook_executor import (  # noqa: F401
 from crew.webhook_handlers import (  # noqa: F401
     _handle_agent_run,
     _handle_cron_status,
+    _handle_employee_delete,
     _handle_employee_prompt,
     _handle_employee_state,
     _handle_employee_update,
@@ -217,6 +218,7 @@ def create_webhook_app(
         Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
         Route("/api/employees/{identifier}/state", endpoint=_make_handler(ctx, _handle_employee_state), methods=["GET"]),
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
+        Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_delete), methods=["DELETE"]),
         Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
     ]
 

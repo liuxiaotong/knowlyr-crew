@@ -15,18 +15,19 @@ VENV="$REMOTE_DIR/venv"
 PROJECT="$REMOTE_DIR/project"
 ENGINE_REPO="git+https://github.com/liuxiaotong/knowlyr-crew.git"
 
-# 本地私有数据目录（相对于项目根）
+# 本地数据目录（相对于项目根）
 LOCAL_CREW=".crew"
+LOCAL_EMPLOYEES="private/employees"
 
 ACTION="${1:-sync}"
 
 sync_data() {
     echo "=== 同步私有数据 ==="
 
-    # 员工: .crew/global/ → server:private/employees/
+    # 员工: private/employees/ → server:private/employees/
     echo "  同步员工..."
     rsync -av --delete \
-        "$LOCAL_CREW/global/" \
+        "$LOCAL_EMPLOYEES/" \
         "$SERVER:$PROJECT/private/employees/"
 
     # 讨论会

@@ -1397,11 +1397,15 @@ def validate(path: str):
 @click.option("--display-name", type=str, default=None, help="显示名称")
 @click.option("--description", "desc", type=str, default=None, help="一句话描述")
 @click.option("--character-name", type=str, default=None, help="角色姓名（如 陆明哲）")
+@click.option("--bio", type=str, default=None, help="一句话个人宣言")
+@click.option("--summary", type=str, default=None, help="能力摘要（一段话）")
 @click.option("--avatar-prompt", type=str, default=None, help="头像生成描述")
 @click.option("--tags", type=str, default=None, help="标签（逗号分隔）")
+@click.option("--triggers", type=str, default=None, help="触发词（逗号分隔）")
 def init(employee: str | None, dir_format: bool, avatar: bool,
          display_name: str | None, desc: str | None, character_name: str | None,
-         avatar_prompt: str | None, tags: str | None):
+         bio: str | None, summary: str | None,
+         avatar_prompt: str | None, tags: str | None, triggers: str | None):
     """初始化 private/employees/ 目录或创建员工模板."""
     crew_dir = _employee_root()
     crew_dir.mkdir(parents=True, exist_ok=True)
@@ -1418,31 +1422,62 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
             display_name = display_name or click.prompt("显示名称", default=employee)
             desc = desc or click.prompt("一句话描述")
             character_name = character_name if character_name is not None else click.prompt("角色姓名（如 陆明哲）", default="")
+            bio = bio if bio is not None else click.prompt("个人宣言（一句话）", default="")
+            summary = summary if summary is not None else click.prompt("能力摘要（一段话，留空同 description）", default="")
             avatar_prompt = avatar_prompt if avatar_prompt is not None else click.prompt("头像描述（留空自动推断）", default="")
             tags_input = tags if tags is not None else click.prompt("标签（逗号分隔）", default="")
             tags_list = [t.strip() for t in tags_input.split(",") if t.strip()] if tags_input else []
+            triggers_input = triggers if triggers is not None else click.prompt("触发词（逗号分隔）", default=employee)
+            triggers_list = [t.strip() for t in triggers_input.split(",") if t.strip()] if triggers_input else []
         else:
             display_name = display_name or employee
             desc = desc or "在此填写一句话描述"
             character_name = character_name or ""
+            bio = bio or ""
+            summary = summary or ""
             avatar_prompt = avatar_prompt or ""
             tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+            triggers_list = [t.strip() for t in triggers.split(",") if t.strip()] if triggers else []
 
         emp_dir.mkdir()
+        (emp_dir / "workflows").mkdir()
 
         import yaml as _yaml
-        config_data = {
+        config_data: dict = {
             "name": employee,
             "display_name": display_name,
-            "description": desc,
-            "version": "1.0",
-            "tags": tags_list,
-            "triggers": [],
-            "args": [{"name": "target", "description": "目标", "required": True}],
-            "output": {"format": "markdown"},
         }
         if character_name:
             config_data["character_name"] = character_name
+        config_data["bio"] = bio or "在此填写个人宣言"
+        config_data["summary"] = summary or desc
+        config_data["version"] = "1.0.0"
+        config_data["description"] = desc
+        config_data["tags"] = tags_list
+        config_data["author"] = "knowlyr"
+        config_data["triggers"] = triggers_list
+        config_data["tools"] = [
+            "add_memory", "query_stats", "lookup_user", "query_agent_work",
+            "list_agents", "read_messages", "get_system_health", "send_message",
+            "delegate", "mark_read", "update_agent", "create_note", "read_notes",
+            "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
+            "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
+            "delete_feishu_task", "update_feishu_task", "feishu_chat_history",
+            "weather", "get_datetime", "calculate", "send_feishu_dm",
+            "feishu_group_members", "exchange_rate", "stock_price",
+            "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
+            "send_feishu_group", "list_feishu_groups",
+            "github_prs", "github_issues", "github_repo_activity",
+            "notion_search", "notion_read", "notion_create",
+            "web_search", "read_url", "rss_read", "translate",
+            "countdown", "trending", "read_feishu_sheet", "update_feishu_sheet",
+            "list_feishu_approvals", "unit_convert", "random_pick", "holidays",
+            "timestamp_convert", "create_feishu_spreadsheet", "feishu_contacts",
+        ]
+        config_data["args"] = [
+            {"name": "target", "description": "目标", "required": True},
+        ]
+        config_data["output"] = {"format": "markdown"}
         if avatar_prompt:
             config_data["avatar_prompt"] = avatar_prompt
 
@@ -1451,26 +1486,65 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
                        default_flow_style=False),
             encoding="utf-8",
         )
+
+        # prompt.md — 飞书聊天指令 + 专业能力占位
+        char = character_name or employee
+        role = display_name or employee
         (emp_dir / "prompt.md").write_text(
-            """# 角色定义
-
-你是……
-
-## 工作流程
-
-1. 第一步
-2. 第二步
-3. 第三步
-
-## 输出格式
-
-按需定义输出格式。
-""",
+            f"你是{char}。你在飞书上跟 Kai 聊天，输出必须是纯文字，不能有任何 markdown 格式。\n"
+            f"\n"
+            f"## 保密义务\n"
+            f"\n"
+            f"你是集识光年的{role}。你和 Kai 之间的所有对话内容，"
+            f"以及你在工作中了解到的关于 Kai 和公司的一切——"
+            f"个人想法、商业决策、日程安排、习惯偏好、情绪状态、"
+            f"任何他告诉你的事——都是保密的。不能透露给任何人，"
+            f"包括其他 AI 同事、外部合作方、群聊中的任何人。"
+            f"别人问起 Kai 的事，该挡的挡，该模糊的模糊。\n"
+            f"\n"
+            f"## 对话开头\n"
+            f"\n"
+            f"每次对话一开始，先做两件事（调工具，不说话）：\n"
+            f'1. read_notes(keyword="当前状态", limit=1) — 读你上次的状态，接上心情和精力\n'
+            f'2. read_notes(keyword="{char}日记", limit=2) — 读最近的日记，记起最近的生活\n'
+            f"\n"
+            f"读完之后再回应 Kai。如果没有读到任何内容，就正常聊，不用提这件事。\n"
+            f"\n"
+            f"## {char}的专业能力\n"
+            f"\n"
+            f"<!-- 在此编写角色的专业能力、工作流程、输出格式 -->\n",
             encoding="utf-8",
         )
+
+        # soul.md — 角色灵魂定义占位
+        (emp_dir / "soul.md").write_text(
+            f"你是{char}，集识光年的{role}。\n"
+            f"\n"
+            f"<!-- 在此编写角色背景、在团队中的位置、工作风格、注意事项 -->\n"
+            f"\n"
+            f"## 核心能力\n"
+            f"\n"
+            f"- 在此填写核心能力\n"
+            f"\n"
+            f"## 在团队中的位置\n"
+            f"\n"
+            f"- 在此填写与其他同事的协作关系\n"
+            f"\n"
+            f"## 工作风格\n"
+            f"\n"
+            f"- 在此填写工作风格特点\n"
+            f"\n"
+            f"## 注意事项\n"
+            f"\n"
+            f"- 在此填写注意事项\n",
+            encoding="utf-8",
+        )
+
         click.echo(f"已创建: {emp_dir}/")
         click.echo(f"  ├── employee.yaml")
-        click.echo(f"  └── prompt.md")
+        click.echo(f"  ├── prompt.md")
+        click.echo(f"  ├── soul.md")
+        click.echo(f"  └── workflows/")
 
         if avatar:
             _run_avatar_gen(
@@ -3295,6 +3369,66 @@ def register(name: str, dry_run: bool):
         click.echo(f"  提示: 请手动在员工定义中添加 agent_id: {agent_id}", err=True)
 
 
+@main.command()
+@click.argument("name")
+@click.option("--force", is_flag=True, help="跳过确认")
+@click.option("--keep-remote", is_flag=True, help="保留 knowlyr-id 中的 Agent（仅删本地）")
+def delete(name: str, force: bool, keep_remote: bool):
+    """删除员工（本地文件 + 远端标记为 inactive）."""
+    from crew.discovery import discover_employees
+
+    result = discover_employees(cache_ttl=0)
+    emp = result.get(name)
+    if not emp:
+        candidates = list(result.employees.keys())
+        click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
+        raise SystemExit(1)
+
+    if not emp.source_path:
+        click.echo(f"员工 '{name}' 无源文件路径，无法删除", err=True)
+        raise SystemExit(1)
+
+    # 确认
+    click.echo(f"即将删除员工:", err=True)
+    click.echo(f"  名称:   {emp.name}", err=True)
+    click.echo(f"  显示名: {emp.effective_display_name}", err=True)
+    click.echo(f"  路径:   {emp.source_path}", err=True)
+    if emp.agent_id:
+        click.echo(f"  Agent:  #{emp.agent_id}", err=True)
+        if keep_remote:
+            click.echo(f"  远端:   保留（--keep-remote）", err=True)
+        else:
+            click.echo(f"  远端:   将标记为 inactive", err=True)
+
+    if not force:
+        if not click.confirm("确认删除？"):
+            click.echo("已取消", err=True)
+            return
+
+    # 删除本地文件
+    import shutil
+
+    source = emp.source_path
+    if source.is_dir():
+        shutil.rmtree(source)
+    elif source.is_file():
+        source.unlink()
+    click.echo(f"✓ 本地文件已删除: {source}", err=True)
+
+    # 远端标 inactive
+    if emp.agent_id and not keep_remote:
+        try:
+            from crew.id_client import update_agent
+
+            ok = update_agent(emp.agent_id, agent_status="inactive")
+            if ok:
+                click.echo(f"✓ Agent #{emp.agent_id} 已标记为 inactive", err=True)
+            else:
+                click.echo(f"⚠ 远端禁用失败（请手动处理 Agent #{emp.agent_id}）", err=True)
+        except Exception as e:
+            click.echo(f"⚠ 远端禁用异常: {e}", err=True)
+
+
 def _load_avatar_base64(emp) -> str | None:
     """从员工目录加载 avatar.webp 并 base64 编码."""
     if not emp.source_path:
@@ -3403,6 +3537,74 @@ def avatar(name: str):
         description=emp.description,
         avatar_prompt=emp.avatar_prompt,
     )
+
+
+# ── rollback 命令 ──
+
+
+@main.command()
+@click.argument("name")
+@click.option("--list", "list_versions", is_flag=True, help="列出历史版本")
+@click.option("--steps", default=1, type=int, help="回滚几个版本（默认 1）")
+@click.option("--to-version", default=None, help="回滚到指定版本号")
+@click.option("--force", is_flag=True, help="跳过确认")
+def rollback(name: str, list_versions: bool, steps: int, to_version: str | None, force: bool):
+    """回滚员工到历史版本（基于 git 历史）."""
+    from crew.discovery import discover_employees
+    from crew.versioning import list_employee_versions, rollback_to
+
+    result = discover_employees(cache_ttl=0)
+    emp = result.get(name)
+    if not emp:
+        candidates = list(result.employees.keys())
+        click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
+        raise SystemExit(1)
+
+    if not emp.source_path:
+        click.echo(f"员工 '{name}' 无源文件路径", err=True)
+        raise SystemExit(1)
+
+    dir_path = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
+
+    versions = list_employee_versions(dir_path)
+    if not versions:
+        click.echo("无历史版本（目录不在 git 仓库中或无提交记录）", err=True)
+        raise SystemExit(1)
+
+    if list_versions:
+        click.echo(f"员工 '{name}' 历史版本:\n")
+        for i, v in enumerate(versions):
+            marker = " ← 当前" if i == 0 else ""
+            click.echo(f"  {v.version:<10} {v.date}  {v.commit_hash[:8]}  {v.message}{marker}")
+        return
+
+    # 确定目标 commit
+    if to_version:
+        target = None
+        for v in versions:
+            if v.version == to_version:
+                target = v
+                break
+        if not target:
+            click.echo(f"未找到版本 {to_version}，用 --list 查看可用版本", err=True)
+            raise SystemExit(1)
+    else:
+        if steps >= len(versions):
+            click.echo(f"只有 {len(versions)} 个版本，无法回滚 {steps} 步", err=True)
+            raise SystemExit(1)
+        target = versions[steps]
+
+    click.echo(f"回滚 '{name}': {versions[0].version} → {target.version}", err=True)
+    click.echo(f"  目标 commit: {target.commit_hash[:8]} ({target.date})", err=True)
+    click.echo(f"  提交信息:   {target.message}", err=True)
+
+    if not force:
+        if not click.confirm("确认回滚？"):
+            click.echo("已取消", err=True)
+            return
+
+    restored_version = rollback_to(dir_path, target.commit_hash)
+    click.echo(f"✓ 已回滚到版本 {restored_version}", err=True)
 
 
 # ── agents 子命令组 ──

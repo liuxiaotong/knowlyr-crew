@@ -21,7 +21,7 @@ def resolve_project_dir(project_dir: Path | None = None) -> Path:
 
 
 def _default_global_dir(project_dir: Path | None = None) -> Path:
-    return resolve_project_dir(project_dir) / ".crew" / "global"
+    return resolve_project_dir(project_dir) / "private" / "employees"
 
 
 def get_global_dir(project_dir: Path | None = None) -> Path:

@@ -220,6 +220,62 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     })
 
 
+async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
+    """删除员工（本地文件 + 远端标记为 inactive）."""
+    import shutil
+    from starlette.responses import JSONResponse
+    from crew.discovery import discover_employees
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir, cache_ttl=0)
+
+    employee = None
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                employee = emp
+                break
+    except ValueError:
+        employee = result.employees.get(identifier)
+
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    if not employee.source_path:
+        return JSONResponse({"error": "Employee source path unknown"}, status_code=400)
+
+    # 删除本地文件
+    source = employee.source_path
+    try:
+        if source.is_dir():
+            shutil.rmtree(source)
+        elif source.is_file():
+            source.unlink()
+    except Exception as e:
+        logger.exception("删除员工文件失败: %s", identifier)
+        return JSONResponse({"error": f"Delete failed: {e}"}, status_code=500)
+
+    # 远端标 inactive
+    remote_disabled = False
+    also_remote = request.query_params.get("also_remote", "true").lower() != "false"
+    if employee.agent_id and also_remote:
+        try:
+            from crew.id_client import aupdate_agent
+
+            remote_disabled = await aupdate_agent(
+                agent_id=employee.agent_id, agent_status="inactive",
+            )
+        except Exception:
+            logger.warning("远端禁用失败: Agent #%s", employee.agent_id)
+
+    return JSONResponse({
+        "ok": True,
+        "deleted": employee.name,
+        "remote_disabled": remote_disabled,
+    })
+
+
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
     """接收外部讨论数据，写入参与者记忆和会议记录."""
     from starlette.responses import JSONResponse
