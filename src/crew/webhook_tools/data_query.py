@@ -65,6 +65,7 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_A
     title = args.get("title", "untitled")
     content = args.get("content", "")
     tags = args.get("tags", "")
+    visibility = args.get("visibility", "open")
 
     if not content:
         return "错误：content 不能为空"
@@ -88,6 +89,8 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_A
     ]
     if tags:
         lines.append(f"tags: [{tags}]")
+    if visibility == "private":
+        lines.append("visibility: private")
     lines.extend(["---", "", content])
 
     note_path = notes_dir / filename
@@ -133,6 +136,7 @@ async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_Ap
     """列出最近笔记，可选按关键词过滤."""
     keyword = args.get("keyword", "")
     limit = min(args.get("limit", 10), 20)
+    max_visibility = args.get("_max_visibility", "open")
 
     notes_dir = (ctx.project_dir if ctx and ctx.project_dir else Path(".")) / ".crew" / "notes"
     if not notes_dir.exists():
@@ -144,6 +148,9 @@ async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_Ap
         if len(results) >= limit:
             break
         content = f.read_text(encoding="utf-8")
+        # 可见性过滤: max_visibility="open" 时跳过 private 笔记
+        if max_visibility != "private" and "visibility: private" in content:
+            continue
         if keyword and keyword.lower() not in content.lower():
             continue
         results.append(f"【{f.stem}】\n{content[:200]}")

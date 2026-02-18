@@ -155,6 +155,7 @@ async def _feishu_fast_reply(
     emp: Any,
     task_text: str,
     message_history: list[dict[str, Any]] | None,
+    max_visibility: str = "open",
 ) -> dict[str, Any]:
     """闲聊快速路径 — 不加载工具，单轮回复.
 
@@ -185,6 +186,19 @@ async def _feishu_fast_reply(
         "不要编造具体事件（客户拜访、会议、调休、出差等）。"
         "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常（跑步、做饭、阿灰）。"
     )
+
+    # 私聊时注入私密记忆（快速路径也能看到 Kai 的秘密）
+    if max_visibility == "private":
+        try:
+            from crew.memory import MemoryStore
+            store = MemoryStore(project_dir=ctx.project_dir)
+            memory_text = store.format_for_prompt(
+                emp.name, limit=5, max_visibility="private",
+            )
+            if memory_text:
+                prompt += "\n\n## 你记得的事\n\n" + memory_text
+        except Exception:
+            pass
 
     # 用备用模型（kimi）降低成本，没配就用主模型
     # 注意：fallback 系列配置不能混用主模型的配置（key/base_url 不通用）
@@ -356,7 +370,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 )
             message_history = None
 
-        args = {"task": chat_context}
+        args = {"task": chat_context, "_max_visibility": _visibility}
         if emp and emp.args:
             first_required = next((a for a in emp.args if a.required), None)
             if first_required:
@@ -373,6 +387,10 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 {"type": "text", "text": task_text},
             ]
 
+        # ── 可见性上下文 ──
+        # 私聊 → private（可以看到 Kai 的秘密），群聊 → open
+        _visibility = "private" if msg_event.chat_type != "group" else "open"
+
         # ── 闲聊快速路径 ──
         # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
         # 省 ~80K tokens / $0.07 per message
@@ -388,6 +406,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             try:
                 result = await _feishu_fast_reply(
                     ctx, emp, task_text, message_history,
+                    max_visibility=_visibility,
                 )
             except Exception as fast_exc:
                 logger.warning("闲聊快速路径失败，回退完整路径: %s", fast_exc)

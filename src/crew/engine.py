@@ -113,6 +113,7 @@ class CrewEngine:
         agent_identity: "AgentIdentity | None" = None,
         project_info: "ProjectInfo | None" = None,
         exemplar_prompt: str = "",
+        max_visibility: str = "open",
     ) -> str:
         """生成完整的 system prompt.
 
@@ -191,6 +192,7 @@ class CrewEngine:
             memory_store = MemoryStore(project_dir=self.project_dir)
             memory_text = memory_store.format_for_prompt(
                 employee.name, query=rendered, employee_tags=employee.tags,
+                max_visibility=max_visibility,
             )
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])

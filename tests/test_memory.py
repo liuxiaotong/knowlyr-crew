@@ -395,3 +395,83 @@ class TestCapacityControl:
 
         entries = store.query("pm")
         assert len(entries) == 2
+
+
+class TestVisibility:
+    """测试记忆可见性控制."""
+
+    def test_visibility_default_open(self):
+        """默认 visibility 为 open."""
+        entry = MemoryEntry(employee="pm", category="finding", content="test")
+        assert entry.visibility == "open"
+
+    def test_visibility_private(self):
+        entry = MemoryEntry(employee="pm", category="finding", content="secret", visibility="private")
+        assert entry.visibility == "private"
+
+    def test_backward_compat_no_visibility(self):
+        """旧格式 JSON（无 visibility）可正常解析，默认 open."""
+        old_json = '{"id":"abc","employee":"pm","category":"finding","content":"old"}'
+        entry = MemoryEntry(**json.loads(old_json))
+        assert entry.visibility == "open"
+
+    def test_add_with_visibility(self, tmp_path):
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        entry = store.add("pm", "finding", "Kai 的密码是 123", visibility="private")
+        assert entry.visibility == "private"
+
+        # 写入文件后能读回来
+        entries = store.query("pm", max_visibility="private")
+        assert len(entries) == 1
+        assert entries[0].visibility == "private"
+
+    def test_query_open_filters_private(self, tmp_path):
+        """max_visibility='open' 过滤掉 private 记忆."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("pm", "finding", "公开信息")
+        store.add("pm", "finding", "Kai 的密码", visibility="private")
+
+        # open 模式只看到公开记忆
+        open_entries = store.query("pm", max_visibility="open")
+        assert len(open_entries) == 1
+        assert open_entries[0].content == "公开信息"
+
+        # private 模式看到全部
+        all_entries = store.query("pm", max_visibility="private")
+        assert len(all_entries) == 2
+
+    def test_query_default_returns_all(self, tmp_path):
+        """默认 max_visibility='private' 返回全部."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("pm", "finding", "公开")
+        store.add("pm", "finding", "私密", visibility="private")
+
+        entries_all = store.query("pm")
+        assert len(entries_all) == 2
+
+    def test_format_for_prompt_respects_visibility(self, tmp_path):
+        """format_for_prompt 的 max_visibility 过滤."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("pm", "finding", "公开记忆")
+        store.add("pm", "finding", "私密记忆", visibility="private")
+
+        # open — 只有公开记忆
+        open_text = store.format_for_prompt("pm", max_visibility="open")
+        assert "公开记忆" in open_text
+        assert "私密记忆" not in open_text
+
+        # private — 全部
+        private_text = store.format_for_prompt("pm", max_visibility="private")
+        assert "公开记忆" in private_text
+        assert "私密记忆" in private_text
+
+    def test_api_state_only_open(self, tmp_path):
+        """模拟 API /state 场景：只返回 open 记忆."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("ceo-assistant", "finding", "Kai 喜欢吃面")
+        store.add("ceo-assistant", "finding", "Kai 的 wifi 密码 abc123", visibility="private")
+
+        # API 只传 max_visibility="open"
+        memories = store.query("ceo-assistant", limit=10, max_visibility="open")
+        assert len(memories) == 1
+        assert "wifi 密码" not in memories[0].content

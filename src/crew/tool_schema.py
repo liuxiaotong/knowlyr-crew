@@ -556,6 +556,12 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "description": "标签，逗号分隔",
                     "default": "",
                 },
+                "visibility": {
+                    "type": "string",
+                    "enum": ["open", "private"],
+                    "default": "open",
+                    "description": "可见性: open=公开, private=仅私聊可见",
+                },
             },
             "required": ["title", "content"],
         },
@@ -1143,6 +1149,12 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "content": {
                     "type": "string",
                     "description": "记忆内容",
+                },
+                "visibility": {
+                    "type": "string",
+                    "enum": ["open", "private"],
+                    "default": "open",
+                    "description": "可见性: open=公开, private=仅私聊可见",
                 },
             },
             "required": ["content"],

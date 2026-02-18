@@ -129,21 +129,24 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         if soul_path.exists():
             soul = soul_path.read_text(encoding="utf-8")
 
-    # 读取最近记忆
+    # 读取最近记忆（API 只返回公开记忆，过滤 private）
     store = MemoryStore(project_dir=ctx.project_dir)
-    memories = store.query(employee.name, limit=limit)
+    memories = store.query(employee.name, limit=limit, max_visibility="open")
     memory_list = [
         {"category": m.category, "content": m.content, "created_at": m.created_at, "tags": m.tags}
         for m in memories
     ]
 
-    # 读取最近笔记
+    # 读取最近笔记（API 只返回公开笔记，过滤 private）
     notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
     recent_notes: list[dict] = []
     if notes_dir.is_dir():
         note_files = sorted(notes_dir.glob("*.md"), reverse=True)
         for nf in note_files[:5]:
             text = nf.read_text(encoding="utf-8")
+            # 跳过 private 笔记
+            if "visibility: private" in text:
+                continue
             if employee.character_name in text or employee.name in text:
                 recent_notes.append({"filename": nf.name, "content": text[:500]})
 
@@ -698,11 +701,22 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     from starlette.responses import JSONResponse
     from crew.discovery import discover_employees
     from crew.organization import load_organization, get_effective_authority
-    from crew.cost import query_cost_summary
+    from crew.cost import query_cost_summary, fetch_aiberm_billing
 
     result = discover_employees(ctx.project_dir)
     org = load_organization(project_dir=ctx.project_dir)
     cost = query_cost_summary(ctx.registry, days=7)
+
+    # 从任意员工配置提取 aiberm API key
+    aiberm_billing = None
+    for emp in result.employees.values():
+        if emp.api_key and "aiberm.com" in (emp.base_url or ""):
+            aiberm_billing = await fetch_aiberm_billing(
+                api_key=emp.api_key,
+                base_url=emp.base_url,
+                days=7,
+            )
+            break
 
     employees_info = []
     for name, emp in sorted(result.employees.items()):
@@ -736,6 +750,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
             for level, auth in org.authority.items()
         },
         "cost_7d": cost,
+        "aiberm_billing": aiberm_billing,
         "employees": employees_info,
         "routing_templates": {
             name: {
@@ -748,6 +763,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                         "team": step.team,
                         "description": step.description,
                         "optional": step.optional,
+                        "approval": step.approval,
                     }
                     for step in tmpl.steps
                 ],

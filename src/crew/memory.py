@@ -44,6 +44,10 @@ class MemoryEntry(BaseModel):
     # Enhancement 3: 跨员工共享
     tags: list[str] = Field(default_factory=list, description="语义标签")
     shared: bool = Field(default=False, description="是否加入共享记忆池")
+    # 可见性控制
+    visibility: Literal["open", "private"] = Field(
+        default="open", description="可见性: open=公开, private=仅私聊可见"
+    )
 
 
 class MemoryStore:
@@ -195,6 +199,7 @@ class MemoryStore:
         ttl_days: int = 0,
         tags: list[str] | None = None,
         shared: bool = False,
+        visibility: Literal["open", "private"] = "open",
     ) -> MemoryEntry:
         """添加一条记忆."""
         self._ensure_dir()
@@ -208,6 +213,7 @@ class MemoryStore:
             ttl_days=effective_ttl,
             tags=tags or [],
             shared=shared,
+            visibility=visibility,
         )
         with self._employee_file(employee).open("a", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")
@@ -238,6 +244,7 @@ class MemoryStore:
         limit: int = 20,
         min_confidence: float = 0.0,
         include_expired: bool = False,
+        max_visibility: str = "private",
     ) -> list[MemoryEntry]:
         """查询员工记忆.
 
@@ -247,6 +254,7 @@ class MemoryStore:
             limit: 最大返回条数
             min_confidence: 最低置信度（对比衰减后的有效值）
             include_expired: 是否包含已过期条目
+            max_visibility: 可见性上限 — "private" 返回全部, "open" 只返回公开记忆
 
         Returns:
             记忆列表（最新在前，置信度为衰减后的有效值）
@@ -275,6 +283,10 @@ class MemoryStore:
                 continue
 
             if category and entry.category != category:
+                continue
+
+            # 可见性过滤: max_visibility="open" 时跳过 private 记忆
+            if max_visibility != "private" and entry.visibility == "private":
                 continue
 
             # 应用衰减后检查置信度
@@ -367,6 +379,7 @@ class MemoryStore:
         limit: int = 10,
         query: str = "",
         employee_tags: list[str] | None = None,
+        max_visibility: str = "open",
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
@@ -375,6 +388,7 @@ class MemoryStore:
             limit: 最大条数
             query: 查询上下文（有值时使用语义搜索优先返回相关记忆）
             employee_tags: 员工标签（用于匹配共享记忆）
+            max_visibility: 可见性上限 — "private" 返回全部, "open" 只返回公开记忆
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
@@ -400,7 +414,7 @@ class MemoryStore:
                 logger.debug("语义搜索降级: %s", e)
 
         if not own_found:
-            entries = self.query(employee, limit=limit)
+            entries = self.query(employee, limit=limit, max_visibility=max_visibility)
             if entries:
                 parts.append(self._format_entries(entries))
 

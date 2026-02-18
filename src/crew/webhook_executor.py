@@ -483,7 +483,9 @@ async def _execute_employee_with_tools(
             logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
 
     engine = CrewEngine(project_dir=ctx.project_dir)
-    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
+    # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
+    max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
+    prompt = engine.prompt(match, args=args, agent_identity=agent_identity, max_visibility=max_visibility)
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
@@ -629,6 +631,7 @@ async def _execute_employee_with_tools(
                     continue
                 tool_output = await _handle_tool_call(
                     ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
+                    max_visibility=max_visibility,
                 )
                 if tool_output is None:
                     # finish tool
@@ -705,6 +708,7 @@ async def _execute_employee_with_tools(
                     continue
                 tool_output = await _handle_tool_call(
                     ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
+                    max_visibility=max_visibility,
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
@@ -744,6 +748,7 @@ async def _handle_tool_call(
     arguments: dict[str, Any],
     agent_id: int | None,
     guard: Any | None = None,
+    max_visibility: str = "open",
 ) -> str | None:
     """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
     from crew.tool_schema import is_finish_tool
@@ -762,13 +767,16 @@ async def _handle_tool_call(
         from crew.memory import MemoryStore
         project_dir = ctx.project_dir if ctx else Path(".")
         store = MemoryStore(project_dir=project_dir)
+        # 私聊时默认 private，LLM 也可显式指定
+        default_vis = "private" if max_visibility == "private" else "open"
         entry = store.add(
             employee=employee_name,
             category=arguments.get("category", "finding"),
             content=arguments.get("content", ""),
             source_session="",
+            visibility=arguments.get("visibility", default_vis),
         )
-        logger.info("记忆保存: %s → %s", employee_name, entry.content[:60])
+        logger.info("记忆保存: %s → %s (visibility=%s)", employee_name, entry.content[:60], entry.visibility)
         return "已记住。"
 
     if tool_name == "delegate":
@@ -779,6 +787,12 @@ async def _handle_tool_call(
             arguments.get("employee_name", ""),
             arguments.get("task", ""),
         )
+
+    # 注入 _max_visibility 到 read_notes / create_note 工具
+    if tool_name in ("read_notes", "create_note"):
+        arguments.setdefault("_max_visibility", max_visibility)
+        if tool_name == "create_note" and max_visibility == "private":
+            arguments.setdefault("visibility", "private")
 
     handler = _TOOL_HANDLERS.get(tool_name)
     if handler:
@@ -832,7 +846,9 @@ async def _execute_employee(
             logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
 
     engine = CrewEngine(project_dir=ctx.project_dir)
-    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
+    # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
+    max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
+    prompt = engine.prompt(match, args=args, agent_identity=agent_identity, max_visibility=max_visibility)
 
     # 尝试执行 LLM 调用（executor 自动从环境变量解析 API key）
     try:
