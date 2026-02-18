@@ -126,6 +126,85 @@ async def _find_recent_image_in_chat(
     return None
 
 
+# ── 闲聊快速路径 ──
+
+# 工作关键词 — 命中任一则走完整 agent loop（带工具）
+_WORK_KEYWORDS = frozenset([
+    "数据", "报表", "分析", "查一下", "查下", "帮我查", "统计",
+    "日程", "日历", "会议", "审批", "待办", "任务",
+    "委派", "安排", "创建", "删除", "更新", "发送", "通知",
+    "项目", "进度", "上线", "部署", "发布",
+    "飞书", "文档", "表格", "知识库",
+    "github", "pr", "issue", "仓库",
+    "邮件", "快递", "航班",
+    "密码", "二维码", "短链",
+])
+
+
+def _needs_tools(text: str) -> bool:
+    """判断消息是否需要工具（即不是纯闲聊）."""
+    if not text or len(text) > 200:
+        # 长消息通常是正式任务描述
+        return True
+    t = text.lower()
+    return any(kw in t for kw in _WORK_KEYWORDS)
+
+
+async def _feishu_fast_reply(
+    ctx: _AppContext,
+    emp: Any,
+    task_text: str,
+    message_history: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """闲聊快速路径 — 不加载工具，单轮回复.
+
+    对比完整路径: ~87K tokens → ~8K tokens, 10x 节省.
+    """
+    from crew.engine import CrewEngine
+    from crew.executor import aexecute_prompt
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+    # soul prompt（人设）+ 简短 chat context，不附加委派花名册和工具
+    prompt = engine.prompt(emp, args={"task": (
+        "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
+        "这次对话不需要查数据或调工具，纯聊天就行。"
+    )})
+
+    # 用备用模型（kimi）降低成本，没配就用主模型
+    chat_model = emp.fallback_model or emp.model or "claude-sonnet-4-20250514"
+    chat_api_key = emp.fallback_api_key or emp.api_key or None
+    chat_base_url = emp.fallback_base_url or emp.base_url or None
+
+    # 把对话历史嵌入 prompt（aexecute_prompt 不支持 message_history 参数）
+    if message_history:
+        history_lines = []
+        for msg in message_history[-6:]:  # 最近 6 条足够
+            role = "Kai" if msg["role"] == "user" else emp.character_name or emp.name
+            history_lines.append(f"{role}: {msg['content']}")
+        if history_lines:
+            prompt += "\n\n## 最近对话\n\n" + "\n".join(history_lines)
+
+    result = await aexecute_prompt(
+        system_prompt=prompt,
+        model=chat_model,
+        api_key=chat_api_key,
+        base_url=chat_base_url,
+        stream=False,
+        user_message=task_text,
+    )
+
+    return {
+        "employee": emp.name,
+        "prompt": prompt[:500],
+        "output": result.content if result else "",
+        "model": result.model if result else chat_model,
+        "input_tokens": result.input_tokens if result else 0,
+        "output_tokens": result.output_tokens if result else 0,
+        "base_url": chat_base_url or "",
+        "fast_path": True,
+    }
+
+
 async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     """后台处理飞书消息：路由到员工 → 执行 → 回复卡片."""
     from crew.discovery import discover_employees
@@ -221,11 +300,12 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
             )
 
-        # 加载对话历史
+        # 加载对话历史（15 条足够保持上下文，更早的可用 feishu_chat_history 工具回查）
+        _history_limit = 15
         message_history = None
         if ctx.feishu_chat_store:
             history_entries = ctx.feishu_chat_store.get_recent(
-                msg_event.chat_id, limit=40,
+                msg_event.chat_id, limit=_history_limit,
             )
             if history_entries:
                 message_history = [
@@ -235,7 +315,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         if not has_tools and message_history:
             history_text = ctx.feishu_chat_store.format_for_prompt(
-                msg_event.chat_id, limit=40,
+                msg_event.chat_id, limit=_history_limit,
             )
             if history_text:
                 chat_context += (
@@ -262,13 +342,29 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 {"type": "text", "text": task_text},
             ]
 
-        # 通过 webhook 模块查找，确保 mock patch 生效
-        import crew.webhook as _wh
-        result = await _wh._execute_employee(
-            ctx, employee_name, args, model=None,
-            user_message=user_msg,
-            message_history=message_history,
+        # ── 闲聊快速路径 ──
+        # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
+        # 省 ~80K tokens / $0.07 per message
+        use_fast_path = (
+            has_tools
+            and image_data is None
+            and isinstance(user_msg, str)
+            and not _needs_tools(task_text)
+            and emp is not None
         )
+
+        if use_fast_path:
+            result = await _feishu_fast_reply(
+                ctx, emp, task_text, message_history,
+            )
+        else:
+            # 通过 webhook 模块查找，确保 mock patch 生效
+            import crew.webhook as _wh
+            result = await _wh._execute_employee(
+                ctx, employee_name, args, model=None,
+                user_message=user_msg,
+                message_history=message_history,
+            )
 
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)

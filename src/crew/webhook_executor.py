@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -310,8 +311,16 @@ async def _execute_chain(
     ctx: _AppContext,
     task_id: str,
     steps: list[dict[str, str]],
+    *,
+    start_index: int = 0,
+    prev_output: str = "",
+    step_results: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """按顺序执行委派链，前一步结果传给下一步."""
+    """按顺序执行委派链，前一步结果传给下一步.
+
+    支持审批检查点: 遇到 approval 步骤时暂停链执行，保存断点，
+    通知 Kai 审批。批准后通过 _resume_chain 从断点恢复。
+    """
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
     from crew.executor import aexecute_prompt
@@ -319,11 +328,31 @@ async def _execute_chain(
     discovery = discover_employees(project_dir=ctx.project_dir)
     engine = CrewEngine(project_dir=ctx.project_dir)
 
-    prev_output = ""
-    step_results: list[dict[str, str]] = []
+    if step_results is None:
+        step_results = []
 
-    for i, step in enumerate(steps):
+    for i in range(start_index, len(steps)):
+        step = steps[i]
         emp_name = step["employee_name"]
+
+        # 审批检查点: 暂停链执行
+        if step.get("approval") and i > start_index:
+            checkpoint = {
+                "chain_step": i,
+                "steps_json": json.dumps(steps, ensure_ascii=False),
+                "prev_output": prev_output,
+                "step_results": step_results,
+            }
+            ctx.registry.update_checkpoint(task_id, checkpoint)
+            ctx.registry.update(task_id, "awaiting_approval")
+            await _notify_approval_needed(ctx, task_id, step, prev_output)
+            return {
+                "steps": step_results,
+                "status": "awaiting_approval",
+                "pending_step": emp_name,
+                "message": f"步骤 {i + 1} ({emp_name}) 需要审批，已通知 Kai",
+            }
+
         task_desc = step["task"].replace("{prev}", prev_output)
 
         target = discovery.get(emp_name)
@@ -350,6 +379,73 @@ async def _execute_chain(
             break
 
     return {"steps": step_results, "final_output": prev_output}
+
+
+async def _notify_approval_needed(
+    ctx: _AppContext, task_id: str, step: dict, prev_output: str,
+) -> None:
+    """通过飞书私聊通知 Kai 有步骤等待审批."""
+    if not (ctx.feishu_token_mgr and ctx.feishu_config):
+        logger.info("审批通知跳过: 飞书未配置 (task=%s)", task_id)
+        return
+    owner_id = ctx.feishu_config.owner_open_id
+    if not owner_id:
+        logger.info("审批通知跳过: owner_open_id 未配置 (task=%s)", task_id)
+        return
+
+    emp_name = step.get("employee_name", "?")
+    task_text = step.get("task", "")
+    role = task_text.split("]")[0].lstrip("[") if "]" in task_text else emp_name
+    summary = prev_output[:300] if prev_output else "（无前序输出）"
+
+    text = (
+        f"📋 任务 {task_id} 等待审批\n\n"
+        f"下一步: {emp_name}（{role}）\n"
+        f"前序结果摘要:\n{summary}\n\n"
+        f"回复「approve {task_id}」批准\n"
+        f"回复「reject {task_id}」拒绝"
+    )
+
+    try:
+        from crew.feishu import send_feishu_message
+        await send_feishu_message(
+            ctx.feishu_token_mgr, owner_id, {"text": text}, msg_type="text",
+        )
+    except Exception as e:
+        logger.warning("审批通知发送失败 (task=%s): %s", task_id, e)
+
+
+async def _resume_chain(ctx: _AppContext, task_id: str) -> None:
+    """从审批检查点恢复链执行."""
+    record = ctx.registry.get(task_id)
+    if not record or record.status != "awaiting_approval":
+        return
+    if not record.checkpoint:
+        ctx.registry.update(task_id, "failed", error="无断点数据")
+        return
+
+    cp = record.checkpoint
+    steps = json.loads(cp["steps_json"])
+    start_index = cp["chain_step"]
+    prev_output = cp["prev_output"]
+    step_results = cp.get("step_results", [])
+
+    ctx.registry.update(task_id, "running")
+
+    try:
+        result = await _execute_chain(
+            ctx, task_id, steps,
+            start_index=start_index,
+            prev_output=prev_output,
+            step_results=step_results,
+        )
+        # 如果又遇到审批检查点，_execute_chain 已处理，不需要再 update
+        if result.get("status") == "awaiting_approval":
+            return
+        ctx.registry.update(task_id, "completed", result=result)
+    except Exception as e:
+        logger.exception("恢复链执行失败 [task=%s]: %s", task_id, e)
+        ctx.registry.update(task_id, "failed", error=str(e))
 
 
 async def _execute_employee_with_tools(
@@ -395,7 +491,8 @@ async def _execute_employee_with_tools(
 
         org = load_organization(project_dir=ctx.project_dir)
 
-        team_rosters: dict[str, list[str]] = {}
+        # 紧凑名单格式 — 省掉描述（employee name 已自描述），每组一行
+        team_members: dict[str, list[str]] = {}
         ungrouped: list[str] = []
 
         for emp_name, emp in discovery.employees.items():
@@ -403,34 +500,27 @@ async def _execute_employee_with_tools(
                 continue
             label = emp.character_name or emp.effective_display_name
             auth = get_effective_authority(org, emp_name, project_dir=ctx.project_dir) or "?"
-            line = f"- {emp_name}（{label}，{auth}类）：{emp.description}"
+            tag = f"{emp_name}({label},{auth})"
             team_id = org.get_team(emp_name)
             if team_id:
-                team_rosters.setdefault(team_id, []).append(line)
+                team_members.setdefault(team_id, []).append(tag)
             else:
-                ungrouped.append(line)
+                ungrouped.append(tag)
 
         sections: list[str] = []
-        for tid, lines in team_rosters.items():
+        for tid, members in team_members.items():
             team_def = org.teams.get(tid)
             team_label = team_def.label if team_def else tid
-            sections.append(f"### {team_label}\n" + "\n".join(lines))
+            sections.append(f"**{team_label}**: {' '.join(members)}")
         if ungrouped:
-            sections.append("### 其他\n" + "\n".join(ungrouped))
-
-        authority_note = (
-            "\n\n权限级别说明：A类=自主执行可直接交付，"
-            "B类=需 Kai 确认后才能决定下一步，"
-            "C类=简单任务直接做/复杂任务需确认。"
-        )
+            sections.append(f"**其他**: {' '.join(ungrouped)}")
 
         if sections:
             prompt += (
                 "\n\n---\n\n## 可委派的同事\n\n"
-                "使用 delegate/delegate_async/delegate_chain/route 工具调用他们。\n"
-                + authority_note
-                + "\n\n"
-                + "\n\n".join(sections)
+                "A=自主执行 B=需Kai确认 C=看场景。"
+                "用 delegate/delegate_async/delegate_chain/route 调用。\n\n"
+                + "\n".join(sections)
             )
 
     from crew.permission import PermissionGuard
@@ -442,7 +532,7 @@ async def _execute_employee_with_tools(
     tool_schemas, deferred_names = employee_tools_to_schemas(agent_tool_names)
     loaded_deferred: set[str] = set()  # 已加载的延迟工具
 
-    use_model = match.model or model or "claude-sonnet-4-20250514"
+    use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
     # base_url 强制走 OpenAI 兼容路径，消息格式也要对应
     is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
@@ -504,10 +594,18 @@ async def _execute_employee_with_tools(
             finished = False
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
-                    # ── 延迟加载工具 ──
+                    # ── 延迟加载工具（支持技能包名） ──
+                    from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
                     requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+                    # 展开技能包名为工具名
+                    expanded: set[str] = set()
+                    for rn in requested:
+                        if rn in SKILL_PACKS:
+                            expanded |= SKILL_PACKS[rn]["tools"]
+                        else:
+                            expanded.add(rn)
                     newly = []
-                    for tn in sorted(requested):
+                    for tn in sorted(expanded):
                         if tn in deferred_names and tn not in loaded_deferred:
                             schema = get_tool_schema(tn)
                             if schema:
@@ -518,9 +616,10 @@ async def _execute_employee_with_tools(
                     if not remaining:
                         tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
                     else:
+                        new_load_schema = _make_load_tools_schema(remaining)
                         for s in tool_schemas:
                             if s["name"] == "load_tools":
-                                s["description"] = f"加载额外工具后才能调用。可用: {', '.join(sorted(remaining))}"
+                                s["description"] = new_load_schema["description"]
                     load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
                     tool_results.append({
                         "type": "tool_result",
@@ -572,10 +671,17 @@ async def _execute_employee_with_tools(
             finished = False
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
-                    # ── 延迟加载工具 ──
+                    # ── 延迟加载工具（支持技能包名） ──
+                    from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
                     requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+                    expanded: set[str] = set()
+                    for rn in requested:
+                        if rn in SKILL_PACKS:
+                            expanded |= SKILL_PACKS[rn]["tools"]
+                        else:
+                            expanded.add(rn)
                     newly = []
-                    for tn in sorted(requested):
+                    for tn in sorted(expanded):
                         if tn in deferred_names and tn not in loaded_deferred:
                             schema = get_tool_schema(tn)
                             if schema:
@@ -586,9 +692,10 @@ async def _execute_employee_with_tools(
                     if not remaining:
                         tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
                     else:
+                        new_load_schema = _make_load_tools_schema(remaining)
                         for s in tool_schemas:
                             if s["name"] == "load_tools":
-                                s["description"] = f"加载额外工具后才能调用。可用: {', '.join(sorted(remaining))}"
+                                s["description"] = new_load_schema["description"]
                     load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
                     messages.append({
                         "role": "tool",
@@ -731,7 +838,7 @@ async def _execute_employee(
     try:
         from crew.executor import aexecute_prompt
 
-        use_model = match.model or model or "claude-sonnet-4-20250514"
+        use_model = model or match.model or "claude-sonnet-4-20250514"
         exec_kwargs = dict(
             system_prompt=prompt,
             api_key=match.api_key or None,
@@ -806,7 +913,7 @@ async def _stream_employee(
         try:
             from crew.executor import aexecute_prompt
 
-            use_model = match.model or model or "claude-sonnet-4-20250514"
+            use_model = model or match.model or "claude-sonnet-4-20250514"
             stream_iter = await asyncio.wait_for(
                 aexecute_prompt(
                     system_prompt=prompt,

@@ -386,6 +386,7 @@ class RoutingStep(BaseModel):
     team: str | None = Field(default=None, description="指定团队")
     description: str = Field(default="", description="步骤说明")
     optional: bool = Field(default=False, description="是否可选步骤")
+    approval: bool = Field(default=False, description="执行前需人工审批")
 
 
 class RoutingTemplate(BaseModel):

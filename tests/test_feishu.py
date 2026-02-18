@@ -662,3 +662,41 @@ class TestFeishuEventEndpoint:
         # 第二次去重
         resp2 = client.post("/feishu/event", json=event_payload)
         assert resp2.json()["message"] == "duplicate"
+
+
+# ── 闲聊快速路径判断 ──
+
+class TestNeedsTools:
+    """测试 _needs_tools() 闲聊判断."""
+
+    def test_casual_greetings(self):
+        from crew.webhook_feishu import _needs_tools
+        assert not _needs_tools("早")
+        assert not _needs_tools("下午好")
+        assert not _needs_tools("晚安")
+        assert not _needs_tools("你好")
+
+    def test_casual_chat(self):
+        from crew.webhook_feishu import _needs_tools
+        assert not _needs_tools("下午有点累，不想开会了")
+        assert not _needs_tools("周末有什么好吃的")
+        assert not _needs_tools("帮我想个团建活动")
+        assert not _needs_tools("最近怎么样")
+
+    def test_work_keywords_trigger(self):
+        from crew.webhook_feishu import _needs_tools
+        assert _needs_tools("查一下昨天的数据")
+        assert _needs_tools("帮我查下今天的日程")
+        assert _needs_tools("创建一个飞书文档")
+        assert _needs_tools("看看GitHub上的PR")
+        assert _needs_tools("帮我发送邮件给张三")
+        assert _needs_tools("项目进度怎么样了")
+
+    def test_long_text_is_work(self):
+        from crew.webhook_feishu import _needs_tools
+        # 超过 200 字的消息被认为是正式任务
+        assert _needs_tools("x" * 201)
+
+    def test_empty_is_work(self):
+        from crew.webhook_feishu import _needs_tools
+        assert _needs_tools("")

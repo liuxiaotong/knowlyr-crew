@@ -642,7 +642,10 @@ async def _tool_route(
         if len(steps) > 0:
             step_task += "\n\n上一步结果: {prev}"
 
-        steps.append({"employee_name": emp_name, "task": step_task})
+        step_dict: dict[str, Any] = {"employee_name": emp_name, "task": step_task}
+        if step.approval:
+            step_dict["approval"] = True
+        steps.append(step_dict)
 
     if not steps:
         return f"错误: 模板 '{template_name}' 展开后没有有效步骤"

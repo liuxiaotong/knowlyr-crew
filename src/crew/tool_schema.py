@@ -138,17 +138,17 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "delegate": {
         "name": "delegate",
-        "description": "委派任务给另一位 AI 同事执行。同事将独立完成任务并返回结果。",
+        "description": "同步委派任务给同事，等待完成后返回结果。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "employee_name": {
                     "type": "string",
-                    "description": "目标员工名称（如 code-reviewer、doc-writer）",
+                    "description": "员工名称",
                 },
                 "task": {
                     "type": "string",
-                    "description": "委派的具体任务描述",
+                    "description": "任务描述",
                 },
             },
             "required": ["employee_name", "task"],
@@ -156,17 +156,17 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "delegate_async": {
         "name": "delegate_async",
-        "description": "异步委派任务给同事，立即返回任务 ID，不等待完成。适合并行派多个人做事。",
+        "description": "异步委派，立即返回任务 ID。适合并行派多人。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "employee_name": {
                     "type": "string",
-                    "description": "目标员工名称（如 code-reviewer、doc-writer）",
+                    "description": "员工名称",
                 },
                 "task": {
                     "type": "string",
-                    "description": "委派的具体任务描述",
+                    "description": "任务描述",
                 },
             },
             "required": ["employee_name", "task"],
@@ -174,13 +174,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "check_task": {
         "name": "check_task",
-        "description": "查询异步任务的状态和结果（包括委派任务和会议）。",
+        "description": "查询异步任务状态和结果。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "任务 ID（由 delegate_async 或 organize_meeting 返回）",
+                    "description": "任务 ID",
                 },
             },
             "required": ["task_id"],
@@ -188,19 +188,19 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "list_tasks": {
         "name": "list_tasks",
-        "description": "列出最近的异步任务，支持按状态或类型筛选。",
+        "description": "列出最近异步任务。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "status": {
                     "type": "string",
                     "enum": ["pending", "running", "completed", "failed"],
-                    "description": "按状态筛选（可选）",
+                    "description": "按状态筛选",
                 },
                 "type": {
                     "type": "string",
                     "enum": ["employee", "meeting", "pipeline"],
-                    "description": "按类型筛选（可选）",
+                    "description": "按类型筛选",
                 },
                 "limit": {
                     "type": "integer",
@@ -212,17 +212,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "organize_meeting": {
         "name": "organize_meeting",
-        "description": (
-            "组织多位同事的讨论会议，异步执行，立即返回会议 ID。"
-            "各参会者并行讨论多轮后综合结论。"
-        ),
+        "description": "组织讨论会议。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "employees": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "参会员工名称列表（如 ['code-reviewer', 'test-engineer']）",
+                    "description": "参会员工名称列表",
                 },
                 "topic": {
                     "type": "string",
@@ -230,7 +227,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "goal": {
                     "type": "string",
-                    "description": "会议目标（可选）",
+                    "description": "会议目标",
                 },
                 "rounds": {
                     "type": "integer",
@@ -243,13 +240,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "check_meeting": {
         "name": "check_meeting",
-        "description": "查询会议进展和结果（check_task 的会议专用别名）。",
+        "description": "查会议结果。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "会议 ID（由 organize_meeting 返回）",
+                    "description": "会议 ID",
                 },
             },
             "required": ["task_id"],
@@ -257,17 +254,17 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "run_pipeline": {
         "name": "run_pipeline",
-        "description": "执行预定义的多员工流水线（如安全审计、产品发布）。异步执行，返回任务 ID。",
+        "description": "执行预定义流水线，异步返回任务 ID。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "流水线名称（如 security-test、product-launch）",
+                    "description": "流水线名称",
                 },
                 "args": {
                     "type": "object",
-                    "description": "流水线参数（如 {\"target\": \"auth.py\"}）",
+                    "description": "流水线参数",
                     "additionalProperties": {"type": "string"},
                 },
             },
@@ -276,7 +273,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "delegate_chain": {
         "name": "delegate_chain",
-        "description": "按顺序委派多位同事，前一步的结果自动传给下一步。异步执行，返回任务 ID。",
+        "description": "按顺序委派多人，前步结果自动传给下步。异步返回任务 ID。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -304,21 +301,21 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "route": {
         "name": "route",
-        "description": "按预定义的协作路由模板发起委派链。比手动编排 delegate_chain 更快。",
+        "description": "按路由模板发起委派链。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "template": {
                     "type": "string",
-                    "description": "路由模板名称（如 code_change、new_feature、security_audit、performance、data_pipeline、external_content）",
+                    "description": "模板名称",
                 },
                 "task": {
                     "type": "string",
-                    "description": "任务描述，会传递给链中每一步",
+                    "description": "任务描述",
                 },
                 "overrides": {
                     "type": "object",
-                    "description": "覆盖模板中的员工选择，格式 {role: employee_name}",
+                    "description": "覆盖默认员工 {role: name}",
                 },
             },
             "required": ["template", "task"],
@@ -344,7 +341,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "schedule_task": {
         "name": "schedule_task",
-        "description": "创建定时任务（如每天早上发简报、每周五写周报）。",
+        "description": "创建定时任务。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -354,7 +351,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "cron": {
                     "type": "string",
-                    "description": "cron 表达式（如 '0 9 * * *' 表示每天 9 点）",
+                    "description": "cron 表达式",
                 },
                 "employee_name": {
                     "type": "string",
@@ -370,7 +367,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "list_schedules": {
         "name": "list_schedules",
-        "description": "列出所有定时任务及下次执行时间。",
+        "description": "列出定时任务。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -392,7 +389,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "agent_file_read": {
         "name": "agent_file_read",
-        "description": "读取项目目录内的文件内容（只读，不能写入）。",
+        "description": "读取项目文件。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -414,17 +411,17 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "agent_file_grep": {
         "name": "agent_file_grep",
-        "description": "在项目目录内搜索文件内容（正则匹配）。",
+        "description": "搜索项目文件内容。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "搜索模式（正则表达式）",
+                    "description": "正则表达式",
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索目录（相对于项目根目录，默认整个项目）",
+                    "description": "目录路径",
                 },
                 "file_pattern": {
                     "type": "string",
@@ -436,7 +433,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "query_data": {
         "name": "query_data",
-        "description": "查询细粒度业务数据（按指标、时间段、分组维度）。",
+        "description": "查询业务数据。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -448,13 +445,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "period": {
                     "type": "string",
                     "enum": ["today", "week", "month", "quarter"],
-                    "description": "时间段（默认 week）",
+                    "description": "时间段",
                     "default": "week",
                 },
                 "group_by": {
                     "type": "string",
                     "enum": ["day", "week", "agent"],
-                    "description": "分组维度（可选）",
+                    "description": "分组",
                 },
             },
             "required": ["metric"],
@@ -462,7 +459,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "find_free_time": {
         "name": "find_free_time",
-        "description": "查询多位飞书用户的共同空闲时间段。",
+        "description": "查共同空闲时间。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -473,12 +470,12 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "days": {
                     "type": "integer",
-                    "description": "查询未来几天（默认 7）",
+                    "description": "天数",
                     "default": 7,
                 },
                 "duration_minutes": {
                     "type": "integer",
-                    "description": "需要的时长（分钟，默认 60）",
+                    "description": "分钟",
                     "default": 60,
                 },
             },
@@ -487,7 +484,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "query_stats": {
         "name": "query_stats",
-        "description": "查询公司实时业务数据。返回用户增长、消息活跃、AI团队状态、财务等数据。问业务问题前先调这个。",
+        "description": "查询业务概览数据。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -523,7 +520,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "web_search": {
         "name": "web_search",
-        "description": "搜索互联网获取实时信息。适用于查行业动态、竞品信息、技术概念等。返回搜索结果摘要。",
+        "description": "搜索互联网获取实时信息。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -542,21 +539,21 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "create_note": {
         "name": "create_note",
-        "description": "保存备忘或笔记。存储在项目目录中，长期保留。适合记录决策、待办、会议要点。",
+        "description": "保存笔记。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "笔记标题（也用作文件名）",
+                    "description": "标题",
                 },
                 "content": {
                     "type": "string",
-                    "description": "笔记内容（markdown 格式）",
+                    "description": "内容（markdown）",
                 },
                 "tags": {
                     "type": "string",
-                    "description": "标签，逗号分隔（如 decision,urgent）",
+                    "description": "标签，逗号分隔",
                     "default": "",
                 },
             },
@@ -565,13 +562,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "lookup_user": {
         "name": "lookup_user",
-        "description": "按姓名查用户详情（活跃度、消息数、注册时间等）。",
+        "description": "查用户详情。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "用户昵称（支持模糊搜索）",
+                    "description": "用户昵称",
                 },
             },
             "required": ["name"],
@@ -579,7 +576,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "query_agent_work": {
         "name": "query_agent_work",
-        "description": "查某个AI同事最近的工作记录（任务数、成功率、评分、具体任务列表）。",
+        "description": "查AI同事工作记录。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -598,13 +595,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "read_notes": {
         "name": "read_notes",
-        "description": "查看之前保存的备忘和笔记。可按关键词筛选。",
+        "description": "查看笔记。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "keyword": {
                     "type": "string",
-                    "description": "搜索关键词（可选）",
+                    "description": "关键词",
                     "default": "",
                 },
                 "limit": {
@@ -618,7 +615,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "read_messages": {
         "name": "read_messages",
-        "description": "查看 Kai 的未读消息。返回未读数量和每个发件人的最新消息预览。",
+        "description": "查看 Kai 的未读消息。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -627,7 +624,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "get_system_health": {
         "name": "get_system_health",
-        "description": "查看服务器健康状态（磁盘、内存、CPU、服务状态、错误日志）。",
+        "description": "查看服务器健康状态。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -636,7 +633,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "project_status": {
         "name": "project_status",
-        "description": "查询 knowlyr 生态所有项目的开发状态（版本、PyPI、测试、Git）。默认读缓存（快），传 refresh=true 实时刷新（3-5 秒）。",
+        "description": "查询项目开发状态。refresh=true 实时刷新。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -651,7 +648,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "mark_read": {
         "name": "mark_read",
-        "description": "把 Kai 的未读消息标为已读。可以标某个人发的，也可以全部标已读。",
+        "description": "标记消息已读。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -670,7 +667,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "update_agent": {
         "name": "update_agent",
-        "description": "管理AI同事：暂停/恢复运行、更新记忆。先用 list_agents 查到 agent_id。",
+        "description": "管理AI同事：暂停/恢复/更新记忆。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -692,7 +689,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "read_feishu_calendar": {
         "name": "read_feishu_calendar",
-        "description": "查看飞书日历日程。Kai 问今天有什么会、这周安排、日程时调用。",
+        "description": "查看飞书日历日程。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -711,7 +708,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "delete_feishu_event": {
         "name": "delete_feishu_event",
-        "description": "取消/删除飞书日历日程。需要先用 read_feishu_calendar 查到 event_id。",
+        "description": "删除飞书日程。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -725,7 +722,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "create_feishu_task": {
         "name": "create_feishu_task",
-        "description": "在飞书创建待办任务。Kai 说建个待办、记个任务时调用。",
+        "description": "创建飞书待办任务。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -748,7 +745,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "list_feishu_tasks": {
         "name": "list_feishu_tasks",
-        "description": "查看飞书待办任务列表。Kai 问还有什么没做的、看看待办时调用。",
+        "description": "查看飞书待办任务列表。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -763,7 +760,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "complete_feishu_task": {
         "name": "complete_feishu_task",
-        "description": "完成飞书待办任务。需要先用 list_feishu_tasks 查到 task_id。",
+        "description": "完成飞书待办任务。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -777,7 +774,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "delete_feishu_task": {
         "name": "delete_feishu_task",
-        "description": "删除飞书待办任务。需要先用 list_feishu_tasks 查到 task_id。",
+        "description": "删除飞书待办任务。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -791,7 +788,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "update_feishu_task": {
         "name": "update_feishu_task",
-        "description": "更新飞书待办任务的标题、截止日期或描述。需要先用 list_feishu_tasks 查到 task_id。",
+        "description": "更新飞书待办任务。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -817,7 +814,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "get_datetime": {
         "name": "get_datetime",
-        "description": "获取当前准确日期时间（北京时间）。不确定现在几点、今天星期几时调用。",
+        "description": "获取当前日期时间。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -826,13 +823,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "calculate": {
         "name": "calculate",
-        "description": "计算数学表达式。支持加减乘除、幂次、sqrt、log、三角函数等。适合精确计算场景。",
+        "description": "计算数学表达式。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "数学表达式，如 100*1.15**12 或 sqrt(144)",
+                    "description": "数学表达式",
                 },
             },
             "required": ["expression"],
@@ -840,13 +837,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "feishu_chat_history": {
         "name": "feishu_chat_history",
-        "description": "读取飞书群/会话的最近消息。需要 chat_id，不知道就先用 list_feishu_groups 查。",
+        "description": "读取飞书群/会话的最近消息。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "chat_id": {
                     "type": "string",
-                    "description": "飞书群聊 ID（形如 oc_xxxxx）",
+                    "description": "群聊 ID",
                 },
                 "limit": {
                     "type": "integer",
@@ -859,17 +856,17 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "weather": {
         "name": "weather",
-        "description": "查国内城市天气。支持主要城市，返回当前温度和未来几天预报。",
+        "description": "查城市天气。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "city": {
                     "type": "string",
-                    "description": "城市名（如：上海、北京、杭州）",
+                    "description": "城市名",
                 },
                 "days": {
                     "type": "integer",
-                    "description": "预报天数（1-7），默认 3",
+                    "description": "天数",
                     "default": 3,
                 },
             },
@@ -878,35 +875,35 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "create_feishu_event": {
         "name": "create_feishu_event",
-        "description": "在飞书日历创建日程。Kai 说安排日程、设提醒、记个时间时调用。",
+        "description": "创建飞书日历日程。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "日程标题（如：查返回上海的机票酒店）",
+                    "description": "日程标题",
                 },
                 "date": {
                     "type": "string",
-                    "description": "日期，YYYY-MM-DD 格式（如 2025-02-15）",
+                    "description": "YYYY-MM-DD",
                 },
                 "start_hour": {
                     "type": "integer",
-                    "description": "开始小时（0-23）",
+                    "description": "0-23",
                 },
                 "start_minute": {
                     "type": "integer",
-                    "description": "开始分钟（0-59），默认 0",
+                    "description": "0-59",
                     "default": 0,
                 },
                 "duration_minutes": {
                     "type": "integer",
-                    "description": "持续时长（分钟），默认 60",
+                    "description": "分钟",
                     "default": 60,
                 },
                 "description": {
                     "type": "string",
-                    "description": "日程描述（可选）",
+                    "description": "描述",
                     "default": "",
                 },
             },
@@ -916,7 +913,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 飞书文档工具 ──
     "search_feishu_docs": {
         "name": "search_feishu_docs",
-        "description": "搜索飞书云文档和知识库。输入关键词，返回匹配的文档列表（标题、链接、摘要）。",
+        "description": "搜索飞书云文档。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -928,18 +925,18 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "read_feishu_doc": {
         "name": "read_feishu_doc",
-        "description": "读取飞书文档内容。传入 document_id，返回文档纯文本。",
+        "description": "读取飞书文档内容。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "document_id": {"type": "string", "description": "飞书文档 ID（从搜索结果或 URL 获取）"},
+                "document_id": {"type": "string", "description": "文档 ID"},
             },
             "required": ["document_id"],
         },
     },
     "create_feishu_doc": {
         "name": "create_feishu_doc",
-        "description": "在飞书创建新文档。传入标题和正文，返回文档链接。",
+        "description": "创建飞书文档。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -947,7 +944,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "content": {"type": "string", "description": "文档正文"},
                 "folder_token": {
                     "type": "string",
-                    "description": "目标文件夹 token（可选）",
+                    "description": "文件夹 token",
                     "default": "",
                 },
             },
@@ -956,11 +953,11 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "send_feishu_group": {
         "name": "send_feishu_group",
-        "description": "发消息到飞书群。指定群聊 ID 和消息内容。不知道 chat_id 时先调 list_feishu_groups 查。",
+        "description": "发消息到飞书群。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "chat_id": {"type": "string", "description": "飞书群聊 ID（形如 oc_xxxxx）"},
+                "chat_id": {"type": "string", "description": "群聊 ID"},
                 "text": {"type": "string", "description": "消息内容"},
             },
             "required": ["chat_id", "text"],
@@ -968,20 +965,20 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "send_feishu_file": {
         "name": "send_feishu_file",
-        "description": "上传文件并发送到飞书群。传入群聊 ID、文件名和文件内容。支持 .md、.txt、.csv、.json 等文本文件。",
+        "description": "发送文件到飞书群。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "chat_id": {"type": "string", "description": "飞书群聊 ID（形如 oc_xxxxx）"},
-                "file_name": {"type": "string", "description": "文件名（含扩展名，如 report.md）"},
-                "content": {"type": "string", "description": "文件内容（文本）"},
+                "chat_id": {"type": "string", "description": "群聊 ID"},
+                "file_name": {"type": "string", "description": "文件名"},
+                "content": {"type": "string", "description": "文件内容"},
             },
             "required": ["chat_id", "file_name", "content"],
         },
     },
     "list_feishu_groups": {
         "name": "list_feishu_groups",
-        "description": "列出机器人加入的所有飞书群，返回群名和 chat_id。发群消息前用这个查 chat_id。",
+        "description": "列出飞书群列表。",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -1066,13 +1063,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "send_feishu_dm": {
         "name": "send_feishu_dm",
-        "description": "给飞书用户发私聊消息。需要对方 open_id，不知道就先用 feishu_group_members 查。",
+        "description": "给飞书用户发私聊消息。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "open_id": {
                     "type": "string",
-                    "description": "接收人的 open_id（形如 ou_xxxxx）",
+                    "description": "接收人 open_id",
                 },
                 "text": {
                     "type": "string",
@@ -1084,13 +1081,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "feishu_group_members": {
         "name": "feishu_group_members",
-        "description": "查看飞书群成员列表（姓名+open_id）。发私聊前用这个查 open_id。",
+        "description": "查看飞书群成员列表。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "chat_id": {
                     "type": "string",
-                    "description": "飞书群聊 ID（形如 oc_xxxxx）",
+                    "description": "群聊 ID",
                 },
             },
             "required": ["chat_id"],
@@ -1099,18 +1096,18 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 金融工具 ──
     "exchange_rate": {
         "name": "exchange_rate",
-        "description": "查汇率。默认美元兑人民币，支持所有主流货币。",
+        "description": "查汇率。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "from": {
                     "type": "string",
-                    "description": "基准货币代码（如 USD、EUR、CNY），默认 USD",
+                    "description": "货币代码",
                     "default": "USD",
                 },
                 "to": {
                     "type": "string",
-                    "description": "目标货币代码，逗号分隔（如 CNY,EUR,JPY），默认 CNY",
+                    "description": "目标货币，逗号分隔",
                     "default": "CNY",
                 },
             },
@@ -1119,13 +1116,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "stock_price": {
         "name": "stock_price",
-        "description": "查股价。支持A股（如 sh600519 茅台）和美股（如 gb_aapl 苹果）。纯数字默认A股，纯字母默认美股。",
+        "description": "查股价（A股/美股）。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "股票代码（如 sh600519、sz000001、gb_aapl、aapl、600519）",
+                    "description": "股票代码",
                 },
             },
             "required": ["symbol"],
@@ -1134,18 +1131,18 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 记忆工具 ──
     "add_memory": {
         "name": "add_memory",
-        "description": "记录一条持久记忆。记忆会自动注入到未来的对话中。适合记录反思、发现、决策背景。",
+        "description": "记录持久记忆。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "category": {
                     "type": "string",
-                    "description": "分类: finding(发现/反思) / decision(决策) / correction(纠正)",
+                    "description": "finding/decision/correction",
                     "default": "finding",
                 },
                 "content": {
                     "type": "string",
-                    "description": "记忆内容（用自己的话写）",
+                    "description": "记忆内容",
                 },
             },
             "required": ["content"],
@@ -1154,19 +1151,19 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 生活助手 ──
     "translate": {
         "name": "translate",
-        "description": "中英互译。自动检测语言方向：中文→英文，英文→中文。也可手动指定。",
+        "description": "中英互译。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要翻译的文本"},
                 "from_lang": {
                     "type": "string",
-                    "description": "源语言（auto=自动检测, zh=中文, en=英文, ja=日文）",
+                    "description": "auto/zh/en/ja",
                     "default": "auto",
                 },
                 "to_lang": {
                     "type": "string",
-                    "description": "目标语言（留空则自动选对向语言）",
+                    "description": "目标语言",
                     "default": "",
                 },
             },
@@ -1175,7 +1172,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "countdown": {
         "name": "countdown",
-        "description": "计算距离某个日期还有多少天。适合问倒计时、还有几天到XX。",
+        "description": "计算距离某日期的天数。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1191,13 +1188,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "trending": {
         "name": "trending",
-        "description": "查看热搜榜。支持微博热搜和知乎热榜。",
+        "description": "查看热搜榜。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "platform": {
                     "type": "string",
-                    "description": "平台：weibo（微博热搜）或 zhihu（知乎热榜）",
+                    "description": "weibo/zhihu",
                     "default": "weibo",
                 },
                 "limit": {"type": "integer", "description": "返回条数", "default": 15},
@@ -1208,7 +1205,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 飞书表格 ──
     "read_feishu_sheet": {
         "name": "read_feishu_sheet",
-        "description": "读取飞书表格数据。需要 spreadsheet_token（从 search_feishu_docs 或 URL 获取）。",
+        "description": "读取飞书表格数据。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1232,7 +1229,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "update_feishu_sheet": {
         "name": "update_feishu_sheet",
-        "description": "写入飞书表格数据。需要 spreadsheet_token 和 range。",
+        "description": "写入飞书表格数据。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1251,7 +1248,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "values": {
                     "type": "string",
-                    "description": "要写入的数据，JSON 二维数组，如 [[\"姓名\",\"部门\"],[\"张三\",\"产品\"]]",
+                    "description": "JSON 二维数组",
                 },
             },
             "required": ["spreadsheet_token", "range", "values"],
@@ -1260,13 +1257,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 飞书审批 ──
     "list_feishu_approvals": {
         "name": "list_feishu_approvals",
-        "description": "查看飞书审批列表。可查待审、已批准、已拒绝的审批。",
+        "description": "查看飞书审批列表。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "status": {
                     "type": "string",
-                    "description": "审批状态: PENDING（待审）/ APPROVED（已批准）/ REJECTED（已拒绝）/ ALL",
+                    "description": "PENDING/APPROVED/REJECTED/ALL",
                     "default": "PENDING",
                 },
                 "limit": {"type": "integer", "description": "返回条数", "default": 10},
@@ -1277,14 +1274,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 编码 & 开发辅助 ──
     "base64_codec": {
         "name": "base64_codec",
-        "description": "Base64 编码或解码文本。",
+        "description": "Base64 编解码。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要编码或解码的文本"},
                 "decode": {
                     "type": "boolean",
-                    "description": "true=解码，false=编码（默认编码）",
+                    "description": "true=解码",
                     "default": False,
                 },
             },
@@ -1293,13 +1290,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "color_convert": {
         "name": "color_convert",
-        "description": "颜色格式转换。支持 HEX、RGB、HSL 互转。",
+        "description": "颜色格式转换（HEX/RGB/HSL）。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "color": {
                     "type": "string",
-                    "description": "颜色值，如 #FF5733、rgb(255,87,51)、hsl(11,100%,60%)",
+                    "description": "颜色值",
                 },
             },
             "required": ["color"],
@@ -1307,13 +1304,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "cron_explain": {
         "name": "cron_explain",
-        "description": "解释 cron 表达式的含义，或根据描述生成 cron 表达式。",
+        "description": "解释或生成 cron 表达式。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "cron 表达式（如 0 9 * * 1-5）或自然语言描述（如「每天早上9点」）",
+                    "description": "cron 表达式或自然语言",
                 },
             },
             "required": ["expression"],
@@ -1321,7 +1318,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "regex_test": {
         "name": "regex_test",
-        "description": "测试正则表达式是否匹配文本，返回匹配结果。",
+        "description": "测试正则表达式。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1338,14 +1335,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "hash_gen": {
         "name": "hash_gen",
-        "description": "计算文本的哈希值。支持 MD5、SHA1、SHA256。",
+        "description": "计算哈希值。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要计算哈希的文本"},
                 "algorithm": {
                     "type": "string",
-                    "description": "算法：md5/sha1/sha256（默认 sha256）",
+                    "description": "md5/sha1/sha256",
                     "default": "sha256",
                 },
             },
@@ -1354,14 +1351,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "url_codec": {
         "name": "url_codec",
-        "description": "URL 编码或解码。",
+        "description": "URL 编解码。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要编码或解码的文本/URL"},
                 "decode": {
                     "type": "boolean",
-                    "description": "true=解码，false=编码（默认编码）",
+                    "description": "true=解码",
                     "default": False,
                 },
             },
@@ -1371,14 +1368,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 文本 & 开发工具 ──
     "text_extract": {
         "name": "text_extract",
-        "description": "从非结构化文本中提取关键信息：邮箱、手机号、URL、金额等。",
+        "description": "提取文本中的结构化信息。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要提取信息的文本"},
                 "extract_type": {
                     "type": "string",
-                    "description": "提取类型：email/phone/url/money/all（默认 all）",
+                    "description": "email/phone/url/money/all",
                     "default": "all",
                 },
             },
@@ -1387,14 +1384,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "json_format": {
         "name": "json_format",
-        "description": "格式化/压缩 JSON，或从文本中提取 JSON 片段。",
+        "description": "格式化/压缩 JSON。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "JSON 文本或包含 JSON 的文本"},
                 "compact": {
                     "type": "boolean",
-                    "description": "是否压缩（true=单行，false=美化缩进）",
+                    "description": "true=压缩",
                     "default": False,
                 },
             },
@@ -1403,7 +1400,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "password_gen": {
         "name": "password_gen",
-        "description": "生成安全随机密码。",
+        "description": "生成随机密码。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1420,7 +1417,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "ip_lookup": {
         "name": "ip_lookup",
-        "description": "查询 IP 地址的地理位置和运营商信息。",
+        "description": "IP 地理位置查询。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1442,7 +1439,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "word_count": {
         "name": "word_count",
-        "description": "统计文本的字数、词数、行数等。适合检查文稿长度。",
+        "description": "统计文本字数。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1454,26 +1451,26 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 实用工具 ──
     "unit_convert": {
         "name": "unit_convert",
-        "description": "单位换算。支持长度、重量、温度、面积、体积、数据大小等。",
+        "description": "单位换算。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "value": {"type": "number", "description": "数值"},
                 "from_unit": {"type": "string", "description": "原单位，如 km, lb, °F, GB"},
-                "to_unit": {"type": "string", "description": "目标单位，如 mi, kg, °C, MB"},
+                "to_unit": {"type": "string", "description": "目标单位"},
             },
             "required": ["value", "from_unit", "to_unit"],
         },
     },
     "random_pick": {
         "name": "random_pick",
-        "description": "从多个选项中随机选一个，或掷骰子、生成随机数。帮 Kai 做选择。",
+        "description": "随机选择或掷骰子。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "options": {
                     "type": "string",
-                    "description": "用逗号分隔的选项列表，如「火锅,烤肉,日料」。留空则掷 1-6 骰子。",
+                    "description": "逗号分隔选项，留空掷骰子",
                     "default": "",
                 },
                 "count": {"type": "integer", "description": "选几个（默认 1）", "default": 1},
@@ -1483,7 +1480,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "holidays": {
         "name": "holidays",
-        "description": "查询中国法定节假日和调休安排。适合问「下周放假吗」「五一怎么调休」。",
+        "description": "查询节假日和调休安排。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1495,13 +1492,13 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "timestamp_convert": {
         "name": "timestamp_convert",
-        "description": "Unix 时间戳和可读时间互转。支持秒级和毫秒级。",
+        "description": "时间戳互转。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "时间戳（如 1708012800）或日期时间（如 2026-02-16 10:00）",
+                    "description": "时间戳或日期时间",
                 },
             },
             "required": ["input"],
@@ -1509,7 +1506,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "create_feishu_spreadsheet": {
         "name": "create_feishu_spreadsheet",
-        "description": "在飞书中创建一个新的表格。可指定标题和文件夹。",
+        "description": "创建飞书表格。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1525,7 +1522,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "feishu_contacts": {
         "name": "feishu_contacts",
-        "description": "在飞书通讯录中搜索同事。可按姓名搜索。",
+        "description": "搜索飞书通讯录。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1562,7 +1559,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 飞书增强 ──
     "feishu_bitable": {
         "name": "feishu_bitable",
-        "description": "读取飞书多维表格数据。需要 app_token 和 table_id。",
+        "description": "读取飞书多维表格数据。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1580,7 +1577,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "feishu_wiki": {
         "name": "feishu_wiki",
-        "description": "搜索飞书知识库。输入关键词，返回知识库中匹配的文档。",
+        "description": "搜索飞书知识库。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1592,14 +1589,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "approve_feishu": {
         "name": "approve_feishu",
-        "description": "操作飞书审批：通过或拒绝。需要先用 list_feishu_approvals 查到 instance_id。",
+        "description": "通过或拒绝飞书审批。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "instance_id": {"type": "string", "description": "审批实例 ID"},
                 "action": {
                     "type": "string",
-                    "description": "操作: approve（通过）/ reject（拒绝）",
+                    "description": "approve/reject",
                 },
                 "comment": {
                     "type": "string",
@@ -1613,14 +1610,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── AI 能力 ──
     "summarize": {
         "name": "summarize",
-        "description": "对长文本生成摘要。适合总结文章、会议记录、文档。",
+        "description": "生成文本摘要。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "要摘要的文本"},
                 "style": {
                     "type": "string",
-                    "description": "摘要风格: bullet（要点）/ paragraph（段落）/ oneline（一句话）",
+                    "description": "bullet/paragraph/oneline",
                     "default": "bullet",
                 },
             },
@@ -1629,7 +1626,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "sentiment": {
         "name": "sentiment",
-        "description": "分析文本的情感倾向和语气。适合分析用户反馈、评论、消息。",
+        "description": "情感分析。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1641,7 +1638,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 效率工具 ──
     "email_send": {
         "name": "email_send",
-        "description": "发送电子邮件。指定收件人、主题和正文。",
+        "description": "发送邮件。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1654,11 +1651,11 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "qrcode": {
         "name": "qrcode",
-        "description": "生成二维码图片链接。输入文本或 URL，返回二维码图片地址。",
+        "description": "生成二维码。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "data": {"type": "string", "description": "要编码的文本或 URL"},
+                "data": {"type": "string", "description": "文本或 URL"},
                 "size": {"type": "integer", "description": "图片尺寸（像素）", "default": 300},
             },
             "required": ["data"],
@@ -1666,7 +1663,7 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "diff_text": {
         "name": "diff_text",
-        "description": "对比两段文本的差异。返回 diff 结果。",
+        "description": "对比文本差异。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1679,29 +1676,29 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 数据查询 ──
     "whois": {
         "name": "whois",
-        "description": "查询域名的 WHOIS 注册信息。",
+        "description": "WHOIS 查询。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "domain": {"type": "string", "description": "域名（如 example.com）"},
+                "domain": {"type": "string", "description": "域名"},
             },
             "required": ["domain"],
         },
     },
     "dns_lookup": {
         "name": "dns_lookup",
-        "description": "查询域名的 DNS 解析记录（A、AAAA）。",
+        "description": "DNS 查询。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "domain": {"type": "string", "description": "域名（如 example.com）"},
+                "domain": {"type": "string", "description": "域名"},
             },
             "required": ["domain"],
         },
     },
     "http_check": {
         "name": "http_check",
-        "description": "检查网站是否可用。返回状态码和响应时间。",
+        "description": "检查网站可用性。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1713,14 +1710,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     # ── 生活服务 ──
     "express_track": {
         "name": "express_track",
-        "description": "查快递物流信息。输入快递单号，自动识别快递公司。",
+        "description": "查快递物流。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "number": {"type": "string", "description": "快递单号"},
                 "company": {
                     "type": "string",
-                    "description": "快递公司代码（可选，自动识别）",
+                    "description": "快递公司代码",
                     "default": "",
                 },
             },
@@ -1729,14 +1726,14 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "flight_info": {
         "name": "flight_info",
-        "description": "查询航班信息。输入航班号，返回出发到达时间和状态。",
+        "description": "查航班信息。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "flight_no": {"type": "string", "description": "航班号（如 CA1234、MU5678）"},
+                "flight_no": {"type": "string", "description": "航班号"},
                 "date": {
                     "type": "string",
-                    "description": "日期 YYYY-MM-DD（默认今天）",
+                    "description": "YYYY-MM-DD",
                     "default": "",
                 },
             },
@@ -1745,11 +1742,11 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "aqi": {
         "name": "aqi",
-        "description": "查询城市空气质量指数（AQI）。",
+        "description": "查空气质量。",
         "input_schema": {
             "type": "object",
             "properties": {
-                "city": {"type": "string", "description": "城市名（如：上海、beijing）"},
+                "city": {"type": "string", "description": "城市名"},
             },
             "required": ["city"],
         },
@@ -1857,6 +1854,69 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
     "life": {"express_track", "flight_info", "aqi", "email_send"},
 }
 
+# ── 技能包 — load_tools 的语义分组，LLM 按包名一次加载 ──
+
+SKILL_PACKS: dict[str, dict[str, Any]] = {
+    "feishu": {
+        "label": "飞书",
+        "description": "日历/任务/文档/消息/审批/表格",
+        "tools": TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["feishu-write"],
+    },
+    "github": {
+        "label": "GitHub",
+        "description": "PR、Issue、仓库动态",
+        "tools": TOOL_ROLE_PRESETS["github"],
+    },
+    "notion": {
+        "label": "Notion",
+        "description": "搜索/读取/创建页面",
+        "tools": TOOL_ROLE_PRESETS["notion"],
+    },
+    "admin": {
+        "label": "后台管理",
+        "description": "用户查询/员工管理/系统健康/消息/成本",
+        "tools": TOOL_ROLE_PRESETS["knowlyr-admin"] | {"query_cost"},
+    },
+    "delegate": {
+        "label": "委派",
+        "description": "委派任务给其他员工/检查任务状态/链式委派/路由",
+        "tools": TOOL_ROLE_PRESETS["agent-core"] | TOOL_ROLE_PRESETS["pipeline"],
+    },
+    "web": {
+        "label": "网络搜索",
+        "description": "搜索/读网页/RSS",
+        "tools": TOOL_ROLE_PRESETS["web"],
+    },
+    "memory": {
+        "label": "记忆",
+        "description": "添加记忆/创建笔记/读取笔记",
+        "tools": TOOL_ROLE_PRESETS["memory"],
+    },
+    "scheduling": {
+        "label": "日程",
+        "description": "定时任务/会议安排/空闲时间查询",
+        "tools": (
+            TOOL_ROLE_PRESETS["scheduling"] | TOOL_ROLE_PRESETS["meeting"]
+            | {"find_free_time"}
+        ),
+    },
+    "utilities": {
+        "label": "工具箱",
+        "description": "计算/天气/汇率/翻译/时间/单位换算",
+        "tools": TOOL_ROLE_PRESETS["utilities"],
+    },
+    "dev-tools": {
+        "label": "开发工具",
+        "description": "编码/JSON/正则/IP查询/文本处理/摘要",
+        "tools": TOOL_ROLE_PRESETS["dev-tools"] | {"agent_file_read", "agent_file_grep", "query_data"},
+    },
+    "life": {
+        "label": "生活服务",
+        "description": "快递/航班/空气质量/邮件",
+        "tools": TOOL_ROLE_PRESETS["life"],
+    },
+}
+
 # 组合角色
 TOOL_ROLE_PRESETS["feishu-admin"] = (
     TOOL_ROLE_PRESETS["feishu-read"] | TOOL_ROLE_PRESETS["feishu-write"]
@@ -1946,17 +2006,32 @@ def validate_permissions(employee: "Employee") -> list[str]:
 
 
 def _make_load_tools_schema(available: set[str]) -> dict[str, Any]:
-    """构建 load_tools 元工具 schema."""
-    names_str = ", ".join(sorted(available))
+    """构建 load_tools 元工具 schema — 按技能包分组展示."""
+    # 按技能包分组
+    pack_lines: list[str] = []
+    covered: set[str] = set()
+    for pack_name, pack_def in SKILL_PACKS.items():
+        pack_tools = pack_def["tools"] & available
+        if pack_tools:
+            pack_lines.append(f"{pack_name}({pack_def['label']}): {pack_def['description']}")
+            covered |= pack_tools
+
+    remaining = sorted(available - covered)
+    desc_parts: list[str] = ["加载工具后才能调用。"]
+    if pack_lines:
+        desc_parts.append("技能包(用包名一次加载整包):\n" + "\n".join(pack_lines))
+    if remaining:
+        desc_parts.append("其他: " + ", ".join(remaining))
+
     return {
         "name": "load_tools",
-        "description": f"加载额外工具后才能调用。可用: {names_str}",
+        "description": "\n".join(desc_parts),
         "input_schema": {
             "type": "object",
             "properties": {
                 "names": {
                     "type": "string",
-                    "description": "要加载的工具名，逗号分隔",
+                    "description": "技能包名或工具名，逗号分隔。如 'feishu,admin' 或 'query_stats'",
                 },
             },
             "required": ["names"],

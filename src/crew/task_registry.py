@@ -21,7 +21,7 @@ class TaskRecord(BaseModel):
     """单个任务记录."""
 
     task_id: str = Field(description="任务唯一标识")
-    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    status: Literal["pending", "running", "completed", "failed", "awaiting_approval"] = "pending"
     trigger: str = Field(description="触发来源: github / openclaw / generic / direct / cron")
     target_type: str = Field(description="目标类型: pipeline / employee")
     target_name: str = Field(description="目标名称")
@@ -155,7 +155,7 @@ class TaskRegistry:
     def update(
         self,
         task_id: str,
-        status: Literal["running", "completed", "failed"],
+        status: Literal["running", "completed", "failed", "awaiting_approval"],
         result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> TaskRecord | None:

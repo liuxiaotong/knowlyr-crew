@@ -585,6 +585,35 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
+    """POST /api/tasks/{task_id}/approve — 批准或拒绝等待审批的任务."""
+    import asyncio
+
+    from starlette.responses import JSONResponse
+
+    task_id = request.path_params["task_id"]
+    body = await request.json()
+    action = body.get("action", "approve")
+
+    record = ctx.registry.get(task_id)
+    if record is None:
+        return JSONResponse({"error": "task not found"}, status_code=404)
+    if record.status != "awaiting_approval":
+        return JSONResponse(
+            {"error": f"任务状态为 {record.status}，无法审批"}, status_code=400,
+        )
+
+    if action == "reject":
+        reason = body.get("reason", "人工拒绝")
+        ctx.registry.update(task_id, "failed", error=reason)
+        return JSONResponse({"status": "rejected", "task_id": task_id})
+
+    from crew.webhook_executor import _resume_chain
+
+    asyncio.create_task(_resume_chain(ctx, task_id))
+    return JSONResponse({"status": "approved", "task_id": task_id})
+
+
 async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
     """查询 cron 调度器状态."""
     from starlette.responses import JSONResponse

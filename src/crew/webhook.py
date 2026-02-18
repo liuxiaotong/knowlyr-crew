@@ -83,6 +83,7 @@ from crew.webhook_executor import (  # noqa: F401
     _execute_pipeline,
     _execute_task,
     _handle_tool_call,
+    _resume_chain,
     _resume_incomplete_pipelines,
     _stream_employee,
 )
@@ -104,6 +105,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_project_status,
     _handle_run_employee,
     _handle_run_pipeline,
+    _handle_task_approve,
     _handle_task_replay,
     _handle_task_status,
     _health,
@@ -216,6 +218,7 @@ def create_webhook_app(
         Route("/agent/run/{name}", endpoint=_make_handler(ctx, _handle_agent_run), methods=["POST"]),
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
         Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
+        Route("/api/tasks/{task_id}/approve", endpoint=_make_handler(ctx, _handle_task_approve), methods=["POST"]),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
         Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
