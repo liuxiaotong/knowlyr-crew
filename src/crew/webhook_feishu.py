@@ -197,7 +197,8 @@ async def _feishu_fast_reply(
         "你正在飞书上和 Kai 聊天。像平时一样自然回复，纯聊天，不需要查数据或调工具。\n"
         "你知道今天的日期，但没有读过笔记和日记，不知道最近发生了什么具体的事。"
         "不要编造具体事件（客户拜访、会议、调休、出差等）。"
-        "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常（跑步、做饭、阿灰）。"
+        "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常（跑步、做饭、阿灰）。\n"
+        "你没有手机，不能发照片、文件，也不能主动联系任何人。别装能做到。"
     )
 
     # 私聊时注入私密记忆（快速路径也能看到 Kai 的秘密）
@@ -254,6 +255,127 @@ async def _feishu_fast_reply(
     }
 
 
+async def _feishu_approve_dispatch(
+    ctx: _AppContext,
+    msg_event: Any,
+    task_id: str,
+    action: str,
+    *,
+    send_feishu_text: Any,
+    send_feishu_reply: Any,
+) -> None:
+    """飞书审批命令 — approve/reject 等待中的任务."""
+
+    async def _reply_text(text: str) -> None:
+        if msg_event.chat_type == "group":
+            await send_feishu_reply(ctx.feishu_token_mgr, msg_event.message_id, text)
+        else:
+            await send_feishu_text(ctx.feishu_token_mgr, msg_event.chat_id, text)
+
+    record = ctx.registry.get(task_id)
+    if record is None:
+        await _reply_text(f"未找到任务: {task_id}")
+        return
+    if record.status != "awaiting_approval":
+        await _reply_text(f"任务 {task_id} 当前状态为 {record.status}，不需要审批。")
+        return
+
+    if action == "reject":
+        ctx.registry.update(task_id, "failed", error="被 Kai 在飞书拒绝")
+        await _reply_text(f"已拒绝任务 {task_id}")
+        return
+
+    # approve — 恢复链执行
+    from crew.webhook_executor import _resume_chain
+
+    asyncio.create_task(_resume_chain(ctx, task_id))
+    await _reply_text(f"已批准任务 {task_id}，继续执行中...")
+
+
+async def _feishu_route_dispatch(
+    ctx: _AppContext,
+    msg_event: Any,
+    template_name: str,
+    task: str,
+    *,
+    send_feishu_text: Any,
+    send_feishu_reply: Any,
+) -> None:
+    """飞书触发路由模板 — 展开为 chain 异步执行."""
+    import json as _json
+    from crew.organization import load_organization
+
+    _reply = send_feishu_reply if msg_event.chat_type == "group" else send_feishu_text
+
+    org = load_organization(project_dir=ctx.project_dir)
+
+    async def _reply_text(text: str) -> None:
+        if msg_event.chat_type == "group":
+            await send_feishu_reply(ctx.feishu_token_mgr, msg_event.message_id, text)
+        else:
+            await send_feishu_text(ctx.feishu_token_mgr, msg_event.chat_id, text)
+
+    if not template_name:
+        names = list(org.routing_templates.keys())
+        await _reply_text(f"请指定流程名称。可用: {', '.join(names)}")
+        return
+
+    tmpl = org.routing_templates.get(template_name)
+    if not tmpl:
+        names = list(org.routing_templates.keys())
+        await _reply_text(f"未找到流程「{template_name}」。可用: {', '.join(names)}")
+        return
+
+    if not task:
+        await _reply_text(f"请提供任务描述。格式: 流程 {template_name} <任务描述>")
+        return
+
+    # 展开模板为 chain steps
+    steps: list[dict[str, Any]] = []
+    step_names: list[str] = []
+    for step in tmpl.steps:
+        if step.optional or step.human:
+            continue
+        emp_name = None
+        if step.employee:
+            emp_name = step.employee
+        elif step.employees:
+            emp_name = step.employees[0]
+        elif step.team:
+            members = org.get_team_members(step.team)
+            emp_name = members[0] if members else None
+        if not emp_name:
+            continue
+        step_task = f"[{step.role}] {task}"
+        if steps:
+            step_task += "\n\n上一步结果: {prev}"
+        step_dict: dict[str, Any] = {"employee_name": emp_name, "task": step_task}
+        if step.approval:
+            step_dict["approval"] = True
+        steps.append(step_dict)
+        step_names.append(emp_name)
+
+    if not steps:
+        await _reply_text("模板展开后无可执行步骤。")
+        return
+
+    # 创建 chain 任务并异步执行
+    chain_name = " → ".join(step_names)
+    record = ctx.registry.create(
+        trigger="feishu",
+        target_type="chain",
+        target_name=chain_name,
+        args={"steps_json": _json.dumps(steps, ensure_ascii=False)},
+    )
+    import crew.webhook as _wh
+    asyncio.create_task(_wh._execute_task(ctx, record.task_id))
+
+    # 回复确认
+    await _reply_text(
+        f"已启动「{tmpl.label}」流程 ({len(steps)} 步)\n{chain_name}\n任务: {task[:100]}"
+    )
+
+
 async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     """后台处理飞书消息：路由到员工 → 执行 → 回复卡片."""
     from crew.discovery import discover_employees
@@ -283,6 +405,44 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             discovery,
             default_employee=use_default,
         )
+
+        # ── 命令拦截 ──
+        _raw = (task_text or msg_event.text or "").strip()
+
+        # 审批命令: "approve xxx" / "reject xxx" / "批准 xxx" / "拒绝 xxx"
+        _raw_lower = _raw.lower()
+        _approve_action = None
+        _approve_task_id = None
+        for _ap, _act in [("approve ", "approve"), ("reject ", "reject"),
+                          ("批准 ", "approve"), ("拒绝 ", "reject")]:
+            if _raw_lower.startswith(_ap):
+                _approve_action = _act
+                _approve_task_id = _raw[len(_ap):].strip()
+                break
+        if _approve_action and _approve_task_id:
+            await _feishu_approve_dispatch(
+                ctx, msg_event, _approve_task_id, _approve_action,
+                send_feishu_text=send_feishu_text,
+                send_feishu_reply=send_feishu_reply,
+            )
+            return
+
+        # 路由模板命令: "流程 code_change 任务描述"
+        _route_match = None
+        for _prefix in ("流程 ", "流程:", "route ", "route:"):
+            if _raw.lower().startswith(_prefix):
+                _route_match = _raw[len(_prefix):].strip()
+                break
+        if _route_match:
+            parts = _route_match.split(None, 1)
+            _tmpl_name = parts[0] if parts else ""
+            _tmpl_task = parts[1] if len(parts) > 1 else ""
+            await _feishu_route_dispatch(
+                ctx, msg_event, _tmpl_name, _tmpl_task,
+                send_feishu_text=send_feishu_text,
+                send_feishu_reply=send_feishu_reply,
+            )
+            return
 
         if employee_name is None:
             if msg_event.chat_type == "group":
