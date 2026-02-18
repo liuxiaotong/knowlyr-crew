@@ -241,14 +241,23 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     try:
         discovery = discover_employees(project_dir=ctx.project_dir)
 
+        # 群聊只响应 @mention，私聊可用 default_employee
+        use_default = (
+            ctx.feishu_config.default_employee
+            if msg_event.chat_type != "group"
+            else ""
+        )
         employee_name, task_text = resolve_employee_from_mention(
             msg_event.mentions,
             msg_event.text,
             discovery,
-            default_employee=ctx.feishu_config.default_employee,
+            default_employee=use_default,
         )
 
         if employee_name is None:
+            if msg_event.chat_type == "group":
+                # 群聊没 @人，静默忽略
+                return
             await send_feishu_text(
                 ctx.feishu_token_mgr,
                 msg_event.chat_id,
