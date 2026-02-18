@@ -168,6 +168,10 @@ async def _feishu_fast_reply(
     prompt = engine.prompt(emp, args={"task": (
         "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
         "这次对话不需要查数据或调工具，纯聊天就行。"
+        "【重要】这轮对话没有任何可用工具。"
+        "不要输出 <tool>、read_notes、add_memory 等任何工具调用。"
+        "不要执行「对话开头」「对话结束」里的工具步骤。"
+        "直接用纯文字回复。"
     )})
 
     # 用备用模型（kimi）降低成本，没配就用主模型
