@@ -626,6 +626,14 @@ knowlyr-crew pipeline checkpoint list
 knowlyr-crew pipeline checkpoint resume <task_id>
 ```
 
+### Route
+
+```bash
+knowlyr-crew route list [-f json]                                  # 列出协作流程模板
+knowlyr-crew route show <name>                                     # 查看流程详情
+knowlyr-crew route run <name> <task> [--execute] [--remote]        # 执行协作流程
+```
+
 ### Server & MCP
 
 ```bash
