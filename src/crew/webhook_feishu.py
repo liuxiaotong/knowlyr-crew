@@ -160,19 +160,24 @@ async def _feishu_fast_reply(
 
     对比完整路径: ~87K tokens → ~8K tokens, 10x 节省.
     """
-    from crew.engine import CrewEngine
     from crew.executor import aexecute_prompt
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
-    # soul prompt（人设）+ 简短 chat context，不附加委派花名册和工具
-    prompt = engine.prompt(emp, args={"task": (
-        "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
-        "这次对话不需要查数据或调工具，纯聊天就行。"
-        "【重要】这轮对话没有任何可用工具。"
-        "不要输出 <tool>、read_notes、add_memory 等任何工具调用。"
-        "不要执行「对话开头」「对话结束」里的工具步骤。"
-        "直接用纯文字回复。"
-    )})
+    # 只用 soul.md（人设），不用 prompt.md（工具路由表），避免模型 hallucinate 工具调用
+    soul_text = ""
+    if emp.source_path and emp.source_path.is_dir():
+        soul_path = emp.source_path / "soul.md"
+        if soul_path.exists():
+            soul_text = soul_path.read_text(encoding="utf-8")
+
+    display = emp.display_name or emp.name
+    char = emp.character_name or display
+    prompt = (
+        f"# {display}\n\n"
+        f"你是{char}。{emp.description}\n\n"
+        f"{soul_text}\n\n"
+        "---\n\n"
+        "你正在飞书上和 Kai 聊天。像平时一样自然回复，纯聊天，不需要查数据或调工具。"
+    )
 
     # 用备用模型（kimi）降低成本，没配就用主模型
     # 注意：fallback 系列配置不能混用主模型的配置（key/base_url 不通用）
