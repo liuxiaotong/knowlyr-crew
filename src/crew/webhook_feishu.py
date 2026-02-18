@@ -171,9 +171,15 @@ async def _feishu_fast_reply(
     )})
 
     # 用备用模型（kimi）降低成本，没配就用主模型
-    chat_model = emp.fallback_model or emp.model or "claude-sonnet-4-20250514"
-    chat_api_key = emp.fallback_api_key or emp.api_key or None
-    chat_base_url = emp.fallback_base_url or emp.base_url or None
+    # 注意：fallback 系列配置不能混用主模型的配置（key/base_url 不通用）
+    if emp.fallback_model:
+        chat_model = emp.fallback_model
+        chat_api_key = emp.fallback_api_key or None
+        chat_base_url = emp.fallback_base_url or None
+    else:
+        chat_model = emp.model or "claude-sonnet-4-20250514"
+        chat_api_key = emp.api_key or None
+        chat_base_url = emp.base_url or None
 
     # 把对话历史嵌入 prompt（aexecute_prompt 不支持 message_history 参数）
     if message_history:
@@ -354,10 +360,14 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         )
 
         if use_fast_path:
-            result = await _feishu_fast_reply(
-                ctx, emp, task_text, message_history,
-            )
-        else:
+            try:
+                result = await _feishu_fast_reply(
+                    ctx, emp, task_text, message_history,
+                )
+            except Exception as fast_exc:
+                logger.warning("闲聊快速路径失败，回退完整路径: %s", fast_exc)
+                use_fast_path = False
+        if not use_fast_path:
             # 通过 webhook 模块查找，确保 mock patch 生效
             import crew.webhook as _wh
             result = await _wh._execute_employee(
