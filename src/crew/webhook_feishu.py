@@ -169,6 +169,10 @@ async def _feishu_fast_reply(
         if soul_path.exists():
             soul_text = soul_path.read_text(encoding="utf-8")
 
+    # 去掉 soul.md 中包含工具调用指令的段落（如"你的内心习惯"提到 read_notes/add_memory）
+    import re as _re
+    soul_text = _re.split(r"(?m)^## 你的内心习惯", soul_text)[0].rstrip()
+
     display = emp.display_name or emp.name
     char = emp.character_name or display
     prompt = (
