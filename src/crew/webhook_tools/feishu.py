@@ -52,6 +52,8 @@ async def _tool_create_feishu_event(
     from crew.feishu import add_attendees_to_event, create_calendar_event
 
     cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or ""
+    if not cal_id:
+        logger.warning("日历创建: calendar_id 为空，将依赖环境变量 FEISHU_CALENDAR_ID")
     result = await create_calendar_event(
         token_mgr=ctx.feishu_token_mgr,
         summary=summary,
@@ -63,8 +65,11 @@ async def _tool_create_feishu_event(
 
     if result.get("ok"):
         event_id = result.get("event_id", "")
+        logger.info("日历日程创建成功: event_id=%s summary=%s", event_id, summary)
         # 自动邀请日历所有者（让日程出现在他/她的日历上）
         owner_id = (ctx.feishu_config.owner_open_id if ctx.feishu_config else "") or ""
+        if not owner_id:
+            logger.warning("日历创建: owner_open_id 为空，日程不会自动邀请所有者")
         if owner_id and event_id and cal_id:
             att_result = await add_attendees_to_event(
                 token_mgr=ctx.feishu_token_mgr,

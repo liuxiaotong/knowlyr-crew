@@ -84,6 +84,35 @@ class TestFeishuChatStore:
             assert "content" in data
             assert "ts" in data
 
+    def test_sender_name_stored(self, tmp_path: Path):
+        """sender_name 应存储到 JSONL."""
+        store = FeishuChatStore(tmp_path / "chats")
+        store.append("chat_grp", "user", "大家好", sender_name="王瑶")
+        store.append("chat_grp", "assistant", "你好")
+
+        msgs = store.get_recent("chat_grp")
+        assert msgs[0].get("sender_name") == "王瑶"
+        assert "sender_name" not in msgs[1]  # assistant 不带 sender_name
+
+    def test_sender_name_in_format(self, tmp_path: Path):
+        """format_for_prompt 应显示发送者姓名."""
+        store = FeishuChatStore(tmp_path / "chats")
+        store.append("chat_multi", "user", "你好", sender_name="王瑶")
+        store.append("chat_multi", "assistant", "你好！")
+        store.append("chat_multi", "user", "帮我查数据", sender_name="李明")
+
+        text = store.format_for_prompt("chat_multi")
+        assert "王瑶: 你好" in text
+        assert "李明: 帮我查数据" in text
+        assert "你: 你好！" in text
+
+    def test_no_sender_name_defaults_to_kai(self, tmp_path: Path):
+        """无 sender_name 时降级为 Kai."""
+        store = FeishuChatStore(tmp_path / "chats")
+        store.append("chat_old", "user", "旧消息")  # 不传 sender_name
+        text = store.format_for_prompt("chat_old")
+        assert "Kai: 旧消息" in text
+
 
 class TestCaptureFeishuMemory:
     def test_creates_session_and_memory(self, tmp_path: Path):

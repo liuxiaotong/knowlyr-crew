@@ -130,6 +130,56 @@ class FeishuTokenManager:
         return self._token
 
 
+# ── 用户名查询 ──
+
+_USER_NAME_CACHE: dict[str, str] = {}
+_USER_NAME_CACHE_MAX = 200
+
+
+async def get_user_name(
+    token_manager: FeishuTokenManager,
+    open_id: str,
+) -> str:
+    """通过 open_id 查询飞书用户姓名，带内存缓存.
+
+    Returns:
+        用户姓名，查询失败则返回空字符串.
+    """
+    if not open_id:
+        return ""
+
+    if open_id in _USER_NAME_CACHE:
+        return _USER_NAME_CACHE[open_id]
+
+    import httpx
+
+    token = await token_manager.get_token()
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{FEISHU_API_BASE}/contact/v3/users/{open_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"user_id_type": "open_id"},
+            )
+            data = resp.json()
+
+        if data.get("code") == 0:
+            name = data.get("data", {}).get("user", {}).get("name", "")
+            if name:
+                if len(_USER_NAME_CACHE) >= _USER_NAME_CACHE_MAX:
+                    keys = list(_USER_NAME_CACHE.keys())
+                    for k in keys[: len(keys) // 2]:
+                        _USER_NAME_CACHE.pop(k, None)
+                _USER_NAME_CACHE[open_id] = name
+                return name
+        else:
+            logger.debug("飞书用户查询失败: code=%s msg=%s", data.get("code"), data.get("msg"))
+    except Exception as exc:
+        logger.debug("飞书用户查询异常: %s", exc)
+
+    return ""
+
+
 # ── 事件解析 ──
 
 
@@ -373,6 +423,26 @@ def _parse_image_response(resp: "httpx.Response") -> tuple[bytes, str]:
 
 # ── 消息发送 ──
 
+_FEISHU_TEXT_MAX_LEN = 4000
+
+
+def _sanitize_feishu_text(text: str) -> str:
+    """净化发送到飞书的文本内容.
+
+    - 去除 null bytes 和 C0 控制字符（保留换行符和制表符）
+    - 长文本截断到 4000 字符
+    """
+    if not text:
+        return text
+    # 去除 null bytes 和 C0 控制字符（保留 \n \r \t）
+    cleaned = "".join(
+        c for c in text
+        if c in ("\n", "\r", "\t") or (ord(c) >= 0x20)
+    )
+    if len(cleaned) > _FEISHU_TEXT_MAX_LEN:
+        cleaned = cleaned[:_FEISHU_TEXT_MAX_LEN] + "..."
+    return cleaned
+
 
 async def send_feishu_message(
     token_manager: FeishuTokenManager,
@@ -436,6 +506,7 @@ async def send_feishu_text(
     text: str,
 ) -> dict[str, Any]:
     """发送纯文本消息."""
+    text = _sanitize_feishu_text(text)
     content = {"text": text}
     return await send_feishu_message(
         token_manager, chat_id, content=content, msg_type="text",
@@ -450,6 +521,7 @@ async def send_feishu_reply(
     """回复指定消息（形成 thread）."""
     import httpx
 
+    text = _sanitize_feishu_text(text)
     token = await token_manager.get_token()
     url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply"
 
@@ -525,16 +597,27 @@ async def create_calendar_event(
                 json=body,
             )
             data = resp.json()
-            if data.get("code") != 0:
-                return {"ok": False, "error": data.get("msg", "未知错误")}
+            code = data.get("code", -1)
+            msg = data.get("msg", "")
+            if code != 0:
+                logger.warning(
+                    "飞书创建日程 API 失败: code=%s msg=%s cal_id=%s summary=%s",
+                    code, msg, cal_id, summary,
+                )
+                return {"ok": False, "error": msg or "未知错误"}
             event = data.get("data", {}).get("event", {})
+            event_id = event.get("event_id", "")
+            logger.info(
+                "飞书创建日程成功: event_id=%s cal_id=%s summary=%s",
+                event_id, cal_id, summary,
+            )
             return {
                 "ok": True,
-                "event_id": event.get("event_id", ""),
+                "event_id": event_id,
                 "summary": event.get("summary", summary),
             }
     except Exception as e:
-        logger.error("飞书创建日程失败: %s", e)
+        logger.error("飞书创建日程失败: %s (cal_id=%s)", e, cal_id)
         return {"ok": False, "error": str(e)}
 
 

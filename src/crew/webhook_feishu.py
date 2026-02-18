@@ -138,6 +138,8 @@ _WORK_KEYWORDS = frozenset([
     "github", "pr", "issue", "仓库",
     "邮件", "快递", "航班",
     "密码", "二维码", "短链",
+    "记忆", "记住", "笔记", "写入",
+    "网站", "网页", "链接",
 ])
 
 
@@ -147,6 +149,9 @@ def _needs_tools(text: str) -> bool:
         # 长消息通常是正式任务描述
         return True
     t = text.lower()
+    # URL 通常需要工具处理（读取网页、链接预览等）
+    if "http://" in t or "https://" in t:
+        return True
     return any(kw in t for kw in _WORK_KEYWORDS)
 
 
@@ -162,6 +167,13 @@ async def _feishu_fast_reply(
     对比完整路径: ~87K tokens → ~8K tokens, 10x 节省.
     """
     from crew.executor import aexecute_prompt
+
+    from datetime import datetime as _dt
+
+    _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    _now = _dt.now()
+    _date_str = _now.strftime("%Y-%m-%d")
+    _weekday_str = _WEEKDAY_CN[_now.weekday()]
 
     # 只用 soul.md（人设），不用 prompt.md（工具路由表），避免模型 hallucinate 工具调用
     soul_text = ""
@@ -181,8 +193,9 @@ async def _feishu_fast_reply(
         f"你是{char}。{emp.description}\n\n"
         f"{soul_text}\n\n"
         "---\n\n"
+        f"今天是 {_date_str}（{_weekday_str}）。\n\n"
         "你正在飞书上和 Kai 聊天。像平时一样自然回复，纯聊天，不需要查数据或调工具。\n"
-        "你现在没有读过笔记和日记，不知道最近发生了什么具体的事。"
+        "你知道今天的日期，但没有读过笔记和日记，不知道最近发生了什么具体的事。"
         "不要编造具体事件（客户拜访、会议、调休、出差等）。"
         "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常（跑步、做饭、阿灰）。"
     )
@@ -284,6 +297,15 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         emp = discovery.get(employee_name)
 
+        # 解析发送者姓名（群聊需要区分多人）
+        sender_name = ""
+        if msg_event.chat_type == "group" and msg_event.sender_id:
+            try:
+                from crew.feishu import get_user_name
+                sender_name = await get_user_name(ctx.feishu_token_mgr, msg_event.sender_id)
+            except Exception:
+                pass
+
         # 图片 → 下载图片 + vision
         image_key = msg_event.image_key
         image_message_id = msg_event.message_id
@@ -322,6 +344,10 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             if not task_text:
                 task_text = "Kai 发了一张图片，请看图片内容并回应。"
 
+        # ── 可见性上下文 ──
+        # 私聊 → private（可以看到 Kai 的秘密），群聊 → open
+        _visibility = "private" if msg_event.chat_type != "group" else "open"
+
         # 执行员工 — 飞书实时聊天
         from crew.tool_schema import AGENT_TOOLS
 
@@ -330,16 +356,25 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             for t in (emp.tools or [])
         ) if emp else False
 
+        from datetime import datetime as _dt
+        _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        _now = _dt.now()
+        _date_header = f"今天是 {_now.strftime('%Y-%m-%d')}（{_WEEKDAY_CN[_now.weekday()]}）。\n"
+
         if has_tools:
             chat_context = (
-                "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
+                _date_header
+                + "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
                 "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
                 "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
                 "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
             )
-        else:
+        if msg_event.chat_type == "group" and sender_name:
+            chat_context += f"\n当前和你说话的人是{sender_name}（不是 Kai）。注意区分群里不同的人。"
+        if not has_tools:
             chat_context = (
-                "这是飞书实时聊天。你现在没有任何业务数据。"
+                _date_header
+                + "这是飞书实时聊天。你现在没有任何业务数据。"
                 "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
                 "Kai 问这些就说「这个我得看看今天的数据才能说」。"
                 "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
@@ -387,10 +422,6 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 {"type": "text", "text": task_text},
             ]
 
-        # ── 可见性上下文 ──
-        # 私聊 → private（可以看到 Kai 的秘密），群聊 → open
-        _visibility = "private" if msg_event.chat_type != "group" else "open"
-
         # ── 闲聊快速路径 ──
         # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
         # 省 ~80K tokens / $0.07 per message
@@ -423,7 +454,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)
         if ctx.feishu_chat_store:
-            ctx.feishu_chat_store.append(msg_event.chat_id, "user", task_text)
+            ctx.feishu_chat_store.append(msg_event.chat_id, "user", task_text, sender_name=sender_name)
             ctx.feishu_chat_store.append(msg_event.chat_id, "assistant", output_text)
 
         # 沉淀长期记忆

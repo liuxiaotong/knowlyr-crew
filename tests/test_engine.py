@@ -157,6 +157,20 @@ class TestCrewEngine:
         with patch("crew.engine.subprocess.run", side_effect=OSError("err")):
             assert _get_git_branch() == ""
 
+    def test_render_weekday_variable(self):
+        """render() 应替换 {weekday} 为中文星期."""
+        from crew.models import Employee, EmployeeArg
+
+        emp = Employee(
+            name="weekday-test",
+            description="test",
+            body="今天是{weekday}",
+            args=[],
+        )
+        result = self.engine.render(emp)
+        assert "星期" in result
+        assert "{weekday}" not in result
+
     def test_prompt_memory_failure_logged(self, caplog):
         """MemoryStore 加载失败时不影响 prompt 生成."""
         import logging

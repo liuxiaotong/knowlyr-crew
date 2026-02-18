@@ -232,6 +232,20 @@ def create_webhook_app(
     ]
 
     async def on_startup():
+        # ── 环境变量校验（不阻塞启动，仅记日志）──
+        import os as _os
+
+        if not _os.environ.get("ANTHROPIC_API_KEY"):
+            logger.warning(
+                "⚠ ANTHROPIC_API_KEY 未设置 — Agent 调用和定时任务将无法使用 Claude 模型"
+            )
+        if not _os.environ.get("FEISHU_CALENDAR_ID") and not (
+            feishu_config and feishu_config.calendar_id
+        ):
+            logger.info(
+                "FEISHU_CALENDAR_ID 未设置且 feishu.yaml 无 calendar_id — 日历功能将不可用"
+            )
+
         if scheduler:
             await scheduler.start()
         try:

@@ -11,6 +11,8 @@ from crew.paths import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
+_WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
 
 def _get_git_branch() -> str:
     """获取当前 git 分支名，失败返回空."""
@@ -96,6 +98,7 @@ class CrewEngine:
         env_vars = {
             "{date}": now.strftime("%Y-%m-%d"),
             "{datetime}": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "{weekday}": _WEEKDAY_CN[now.weekday()],
             "{cwd}": str(self.project_dir),
             "{git_branch}": _get_git_branch(),
             "{name}": employee.name,

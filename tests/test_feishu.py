@@ -700,3 +700,83 @@ class TestNeedsTools:
     def test_empty_is_work(self):
         from crew.webhook_feishu import _needs_tools
         assert _needs_tools("")
+
+    def test_url_triggers_tools(self):
+        """URL 消息应走工具路径."""
+        from crew.webhook_feishu import _needs_tools
+        assert _needs_tools("帮我看看 https://example.com 上的内容")
+        assert _needs_tools("http://localhost:8080/status")
+        assert _needs_tools("https://github.com/foo/bar/pull/123")
+
+    def test_memory_keywords_trigger(self):
+        """记忆相关关键词应走工具路径."""
+        from crew.webhook_feishu import _needs_tools
+        assert _needs_tools("记住这件事")
+        assert _needs_tools("帮我做个笔记")
+        assert _needs_tools("写入到备忘录")
+
+
+# ── 飞书文本净化 ──
+
+
+class TestSanitizeFeishuText:
+    """测试 _sanitize_feishu_text() 防 230001."""
+
+    def test_normal_text_unchanged(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("你好世界") == "你好世界"
+
+    def test_removes_null_bytes(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("hello\x00world") == "helloworld"
+
+    def test_removes_control_chars(self):
+        from crew.feishu import _sanitize_feishu_text
+        # \x01-\x08, \x0b, \x0c, \x0e-\x1f 应被移除
+        text = "a\x01b\x02c\x0bd\x0ee"
+        result = _sanitize_feishu_text(text)
+        assert result == "abcde"
+
+    def test_preserves_newline_tab(self):
+        from crew.feishu import _sanitize_feishu_text
+        text = "line1\nline2\tindented\r\nline3"
+        assert _sanitize_feishu_text(text) == text
+
+    def test_truncates_long_text(self):
+        from crew.feishu import _sanitize_feishu_text, _FEISHU_TEXT_MAX_LEN
+        long_text = "a" * (_FEISHU_TEXT_MAX_LEN + 500)
+        result = _sanitize_feishu_text(long_text)
+        assert len(result) == _FEISHU_TEXT_MAX_LEN + 3  # +3 for "..."
+        assert result.endswith("...")
+
+    def test_empty_passthrough(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("") == ""
+
+    def test_none_like_empty(self):
+        from crew.feishu import _sanitize_feishu_text
+        # 空字符串 falsy 走 early return
+        assert _sanitize_feishu_text("") == ""
+
+
+# ── 用户名解析 ──
+
+
+class TestGetUserName:
+    """测试 get_user_name() 缓存和 API 调用."""
+
+    def test_cached_result(self):
+        from crew.feishu import _USER_NAME_CACHE, get_user_name
+
+        _USER_NAME_CACHE["ou_cached"] = "张三"
+        try:
+            mgr = MagicMock()
+            name = _run(get_user_name(mgr, "ou_cached"))
+            assert name == "张三"
+        finally:
+            _USER_NAME_CACHE.pop("ou_cached", None)
+
+    def test_empty_open_id(self):
+        from crew.feishu import get_user_name
+        mgr = MagicMock()
+        assert _run(get_user_name(mgr, "")) == ""

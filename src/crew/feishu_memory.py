@@ -30,14 +30,16 @@ class FeishuChatStore:
         safe_id = chat_id.replace("/", "_").replace("..", "_")
         return self.store_dir / f"{safe_id}.jsonl"
 
-    def append(self, chat_id: str, role: str, content: str) -> None:
+    def append(self, chat_id: str, role: str, content: str, sender_name: str = "") -> None:
         """追加一条消息."""
         self._ensure_dir()
-        entry = {
+        entry: dict[str, str] = {
             "role": role,
             "content": content,
             "ts": datetime.now().isoformat(),
         }
+        if sender_name:
+            entry["sender_name"] = sender_name
         with self._chat_file(chat_id).open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -69,7 +71,10 @@ class FeishuChatStore:
             return ""
         lines = []
         for entry in entries:
-            role_label = "Kai" if entry["role"] == "user" else "你"
+            if entry["role"] == "user":
+                role_label = entry.get("sender_name") or "Kai"
+            else:
+                role_label = "你"
             lines.append(f"{role_label}: {entry['content']}")
         return "\n".join(lines)
 
