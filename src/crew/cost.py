@@ -51,6 +51,15 @@ PROXY_PRICE_OVERRIDES: dict[str, dict[str, dict[str, float]]] = {
 _DEFAULT_PRICE = {"input": 0.001, "output": 0.003}
 
 
+def _model_channel(model: str) -> str:
+    """模型名称 → 渠道分类."""
+    if model.startswith("claude"):
+        return "claude"
+    if model.startswith("kimi") or model.startswith("moonshot"):
+        return "kimi"
+    return "other"
+
+
 def estimate_cost(
     model: str,
     input_tokens: int,
@@ -131,11 +140,13 @@ def query_cost_summary(
         if emp_name not in by_employee:
             by_employee[emp_name] = {
                 "cost_usd": 0.0, "tasks": 0, "input_tokens": 0, "output_tokens": 0,
+                "cost_by_channel": {"claude": 0.0, "kimi": 0.0, "other": 0.0},
             }
         by_employee[emp_name]["cost_usd"] += cost
         by_employee[emp_name]["tasks"] += 1
         by_employee[emp_name]["input_tokens"] += inp
         by_employee[emp_name]["output_tokens"] += out
+        by_employee[emp_name]["cost_by_channel"][_model_channel(model)] += cost
 
         # 按模型汇总
         if model not in by_model:
@@ -156,12 +167,23 @@ def query_cost_summary(
     def _round_dict(d: dict) -> dict:
         return {k: round(v, 4) if isinstance(v, float) else v for k, v in d.items()}
 
+    def _round_nested(d: dict) -> dict:
+        out = {}
+        for k, v in d.items():
+            if isinstance(v, float):
+                out[k] = round(v, 4)
+            elif isinstance(v, dict):
+                out[k] = {kk: round(vv, 4) if isinstance(vv, float) else vv for kk, vv in v.items()}
+            else:
+                out[k] = v
+        return out
+
     return {
         "period_days": days,
         "total_cost_usd": round(total_cost, 4),
         "total_tasks": total_tasks,
         "by_employee": {
-            k: _round_dict(v)
+            k: _round_nested(v)
             for k, v in sorted(by_employee.items(), key=lambda x: -x[1]["cost_usd"])
         },
         "by_model": {
@@ -173,6 +195,193 @@ def query_cost_summary(
             for k, v in sorted(by_trigger.items(), key=lambda x: -x[1]["cost_usd"])
         },
     }
+
+
+def calibrate_employee_costs(
+    cost_summary: dict[str, Any],
+    aiberm_real_usd: float | None = None,
+    moonshot_real_usd: float | None = None,
+) -> dict[str, Any]:
+    """用真实账单按 token 比例校准员工成本.
+
+    原理：
+        校准系数 = 实际账单 / 估算总额
+        员工实际成本 = 员工估算成本 × 校准系数
+
+    只修改 by_employee 中的 calibrated_cost_usd 字段，不覆盖原始估算。
+    """
+    by_employee = cost_summary.get("by_employee", {})
+    if not by_employee:
+        return cost_summary
+
+    # 汇总各渠道估算总额
+    claude_estimated = 0.0
+    kimi_estimated = 0.0
+    for emp_data in by_employee.values():
+        cbc = emp_data.get("cost_by_channel", {})
+        claude_estimated += cbc.get("claude", 0)
+        kimi_estimated += cbc.get("kimi", 0)
+
+    # 计算校准系数
+    claude_factor = (aiberm_real_usd / claude_estimated) if (aiberm_real_usd and claude_estimated > 0) else None
+    kimi_factor = (moonshot_real_usd / kimi_estimated) if (moonshot_real_usd and kimi_estimated > 0) else None
+
+    calibrated_total = 0.0
+    for emp_data in by_employee.values():
+        cbc = emp_data.get("cost_by_channel", {})
+        cal = 0.0
+        # Claude 渠道校准
+        if claude_factor is not None and cbc.get("claude", 0) > 0:
+            cal += cbc["claude"] * claude_factor
+        else:
+            cal += cbc.get("claude", 0)
+        # Kimi 渠道校准
+        if kimi_factor is not None and cbc.get("kimi", 0) > 0:
+            cal += cbc["kimi"] * kimi_factor
+        else:
+            cal += cbc.get("kimi", 0)
+        # 其他渠道不校准
+        cal += cbc.get("other", 0)
+        emp_data["calibrated_cost_usd"] = round(cal, 4)
+        calibrated_total += cal
+
+    cost_summary["calibrated_total_usd"] = round(calibrated_total, 4)
+    if claude_factor is not None:
+        cost_summary["claude_calibration_factor"] = round(claude_factor, 4)
+    if kimi_factor is not None:
+        cost_summary["kimi_calibration_factor"] = round(kimi_factor, 4)
+
+    # 按校准后成本重新排序
+    cost_summary["by_employee"] = dict(
+        sorted(by_employee.items(), key=lambda x: -(x[1].get("calibrated_cost_usd", x[1]["cost_usd"])))
+    )
+
+    return cost_summary
+
+
+# ── aiberm 真实账单 ──
+
+
+async def fetch_aiberm_billing(
+    api_key: str,
+    base_url: str = "https://aiberm.com/v1",
+    days: int = 7,
+) -> dict[str, Any] | None:
+    """从 aiberm 账单 API 拉取真实消耗数据.
+
+    同时查询 7 日消耗和累计消耗。
+    """
+    import httpx
+
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    start_str = start.strftime("%Y-%m-%d")
+    end_str = end.strftime("%Y-%m-%d")
+
+    base = base_url.rstrip("/")
+    url = f"{base}/dashboard/billing/usage"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # 7 日消耗
+            resp = await client.get(url, params={"start_date": start_str, "end_date": end_str}, headers=headers)
+            resp.raise_for_status()
+            total_cents = resp.json().get("total_usage", 0)
+
+            # 累计消耗（从 2024-01-01 至今）
+            resp2 = await client.get(url, params={"start_date": "2024-01-01", "end_date": end_str}, headers=headers)
+            resp2.raise_for_status()
+            cumulative_cents = resp2.json().get("total_usage", 0)
+
+            return {
+                "total_usd": round(total_cents / 100, 4),
+                "total_cents": total_cents,
+                "cumulative_usd": round(cumulative_cents / 100, 4),
+                "period_days": days,
+                "start": start_str,
+                "end": end_str,
+            }
+    except Exception as exc:
+        logger.warning("aiberm billing fetch failed: %s", exc)
+        return None
+
+
+async def fetch_aiberm_balance(
+    access_token: str,
+    base_url: str = "https://aiberm.com",
+) -> dict[str, Any] | None:
+    """从 aiberm（new-api）管理 API 查询账户余额.
+
+    需要 access_token（从 aiberm 网页后台登录获取），不是 API key。
+    """
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/api/user/self"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("success"):
+                logger.warning("aiberm balance returned success=false: %s", data.get("message"))
+                return None
+            user = data.get("data", {})
+            quota = user.get("quota", 0)
+            used = user.get("used_quota", 0)
+            # new-api quota 单位: 默认 500000 = $1
+            quota_per_unit = 500000
+            return {
+                "balance_usd": round(quota / quota_per_unit, 2),
+                "used_usd": round(used / quota_per_unit, 2),
+            }
+    except Exception as exc:
+        logger.warning("aiberm balance fetch failed: %s", exc)
+        return None
+
+
+# ── Moonshot/Kimi 余额查询 ──
+
+# 人民币→美元汇率（近似，用于展示）
+_CNY_TO_USD = 0.138
+
+
+async def fetch_moonshot_balance(
+    api_key: str,
+    base_url: str = "https://api.moonshot.cn/v1",
+) -> dict[str, Any] | None:
+    """从 Moonshot API 查询 Kimi 账户余额.
+
+    Returns:
+        {"balance_cny": 56.85, "balance_usd": 7.85, "cash_cny": 50, "voucher_cny": 6.85}
+        或 None（请求失败时）
+    """
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/users/me/balance"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("status"):
+                logger.warning("moonshot balance returned status=false: %s", data)
+                return None
+            bal = data.get("data", {})
+            total_cny = bal.get("available_balance", 0)
+            return {
+                "balance_cny": round(total_cny, 2),
+                "balance_usd": round(total_cny * _CNY_TO_USD, 2),
+                "cash_cny": round(bal.get("cash_balance", 0), 2),
+                "voucher_cny": round(bal.get("voucher_balance", 0), 2),
+            }
+    except Exception as exc:
+        logger.warning("moonshot balance fetch failed: %s", exc)
+        return None
 
 
 # ── 质量预评分解析 ──

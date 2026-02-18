@@ -439,7 +439,9 @@ class MemoryStore:
                 "correction": "纠正",
             }.get(entry.category, entry.category)
             conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
-            lines.append(f"- [{category_label}]{conf} {entry.content}")
+            # proxied 记忆来自代理推理，不是员工本人的真实工作
+            proxied = " ⚠️模拟讨论记录，非实际工作" if "proxied" in entry.tags else ""
+            lines.append(f"- [{category_label}]{conf}{proxied} {entry.content}")
         return "\n".join(lines)
 
     def _get_shared_memories(

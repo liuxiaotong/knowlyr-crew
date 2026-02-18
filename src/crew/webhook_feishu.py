@@ -161,6 +161,8 @@ async def _feishu_fast_reply(
     task_text: str,
     message_history: list[dict[str, Any]] | None,
     max_visibility: str = "open",
+    extra_context: str | None = None,
+    sender_name: str = "Kai",
 ) -> dict[str, Any]:
     """闲聊快速路径 — 不加载工具，单轮回复.
 
@@ -194,11 +196,14 @@ async def _feishu_fast_reply(
         f"{soul_text}\n\n"
         "---\n\n"
         f"今天是 {_date_str}（{_weekday_str}）。\n\n"
-        "你正在飞书上和 Kai 聊天。像平时一样自然回复，纯聊天，不需要查数据或调工具。\n"
+        f"你正在和 {sender_name} 聊天。像平时一样自然回复，纯聊天，不需要查数据或调工具。\n"
         "你知道今天的日期，但没有读过笔记和日记，不知道最近发生了什么具体的事。"
         "不要编造具体事件（客户拜访、会议、调休、出差等）。"
-        "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常（跑步、做饭、阿灰）。\n"
-        "你没有手机，不能发照片、文件，也不能主动联系任何人。别装能做到。"
+        "不确定的事就说不确定，或者自然地聊你 soul 里写过的日常。\n"
+        "不要把别人的生活细节当成自己的——同事的猫、爱好、习惯是他们的，不是你的。"
+        "只聊你自己 soul 里明确写过的事，没写过的就说不清楚。\n"
+        "你没有手机，不能发照片、文件，也不能主动联系任何人。别装能做到。\n"
+        "回复简洁自然，3-5 句话为宜，别写太长。"
     )
 
     # 私聊时注入私密记忆（快速路径也能看到 Kai 的秘密）
@@ -213,6 +218,26 @@ async def _feishu_fast_reply(
                 prompt += "\n\n## 你记得的事\n\n" + memory_text
         except Exception:
             pass
+
+    # 注入同事花名册（name→角色名映射，让 fast path 也认识所有同事）
+    try:
+        from crew.discovery import discover_employees
+        _all = discover_employees(project_dir=ctx.project_dir)
+        _roster = []
+        for _e in _all.employees.values():
+            if _e.name == emp.name:
+                continue
+            _cname = _e.character_name or _e.display_name or _e.name
+            _role = _e.display_name or _e.description or ""
+            _roster.append(f"- {_cname}（{_e.name}）— {_role}")
+        if _roster:
+            prompt += "\n\n## 你的同事\n\n" + "\n".join(_roster)
+    except Exception:
+        pass
+
+    # 注入外部上下文（站内消息等渠道传入的记忆、用户记忆、对话摘要）
+    if extra_context:
+        prompt += "\n\n" + extra_context
 
     # 用备用模型（kimi）降低成本，没配就用主模型
     # 注意：fallback 系列配置不能混用主模型的配置（key/base_url 不通用）
@@ -229,7 +254,7 @@ async def _feishu_fast_reply(
     if message_history:
         history_lines = []
         for msg in message_history[-6:]:  # 最近 6 条足够
-            role = "Kai" if msg["role"] == "user" else emp.character_name or emp.name
+            role = sender_name if msg["role"] == "user" else emp.character_name or emp.name
             history_lines.append(f"{role}: {msg['content']}")
         if history_lines:
             prompt += "\n\n## 最近对话\n\n" + "\n".join(history_lines)
@@ -241,6 +266,7 @@ async def _feishu_fast_reply(
         base_url=chat_base_url,
         stream=False,
         user_message=task_text,
+        max_tokens=500,
     )
 
     return {
@@ -585,6 +611,9 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # ── 闲聊快速路径 ──
         # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
         # 省 ~80K tokens / $0.07 per message
+        import time as _time
+        _t0 = _time.monotonic()
+
         use_fast_path = (
             has_tools
             and image_data is None
@@ -610,6 +639,17 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 user_message=user_msg,
                 message_history=message_history,
             )
+
+        _elapsed = _time.monotonic() - _t0
+        _path_label = "fast" if use_fast_path else "full"
+        _model_used = result.get("model", "?") if isinstance(result, dict) else "?"
+        _in_tok = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+        _out_tok = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+        logger.warning(
+            "飞书回复 [%s] %.1fs model=%s in=%d out=%d msg=%s",
+            _path_label, _elapsed, _model_used, _in_tok, _out_tok,
+            task_text[:40],
+        )
 
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)

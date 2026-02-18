@@ -758,6 +758,120 @@ class TestSanitizeFeishuText:
         # 空字符串 falsy 走 early return
         assert _sanitize_feishu_text("") == ""
 
+    def test_strips_markdown_headings(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("### 标题\n内容") == "标题\n内容"
+
+    def test_strips_markdown_bold(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("这是**重点**内容") == "这是重点内容"
+
+    def test_strips_markdown_links(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("点击[这里](https://example.com)查看") == "点击这里查看"
+
+    def test_strips_inline_code(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("使用 `print()` 输出") == "使用 print() 输出"
+
+    def test_strips_code_blocks(self):
+        from crew.feishu import _sanitize_feishu_text
+        text = "代码如下：\n```python\nprint('hi')\n```\n结束"
+        result = _sanitize_feishu_text(text)
+        assert "```" not in result
+        assert "print('hi')" in result
+
+    def test_strips_html_tags(self):
+        from crew.feishu import _sanitize_feishu_text
+        assert _sanitize_feishu_text("你好<br>世界<div>内容</div>") == "你好世界内容"
+
+    def test_strips_images(self):
+        from crew.feishu import _sanitize_feishu_text
+        result = _sanitize_feishu_text("看图 ![示意图](https://img.png) 结束")
+        assert "![" not in result
+        assert "结束" in result
+
+    def test_strips_horizontal_rule(self):
+        from crew.feishu import _sanitize_feishu_text
+        result = _sanitize_feishu_text("上面\n---\n下面")
+        assert "---" not in result
+
+
+class TestStripMarkdown:
+    """测试 _strip_markdown() 独立逻辑."""
+
+    def test_complex_markdown(self):
+        from crew.feishu import _strip_markdown
+        text = """## 任务清单
+
+**第一项**: 完成[文档](https://doc.com)
+*第二项*: 检查 `config.yaml`
+
+```bash
+echo hello
+```
+
+---
+
+详情见 <a href="url">链接</a>"""
+        result = _strip_markdown(text)
+        assert "##" not in result
+        assert "**" not in result
+        assert "[文档]" not in result
+        assert "```" not in result
+        assert "---" not in result
+        assert "<a" not in result
+        assert "任务清单" in result
+        assert "第一项" in result
+        assert "config.yaml" in result
+        assert "echo hello" in result
+
+
+class TestSendFeishuText230001Retry:
+    """测试 send_feishu_text 230001 自动降级重试."""
+
+    def test_retry_on_230001(self):
+        from unittest.mock import AsyncMock, patch
+
+        from crew.feishu import send_feishu_text
+
+        token_mgr = MagicMock()
+        token_mgr.get_token = AsyncMock(return_value="token")
+
+        call_count = 0
+
+        async def mock_send(tm, chat_id, content, msg_type):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"code": 230001, "msg": "invalid message content"}
+            return {"code": 0, "msg": "ok"}
+
+        with patch("crew.feishu.send_feishu_message", side_effect=mock_send):
+            result = _run(send_feishu_text(token_mgr, "chat123", "带<html>标签的文本"))
+        assert result["code"] == 0
+        assert call_count == 2
+
+    def test_no_retry_on_success(self):
+        from unittest.mock import AsyncMock, patch
+
+        from crew.feishu import send_feishu_text
+
+        token_mgr = MagicMock()
+        token_mgr.get_token = AsyncMock(return_value="token")
+
+        call_count = 0
+
+        async def mock_send(tm, chat_id, content, msg_type):
+            nonlocal call_count
+            call_count += 1
+            return {"code": 0, "msg": "ok"}
+
+        with patch("crew.feishu.send_feishu_message", side_effect=mock_send):
+            result = _run(send_feishu_text(token_mgr, "chat123", "正常文本"))
+        assert result["code"] == 0
+        assert call_count == 1
+
 
 # ── 用户名解析 ──
 

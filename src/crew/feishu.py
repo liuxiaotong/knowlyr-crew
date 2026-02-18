@@ -7,6 +7,7 @@ import hmac
 import json as _json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -426,17 +427,50 @@ def _parse_image_response(resp: "httpx.Response") -> tuple[bytes, str]:
 _FEISHU_TEXT_MAX_LEN = 4000
 
 
+def _strip_markdown(text: str) -> str:
+    """将 Markdown 格式转为飞书友好的纯文本."""
+    # 代码块: ```lang\n...\n``` → 保留内容
+    text = re.sub(
+        r"```[a-zA-Z]*\n(.*?)```",
+        lambda m: m.group(1).strip(),
+        text,
+        flags=re.DOTALL,
+    )
+    # 标题: ### Title → Title
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    # 粗体/斜体: **text** / *text* / __text__
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    # 行内代码: `code` → code
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # 链接: [text](url) → text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # 图片: ![alt](url) → 移除
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", text)
+    # 水平线: --- / *** / ___
+    text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
+    # HTML 标签（如 <br> <div> 等）— 移除标签保留内容
+    text = re.sub(r"<[^>]+>", "", text)
+    # 清理多余空行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _sanitize_feishu_text(text: str) -> str:
     """净化发送到飞书的文本内容.
 
+    - 清除 Markdown 格式（LLM 常见输出）
     - 去除 null bytes 和 C0 控制字符（保留换行符和制表符）
     - 长文本截断到 4000 字符
     """
     if not text:
         return text
+    # Markdown → 纯文本
+    cleaned = _strip_markdown(text)
     # 去除 null bytes 和 C0 控制字符（保留 \n \r \t）
     cleaned = "".join(
-        c for c in text
+        c for c in cleaned
         if c in ("\n", "\r", "\t") or (ord(c) >= 0x20)
     )
     if len(cleaned) > _FEISHU_TEXT_MAX_LEN:
@@ -505,12 +539,23 @@ async def send_feishu_text(
     chat_id: str,
     text: str,
 ) -> dict[str, Any]:
-    """发送纯文本消息."""
+    """发送纯文本消息，230001 时自动降级重试."""
     text = _sanitize_feishu_text(text)
     content = {"text": text}
-    return await send_feishu_message(
+    data = await send_feishu_message(
         token_manager, chat_id, content=content, msg_type="text",
     )
+    if data.get("code") == 230001:
+        # 激进清洗：只保留基本文字和换行
+        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：""''（）—…]", "", text)
+        plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        if plain:
+            logger.warning("飞书 230001 降级重试 (len=%d→%d)", len(text), len(plain))
+            data = await send_feishu_message(
+                token_manager, chat_id,
+                content={"text": plain}, msg_type="text",
+            )
+    return data
 
 
 async def send_feishu_reply(
@@ -542,6 +587,16 @@ async def send_feishu_reply(
     if code != 0:
         msg = data.get("msg", "unknown")
         logger.warning("飞书回复发送失败: %s (code=%d)", msg, code)
+
+    if data.get("code") == 230001:
+        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：""''（）—…]", "", text)
+        plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        if plain:
+            logger.warning("飞书回复 230001 降级重试 (len=%d→%d)", len(text), len(plain))
+            body["content"] = _json.dumps({"text": plain}, ensure_ascii=False)
+            async with httpx.AsyncClient(timeout=MESSAGE_SEND_TIMEOUT) as client:
+                resp = await client.post(url, json=body, headers=headers)
+                data = resp.json()
 
     return data
 

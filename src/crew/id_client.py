@@ -965,18 +965,52 @@ class HeartbeatManager:
         return self._task is not None and not self._task.done()
 
     async def _loop(self) -> None:
-        while True:
+        httpx = _get_httpx()
+        if httpx is None:
+            return
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            while True:
+                try:
+                    await self._send_all(client)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("周期心跳失败: %s", e)
+                await asyncio.sleep(self._interval)
+
+    async def _send_all(self, client: object) -> None:
+        """用共享 client 发送所有心跳，避免每次创建新连接."""
+        base_url, token = _get_config()
+        if not token:
+            return
+        # 获取 agent 列表
+        try:
+            resp = await client.get(  # type: ignore[union-attr]
+                f"{base_url}/api/agents",
+                headers=_headers(token),
+            )
+            resp.raise_for_status()
+            _breaker.record_success()
+            agents = resp.json()
+        except Exception as e:
+            _breaker.record_failure()
+            logger.warning("Agent 列表获取失败: %s", e)
+            return
+        # 逐个发心跳
+        for agent in agents:
+            aid = agent.get("id")
+            status = agent.get("agent_status", "active")
+            if not aid or status != "active":
+                continue
             try:
-                agents = await alist_agents()
-                if agents:
-                    for agent in agents:
-                        aid = agent.get("id")
-                        status = agent.get("agent_status", "active")
-                        if aid and status == "active":
-                            await asend_heartbeat(aid, detail="periodic")
-                            await asyncio.sleep(0.1)
-            except asyncio.CancelledError:
-                raise
+                resp = await client.post(  # type: ignore[union-attr]
+                    f"{base_url}/api/agents/{aid}/heartbeat",
+                    headers=_headers(token),
+                    json={"label": "periodic"},
+                )
+                resp.raise_for_status()
+                _breaker.record_success()
             except Exception as e:
-                logger.warning("周期心跳失败: %s", e)
-            await asyncio.sleep(self._interval)
+                _breaker.record_failure()
+                logger.warning("Agent %s 心跳发送失败: %s", aid, e)
+            await asyncio.sleep(0.1)

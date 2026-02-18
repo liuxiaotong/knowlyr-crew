@@ -1719,6 +1719,22 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["url"],
         },
     },
+    # ── Python 代码执行 ──
+    "run_python": {
+        "name": "run_python",
+        "description": "执行 Python 代码片段，用于解决内置工具做不到的事（网页抓取、数据处理、调 API、自定义计算）。可用库: httpx, bs4, json, re, datetime, math, csv, collections 等。用 print() 输出结果。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python 代码"},
+                "timeout": {
+                    "type": "integer",
+                    "description": "超时秒数（默认 30，最大 60）",
+                },
+            },
+            "required": ["code"],
+        },
+    },
     # ── 生活服务 ──
     "express_track": {
         "name": "express_track",
@@ -1814,6 +1830,8 @@ AGENT_TOOLS = {
     "whois", "dns_lookup", "http_check",
     # 生活服务
     "express_track", "flight_info", "aqi",
+    # 代码执行
+    "run_python",
 }
 
 # 延迟加载工具 — 首轮只传名字列表，模型需要时调 load_tools 加载完整 schema
@@ -1861,7 +1879,7 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
         "hash_gen", "url_codec", "text_extract", "json_format",
         "password_gen", "ip_lookup", "short_url", "word_count",
         "diff_text", "whois", "dns_lookup", "http_check",
-        "summarize", "sentiment", "qrcode",
+        "summarize", "sentiment", "qrcode", "run_python",
     },
     "life": {"express_track", "flight_info", "aqi", "email_send"},
 }

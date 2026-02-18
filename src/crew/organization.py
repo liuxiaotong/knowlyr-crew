@@ -75,6 +75,38 @@ def set_cache(org: Organization) -> None:
         _cache_time = time.time()
 
 
+# ── 模型档位默认值 ──
+
+_MODEL_TIER_FIELDS = (
+    "model", "api_key", "base_url",
+    "fallback_model", "fallback_api_key", "fallback_base_url",
+)
+
+
+def apply_model_defaults(
+    employees: dict[str, "Employee"],
+    org: Organization,
+) -> None:
+    """按 model_tier 从 organization.model_defaults 填充员工空字段.
+
+    只填充空字段，不覆盖已有值（employee.yaml 优先）。
+    """
+    if not org.model_defaults:
+        return
+    from crew.models import Employee  # noqa: F811 — avoid circular at module level
+
+    for emp in employees.values():
+        if not emp.model_tier:
+            continue
+        tier = org.model_defaults.get(emp.model_tier)
+        if not tier:
+            logger.debug("未知 model_tier: %s (employee=%s)", emp.model_tier, emp.name)
+            continue
+        for field in _MODEL_TIER_FIELDS:
+            if not getattr(emp, field):
+                object.__setattr__(emp, field, getattr(tier, field))
+
+
 # ── 自动降级 ──
 # 规则：连续 N 次任务失败 → 权限从 A 降到 C
 # 只降不升，升级由 Kai 手动决定

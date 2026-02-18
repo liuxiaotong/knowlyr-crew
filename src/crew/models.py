@@ -66,6 +66,7 @@ class Employee(BaseModel):
     output: EmployeeOutput = Field(default_factory=EmployeeOutput, description="输出配置")
     tools: list[str] = Field(default_factory=list, description="需要的工具声明")
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
+    model_tier: str = Field(default="", description="模型档位（引用 organization.yaml model_defaults）")
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     api_key: str = Field(default="", description="专属 API key（留空则使用环境变量）")
     base_url: str = Field(default="", description="专属 API base URL（留空则按 provider 自动推断）")
@@ -362,6 +363,28 @@ class ToolExecutionResult:
 # ── 组织架构模型 ──
 
 
+class ModelTierConfig(BaseModel):
+    """模型档位配置 — organization.yaml model_defaults 中的一个条目."""
+
+    model: str = Field(default="", description="模型 ID")
+    api_key: str = Field(default="", description="API key（支持 ${ENV_VAR}）")
+    base_url: str = Field(default="", description="API base URL")
+    fallback_model: str = Field(default="", description="备用模型")
+    fallback_api_key: str = Field(default="", description="备用 API key（支持 ${ENV_VAR}）")
+    fallback_base_url: str = Field(default="", description="备用 base URL")
+
+    @model_validator(mode="after")
+    def _resolve_env_vars(self) -> "ModelTierConfig":
+        """Resolve ${ENV_VAR} patterns in api_key / fallback_api_key fields."""
+        _env_re = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+        for attr in ("api_key", "fallback_api_key"):
+            val = getattr(self, attr, "")
+            if val and (m := _env_re.match(val)):
+                resolved = os.environ.get(m.group(1), "")
+                object.__setattr__(self, attr, resolved)
+        return self
+
+
 class TeamDef(BaseModel):
     """团队定义."""
 
@@ -387,6 +410,7 @@ class RoutingStep(BaseModel):
     description: str = Field(default="", description="步骤说明")
     optional: bool = Field(default=False, description="是否可选步骤")
     approval: bool = Field(default=False, description="执行前需人工审批")
+    human: bool = Field(default=False, description="人类判断节点（非 AI 执行）")
 
 
 class RoutingTemplate(BaseModel):
@@ -405,6 +429,9 @@ class Organization(BaseModel):
     )
     routing_templates: dict[str, RoutingTemplate] = Field(
         default_factory=dict, description="路由模板"
+    )
+    model_defaults: dict[str, ModelTierConfig] = Field(
+        default_factory=dict, description="模型档位默认配置"
     )
 
     def get_team(self, employee_name: str) -> str | None:

@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from crew.webhook_context import _AppContext, _EMPLOYEE_UPDATABLE_FIELDS
+
+import re as _re
+
+def _parse_sender_name(extra_context: str | None) -> str | None:
+    """从 extra_context 解析发送者名（knowlyr-id 格式: '当前对话用户: XXX'）."""
+    if not extra_context:
+        return None
+    m = _re.search(r"当前对话用户[:：]\s*(\S+?)(?:（|$|\n)", extra_context)
+    return m.group(1) if m else None
 
 
 async def _health(request: Any) -> Any:
@@ -78,6 +88,12 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     from crew.cost import query_cost_summary
     cost_summary = query_cost_summary(ctx.registry, employee=employee.name, days=7)
 
+    # 推理模型不支持自定义 temperature（kimi-k2.5, o1, o3, deepseek-r 等）
+    _model = employee.model or ""
+    _REASONING_PREFIXES = ("kimi-k2", "o1-", "o3-", "o4-", "deepseek-r")
+    if any(_model.startswith(p) for p in _REASONING_PREFIXES):
+        temperature = 1
+
     return JSONResponse({
         "name": employee.name,
         "character_name": employee.character_name,
@@ -86,6 +102,10 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
         "bio": bio,
         "version": employee.version,
         "model": employee.model,
+        "model_tier": employee.model_tier,
+        "base_url": employee.base_url,
+        "fallback_model": employee.fallback_model,
+        "fallback_base_url": employee.fallback_base_url,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "tools": employee.tools,
@@ -432,7 +452,9 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
-    """直接触发员工（支持 SSE 流式输出）."""
+    """直接触发员工（支持 SSE 流式输出 + 对话模式）."""
+    from starlette.responses import JSONResponse
+
     name = request.path_params["name"]
     payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
     args = payload.get("args", {})
@@ -441,10 +463,84 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     agent_id = payload.get("agent_id")
     model = payload.get("model")
 
+    # ── 对话模式：站内消息等渠道通过此接口统一执行 ──
+    user_message = payload.get("user_message")
+    if user_message is not None:
+        message_history = payload.get("message_history")
+        extra_context = payload.get("extra_context")
+        channel = payload.get("channel", "api")
+        sender_name = payload.get("sender_name") or _parse_sender_name(extra_context) or "Kai"
+
+        # 注入额外上下文到 args（和飞书 handler 相同模式）
+        if extra_context:
+            task = args.get("task", "")
+            args["task"] = (extra_context + "\n\n" + task) if task else extra_context
+
+        # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
+        import time as _time
+        from crew.discovery import discover_employees
+        from crew.webhook_feishu import _needs_tools
+        from crew.tool_schema import AGENT_TOOLS
+
+        discovery = discover_employees(project_dir=ctx.project_dir)
+        emp = discovery.get(name)
+        has_tools = any(
+            t in AGENT_TOOLS for t in (emp.tools or [])
+        ) if emp else False
+        use_fast_path = (
+            has_tools
+            and emp is not None
+            and emp.fallback_model
+            and isinstance(user_message, str)
+            and not _needs_tools(user_message)
+        )
+
+        _t0 = _time.monotonic()
+        if use_fast_path:
+            from crew.webhook_feishu import _feishu_fast_reply
+            result = await _feishu_fast_reply(
+                ctx, emp, user_message,
+                message_history=message_history,
+                max_visibility="private",
+                extra_context=extra_context,
+                sender_name=sender_name,
+            )
+        else:
+            import crew.webhook as _wh
+            result = await _wh._execute_employee(
+                ctx, name, args,
+                agent_id=agent_id, model=model,
+                user_message=user_message,
+                message_history=message_history,
+            )
+
+        _elapsed = _time.monotonic() - _t0
+        _path = "fast" if use_fast_path else "full"
+        _m = result.get("model", "?") if isinstance(result, dict) else "?"
+        _in = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+        _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+        logger.warning(
+            "站内回复 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
+            _path, _elapsed, _m, _in, _out, name, user_message[:40],
+        )
+
+        # 记录任务用于成本追踪
+        record = ctx.registry.create(
+            trigger=channel,
+            target_type="employee",
+            target_name=name,
+            args=args,
+        )
+        ctx.registry.update(record.task_id, "completed", result=result)
+
+        return JSONResponse(result)
+
+    # ── 流式模式 ──
     if stream:
         import crew.webhook as _wh
         return await _wh._stream_employee(ctx, name, args, agent_id=agent_id, model=model)
 
+    # ── 原有同步/异步模式 ──
     import crew.webhook as _wh
     return await _wh._dispatch_task(
         ctx,
@@ -455,6 +551,72 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         sync=sync,
         agent_id=agent_id,
         model=model,
+    )
+
+
+async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
+    """直接触发路由模板 — 展开为 delegate_chain 执行."""
+    import json as _json
+    from starlette.responses import JSONResponse
+    from crew.organization import load_organization
+
+    name = request.path_params["name"]
+    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    task = payload.get("args", {}).get("task", "") or payload.get("task", "")
+    overrides = payload.get("overrides", {})
+    sync = payload.get("sync", False)
+
+    if not task:
+        return JSONResponse({"error": "缺少 task 参数"}, status_code=400)
+
+    org = load_organization(project_dir=ctx.project_dir)
+    tmpl = org.routing_templates.get(name)
+    if not tmpl:
+        available = list(org.routing_templates.keys())
+        return JSONResponse(
+            {"error": f"未找到路由模板: {name}", "available": available},
+            status_code=404,
+        )
+
+    # 展开模板为 chain steps（同 _tool_route 逻辑）
+    steps: list[dict[str, Any]] = []
+    for step in tmpl.steps:
+        if step.optional and step.role not in overrides:
+            continue
+        if step.human:
+            continue  # 人工步骤跳过
+        emp_name = overrides.get(step.role)
+        if not emp_name:
+            if step.employee:
+                emp_name = step.employee
+            elif step.employees:
+                emp_name = step.employees[0]
+            elif step.team:
+                members = org.get_team_members(step.team)
+                emp_name = members[0] if members else None
+        if not emp_name:
+            continue
+        step_task = f"[{step.role}] {task}"
+        if steps:
+            step_task += "\n\n上一步结果: {prev}"
+        step_dict: dict[str, Any] = {"employee_name": emp_name, "task": step_task}
+        if step.approval:
+            step_dict["approval"] = True
+        steps.append(step_dict)
+
+    if not steps:
+        return JSONResponse({"error": "模板展开后无可执行步骤"}, status_code=400)
+
+    chain_name = " → ".join(s["employee_name"] for s in steps)
+
+    import crew.webhook as _wh
+    return await _wh._dispatch_task(
+        ctx,
+        trigger="direct",
+        target_type="chain",
+        target_name=chain_name,
+        args={"steps_json": _json.dumps(steps, ensure_ascii=False)},
+        sync=sync,
     )
 
 
@@ -701,7 +863,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     from starlette.responses import JSONResponse
     from crew.discovery import discover_employees
     from crew.organization import load_organization, get_effective_authority
-    from crew.cost import query_cost_summary, fetch_aiberm_billing
+    from crew.cost import query_cost_summary, calibrate_employee_costs, fetch_aiberm_billing, fetch_aiberm_balance, fetch_moonshot_balance
 
     result = discover_employees(ctx.project_dir)
     org = load_organization(project_dir=ctx.project_dir)
@@ -717,6 +879,40 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 days=7,
             )
             break
+
+    # aiberm 余额（需要 access token，不是 API key）
+    aiberm_balance = None
+    aiberm_token = os.environ.get("AIBERM_ACCESS_TOKEN", "")
+    if aiberm_token:
+        aiberm_balance = await fetch_aiberm_balance(access_token=aiberm_token)
+    if aiberm_billing is None:
+        aiberm_billing = {}
+    if aiberm_balance:
+        aiberm_billing["balance_usd"] = aiberm_balance["balance_usd"]
+        aiberm_billing["used_usd"] = aiberm_balance["used_usd"]
+
+    # Moonshot/Kimi 余额 + 7日估算成本
+    moonshot_billing = None
+    moonshot_key = os.environ.get("MOONSHOT_API_KEY") or os.environ.get("KIMI_API_KEY", "")
+    if moonshot_key:
+        balance = await fetch_moonshot_balance(api_key=moonshot_key)
+        # 从 cost_7d 提取 kimi 相关模型的估算成本
+        kimi_cost_usd = 0.0
+        kimi_tasks = 0
+        for model_name, model_cost in cost.get("by_model", {}).items():
+            if model_name.startswith("kimi") or model_name.startswith("moonshot"):
+                kimi_cost_usd += model_cost.get("cost_usd", 0)
+                kimi_tasks += model_cost.get("tasks", 0)
+        moonshot_billing = {
+            "balance": balance,
+            "cost_7d_usd": round(kimi_cost_usd, 4),
+            "cost_7d_tasks": kimi_tasks,
+        }
+
+    # 用真实账单校准员工估算成本
+    aiberm_real = aiberm_billing.get("total_usd") if aiberm_billing else None
+    kimi_real = moonshot_billing.get("cost_7d_usd") if moonshot_billing else None
+    cost = calibrate_employee_costs(cost, aiberm_real_usd=aiberm_real, moonshot_real_usd=kimi_real)
 
     employees_info = []
     for name, emp in sorted(result.employees.items()):
@@ -751,6 +947,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
         },
         "cost_7d": cost,
         "aiberm_billing": aiberm_billing,
+        "moonshot_billing": moonshot_billing,
         "employees": employees_info,
         "routing_templates": {
             name: {
@@ -764,6 +961,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                         "description": step.description,
                         "optional": step.optional,
                         "approval": step.approval,
+                        "human": step.human,
                     }
                     for step in tmpl.steps
                 ],

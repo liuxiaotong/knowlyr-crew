@@ -834,6 +834,142 @@ async def _tool_http_check(
 
 
 
+# ── Python 代码执行沙箱 ──
+
+# 允许导入的模块白名单
+_ALLOWED_MODULES: set[str] = {
+    "json", "re", "math", "datetime", "time", "collections", "itertools",
+    "functools", "string", "textwrap", "decimal", "statistics", "random",
+    "hashlib", "base64", "urllib", "urllib.parse", "html", "html.parser",
+    "csv", "io", "typing", "dataclasses", "enum", "struct", "calendar",
+    "operator", "copy", "pprint", "fractions", "bisect", "heapq",
+    "httpx", "bs4", "lxml",
+}
+
+# 禁止调用的内置函数
+_BLOCKED_CALLS: set[str] = {
+    "__import__", "exec", "eval", "compile",
+    "getattr", "setattr", "delattr",
+    "globals", "locals", "vars", "dir",
+    "breakpoint", "exit", "quit",
+}
+
+
+def _validate_python_code(code: str) -> str | None:
+    """AST 静态检查，返回 None 表示通过，否则返回错误消息."""
+    import ast
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return f"语法错误: {e}"
+
+    for node in ast.walk(tree):
+        # 检查 import
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                mod = alias.name.split(".")[0]
+                if mod not in _ALLOWED_MODULES:
+                    return f"不允许导入 {alias.name}（安全限制）"
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                mod = node.module.split(".")[0]
+                if mod not in _ALLOWED_MODULES:
+                    return f"不允许导入 {node.module}（安全限制）"
+
+        # 检查危险函数调用
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in _BLOCKED_CALLS:
+                return f"不允许调用 {node.func.id}()（安全限制）"
+            # open() 只允许读模式
+            if node.func.id == "open":
+                # 有第二个参数且不是 'r'/'rb' → 拒绝
+                if len(node.args) >= 2:
+                    mode_arg = node.args[1]
+                    if isinstance(mode_arg, ast.Constant) and mode_arg.value not in ("r", "rb"):
+                        return "open() 只允许读模式（安全限制）"
+                # 有 mode keyword
+                for kw in node.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        if kw.value.value not in ("r", "rb"):
+                            return "open() 只允许读模式（安全限制）"
+
+    return None
+
+
+async def _tool_run_python(
+    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+) -> str:
+    """在沙箱中执行 Python 代码片段."""
+    import asyncio
+    import sys
+    import textwrap
+
+    code = (args.get("code") or "").strip()
+    if not code:
+        return "需要 Python 代码。用 print() 输出结果。"
+
+    # 1. AST 静态检查
+    error = _validate_python_code(code)
+    if error:
+        return f"代码检查失败: {error}"
+
+    # 2. 超时限制
+    timeout = min(max(int(args.get("timeout", 30) or 30), 5), 60)
+
+    # 3. 构建 wrapper（Linux 上加 resource limits）
+    wrapper = textwrap.dedent("""\
+        import sys
+        try:
+            import resource
+            resource.setrlimit(resource.RLIMIT_AS, (256*1024*1024, 256*1024*1024))
+            resource.setrlimit(resource.RLIMIT_CPU, ({timeout}, {timeout}))
+        except (ImportError, ValueError, OSError):
+            pass
+        exec(compile({code!r}, "<run_python>", "exec"))
+    """).format(timeout=timeout, code=code)
+
+    # 4. subprocess 执行
+    python = sys.executable or "python3"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            python, "-c", wrapper,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout + 5,
+        )
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()  # type: ignore[union-attr]
+        except ProcessLookupError:
+            pass
+        return "执行超时（超过 %d 秒）。" % timeout
+
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+    # 5. 截断输出
+    max_out, max_err = 10_000, 3_000
+    if len(stdout) > max_out:
+        stdout = stdout[:max_out] + "\n\n[输出已截断]"
+    if len(stderr) > max_err:
+        stderr = stderr[:max_err] + "\n\n[错误已截断]"
+
+    parts: list[str] = []
+    if stdout.strip():
+        parts.append(stdout.strip())
+    if stderr.strip():
+        parts.append(f"[stderr]\n{stderr.strip()}")
+    if proc.returncode and proc.returncode != 0 and not parts:
+        parts.append(f"进程退出码: {proc.returncode}")
+    if not parts:
+        parts.append("（代码执行完毕，无输出）")
+
+    return "\n".join(parts)
+
+
 HANDLERS: dict[str, object] = {
     "get_datetime": _tool_get_datetime,
     "calculate": _tool_calculate,
@@ -857,4 +993,5 @@ HANDLERS: dict[str, object] = {
     "whois": _tool_whois,
     "dns_lookup": _tool_dns_lookup,
     "http_check": _tool_http_check,
+    "run_python": _tool_run_python,
 }

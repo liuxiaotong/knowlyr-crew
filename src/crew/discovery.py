@@ -238,6 +238,12 @@ def _discover_employees_uncached(root: Path) -> DiscoveryResult:
     for emp in _scan_directory(private_dir, "private"):
         _merge_employee(emp, "private", employees, trigger_map, conflicts)
 
+    # 按 model_tier 填充模型默认值
+    from crew.organization import load_organization, apply_model_defaults
+
+    org = load_organization(project_dir=root)
+    apply_model_defaults(employees, org)
+
     return DiscoveryResult(employees=employees, conflicts=conflicts)
 
 

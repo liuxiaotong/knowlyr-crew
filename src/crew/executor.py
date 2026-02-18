@@ -224,6 +224,9 @@ def _openai_execute(
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    # Kimi K2.5 默认开启 thinking，会导致 content 为空（tokens 全在 reasoning）
+    if model.lower().startswith("kimi-"):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     if stream and on_chunk:
         kwargs["stream"] = True
@@ -288,6 +291,9 @@ async def _openai_aexecute(
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    # Kimi K2.5 默认开启 thinking，会导致 content 为空（tokens 全在 reasoning）
+    if model.lower().startswith("kimi-"):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     if stream:
         async def _stream() -> AsyncIterator[str]:

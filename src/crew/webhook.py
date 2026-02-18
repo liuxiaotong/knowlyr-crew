@@ -105,6 +105,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_project_status,
     _handle_run_employee,
     _handle_run_pipeline,
+    _handle_run_route,
     _handle_task_approve,
     _handle_task_replay,
     _handle_task_status,
@@ -214,6 +215,7 @@ def create_webhook_app(
         Route("/webhook/openclaw", endpoint=_make_handler(ctx, _handle_openclaw), methods=["POST"]),
         Route("/webhook", endpoint=_make_handler(ctx, _handle_generic), methods=["POST"]),
         Route("/run/pipeline/{name}", endpoint=_make_handler(ctx, _handle_run_pipeline), methods=["POST"]),
+        Route("/run/route/{name}", endpoint=_make_handler(ctx, _handle_run_route), methods=["POST"]),
         Route("/run/employee/{name}", endpoint=_make_handler(ctx, _handle_run_employee), methods=["POST"]),
         Route("/agent/run/{name}", endpoint=_make_handler(ctx, _handle_agent_run), methods=["POST"]),
         Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
@@ -235,7 +237,7 @@ def create_webhook_app(
         # ── 环境变量校验（不阻塞启动，仅记日志）──
         import os as _os
 
-        if not _os.environ.get("ANTHROPIC_API_KEY"):
+        if not _os.environ.get("ANTHROPIC_API_KEY") and not _os.environ.get("AIBERM_API_KEY"):
             logger.warning(
                 "⚠ ANTHROPIC_API_KEY 未设置 — Agent 调用和定时任务将无法使用 Claude 模型"
             )
