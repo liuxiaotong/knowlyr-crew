@@ -191,13 +191,23 @@ class CrewEngine:
         if exemplar_prompt:
             parts.extend(["", "---", "", exemplar_prompt])
 
-        # 本地持久化记忆（有 rendered body 时使用语义搜索）
+        # 本地持久化记忆（有 rendered body 时使用语义搜索 + 团队记忆）
         try:
             from crew.memory import MemoryStore
             memory_store = MemoryStore(project_dir=self.project_dir)
+            # 获取同团队成员（用于注入队友记忆）
+            _team_members: list[str] | None = None
+            try:
+                from crew.organization import load_organization as _load_org
+                _org = _load_org(project_dir=self.project_dir)
+                _tid = _org.get_team(employee.name)
+                if _tid:
+                    _team_members = _org.teams[_tid].members
+            except Exception:
+                pass
             memory_text = memory_store.format_for_prompt(
                 employee.name, query=rendered, employee_tags=employee.tags,
-                max_visibility=max_visibility,
+                max_visibility=max_visibility, team_members=_team_members,
             )
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])

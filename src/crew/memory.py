@@ -406,6 +406,7 @@ class MemoryStore:
         query: str = "",
         employee_tags: list[str] | None = None,
         max_visibility: str = "open",
+        team_members: list[str] | None = None,
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
@@ -415,6 +416,7 @@ class MemoryStore:
             query: 查询上下文（有值时使用语义搜索优先返回相关记忆）
             employee_tags: 员工标签（用于匹配共享记忆）
             max_visibility: 可见性上限 — "private" 返回全部, "open" 只返回公开记忆
+            team_members: 同团队成员名列表（注入队友的公开记忆）
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
@@ -453,12 +455,27 @@ class MemoryStore:
             if entries:
                 parts.append(self._format_entries(entries))
 
-        # 跨员工共享记忆
+        # 跨员工共享记忆（标签匹配）
         shared_text = self._get_shared_memories(
             employee, query=query, employee_tags=employee_tags, limit=max(3, limit // 3),
         )
         if shared_text:
             parts.append(f"\n### 团队共享经验\n\n{shared_text}")
+
+        # 同团队成员的公开记忆（不要求 shared=True）
+        if team_members:
+            team_entries = self.query_team(
+                team_members, exclude_employee=employee, limit=max(3, limit // 3),
+            )
+            if team_entries:
+                lines = []
+                for entry in team_entries:
+                    cat = {"decision": "决策", "estimate": "估算",
+                           "finding": "发现", "correction": "纠正"}.get(
+                        entry.category, entry.category)
+                    conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
+                    lines.append(f"- [{cat}]{conf} ({entry.employee}) {entry.content}")
+                parts.append(f"\n### 队友近况\n\n" + "\n".join(lines))
 
         return "\n".join(parts)
 
@@ -566,6 +583,56 @@ class MemoryStore:
         # 按创建时间降序
         all_shared.sort(key=lambda e: e.created_at, reverse=True)
         return all_shared[:limit]
+
+    def query_team(
+        self,
+        members: list[str],
+        exclude_employee: str = "",
+        limit: int = 5,
+        min_confidence: float = 0.3,
+    ) -> list[MemoryEntry]:
+        """查询指定团队成员的公开记忆（不要求 shared=True）.
+
+        Args:
+            members: 团队成员名列表
+            exclude_employee: 排除指定员工（通常是当前员工自身）
+            limit: 最大返回条数
+            min_confidence: 最低有效置信度
+        """
+        if not self.memory_dir.is_dir():
+            return []
+
+        member_set = set(members) - {exclude_employee}
+        results: list[MemoryEntry] = []
+
+        for jsonl_file in self.memory_dir.glob("*.jsonl"):
+            employee_name = jsonl_file.stem
+            if employee_name not in member_set:
+                continue
+
+            for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+                if entry.superseded_by:
+                    continue
+                if self._is_expired(entry):
+                    continue
+                if entry.visibility == "private":
+                    continue
+
+                decayed = self._apply_decay(entry)
+                if decayed.confidence < min_confidence:
+                    continue
+                results.append(decayed)
+
+        results.sort(key=lambda e: e.created_at, reverse=True)
+        return results[:limit]
 
     def list_employees(self) -> list[str]:
         """列出有记忆的员工."""

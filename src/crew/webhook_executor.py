@@ -162,6 +162,25 @@ async def _execute_task(
                                 ttl_days=30,
                             )
                             logger.info("自动记忆保存: %s", record.target_name)
+
+                            # 自检摘要提取 — 如果输出包含自检清单，额外保存
+                            import re as _re
+                            check_match = _re.search(
+                                r"##\s*完成后自检.*?\n((?:- \[.\].*\n?)+)",
+                                output_text,
+                            )
+                            if check_match:
+                                checks = check_match.group(1).strip()
+                                store.add(
+                                    employee=record.target_name,
+                                    category="correction",
+                                    content=f"[自检] {task_desc}\n{checks}",
+                                    source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                    confidence=0.7,
+                                    ttl_days=60,
+                                    shared=True,
+                                )
+                                logger.info("自检摘要保存: %s", record.target_name)
                     except Exception as e_mem:
                         logger.debug("自动记忆保存失败: %s", e_mem)
 

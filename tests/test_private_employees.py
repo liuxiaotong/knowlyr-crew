@@ -253,3 +253,52 @@ class TestPrivateRequiredFields:
         emp = parse_employee_dir(emp_dir, source_layer="private")
         errors = validate_employee(emp)
         assert errors == [], f"{emp.name} 校验失败: {'; '.join(errors)}"
+
+
+@_skip_no_private
+class TestPrivateFileIntegrity:
+    """员工目录文件完整性审计."""
+
+    REQUIRED_FILES = ["employee.yaml", "prompt.md", "soul.md"]
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_required_files_exist(self, emp_dir):
+        """每个员工必须有 employee.yaml、prompt.md、soul.md."""
+        for fname in self.REQUIRED_FILES:
+            assert (emp_dir / fname).is_file(), (
+                f"{emp_dir.name} 缺少必要文件: {fname}"
+            )
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_avatar_exists(self, emp_dir):
+        """每个员工应有头像文件."""
+        avatars = list(emp_dir.glob("avatar.*"))
+        assert avatars, f"{emp_dir.name} 缺少头像文件 (avatar.webp/png/jpg)"
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_no_stale_backup_files(self, emp_dir):
+        """不应有遗留的 .bak 文件."""
+        bak_files = list(emp_dir.glob("*.bak"))
+        assert not bak_files, (
+            f"{emp_dir.name} 有遗留备份文件: {[f.name for f in bak_files]}"
+        )
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_prompt_not_empty(self, emp_dir):
+        """prompt.md 不应为空."""
+        prompt = emp_dir / "prompt.md"
+        if prompt.is_file():
+            content = prompt.read_text("utf-8").strip()
+            assert len(content) > 50, (
+                f"{emp_dir.name} 的 prompt.md 内容过短 ({len(content)} 字符)"
+            )
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_soul_not_empty(self, emp_dir):
+        """soul.md 不应为空."""
+        soul = emp_dir / "soul.md"
+        if soul.is_file():
+            content = soul.read_text("utf-8").strip()
+            assert len(content) > 20, (
+                f"{emp_dir.name} 的 soul.md 内容过短 ({len(content)} 字符)"
+            )
