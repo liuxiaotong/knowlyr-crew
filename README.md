@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1280+_passed-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1790+_passed-brightgreen.svg)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP_Tools-18-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Interaction_Modes-9-red.svg)](#adversarial-deliberation-protocol)
@@ -136,8 +136,8 @@ graph LR
 | **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，多后端 Embedding 降级 |
 | **Evaluation** | Evaluation Engine | 决策追踪，回溯评估，自动纠正记忆 |
 | **Execution** | Providers · Cost Tracker | 7 Provider 统一调用，重试/降级/逐任务成本计量 |
-| **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，定时巡检 |
-| **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限守卫，审计日志 |
+| **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，6 项定时任务（巡检/复盘/KPI/知识周刊），触发型自动委派 |
+| **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限守卫，CI 部署后自动审计，审计失败飞书告警 |
 
 ### MCP Primitive Mapping
 
@@ -280,6 +280,10 @@ OpenAI text-embedding-3-small → Gemini text-embedding-004 → TF-IDF (zero-dep
 
 **跨员工共享**：通过 `visibility: open` 标记的记忆自动进入共享记忆池，其他员工可检索。
 
+**自动记忆** (`auto_memory: true`)：员工执行任务后自动保存摘要到持久记忆（`category=finding`），无需手动调用。全部 33 名员工已启用。
+
+**自检学习闭环**：通过 `_templates/selfcheck.md` 共享模板，所有员工每次任务结束时自动输出自检清单。系统从输出中提取自检结果（通过/待改进），写入 `correction` 记忆。下次执行同一员工时，"上次教训"自动注入 prompt——形成 **执行 → 自检 → 记忆 → 改进** 的持续学习闭环。
+
 ```bash
 knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
 knowlyr-crew memory show code-reviewer
@@ -345,6 +349,11 @@ tags: [security, audit]
 triggers: [audit, sec]
 tools: [file_read, bash, grep]
 context: [pyproject.toml, src/]
+auto_memory: true                    # 自动保存任务摘要到持久记忆
+kpi:                                 # KPI 指标（KPI 周报自动评估）
+  - OWASP 覆盖率
+  - 建议可操作性
+  - 零误报率
 args:
   - name: target
     description: 审计目标
@@ -479,6 +488,7 @@ routing_templates:
 | **三级权限** | A（自主执行）/ B（需确认）/ C（看场景），委派名单自动标注 |
 | **自动降级** | 连续 3 次任务失败 → 权限从 A/B 降至 C，持久化到 JSON |
 | **路由模板** | `route` 工具按模板展开为 `delegate_chain`，比手动编排更可靠 |
+| **KPI 度量** | 每位员工声明 3 条 KPI 指标，周报 cron 自动评估并生成 A/B/C/D 评级 |
 | **手动恢复** | API 一键恢复被降级的权限 |
 
 ### 7. Cost-Aware Orchestration
@@ -579,7 +589,15 @@ AI 员工可以**并行委派**多位同事执行任务，或**组织多人会�
 | `query_data` | 细粒度业务数据查询 |
 | `find_free_time` | 飞书忙闲查询，多人共同空闲 |
 
-**主动巡检 & 周复盘**：通过 `.crew/cron.yaml` 配置定时触发——每天 9:00 自动巡检业务数据、待办、日程并推送简报；每周五 18:00 自动生成周报。
+**主动巡检 & 自驱运营**：通过 `.crew/cron.yaml` 配置 6 项定时任务：
+
+| 调度 | 说明 |
+|:---|:---|
+| 每天 9:00 | 晨间巡检——业务数据、待办、日程、系统状态 → 飞书简报 |
+| 每天 23:00 | AI 日记——基于当日工作和记忆写个人日记 |
+| 每周四 16:00 | 团队知识周刊——跨团队工作产出 + 共性问题 + 最佳实践 → 飞书文档 |
+| 每周五 17:00 | KPI 周报——33 名员工逐一评级 + 异常自动委派（D 级 → HR 跟进，连续待改进 → 团队关注） |
+| 每周五 18:00 | 周复盘——本周亮点、问题、下周建议 |
 
 ---
 
@@ -624,6 +642,7 @@ knowlyr-crew serve --port 8765 --token YOUR_SECRET
 | 断路器 | knowlyr-id 连续 3 次失败后暂停 30 秒 |
 | 成本追踪 | 逐任务 token 计量 + 模型单价 |
 | 自动降级 | 连续失败自动降低员工权限 |
+| CI 审计 | 部署后自动运行权限审计脚本，失败时飞书告警 |
 | 链路追踪 | 每个任务唯一 trace_id |
 | 并发安全 | `fcntl.flock` 文件锁 + SQLite WAL |
 | 任务持久化 | `.crew/tasks.jsonl`，重启恢复 |
@@ -633,7 +652,7 @@ knowlyr-crew serve --port 8765 --token YOUR_SECRET
 
 ### Webhook Configuration
 
-`.crew/webhook.yaml` 定义事件路由规则（GitHub HMAC-SHA256 签名验证），`.crew/cron.yaml` 定义定时任务（croniter 解析）。
+`.crew/webhook.yaml` 定义事件路由规则（GitHub HMAC-SHA256 签名验证），`.crew/cron.yaml` 定义定时任务（croniter 解析）。KPI 周报 cron 内置异常自动委派规则——评级 D（无产出）的员工自动转 HR 跟进，连续自检待改进项自动通知团队关注。
 
 ---
 
@@ -857,7 +876,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-pytest -v    # 1280+ test cases
+pytest -v    # 1790+ test cases
 ```
 
 ---
