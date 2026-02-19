@@ -39,6 +39,17 @@ jobs:
             && curl -sf http://localhost:8765/health
           '
 
+      - name: Audit employee config
+        continue-on-error: true
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            mkdir -p /opt/knowlyr-crew/project/scripts &&
+            curl -sf https://raw.githubusercontent.com/liuxiaotong/knowlyr-crew/main/scripts/audit_employees.py \
+              -o /opt/knowlyr-crew/project/scripts/audit_employees.py &&
+            cd /opt/knowlyr-crew/project &&
+            /opt/knowlyr-crew/venv/bin/python scripts/audit_employees.py --json
+          '
+
       - name: Trigger knowlyr-website rebuild
         run: |
           gh workflow run deploy.yml -R liuxiaotong/knowlyr-website
