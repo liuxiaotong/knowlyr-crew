@@ -39,13 +39,16 @@ jobs:
             && curl -sf http://localhost:8765/health
           '
 
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
       - name: Audit employee config
-        continue-on-error: true
         run: |
+          scp -i ~/.ssh/deploy_key \
+            scripts/audit_employees.py \
+            root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/scripts/audit_employees.py
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
-            mkdir -p /opt/knowlyr-crew/project/scripts &&
-            curl -sf https://raw.githubusercontent.com/liuxiaotong/knowlyr-crew/main/scripts/audit_employees.py \
-              -o /opt/knowlyr-crew/project/scripts/audit_employees.py &&
             cd /opt/knowlyr-crew/project &&
             /opt/knowlyr-crew/venv/bin/python scripts/audit_employees.py --json
           '
