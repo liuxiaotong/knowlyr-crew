@@ -304,3 +304,30 @@ class TestToolRolePresets:
         all_preset = TOOL_ROLE_PRESETS["all"]
         assert "file_read" in all_preset
         assert "bash" in all_preset
+
+    def test_profile_engineer_excludes_life_tools(self):
+        """profile-engineer 应排除生活工具."""
+        preset = TOOL_ROLE_PRESETS["profile-engineer"]
+        for tool in ("weather", "exchange_rate", "stock_price", "flight_info", "aqi", "express_track"):
+            assert tool not in preset, f"profile-engineer 不应包含 {tool}"
+        assert "github_prs" in preset  # 应保留代码相关
+
+    def test_profile_researcher_excludes_admin_tools(self):
+        """profile-researcher 应排除管理写操作."""
+        preset = TOOL_ROLE_PRESETS["profile-researcher"]
+        for tool in ("update_agent", "delegate_async", "delegate_chain", "route"):
+            assert tool not in preset
+        assert "web_search" in preset  # 应保留搜索
+
+    def test_profile_security_excludes_write_ops(self):
+        """profile-security 应排除影响审计独立性的写操作."""
+        preset = TOOL_ROLE_PRESETS["profile-security"]
+        for tool in ("update_agent", "delegate", "delegate_async", "delegate_chain", "route", "send_feishu_dm"):
+            assert tool not in preset
+
+    def test_all_profiles_subset_of_base(self):
+        """所有 profile-* 都应是 profile-base 的子集."""
+        base = TOOL_ROLE_PRESETS["profile-base"]
+        for name, preset in TOOL_ROLE_PRESETS.items():
+            if name.startswith("profile-") and name != "profile-base":
+                assert preset <= base, f"{name} 包含了 profile-base 中不存在的工具"

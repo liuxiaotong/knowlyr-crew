@@ -1975,6 +1975,21 @@ DENY_SECURITY = {
     "delegate_chain", "route", "send_feishu_dm",
 }
 
+# 数据组: 去掉生活服务工具
+DENY_DATA = {"flight_info", "aqi", "express_track"}
+
+# 职能组: 去掉代码执行
+DENY_FUNCTIONS = {"run_python"}
+
+# ── 团队 profile 预设 ──
+TOOL_ROLE_PRESETS["profile-engineer"] = AGENT_TOOLS - DENY_ENGINEER
+TOOL_ROLE_PRESETS["profile-data"] = AGENT_TOOLS - DENY_DATA
+TOOL_ROLE_PRESETS["profile-researcher"] = AGENT_TOOLS - DENY_RESEARCHER
+TOOL_ROLE_PRESETS["profile-infra"] = AGENT_TOOLS - DENY_ENGINEER  # 复用工程师 deny
+TOOL_ROLE_PRESETS["profile-business"] = AGENT_TOOLS - DENY_BUSINESS
+TOOL_ROLE_PRESETS["profile-functions"] = AGENT_TOOLS - DENY_FUNCTIONS
+TOOL_ROLE_PRESETS["profile-security"] = AGENT_TOOLS - DENY_SECURITY
+
 
 def resolve_effective_tools(employee: "Employee") -> set[str]:
     """计算员工的有效工具集.

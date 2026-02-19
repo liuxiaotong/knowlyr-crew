@@ -170,6 +170,8 @@ class CrewEngine:
                 parts.append("注意: 调用被禁止的工具会被系统拦截。")
         if employee.context:
             parts.append(f"**预读上下文**: {', '.join(employee.context)}")
+        if employee.kpi:
+            parts.append(f"**KPI**: {' / '.join(employee.kpi)}")
 
         # 注入项目类型信息
         if project_info and project_info.project_type != "unknown":

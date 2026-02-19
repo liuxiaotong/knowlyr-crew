@@ -157,6 +157,31 @@ class TestCrewEngine:
         with patch("crew.engine.subprocess.run", side_effect=OSError("err")):
             assert _get_git_branch() == ""
 
+    def test_prompt_with_kpi(self):
+        """带 KPI 的员工 prompt 应包含 KPI 段."""
+        from crew.models import Employee
+        emp = Employee(
+            name="kpi-test",
+            description="测试 KPI 注入",
+            body="正文内容",
+            kpi=["指标A", "指标B"],
+        )
+        result = self.engine.prompt(emp)
+        assert "**KPI**" in result
+        assert "指标A" in result
+        assert "指标B" in result
+
+    def test_prompt_without_kpi(self):
+        """无 KPI 的员工 prompt 不应有 KPI 段."""
+        from crew.models import Employee
+        emp = Employee(
+            name="no-kpi",
+            description="无 KPI",
+            body="正文内容",
+        )
+        result = self.engine.prompt(emp)
+        assert "**KPI**" not in result
+
     def test_render_weekday_variable(self):
         """render() 应替换 {weekday} 为中文星期."""
         from crew.models import Employee, EmployeeArg

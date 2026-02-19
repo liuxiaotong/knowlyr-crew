@@ -14,6 +14,15 @@ PROJECT_DIR = Path(__file__).parent.parent
 REQUIRED_YAML_FIELDS = {"name", "description", "tools"}
 VALID_MODEL_TIERS = {"claude", "kimi", ""}  # 空字符串 = 未指定（builtin 员工）
 PERMISSIONS_EXCEPTIONS = {"ceo-assistant"}
+TEAM_PROFILE_MAP = {
+    "engineering": "profile-engineer",
+    "data": "profile-data",
+    "research": "profile-researcher",
+    "infrastructure": "profile-infra",
+    "business": "profile-business",
+    "functions": "profile-functions",
+}
+PROFILE_OVERRIDES = {"security-auditor": "profile-security"}
 
 
 def _load_yaml(emp_dir: Path) -> dict:
@@ -132,6 +141,38 @@ class TestPrivatePermissions:
         assert perm is not None, f"{emp_name} 缺少 permissions 字段"
         roles = perm.get("roles")
         assert roles and len(roles) > 0, f"{emp_name} 缺少 permissions.roles"
+
+
+@_skip_no_private
+class TestPrivateProfileAlignment:
+    """每个员工的 permissions.roles 应与所属团队的 profile 一致."""
+
+    @classmethod
+    def setup_class(cls):
+        from crew.organization import invalidate_cache, load_organization
+        invalidate_cache()
+        cls.org = load_organization(project_dir=PROJECT_DIR)
+
+    @classmethod
+    def teardown_class(cls):
+        from crew.organization import invalidate_cache
+        invalidate_cache()
+
+    @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
+    def test_team_aligned_profile(self, emp_dir):
+        config = _load_yaml(emp_dir)
+        emp_name = config.get("name", "")
+        if emp_name in PERMISSIONS_EXCEPTIONS:
+            pytest.skip(f"{emp_name} 在已知例外列表中")
+        team_id = self.org.get_team(emp_name)
+        assert team_id, f"{emp_name} 不在任何团队中"
+        expected = PROFILE_OVERRIDES.get(emp_name, TEAM_PROFILE_MAP.get(team_id))
+        assert expected, f"团队 {team_id} 没有对应的 profile 映射"
+        perm = config.get("permissions", {})
+        roles = perm.get("roles", [])
+        assert expected in roles, (
+            f"{emp_name} (团队 {team_id}) 期望 {expected}，实际 roles={roles}"
+        )
 
 
 @_skip_no_private
