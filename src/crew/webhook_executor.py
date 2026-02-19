@@ -140,20 +140,22 @@ async def _execute_task(
                     if qscore:
                         result["quality_score"] = qscore
 
-                # 自动记忆保存（opt-in）
+                # 自动记忆保存（opt-in）+ 自检提取（独立于 auto_memory）
                 if output_text and len(output_text) > 50:
                     try:
                         from crew.discovery import discover_employees
                         disc = discover_employees(project_dir=ctx.project_dir)
                         match = disc.get(record.target_name)
+                        task_desc = record.args.get("task", "")[:100]
+                        _mem_store = None
+
                         if match and getattr(match, "auto_memory", False):
                             from crew.memory import MemoryStore
-                            store = MemoryStore(project_dir=ctx.project_dir)
+                            _mem_store = MemoryStore(project_dir=ctx.project_dir)
                             summary = output_text[:300].strip()
                             if len(output_text) > 300:
                                 summary += "..."
-                            task_desc = record.args.get("task", "")[:100]
-                            store.add(
+                            _mem_store.add(
                                 employee=record.target_name,
                                 category="finding",
                                 content=f"[任务] {task_desc} → {summary}",
@@ -163,39 +165,42 @@ async def _execute_task(
                             )
                             logger.info("自动记忆保存: %s", record.target_name)
 
-                            # 自检摘要提取 — 结构化格式保存
-                            import re as _re
-                            check_match = _re.search(
-                                r"##\s*完成后自检[^\n]*\n+((?:- \[.\].*\n?)+)",
-                                output_text,
+                        # 自检摘要提取 — 独立于 auto_memory，有自检段就提取
+                        import re as _re
+                        check_match = _re.search(
+                            r"##\s*完成后自检[^\n]*\n+((?:- \[.\].*\n?)+)",
+                            output_text,
+                        )
+                        if check_match:
+                            if _mem_store is None:
+                                from crew.memory import MemoryStore
+                                _mem_store = MemoryStore(project_dir=ctx.project_dir)
+                            check_lines = check_match.group(1).strip().split("\n")
+                            passed = []
+                            failed = []
+                            for cl in check_lines:
+                                cl = cl.strip()
+                                if cl.startswith("- [x]") or cl.startswith("- [X]"):
+                                    passed.append(cl[5:].strip())
+                                elif cl.startswith("- [ ]"):
+                                    failed.append(cl[5:].strip())
+                            parts = [f"[自检] {task_desc}"]
+                            if passed:
+                                parts.append(f"通过: {'; '.join(passed)}")
+                            if failed:
+                                parts.append(f"待改进: {'; '.join(failed)}")
+                            _mem_store.add(
+                                employee=record.target_name,
+                                category="correction",
+                                content=" | ".join(parts),
+                                source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                confidence=0.7,
+                                ttl_days=60,
+                                shared=True,
                             )
-                            if check_match:
-                                check_lines = check_match.group(1).strip().split("\n")
-                                passed = []
-                                failed = []
-                                for cl in check_lines:
-                                    cl = cl.strip()
-                                    if cl.startswith("- [x]") or cl.startswith("- [X]"):
-                                        passed.append(cl[5:].strip())
-                                    elif cl.startswith("- [ ]"):
-                                        failed.append(cl[5:].strip())
-                                parts = [f"[自检] {task_desc}"]
-                                if passed:
-                                    parts.append(f"通过: {'; '.join(passed)}")
-                                if failed:
-                                    parts.append(f"待改进: {'; '.join(failed)}")
-                                store.add(
-                                    employee=record.target_name,
-                                    category="correction",
-                                    content=" | ".join(parts),
-                                    source_session=record.task_id if hasattr(record, "task_id") else task_id,
-                                    confidence=0.7,
-                                    ttl_days=60,
-                                    shared=True,
-                                )
-                                logger.info("自检摘要保存: %s", record.target_name)
+                            logger.info("自检摘要保存: %s", record.target_name)
                     except Exception as e_mem:
-                        logger.debug("自动记忆保存失败: %s", e_mem)
+                        logger.debug("自动记忆/自检保存失败: %s", e_mem)
 
                 # 自动降级检查（记录成功）
                 record_task_outcome(
