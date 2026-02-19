@@ -2,7 +2,7 @@
 
 import json
 import logging
-
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -210,8 +210,6 @@ class MemoryStore:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
     def _employee_file(self, employee: str) -> Path:
-        import re
-
         safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "_", employee)
         if not safe_name:
             safe_name = "employee"
