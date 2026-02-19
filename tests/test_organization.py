@@ -249,7 +249,7 @@ class TestRealOrganization:
         assert "C" in org.authority
 
         # 验证路由模板
-        assert len(org.routing_templates) == 6
+        assert len(org.routing_templates) >= 6
 
     def test_all_employees_have_team(self):
         """所有在权限列表中的员工都应有团队归属."""

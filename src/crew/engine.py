@@ -202,6 +202,34 @@ class CrewEngine:
         except Exception as e:
             logger.debug("记忆加载失败: %s", e)
 
+        # 组织上下文注入（团队、权限级别、队友）
+        try:
+            from crew.organization import load_organization
+            org = load_organization(project_dir=self.project_dir)
+            team_id = org.get_team(employee.name)
+            auth_level = org.get_authority(employee.name)
+            org_lines: list[str] = []
+            if team_id:
+                team_def = org.teams[team_id]
+                teammates = [m for m in team_def.members if m != employee.name]
+                org_lines.append(f"**所属团队**: {team_def.label}（{team_id}）")
+                if teammates:
+                    org_lines.append(f"**队友**: {', '.join(teammates)}")
+            if auth_level:
+                auth_def = org.authority[auth_level]
+                org_lines.append(f"**权限级别**: {auth_level} — {auth_def.label}")
+                if auth_level == "B":
+                    org_lines.append(
+                        "⚠ 你的输出需要 Kai 确认后才能生效。"
+                        "在结论中明确标注哪些内容需要 Kai 决策。"
+                    )
+                elif auth_level == "A":
+                    org_lines.append("你可以自主执行并直接交付结果。")
+            if org_lines:
+                parts.extend(["", "---", "", "## 组织信息", ""] + org_lines)
+        except Exception as e:
+            logger.debug("组织上下文注入失败: %s", e)
+
         # 提示注入防御前言
         parts.extend([
             "", "---", "",

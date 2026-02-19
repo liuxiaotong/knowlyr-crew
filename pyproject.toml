@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "knowlyr-crew"
-version = "0.1.36"
+version = "0.1.37"
 description = "AI Skill Loader - define professional skills in Markdown, load into Claude Code and other AI IDEs via MCP"
 readme = "README.md"
 license = "MIT"
