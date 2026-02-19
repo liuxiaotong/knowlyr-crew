@@ -211,6 +211,29 @@ class CrewEngine:
             )
             if memory_text:
                 parts.extend(["", "---", "", "## 历史经验", "", memory_text])
+
+            # 上次自检注入 — 查询 correction 类记忆，形成学习闭环
+            try:
+                corrections = memory_store.query(
+                    employee.name, category="correction", limit=3,
+                    max_visibility=max_visibility,
+                )
+                if corrections:
+                    lesson_lines = []
+                    for c in corrections:
+                        if "待改进:" in c.content:
+                            focus = c.content.split("待改进:")[-1].strip()
+                            lesson_lines.append(f"- ⚠ {focus}")
+                        else:
+                            lesson_lines.append(f"- {c.content}")
+                    parts.extend([
+                        "", "---", "",
+                        "## 上次教训", "",
+                        "以下是你最近任务的自检结果，本次注意改进：",
+                        "",
+                    ] + lesson_lines)
+            except Exception:
+                pass
         except Exception as e:
             logger.debug("记忆加载失败: %s", e)
 

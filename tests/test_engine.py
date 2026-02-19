@@ -196,6 +196,90 @@ class TestCrewEngine:
         assert "星期" in result
         assert "{weekday}" not in result
 
+    def test_prompt_injects_corrections(self):
+        """有 correction 记忆时 prompt 应包含'上次教训'section."""
+        from unittest.mock import MagicMock, patch
+
+        from crew.models import Employee
+
+        emp = Employee(
+            name="correction-test",
+            description="测试自检注入",
+            body="正文内容",
+        )
+
+        mock_entry = MagicMock()
+        mock_entry.content = "[自检] 审查代码 | 通过: 文件覆盖 | 待改进: 并发安全; 错误处理"
+        mock_entry.category = "correction"
+        mock_entry.confidence = 0.7
+
+        mock_store = MagicMock()
+        mock_store.format_for_prompt.return_value = ""
+        mock_store.query.return_value = [mock_entry]
+
+        with patch("crew.memory.MemoryStore", return_value=mock_store):
+            result = self.engine.prompt(emp)
+
+        assert "上次教训" in result
+        assert "并发安全; 错误处理" in result
+
+    def test_prompt_no_corrections(self):
+        """无 correction 记忆时不应有'上次教训'."""
+        from unittest.mock import MagicMock, patch
+
+        from crew.models import Employee
+
+        emp = Employee(
+            name="no-correction",
+            description="无自检记忆",
+            body="正文内容",
+        )
+
+        mock_store = MagicMock()
+        mock_store.format_for_prompt.return_value = ""
+        mock_store.query.return_value = []
+
+        with patch("crew.memory.MemoryStore", return_value=mock_store):
+            result = self.engine.prompt(emp)
+
+        assert "上次教训" not in result
+
+    def test_selfcheck_extraction_format(self):
+        """自检提取应生成结构化格式."""
+        import re
+
+        output_text = (
+            "一些输出内容\n\n"
+            "## 完成后自检\n\n"
+            "- [x] 文件覆盖率检查\n"
+            "- [x] 安全关键词扫描\n"
+            "- [ ] 并发安全\n"
+            "- [ ] 错误处理\n"
+        )
+        check_match = re.search(
+            r"##\s*完成后自检[^\n]*\n+((?:- \[.\].*\n?)+)",
+            output_text,
+        )
+        assert check_match is not None
+        check_lines = check_match.group(1).strip().split("\n")
+        passed = []
+        failed = []
+        for cl in check_lines:
+            cl = cl.strip()
+            if cl.startswith("- [x]") or cl.startswith("- [X]"):
+                passed.append(cl[5:].strip())
+            elif cl.startswith("- [ ]"):
+                failed.append(cl[5:].strip())
+
+        parts = ["[自检] 审查代码"]
+        if passed:
+            parts.append(f"通过: {'; '.join(passed)}")
+        if failed:
+            parts.append(f"待改进: {'; '.join(failed)}")
+        content = " | ".join(parts)
+
+        assert content == "[自检] 审查代码 | 通过: 文件覆盖率检查; 安全关键词扫描 | 待改进: 并发安全; 错误处理"
+
     def test_prompt_memory_failure_logged(self, caplog):
         """MemoryStore 加载失败时不影响 prompt 生成."""
         import logging

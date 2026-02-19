@@ -163,18 +163,31 @@ async def _execute_task(
                             )
                             logger.info("自动记忆保存: %s", record.target_name)
 
-                            # 自检摘要提取 — 如果输出包含自检清单，额外保存
+                            # 自检摘要提取 — 结构化格式保存
                             import re as _re
                             check_match = _re.search(
-                                r"##\s*完成后自检.*?\n((?:- \[.\].*\n?)+)",
+                                r"##\s*完成后自检[^\n]*\n+((?:- \[.\].*\n?)+)",
                                 output_text,
                             )
                             if check_match:
-                                checks = check_match.group(1).strip()
+                                check_lines = check_match.group(1).strip().split("\n")
+                                passed = []
+                                failed = []
+                                for cl in check_lines:
+                                    cl = cl.strip()
+                                    if cl.startswith("- [x]") or cl.startswith("- [X]"):
+                                        passed.append(cl[5:].strip())
+                                    elif cl.startswith("- [ ]"):
+                                        failed.append(cl[5:].strip())
+                                parts = [f"[自检] {task_desc}"]
+                                if passed:
+                                    parts.append(f"通过: {'; '.join(passed)}")
+                                if failed:
+                                    parts.append(f"待改进: {'; '.join(failed)}")
                                 store.add(
                                     employee=record.target_name,
                                     category="correction",
-                                    content=f"[自检] {task_desc}\n{checks}",
+                                    content=" | ".join(parts),
                                     source_session=record.task_id if hasattr(record, "task_id") else task_id,
                                     confidence=0.7,
                                     ttl_days=60,
