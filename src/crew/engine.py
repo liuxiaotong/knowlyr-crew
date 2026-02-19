@@ -213,10 +213,21 @@ class CrewEngine:
             org_lines: list[str] = []
             if team_id:
                 team_def = org.teams[team_id]
-                teammates = [m for m in team_def.members if m != employee.name]
+                teammate_names = [m for m in team_def.members if m != employee.name]
                 org_lines.append(f"**所属团队**: {team_def.label}（{team_id}）")
-                if teammates:
-                    org_lines.append(f"**队友**: {', '.join(teammates)}")
+                if teammate_names:
+                    # 尝试映射内部名 -> 花名（如 code-reviewer -> 林锐）
+                    try:
+                        from crew.discovery import discover_employees
+                        disc = discover_employees(project_dir=self.project_dir)
+                        display = []
+                        for n in teammate_names:
+                            emp = disc.get(n)
+                            label = emp.character_name or emp.effective_display_name if emp else n
+                            display.append(label)
+                    except Exception:
+                        display = teammate_names
+                    org_lines.append(f"**队友**: {', '.join(display)}")
             if auth_level:
                 auth_def = org.authority[auth_level]
                 org_lines.append(f"**权限级别**: {auth_level} — {auth_def.label}")
