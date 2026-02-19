@@ -818,7 +818,7 @@ wheels = [
 
 [[package]]
 name = "knowlyr-crew"
-version = "0.1.32"
+version = "0.1.34"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
