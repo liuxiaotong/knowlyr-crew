@@ -192,20 +192,22 @@ def parse_employee_dir(
     # 共享模板目录：员工目录的父目录下的 _templates/
     templates_dir = dir_path.parent / "_templates"
 
+    # 先收集 workflows 和 adaptors 中的本地文件，后出现的覆盖先前的
+    combined_files: dict[str, Path] = {}
     for subdir in ("workflows", "adaptors"):
         sub_path = dir_path / subdir
-        # 收集员工自有文件
-        local_files: dict[str, Path] = {}
         if sub_path.is_dir():
             for md_file in sorted(sub_path.glob("*.md")):
-                local_files[md_file.name] = md_file
-        # 共享模板补充缺失的文件（员工自有优先）
-        if templates_dir.is_dir():
-            for md_file in sorted(templates_dir.glob("*.md")):
-                if md_file.name not in local_files:
-                    local_files[md_file.name] = md_file
-        for md_file in sorted(local_files.values(), key=lambda p: p.name):
-            parts.append(md_file.read_text(encoding="utf-8"))
+                combined_files[md_file.name] = md_file
+
+    # 公共模板只补缺失的文件（避免重复注入）
+    if templates_dir.is_dir():
+        for md_file in sorted(templates_dir.glob("*.md")):
+            if md_file.name not in combined_files:
+                combined_files[md_file.name] = md_file
+
+    for md_file in sorted(combined_files.values(), key=lambda p: p.name):
+        parts.append(md_file.read_text(encoding="utf-8"))
 
     body = "\n\n".join(parts)
 

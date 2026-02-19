@@ -210,7 +210,11 @@ class MemoryStore:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
     def _employee_file(self, employee: str) -> Path:
-        safe_name = employee.replace("/", "_").replace("..", "_")
+        import re
+
+        safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "_", employee)
+        if not safe_name:
+            safe_name = "employee"
         return self.memory_dir / f"{safe_name}.jsonl"
 
     def add(
