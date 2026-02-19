@@ -113,6 +113,22 @@ class MemoryStore:
         except Exception as e:
             logger.debug("自动删除索引失败（不影响操作）: %s", e)
 
+    def _load_employee_entries(self, employee: str) -> list[MemoryEntry]:
+        """加载指定员工的全部记忆条目（不做过滤）。"""
+        path = self._employee_file(employee)
+        if not path.exists():
+            return []
+        entries: list[MemoryEntry] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(MemoryEntry(**json.loads(line)))
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return entries
+
     def _apply_decay(self, entry: MemoryEntry) -> MemoryEntry:
         """计算时间衰减后的有效置信度（纯函数，不改原始数据）."""
         half_life = self.config.confidence_half_life_days
@@ -151,6 +167,8 @@ class MemoryStore:
         if not path.exists():
             return 0
 
+        removed_ids: list[str] = []
+        pruned = 0
         with file_lock(path):
             lines = path.read_text(encoding="utf-8").splitlines()
             entries_with_lines: list[tuple[MemoryEntry, str]] = []
@@ -177,10 +195,16 @@ class MemoryStore:
             scored.sort(key=lambda x: x[0], reverse=True)
             keep = scored[:max_entries]
             pruned = len(scored) - max_entries
+            if pruned > 0:
+                removed_ids = [entry.id for _, entry, _ in scored[max_entries:]]
 
             kept_lines = other_lines + [ln for _, ln in superseded] + [ln for _, _, ln in keep]
             path.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
-            return pruned
+
+        if removed_ids:
+            for entry_id in removed_ids:
+                self._auto_remove_index(entry_id)
+        return pruned
 
     def _ensure_dir(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -405,11 +429,20 @@ class MemoryStore:
                     if index.has_index(employee):
                         results = index.search(employee, query, limit=limit)
                         if results:
-                            lines = []
-                            for _id, content, score in results:
-                                lines.append(f"- {content}")
-                            parts.append("\n".join(lines))
-                            own_found = True
+                            entries_map = {e.id: e for e in self._load_employee_entries(employee)}
+                            filtered: list[MemoryEntry] = []
+                            for entry_id, _content, _score in results:
+                                entry = entries_map.get(entry_id)
+                                if entry is None or entry.superseded_by:
+                                    continue
+                                if self._is_expired(entry):
+                                    continue
+                                if max_visibility != "private" and entry.visibility == "private":
+                                    continue
+                                filtered.append(self._apply_decay(entry))
+                            if filtered:
+                                parts.append(self._format_entries(filtered))
+                                own_found = True
             except Exception as e:
                 logger.debug("语义搜索降级: %s", e)
 

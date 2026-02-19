@@ -14,6 +14,11 @@ try:  # pragma: no cover - only used on POSIX
 except ImportError:  # pragma: no cover - Windows fallback
     fcntl = None  # type: ignore
 
+try:  # pragma: no cover - only used on Windows
+    import msvcrt  # type: ignore
+except ImportError:  # pragma: no cover - non-Windows
+    msvcrt = None  # type: ignore
+
 
 class LaneLock:
     """基于文件锁的 Lane."""
@@ -23,6 +28,7 @@ class LaneLock:
         base = root if root is not None else resolve_project_dir(project_dir) / ".crew" / "lanes"
         self.path = base / f"{sanitized}.lock"
         self._fh: "Any | None" = None
+        self._msvcrt_locked = False
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,6 +36,8 @@ class LaneLock:
         try:
             if fcntl:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            elif msvcrt:
+                self._lock_with_msvcrt(fh)
             fh.write(f"pid={os.getpid()}\n")
             fh.flush()
             self._fh = fh
@@ -42,6 +50,13 @@ class LaneLock:
             return
         if fcntl:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        elif msvcrt and self._msvcrt_locked:
+            try:
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+            self._msvcrt_locked = False
         self._fh.close()
         self._fh = None
 
@@ -58,6 +73,16 @@ class LaneLock:
                 self.release()
             except Exception:
                 pass
+
+    def _lock_with_msvcrt(self, fh) -> None:
+        """Windows msvcrt 锁实现."""
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            fh.write(" ")
+            fh.flush()
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        self._msvcrt_locked = True
 
 
 @contextmanager
