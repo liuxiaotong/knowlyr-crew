@@ -25,27 +25,36 @@ sync_data() {
     echo "=== 同步私有数据 ==="
 
     # 员工: private/employees/ → server:private/employees/
-    echo "  同步员工..."
-    mkdir -p "$LOCAL_EMPLOYEES"
-    rsync -av --delete \
-        "$LOCAL_EMPLOYEES/" \
-        "$SERVER:$PROJECT/private/employees/"
+    if [ -d "$LOCAL_EMPLOYEES" ]; then
+        echo "  同步员工..."
+        rsync -av --delete \
+            "$LOCAL_EMPLOYEES/" \
+            "$SERVER:$PROJECT/private/employees/"
+    else
+        echo "  跳过员工（目录不存在: $LOCAL_EMPLOYEES）"
+    fi
 
     # 讨论会
-    echo "  同步讨论会..."
-    mkdir -p "$LOCAL_CREW/discussions"
-    rsync -av --delete \
-        --include="*.yaml" --exclude="*" \
-        "$LOCAL_CREW/discussions/" \
-        "$SERVER:$PROJECT/.crew/discussions/"
+    if [ -d "$LOCAL_CREW/discussions" ]; then
+        echo "  同步讨论会..."
+        rsync -av --delete \
+            --include="*.yaml" --exclude="*" \
+            "$LOCAL_CREW/discussions/" \
+            "$SERVER:$PROJECT/.crew/discussions/"
+    else
+        echo "  跳过讨论会（目录不存在）"
+    fi
 
     # 流水线
-    echo "  同步流水线..."
-    mkdir -p "$LOCAL_CREW/pipelines"
-    rsync -av --delete \
-        --include="*.yaml" --exclude="*" \
-        "$LOCAL_CREW/pipelines/" \
-        "$SERVER:$PROJECT/.crew/pipelines/"
+    if [ -d "$LOCAL_CREW/pipelines" ]; then
+        echo "  同步流水线..."
+        rsync -av --delete \
+            --include="*.yaml" --exclude="*" \
+            "$LOCAL_CREW/pipelines/" \
+            "$SERVER:$PROJECT/.crew/pipelines/"
+    else
+        echo "  跳过流水线（目录不存在）"
+    fi
 
     # 定时任务
     if [ -f ".crew/cron.yaml" ]; then
