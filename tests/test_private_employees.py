@@ -31,10 +31,7 @@ def _collect_employee_dirs(base: Path) -> list[Path]:
     ])
 
 
-FIXTURE_DIRS = _collect_employee_dirs(FIXTURES / "valid_employee_dir".replace("valid_employee_dir", ""))
-# 如果 fixtures 下没有多个员工目录，至少用已有的 valid_employee_dir
-if not FIXTURE_DIRS and (FIXTURES / "valid_employee_dir" / "employee.yaml").exists():
-    FIXTURE_DIRS = [FIXTURES / "valid_employee_dir"]
+FIXTURE_DIRS = _collect_employee_dirs(FIXTURES)
 
 PRIVATE_DIRS = _collect_employee_dirs(PRIVATE_DIR)
 
