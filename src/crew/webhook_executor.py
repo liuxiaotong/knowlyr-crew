@@ -140,6 +140,31 @@ async def _execute_task(
                     if qscore:
                         result["quality_score"] = qscore
 
+                # 自动记忆保存（opt-in）
+                if output_text and len(output_text) > 50:
+                    try:
+                        from crew.discovery import discover_employees
+                        disc = discover_employees(project_dir=ctx.project_dir)
+                        match = disc.get(record.target_name)
+                        if match and getattr(match, "auto_memory", False):
+                            from crew.memory import MemoryStore
+                            store = MemoryStore(project_dir=ctx.project_dir)
+                            summary = output_text[:300].strip()
+                            if len(output_text) > 300:
+                                summary += "..."
+                            task_desc = record.args.get("task", "")[:100]
+                            store.add(
+                                employee=record.target_name,
+                                category="finding",
+                                content=f"[任务] {task_desc} → {summary}",
+                                source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                confidence=0.6,
+                                ttl_days=30,
+                            )
+                            logger.info("自动记忆保存: %s", record.target_name)
+                    except Exception as e_mem:
+                        logger.debug("自动记忆保存失败: %s", e_mem)
+
                 # 自动降级检查（记录成功）
                 record_task_outcome(
                     record.target_name, success=True,

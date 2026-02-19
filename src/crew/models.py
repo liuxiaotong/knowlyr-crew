@@ -78,6 +78,7 @@ class Employee(BaseModel):
     research_instructions: str = Field(
         default="", description="讨论前预研指令（编排式讨论的 round 0）"
     )
+    auto_memory: bool = Field(default=False, description="任务完成后自动保存记忆摘要")
     permissions: PermissionPolicy | None = Field(default=None, description="权限策略")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
