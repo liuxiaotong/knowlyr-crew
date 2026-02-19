@@ -26,12 +26,14 @@ sync_data() {
 
     # 员工: private/employees/ → server:private/employees/
     echo "  同步员工..."
+    mkdir -p "$LOCAL_EMPLOYEES"
     rsync -av --delete \
         "$LOCAL_EMPLOYEES/" \
         "$SERVER:$PROJECT/private/employees/"
 
     # 讨论会
     echo "  同步讨论会..."
+    mkdir -p "$LOCAL_CREW/discussions"
     rsync -av --delete \
         --include="*.yaml" --exclude="*" \
         "$LOCAL_CREW/discussions/" \
@@ -39,6 +41,7 @@ sync_data() {
 
     # 流水线
     echo "  同步流水线..."
+    mkdir -p "$LOCAL_CREW/pipelines"
     rsync -av --delete \
         --include="*.yaml" --exclude="*" \
         "$LOCAL_CREW/pipelines/" \
