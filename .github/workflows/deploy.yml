@@ -44,6 +44,7 @@ jobs:
           sparse-checkout: scripts
 
       - name: Audit employee config
+        id: audit
         run: |
           scp -i ~/.ssh/deploy_key \
             scripts/audit_employees.py \
@@ -51,6 +52,16 @@ jobs:
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             cd /opt/knowlyr-crew/project &&
             /opt/knowlyr-crew/venv/bin/python scripts/audit_employees.py --json
+          '
+
+      - name: Notify audit failure
+        if: failure() && steps.audit.outcome == 'failure'
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            curl -sf -X POST http://localhost:8765/run/employee/ceo-assistant \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${CREW_API_TOKEN}" \
+              -d "{\"task\": \"部署后权限审计发现配置问题。请立即检查 GitHub Actions 日志（knowlyr-crew 仓库 Deploy Engine workflow），然后用 send_feishu_dm 通知 Kai 审计结果和需要修复的问题。\", \"format\": \"memo\"}"
           '
 
       - name: Trigger knowlyr-website rebuild

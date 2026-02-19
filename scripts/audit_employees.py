@@ -8,6 +8,7 @@
   4. Profile 对齐（roles 包含团队对应的 profile）
   5. 工具冲突（声明的工具被 profile 排除的）
   6. 权限级别（恰好 1 个 authority level）
+  7. 自检覆盖（body 中含 ## 完成后自检）
 
 Usage:
   uv run python scripts/audit_employees.py [--json]
@@ -89,6 +90,13 @@ def audit_employee(emp, org):
         issues.append("无权限级别")
     elif len(auths) > 1:
         issues.append(f"多个权限级别: {auths}")
+
+    # 7. 自检覆盖
+    if hasattr(emp, "body") and emp.body:
+        if "完成后自检" not in emp.body:
+            issues.append("body 中缺少 ## 完成后自检")
+    else:
+        issues.append("body 为空，无法检查自检覆盖")
 
     # validate_permissions 额外警告（去重：工具排除已在上面检查过）
     warnings = validate_permissions(emp)
