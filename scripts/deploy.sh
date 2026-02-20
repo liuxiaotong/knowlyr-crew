@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
-# knowlyr-crew 部署脚本
-# 用法: bash scripts/deploy.sh [--reinstall]
-#   --reinstall  强制重新 pip install -e（src/ 有代码变更时用）
+# knowlyr-crew 唯一正确的部署脚本
+# 用法: bash scripts/deploy.sh [--skip-test]
+#   --skip-test  跳过本地测试（仅配置变更时用）
+#
+# 部署流程 6 步:
+#   1. 预检 — 本地测试 + 服务器 .env 完整性
+#   2. 同步代码 — rsync（不用 --delete，排除 .env/data/.git）
+#   3. 同步配置 — organization.yaml + employees/ → project-dir
+#   4. 重装包 — 自动检测 src/ 有变更则 pip install -e
+#   5. 重启服务 — systemctl restart
+#   6. 验证 — API 健康检查 + .env 复查
+#
+# ⚠️ 安全规则:
+#   - rsync 不用 --delete（防止删除服务器独有文件）
+#   - 始终排除 .env（服务器 .env 有完整凭据，本地只有 1 个）
+#   - private/ 不进 git，只通过此脚本同步到服务器
 
 set -euo pipefail
 
@@ -11,10 +24,11 @@ PROJECT_DIR="$REMOTE_DIR/project"
 VENV="$REMOTE_DIR/venv"
 LOCAL_DIR="/Users/liukai/knowlyr-crew"
 SERVICE="knowlyr-crew"
+PORT=8765
 MIN_ENV_VARS=8
 
-REINSTALL=false
-[[ "${1:-}" == "--reinstall" ]] && REINSTALL=true
+SKIP_TEST=false
+[[ "${1:-}" == "--skip-test" ]] && SKIP_TEST=true
 
 # 颜色
 RED='\033[0;31m'
@@ -32,14 +46,17 @@ echo ""
 # ── 1. 预检 ──
 echo "1/6 预检"
 
-# 本地测试
-echo "  运行测试..."
-if cd "$LOCAL_DIR" && uv run --extra dev pytest tests/ -q --tb=no -x > /tmp/crew-test-output 2>&1; then
-    TESTS=$(tail -1 /tmp/crew-test-output)
-    pass "测试通过 ($TESTS)"
+if $SKIP_TEST; then
+    warn "跳过本地测试（--skip-test）"
 else
-    cat /tmp/crew-test-output | tail -5
-    fail "测试未通过，中止部署"
+    echo "  运行测试..."
+    if cd "$LOCAL_DIR" && uv run --extra dev pytest tests/ -q --tb=no -x > /tmp/crew-test-output 2>&1; then
+        TESTS=$(tail -1 /tmp/crew-test-output)
+        pass "测试通过 ($TESTS)"
+    else
+        tail -5 /tmp/crew-test-output
+        fail "测试未通过，中止部署"
+    fi
 fi
 
 # 服务器 .env 预检
@@ -54,7 +71,9 @@ echo ""
 
 # ── 2. 同步代码 ──
 echo "2/6 同步代码"
-rsync -avz --delete \
+
+# ⚠️ 不用 --delete，防止删除服务器独有文件（如 data/、运行时缓存）
+rsync -avz \
     --exclude='.git' \
     --exclude='.venv' \
     --exclude='data' \
@@ -69,30 +88,52 @@ CHANGED=$(grep -c '^>' /tmp/crew-rsync-output 2>/dev/null || echo 0)
 pass "同步完成 (${CHANGED} 个文件变更)"
 echo ""
 
-# ── 3. 同步配置 ──
+# ── 3. 同步配置到 project-dir ──
+# ⚠️ 必须做！crew 服务运行时从 project-dir 读取配置，
+#    rsync 只同步到 /opt/knowlyr-crew/，不会自动同步到 project/ 子目录
 echo "3/6 同步配置"
-ssh "$SERVER" "mkdir -p $PROJECT_DIR/private && cp $REMOTE_DIR/private/organization.yaml $PROJECT_DIR/private/organization.yaml"
+
+ssh "$SERVER" "mkdir -p $PROJECT_DIR/private/employees"
+ssh "$SERVER" "cp $REMOTE_DIR/private/organization.yaml $PROJECT_DIR/private/organization.yaml"
 pass "organization.yaml → project/"
+
+ssh "$SERVER" "rsync -av $REMOTE_DIR/private/employees/ $PROJECT_DIR/private/employees/" > /dev/null 2>&1
+pass "employees/ → project/"
 echo ""
 
 # ── 4. 重装包 ──
+# 自动检测：对比本地 src/ 和服务器已安装版本的 mtime
 echo "4/6 重装包"
-if $REINSTALL; then
+
+# 检查 src/ 下有没有比上次部署更新的文件
+NEED_REINSTALL=false
+SRC_CHANGED=$(rsync -avzn \
+    --include='src/***' \
+    --exclude='*' \
+    "$LOCAL_DIR/" "$SERVER:$REMOTE_DIR/" 2>/dev/null | grep -c '^>' || echo 0)
+
+if (( SRC_CHANGED > 0 )) || [[ "${1:-}" == "--reinstall" ]]; then
+    NEED_REINSTALL=true
+fi
+
+if $NEED_REINSTALL; then
     ssh "$SERVER" "$VENV/bin/pip install -e $REMOTE_DIR" > /dev/null 2>&1
-    pass "pip install -e 完成"
+    pass "pip install -e 完成（src/ 有变更）"
 else
-    warn "跳过（无 --reinstall 参数）"
+    pass "跳过（src/ 无变更）"
 fi
 echo ""
 
 # ── 5. 重启服务 ──
 echo "5/6 重启服务"
 ssh "$SERVER" "sudo systemctl restart $SERVICE"
-sleep 2
+sleep 3
 STATUS=$(ssh "$SERVER" "systemctl is-active $SERVICE" 2>/dev/null || echo "failed")
 if [[ "$STATUS" == "active" ]]; then
     pass "服务已重启 (active)"
 else
+    # 打印最后几行日志帮助排查
+    ssh "$SERVER" "journalctl -u $SERVICE --no-pager -n 10" 2>/dev/null || true
     fail "服务启动失败: $STATUS"
 fi
 echo ""
@@ -101,23 +142,23 @@ echo ""
 echo "6/6 验证"
 
 # API 健康检查
-API_TOKEN=$(ssh "$SERVER" "grep CREW_API_TOKEN $REMOTE_DIR/.env | cut -d= -f2")
-HTTP_CODE=$(ssh "$SERVER" "curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer $API_TOKEN' http://127.0.0.1:8765/api/project/status" 2>/dev/null)
+HTTP_CODE=$(ssh "$SERVER" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health" 2>/dev/null)
 if [[ "$HTTP_CODE" == "200" ]]; then
-    pass "API 返回 200"
+    pass "health 返回 200"
 else
-    fail "API 返回 $HTTP_CODE"
+    fail "health 返回 $HTTP_CODE"
 fi
 
-# Moonshot 计费
-BILLING=$(ssh "$SERVER" "curl -s -H 'Authorization: Bearer $API_TOKEN' http://127.0.0.1:8765/api/project/status | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"moonshot_billing\",{}).get(\"balance\",{}).get(\"balance_cny\",\"null\"))'" 2>/dev/null)
-if [[ "$BILLING" != "null" && -n "$BILLING" ]]; then
-    pass "Moonshot 计费正常 (余额 ¥$BILLING)"
+# 带鉴权的 API 检查
+API_TOKEN=$(ssh "$SERVER" "grep CREW_API_TOKEN $REMOTE_DIR/.env | cut -d= -f2")
+HTTP_CODE=$(ssh "$SERVER" "curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer $API_TOKEN' http://127.0.0.1:$PORT/api/project/status" 2>/dev/null)
+if [[ "$HTTP_CODE" == "200" ]]; then
+    pass "API 鉴权正常"
 else
-    warn "Moonshot 计费无数据"
+    warn "API 鉴权返回 $HTTP_CODE"
 fi
 
-# .env 完整性复查
+# .env 完整性复查（防止 rsync 意外覆盖）
 POST_ENV=$(ssh "$SERVER" "wc -l < $REMOTE_DIR/.env" 2>/dev/null || echo 0)
 if (( POST_ENV >= MIN_ENV_VARS )); then
     pass ".env 完整 (${POST_ENV} 行，未被覆盖)"

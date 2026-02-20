@@ -22,10 +22,15 @@ pull:
 	@ls $(LOCAL_CREW)/sessions/*.jsonl 2>/dev/null | wc -l | xargs -I{} echo "Sessions: {} 个"
 	@echo "拉取完成。用 Claude Code 分析后修改 prompt，然后 make push"
 
-## 第2步: 一键部署员工（推送 + 重启 + 同步到 knowlyr-id）
+## 第2步: 一键部署员工（推送 + 同步 project-dir + 重启 + 同步到 knowlyr-id）
 push:
-	@echo "=== 推送员工配置 ==="
-	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/
+	@echo "=== 推送员工配置到 private/ ==="
+	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
+	@echo ""
+	@echo "=== 同步 private/ → project-dir ==="
+	ssh $(SERVER) "mkdir -p $(REMOTE_DIR)/$(LOCAL_EMPLOYEES) && \
+		cp /opt/knowlyr-crew/private/organization.yaml $(REMOTE_DIR)/private/organization.yaml && \
+		rsync -a /opt/knowlyr-crew/private/employees/ $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/"
 	@echo ""
 	@echo "=== 重启 crew 服务 ==="
 	ssh $(SERVER) "sudo systemctl restart knowlyr-crew"
@@ -39,8 +44,8 @@ push:
 
 ## 只推送文件，不重启不同步
 push-only:
-	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/
-	@echo "文件已推送（未重启、未同步）"
+	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
+	@echo "文件已推送到 private/（未同步 project-dir、未重启、未同步 knowlyr-id）"
 
 ## 第3步: 在服务器上测试某个员工（走真实 webhook，调真实工具）
 test-employee:
@@ -67,8 +72,10 @@ push-employee:
 ifndef NAME
 	$(error 用法: make push-employee NAME=姜墨言-3073)
 endif
-	rsync -avz $(LOCAL_EMPLOYEES)/$(NAME)/ $(SERVER):$(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/$(NAME)/
-	@echo "已推送 $(NAME)"
+	rsync -avz $(LOCAL_EMPLOYEES)/$(NAME)/ $(SERVER):/opt/knowlyr-crew/private/employees/$(NAME)/
+	ssh $(SERVER) "mkdir -p $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/$(NAME) && \
+		rsync -a /opt/knowlyr-crew/private/employees/$(NAME)/ $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/$(NAME)/"
+	@echo "已推送 $(NAME)（private/ + project-dir）"
 
 ## 清理服务器上的脏数据
 clean-memory:
