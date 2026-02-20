@@ -1,7 +1,8 @@
 """测试 knowlyr-id 客户端."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from crew.id_client import (
     AGENT_MEMORY_LIMIT,
