@@ -1121,6 +1121,15 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     kimi_real = moonshot_billing.get("cost_7d_usd") if moonshot_billing else None
     cost = calibrate_employee_costs(cost, aiberm_real_usd=aiberm_real, moonshot_real_usd=kimi_real)
 
+    # 预加载所有员工的记忆数量
+    from crew.memory import MemoryStore
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+    memory_counts: dict[str, int] = {}
+    for name in result.employees:
+        memories = store.query(name, limit=1000)
+        memory_counts[name] = len(memories)
+
     employees_info = []
     for name, emp in sorted(result.employees.items()):
         team = org.get_team(name)
@@ -1136,6 +1145,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 "agent_status": emp.agent_status,
                 "team": team,
                 "authority": authority,
+                "memory_count": memory_counts.get(name, 0),
             }
         )
 
