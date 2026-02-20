@@ -772,26 +772,48 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
 
         # 发送回复
         if msg_event.chat_type == "group":
-            await send_feishu_reply(
+            send_data = await send_feishu_reply(
                 ctx.feishu_token_mgr,
                 msg_event.message_id,
                 output_text,
             )
         else:
-            await send_feishu_text(
+            send_data = await send_feishu_text(
                 ctx.feishu_token_mgr,
                 msg_event.chat_id,
                 output_text,
             )
 
-        # 记录任务
+        # 检查发送结果
+        send_code = send_data.get("code", -1) if isinstance(send_data, dict) else -1
+        send_ok = send_code == 0
+        if not send_ok:
+            send_msg = send_data.get("msg", "unknown") if isinstance(send_data, dict) else "no response"
+            logger.error(
+                "飞书消息投递失败: code=%s msg=%s chat_id=%s employee=%s",
+                send_code,
+                send_msg,
+                msg_event.chat_id,
+                employee_name,
+            )
+
+        # 记录任务（附带投递状态）
         record = ctx.registry.create(
             trigger="feishu",
             target_type="employee",
             target_name=employee_name,
             args=args,
         )
-        ctx.registry.update(record.task_id, "completed", result=result)
+        task_result = dict(result) if isinstance(result, dict) else {"output": str(result)}
+        if send_ok:
+            task_result["delivered"] = True
+        else:
+            task_result["delivered"] = False
+            task_result["feishu_error"] = {
+                "code": send_code,
+                "msg": send_data.get("msg", "unknown") if isinstance(send_data, dict) else "no response",
+            }
+        ctx.registry.update(record.task_id, "completed", result=task_result)
 
         # 工作日志记录
         if isinstance(result, dict):

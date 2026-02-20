@@ -525,16 +525,39 @@ async def send_feishu_card(
     task_result: dict[str, Any] | None,
     task_error: str | None,
 ) -> dict[str, Any]:
-    """构建卡片并发送（复用 delivery._build_feishu_card）."""
+    """构建卡片并发送（复用 delivery._build_feishu_card），230001 时降级为纯文本重试."""
     from crew.delivery import _build_feishu_card
 
     card_payload = _build_feishu_card(task_name, task_result, task_error)
-    return await send_feishu_message(
+    data = await send_feishu_message(
         token_manager,
         chat_id,
         content=card_payload["card"],
         msg_type="interactive",
     )
+
+    if data.get("code") == 230001:
+        # 降级：提取卡片文本，用纯文本重试
+        fallback_parts: list[str] = []
+        card = card_payload.get("card", {})
+        header = card.get("header", {})
+        title = header.get("title", {}).get("content", "")
+        if title:
+            fallback_parts.append(title)
+        for elem in card.get("elements", []):
+            if elem.get("tag") == "markdown":
+                fallback_parts.append(elem.get("content", ""))
+        fallback_text = _sanitize_feishu_text("\n\n".join(fallback_parts))
+        if fallback_text:
+            logger.info("飞书卡片 230001 降级重试，转为纯文本 (len=%d)", len(fallback_text))
+            data = await send_feishu_message(
+                token_manager,
+                chat_id,
+                content={"text": fallback_text},
+                msg_type="text",
+            )
+
+    return data
 
 
 async def send_feishu_text(
