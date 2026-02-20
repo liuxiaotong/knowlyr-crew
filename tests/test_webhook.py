@@ -1186,6 +1186,57 @@ class TestProjectStatusEndpoint:
         assert "employees" in data
         assert "cost_7d" in data
 
+    @patch("crew.organization.get_effective_authority", return_value="L2")
+    @patch("crew.organization.load_organization")
+    @patch("crew.cost.query_cost_summary", return_value={})
+    @patch("crew.discovery.discover_employees")
+    def test_employees_contain_agent_status(
+        self, mock_discover, mock_cost, mock_org, mock_authority, tmp_path
+    ):
+        """employees 列表中每个员工都应包含 agent_status 字段."""
+        from crew.models import DiscoveryResult, Employee, Organization
+
+        emp_a = Employee(
+            name="emp-a",
+            display_name="A",
+            character_name="甲",
+            description="员工A",
+            body="body a",
+            agent_id=1001,
+            agent_status="active",
+            source_path=tmp_path,
+        )
+        emp_b = Employee(
+            name="emp-b",
+            display_name="B",
+            character_name="乙",
+            description="员工B",
+            body="body b",
+            agent_id=1002,
+            agent_status="frozen",
+            source_path=tmp_path,
+        )
+        mock_discover.return_value = DiscoveryResult(
+            employees={"emp-a": emp_a, "emp-b": emp_b}
+        )
+        mock_org.return_value = Organization()
+
+        client = _make_client()
+        resp = client.get(
+            "/api/project/status",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        employees = data["employees"]
+        assert len(employees) == 2
+        for emp in employees:
+            assert "agent_status" in emp, f"{emp['name']} 缺少 agent_status"
+        # 验证具体值
+        by_name = {e["name"]: e for e in employees}
+        assert by_name["emp-a"]["agent_status"] == "active"
+        assert by_name["emp-b"]["agent_status"] == "frozen"
+
     def test_project_status_requires_auth(self):
         """项目状态需要认证."""
         client = _make_client()

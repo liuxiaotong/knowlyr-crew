@@ -1133,6 +1133,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 "description": emp.description,
                 "model": emp.model,
                 "agent_id": emp.agent_id,
+                "agent_status": emp.agent_status,
                 "team": team,
                 "authority": authority,
             }
