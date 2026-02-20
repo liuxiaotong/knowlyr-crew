@@ -8,7 +8,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 try:
-    from mcp.server import Server
+    from mcp.server import InitializationOptions, Server
     from mcp.server.stdio import stdio_server
     from mcp.server.lowlevel.helper_types import ReadResourceContents
     from mcp.types import (
@@ -17,6 +17,7 @@ try:
         PromptArgument,
         PromptMessage,
         Resource,
+        ServerCapabilities,
         TextContent,
         Tool,
     )
@@ -1076,8 +1077,17 @@ async def serve(project_dir: Path | None = None):
         raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
 
     server = create_server(project_dir=project_dir)
+    init_options = InitializationOptions(
+        server_name="crew",
+        server_version="0.1.1",
+        capabilities=ServerCapabilities(
+            tools={},
+            resources={},
+            prompts={},
+        ),
+    )
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        await server.run(read_stream, write_stream, init_options)
 
 
 async def serve_sse(

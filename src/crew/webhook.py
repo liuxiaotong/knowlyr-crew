@@ -102,6 +102,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_github,
     _handle_memory_ingest,
     _handle_openclaw,
+    _handle_org_memories,
     _handle_project_status,
     _handle_run_employee,
     _handle_run_pipeline,
@@ -229,6 +230,7 @@ def create_webhook_app(
         Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_delete), methods=["DELETE"]),
         Route("/api/employees/{identifier}/authority/restore", endpoint=_make_handler(ctx, _handle_authority_restore), methods=["POST"]),
         Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
+        Route("/api/memory/org", endpoint=_make_handler(ctx, _handle_org_memories), methods=["GET"]),
         Route("/api/cost/summary", endpoint=_make_handler(ctx, _handle_cost_summary), methods=["GET"]),
         Route("/api/project/status", endpoint=_make_handler(ctx, _handle_project_status), methods=["GET"]),
     ]
