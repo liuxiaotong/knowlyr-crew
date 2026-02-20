@@ -281,8 +281,17 @@ def _pull_employee(
                 memory_path.write_text(identity.memory.strip() + "\n", encoding="utf-8")
             pulled = True
 
-    # 拉取 temperature → employee.yaml（model 不从 id 拉取 — crew 是唯一真相源）
+    # 拉取 agent_status → employee.yaml（仅在状态变化时写入）
+    _VALID_AGENT_STATUS = {"active", "frozen", "inactive"}
     yaml_updates: dict = {}
+    if (
+        identity.agent_status
+        and identity.agent_status in _VALID_AGENT_STATUS
+        and identity.agent_status != config.get("agent_status", "active")
+    ):
+        yaml_updates["agent_status"] = identity.agent_status
+
+    # 拉取 temperature → employee.yaml（model 不从 id 拉取 — crew 是唯一真相源）
     if identity.temperature is not None and identity.temperature != config.get("temperature"):
         yaml_updates["temperature"] = identity.temperature
 

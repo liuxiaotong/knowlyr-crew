@@ -1233,3 +1233,96 @@ class TestAuthorityRestoreEndpoint:
         client = _make_client()
         resp = client.post("/api/employees/test-emp/authority/restore")
         assert resp.status_code == 401
+
+
+class TestEmployeeStateEndpoint:
+    """GET /api/employees/{slug}/state — 员工运行时状态."""
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.memory.MemoryStore")
+    def test_state_includes_agent_status(self, mock_store_cls, mock_discover, tmp_path):
+        """/api/employees/{slug}/state 返回中包含 agent_status 字段."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp_dir = tmp_path / "test-emp-3090"
+        emp_dir.mkdir(parents=True, exist_ok=True)
+
+        emp = Employee(
+            name="test-emp",
+            display_name="Test",
+            character_name="测试",
+            description="测试员工",
+            body="test body",
+            agent_id=3090,
+            agent_status="frozen",
+            source_path=emp_dir,
+        )
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = []
+        mock_store_cls.return_value = mock_store
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/test-emp/state",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "agent_status" in data
+        assert data["agent_status"] == "frozen"
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.memory.MemoryStore")
+    def test_state_default_agent_status_active(self, mock_store_cls, mock_discover, tmp_path):
+        """默认 agent_status 为 'active'."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp_dir = tmp_path / "default-emp"
+        emp_dir.mkdir(parents=True, exist_ok=True)
+
+        # 不显式设置 agent_status，应走默认值 "active"
+        emp = Employee(
+            name="default-emp",
+            display_name="Default",
+            character_name="默认",
+            description="默认状态测试",
+            body="test body",
+            source_path=emp_dir,
+        )
+        mock_discover.return_value = DiscoveryResult(employees={"default-emp": emp})
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = []
+        mock_store_cls.return_value = mock_store
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/default-emp/state",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "agent_status" in data
+        assert data["agent_status"] == "active"
+
+    @patch("crew.discovery.discover_employees")
+    def test_state_not_found(self, mock_discover):
+        """不存在的员工应返回 404."""
+        from crew.models import DiscoveryResult
+
+        mock_discover.return_value = DiscoveryResult(employees={})
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/nonexistent/state",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 404
+
+    def test_state_requires_auth(self):
+        """state 端点需要认证."""
+        client = _make_client()
+        resp = client.get("/api/employees/test-emp/state")
+        assert resp.status_code == 401

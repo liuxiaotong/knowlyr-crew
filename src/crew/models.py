@@ -75,6 +75,9 @@ class Employee(BaseModel):
     fallback_api_key: str = Field(default="", description="备用模型的 API key")
     fallback_base_url: str = Field(default="", description="备用模型的 base URL")
     agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
+    agent_status: Literal["active", "frozen", "inactive"] = Field(
+        default="active", description="Agent 状态，从 knowlyr-id 同步"
+    )
     avatar_prompt: str = Field(default="", description="头像生成 prompt（留空则自动推断）")
     research_instructions: str = Field(
         default="", description="讨论前预研指令（编排式讨论的 round 0）"

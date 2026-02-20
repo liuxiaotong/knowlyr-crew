@@ -197,6 +197,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         "name": employee.name,
         "character_name": employee.character_name,
         "display_name": employee.display_name,
+        "agent_status": employee.agent_status,
         "soul": soul,
         "memories": memory_list,
         "notes": recent_notes,

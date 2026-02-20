@@ -131,6 +131,22 @@ class TestEmployee:
         emp = self._make(api_key="prefix-${VAR}")
         assert emp.api_key == "prefix-${VAR}"
 
+    def test_default_agent_status(self):
+        """Employee 默认 agent_status 为 'active'."""
+        emp = self._make()
+        assert emp.agent_status == "active"
+
+    def test_agent_status_from_yaml(self):
+        """从 yaml 解析时能正确读取 agent_status 字段."""
+        emp = self._make(agent_status="frozen")
+        assert emp.agent_status == "frozen"
+
+    def test_agent_status_missing_defaults_active(self):
+        """yaml 中没有 agent_status 时默认 'active'（等同不传该参数）."""
+        # 不传 agent_status，应走默认值
+        emp = Employee(name="no-status", description="测试", body="正文")
+        assert emp.agent_status == "active"
+
     def test_permissions_field(self):
         policy = PermissionPolicy(roles=["readonly"], deny=["bash"])
         emp = self._make(permissions=policy)

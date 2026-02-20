@@ -215,6 +215,99 @@ class TestSyncPull:
         assert len(report.pulled) == 0
 
 
+class TestSyncPullAgentStatus:
+    """pull 时同步 agent_status 字段."""
+
+    def test_pull_frozen_status_writes_yaml(self, tmp_path):
+        """_pull_employee 从 id 拉到 frozen 状态时，写入 employee.yaml."""
+        emp_dir = _make_employee_dir(tmp_path, "status-worker", agent_id=3070)
+
+        def mock_fetch(aid):
+            from crew.id_client import AgentIdentity
+
+            return AgentIdentity(
+                agent_id=aid,
+                nickname="status",
+                agent_status="frozen",
+            )
+
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3070, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
+            report = sync_all(tmp_path, push=True, pull=True, force=True)
+
+        # 应有 pull 记录
+        assert len(report.pulled) == 1
+
+        # 检查 yaml — agent_status 应被写入
+        config = yaml.safe_load((emp_dir / "employee.yaml").read_text(encoding="utf-8"))
+        assert config.get("agent_status") == "frozen"
+
+    def test_pull_same_status_no_write(self, tmp_path):
+        """状态没变时不触发写入（mock _write_yaml_field 检查未被调用）."""
+        emp_dir = _make_employee_dir(tmp_path, "same-status", agent_id=3071)
+
+        # 先在 yaml 中写入 agent_status = active（与远程一致）
+        config_path = emp_dir / "employee.yaml"
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["agent_status"] = "active"
+        config_path.write_text(
+            yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+
+        def mock_fetch(aid):
+            from crew.id_client import AgentIdentity
+
+            return AgentIdentity(
+                agent_id=aid,
+                nickname="same",
+                agent_status="active",
+            )
+
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3071, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+            patch("crew.sync._write_yaml_field") as mock_write,
+        ):
+            report = sync_all(tmp_path, push=True, pull=True, force=True)
+
+        # 状态未变，不应有 pull（memory 也无变化）
+        assert len(report.pulled) == 0
+        # _write_yaml_field 不应被调用（由 _pull_employee 触发的写入）
+        mock_write.assert_not_called()
+
+    def test_pull_id_unreachable_no_change(self, tmp_path):
+        """id 不可达时不影响现有字段."""
+        emp_dir = _make_employee_dir(tmp_path, "unreachable-worker", agent_id=3072)
+
+        # 先设置一个已有的 agent_status
+        config_path = emp_dir / "employee.yaml"
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["agent_status"] = "active"
+        config_path.write_text(
+            yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+
+        # fetch_agent_identity 返回 None（不可达）
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3072, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", return_value=None),
+        ):
+            report = sync_all(tmp_path, push=True, pull=True, force=True)
+
+        # 应有 error 记录（无法获取身份）
+        assert len(report.errors) == 1
+        assert "无法获取" in report.errors[0][1]
+
+        # 本地 yaml 不应被修改
+        config_after = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert config_after.get("agent_status") == "active"
+
+
 class TestSyncRegister:
     """新员工注册."""
 
