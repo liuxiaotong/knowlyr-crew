@@ -204,7 +204,7 @@ class TestSyncFrozenCompat:
             patch(
                 "crew.sync.list_agents",
                 return_value=[
-                    {"id": 3054, "nickname": "顾然", "status": "frozen"},
+                    {"id": 3054, "nickname": "顾然", "agent_status": "frozen"},
                 ],
             ),
             patch("crew.sync.update_agent", return_value=True) as mock_update,

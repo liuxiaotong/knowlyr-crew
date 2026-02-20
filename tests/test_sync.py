@@ -55,7 +55,7 @@ class TestSyncPush:
             return True
 
         def mock_list():
-            return [{"id": 3050, "nickname": "old", "status": "active"}]
+            return [{"id": 3050, "nickname": "old", "agent_status": "active"}]
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
@@ -95,7 +95,7 @@ class TestSyncPush:
             return True
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3051, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3051, "agent_status": "active"}]),
             patch("crew.sync.update_agent", mock_update),
             patch("crew.sync.fetch_agent_identity", return_value=None),
         ):
@@ -127,7 +127,7 @@ class TestSyncPush:
             return AgentIdentity(agent_id=aid, nickname="m")
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3052, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3052, "agent_status": "active"}]),
             patch("crew.sync.update_agent", mock_update),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -154,7 +154,7 @@ class TestSyncPull:
             )
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3060, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3060, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -183,7 +183,7 @@ class TestSyncPull:
             )
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3061, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3061, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -206,7 +206,7 @@ class TestSyncPull:
             return AgentIdentity(agent_id=aid, nickname="same")
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3062, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3062, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -232,7 +232,7 @@ class TestSyncPullAgentStatus:
             )
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3070, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3070, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -267,7 +267,7 @@ class TestSyncPullAgentStatus:
             )
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3071, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3071, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
             patch("crew.sync._write_yaml_field") as mock_write,
@@ -293,7 +293,7 @@ class TestSyncPullAgentStatus:
 
         # fetch_agent_identity 返回 None（不可达）
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3072, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3072, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", return_value=None),
         ):
@@ -367,7 +367,7 @@ class TestSyncDisable:
             patch(
                 "crew.sync.list_agents",
                 return_value=[
-                    {"id": 3070, "nickname": "ghost", "status": "active"},
+                    {"id": 3070, "nickname": "ghost", "agent_status": "active"},
                 ],
             ),
             patch("crew.sync.update_agent", mock_update),
@@ -385,7 +385,7 @@ class TestSyncDisable:
             patch(
                 "crew.sync.list_agents",
                 return_value=[
-                    {"id": 3070, "nickname": "ghost", "status": "inactive"},
+                    {"id": 3070, "nickname": "ghost", "agent_status": "inactive"},
                 ],
             ),
             patch("crew.sync.update_agent", return_value=True) as mock_upd,
@@ -415,7 +415,7 @@ class TestSyncDryRun:
             )
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3080, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3080, "agent_status": "active"}]),
             patch(
                 "crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True
             ),
@@ -478,7 +478,7 @@ class TestSyncReport:
             return AgentIdentity(agent_id=aid, nickname="x", memory="data")
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3091, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3091, "agent_status": "active"}]),
             patch("crew.sync.update_agent", return_value=True),
             patch("crew.sync.fetch_agent_identity", mock_fetch),
         ):
@@ -500,7 +500,7 @@ class TestSyncReport:
             return AgentIdentity(agent_id=aid, nickname="x", memory="data", model="gpt-4o")
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3092, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3092, "agent_status": "active"}]),
             patch(
                 "crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True
             ),
@@ -527,7 +527,7 @@ class TestSyncForcePromptChanged:
             return True
 
         with (
-            patch("crew.sync.list_agents", return_value=[{"id": 3095, "status": "active"}]),
+            patch("crew.sync.list_agents", return_value=[{"id": 3095, "agent_status": "active"}]),
             patch("crew.sync.update_agent", mock_update),
             patch("crew.sync.fetch_agent_identity", return_value=None),
         ):

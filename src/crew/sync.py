@@ -116,6 +116,12 @@ def sync_all(
     for item in sorted(employees_dir.iterdir()):
         if not item.is_dir() or not (item / "employee.yaml").exists():
             continue
+        # 缺 prompt.md 的目录不参与同步（避免注册空壳 agent）
+        if not (item / "prompt.md").exists():
+            name = _read_yaml_config(item).get("name", item.name)
+            report.skipped.append(f"{name} (缺少 prompt.md)")
+            logger.warning("跳过 %s: 缺少 prompt.md，不参与同步", item)
+            continue
         config = _read_yaml_config(item)
         agent_id = config.get("agent_id")
         if agent_id is not None:
@@ -165,7 +171,10 @@ def sync_all(
     if push:
         local_ids = set(local_employees.keys())
         for agent_id, agent_data in remote_map.items():
-            if agent_id not in local_ids and agent_data.get("status") not in ("inactive", "frozen"):
+            if agent_id not in local_ids and agent_data.get("agent_status") not in (
+                "inactive",
+                "frozen",
+            ):
                 name = agent_data.get("nickname", str(agent_id))
                 if dry_run:
                     report.disabled.append(f"{name} (#{agent_id}) [dry-run]")
