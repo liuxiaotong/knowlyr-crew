@@ -30,8 +30,18 @@ class FeishuChatStore:
         safe_id = chat_id.replace("/", "_").replace("..", "_")
         return self.store_dir / f"{safe_id}.jsonl"
 
-    def append(self, chat_id: str, role: str, content: str, sender_name: str = "") -> None:
-        """追加一条消息."""
+    def append(
+        self,
+        chat_id: str,
+        role: str,
+        content: str,
+        sender_name: str = "",
+        **extra: str,
+    ) -> None:
+        """追加一条消息.
+
+        额外字段通过 ``**extra`` 传入，如 ``path="full"`` 记录使用的路径。
+        """
         self._ensure_dir()
         entry: dict[str, str] = {
             "role": role,
@@ -40,6 +50,9 @@ class FeishuChatStore:
         }
         if sender_name:
             entry["sender_name"] = sender_name
+        for k, v in extra.items():
+            if v is not None:
+                entry[k] = v
         with self._chat_file(chat_id).open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

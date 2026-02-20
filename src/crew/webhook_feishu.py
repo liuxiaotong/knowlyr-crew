@@ -641,6 +641,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 加载对话历史（15 条足够保持上下文，更早的可用 feishu_chat_history 工具回查）
         _history_limit = 15
         message_history = None
+        _prev_was_full = False  # 上一轮是否走了 full path（有工具）
         if ctx.feishu_chat_store:
             history_entries = ctx.feishu_chat_store.get_recent(
                 msg_event.chat_id,
@@ -650,6 +651,12 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 message_history = [
                     {"role": e["role"], "content": e["content"]} for e in history_entries
                 ]
+                # 检查上一轮 assistant 是否走了 full path（有工具）
+                # 如果是，跟进消息也走 full path，避免"是的""好的"等确认被误判为闲聊
+                for _he in reversed(history_entries):
+                    if _he.get("role") == "assistant":
+                        _prev_was_full = _he.get("path") == "full"
+                        break
 
         if not has_tools and message_history:
             history_text = ctx.feishu_chat_store.format_for_prompt(
@@ -693,6 +700,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             and image_data is None
             and isinstance(user_msg, str)
             and not _needs_tools(task_text)
+            and not _prev_was_full  # 上一轮用了工具，跟进也走 full path
             and emp is not None
         )
 
@@ -743,7 +751,9 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             ctx.feishu_chat_store.append(
                 msg_event.chat_id, "user", task_text, sender_name=sender_name
             )
-            ctx.feishu_chat_store.append(msg_event.chat_id, "assistant", output_text)
+            ctx.feishu_chat_store.append(
+                msg_event.chat_id, "assistant", output_text, path=_path_label
+            )
 
         # 沉淀长期记忆
         if ctx.project_dir:
