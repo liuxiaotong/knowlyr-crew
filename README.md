@@ -12,8 +12,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1790+_passed-brightgreen.svg)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP_Tools-18-purple.svg)](#mcp-primitive-mapping)
+[![Tests](https://img.shields.io/badge/tests-1860+_passed-brightgreen.svg)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Interaction_Modes-9-red.svg)](#adversarial-deliberation-protocol)
 
@@ -29,7 +29,7 @@
 
 系统实现「**定义 → 协商 → 决策 → 评估 → 记忆更新**」的自校正闭环 (self-correcting loop)，将 RLHF (Reinforcement Learning from Human Feedback) 思想引入 Agent 运行时——人工评估结果直接反馈为 Agent 的持久化记忆，驱动认知持续进化。
 
-> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements adversarial multi-agent deliberation with 9 interaction modes and forced-disagreement mechanisms, and provides persistent semantic memory with exponential confidence decay. The system exposes 18 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop inspired by RLHF.
+> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements adversarial multi-agent deliberation with 9 interaction modes and forced-disagreement mechanisms, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop inspired by RLHF.
 
 ---
 
@@ -130,14 +130,14 @@ graph LR
 | 层 | 模块 | 职责 |
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | 声明式员工定义解析，YAML/Markdown 双格式，优先级发现 |
-| **Protocol** | MCP Server · Skill Converter | 18 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
+| **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
 | **Deliberation** | Discussion Engine | 9 种对抗性交互模式，强制分歧，拓扑排序执行计划 |
 | **Orchestration** | Pipeline · Route · Task Registry | 并行/串行/条件/循环编排，断点恢复，多模型路由 |
-| **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，多后端 Embedding 降级 |
+| **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，重要性排序，访问追踪，跨员工 Pattern 共享，多后端 Embedding 降级 |
 | **Evaluation** | Evaluation Engine | 决策追踪，回溯评估，自动纠正记忆 |
 | **Execution** | Providers · Cost Tracker | 7 Provider 统一调用，重试/降级/逐任务成本计量 |
 | **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，6 项定时任务（巡检/复盘/KPI/知识周刊），触发型自动委派 |
-| **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限守卫，CI 部署后自动审计，审计失败飞书告警 |
+| **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限矩阵查询，工具调用审计日志，CI 部署后自动审计，审计失败飞书告警 |
 
 ### MCP Primitive Mapping
 
@@ -145,10 +145,10 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | 每位员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 员工/讨论/流水线/记忆/评估/成本/日志/项目检测等 | 18 |
+| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/日志/项目检测等 | 20 |
 
 <details>
-<summary>18 个 MCP Tools 详情</summary>
+<summary>20 个 MCP Tools 详情</summary>
 
 | Tool | Description |
 |:---|:---|
@@ -161,7 +161,7 @@ graph LR
 | `run_pipeline` | 执行流水线 |
 | `list_discussions` | 列出所有讨论会 |
 | `run_discussion` | 生成讨论会 prompt |
-| `add_memory` | 为员工添加持久化记忆 |
+| `add_memory` | 为员工添加持久化记忆（支持 pattern 类型） |
 | `query_memory` | 查询员工的持久化记忆 |
 | `track_decision` | 记录待评估的决策 |
 | `evaluate_decision` | 评估决策并将经验写入员工记忆 |
@@ -169,7 +169,9 @@ graph LR
 | `get_meeting_detail` | 获取讨论会完整记录 |
 | `crew_feedback` | 提交工作反馈到 knowlyr-id |
 | `crew_status` | 查询 Agent 状态 |
-| `query_cost` | 查询成本汇总（按员工/模型/时间段） |
+| `list_tool_schemas` | 列出所有可用工具定义（按角色过滤） |
+| `get_permission_matrix` | 查看员工权限矩阵与策略 |
+| `get_audit_log` | 查询工具调用审计日志 |
 
 </details>
 
@@ -261,7 +263,7 @@ knowlyr-crew discuss run architecture-review --orchestrated
 
 人类记忆遵循 Ebbinghaus 遗忘曲线——新鲜的经验权重高，陈旧的记忆逐渐淡化。Crew 将这一认知科学原理引入 Agent 系统：
 
-**四种记忆类别**：
+**五种记忆类别**：
 
 | 类别 | 说明 | 示例 |
 |:---|:---|:---|
@@ -269,6 +271,7 @@ knowlyr-crew discuss run architecture-review --orchestrated
 | `estimate` | 估算记录 | "CSS 拆分预计 2 天" |
 | `finding` | 发现记录 | "main.css 有 2057 行，超出维护阈值" |
 | `correction` | 纠正记录 | "CSS 拆分实际花了 5 天，低估跨模块依赖" |
+| `pattern` | 工作模式 | "API 变更必须同步更新 SDK 文档"（跨员工自动共享） |
 
 **Embedding 降级链** (Graceful Degradation)：
 
@@ -277,6 +280,10 @@ OpenAI text-embedding-3-small → Gemini text-embedding-004 → TF-IDF (zero-dep
 ```
 
 任一上游不可用时自动降级到下一层，确保无 API key 环境下仍可运行语义搜索。
+
+**重要性与访问追踪**：每条记忆携带 `importance`（1-5）权重和 `last_accessed` 时间戳，查询时支持按重要性排序和最低重要性过滤，API 调用自动更新访问时间。
+
+**跨员工工作模式** (`pattern`)：从个体经验中提炼的可复用工作模式，自动标记为共享（`shared: true`），可设置触发条件 (`trigger_condition`) 和适用范围 (`applicability`)，其他员工在匹配场景下自动获取。
 
 **跨员工共享**：通过 `visibility: open` 标记的记忆自动进入共享记忆池，其他员工可检索。
 
@@ -487,7 +494,7 @@ routing_templates:
 |:---|:---|
 | **三级权限** | A（自主执行）/ B（需确认）/ C（看场景），委派名单自动标注 |
 | **自动降级** | 连续 3 次任务失败 → 权限从 A/B 降至 C，持久化到 JSON |
-| **路由模板** | `route` 工具按模板展开为 `delegate_chain`，比手动编排更可靠 |
+| **路由模板** | `route` 工具按模板展开为 `delegate_chain`，支持多流程行、CI 步骤标注、人类判断节点、仓库绑定 |
 | **KPI 度量** | 每位员工声明 3 条 KPI 指标，周报 cron 自动评估并生成 A/B/C/D 评级 |
 | **手动恢复** | API 一键恢复被降级的权限 |
 
@@ -677,6 +684,8 @@ Crew 定义"谁做什么"，[knowlyr-id](https://github.com/liuxiaotong/knowlyr-
 ```
 
 knowlyr-id 通过 `CREW_API_URL` 获取员工的 prompt / model / temperature / 团队 / 权限 / 成本（5 分钟缓存），不可用时回退到 DB 缓存。连接是**可选的**——不配置时 Crew 独立运行。管理后台实时展示每位员工的权限徽章、团队归属、7 日成本，并支持一键恢复被自动降级的权限。
+
+**员工状态同步** (`agent_status`)：Crew 维护三态生命周期——`active`（正常运行）/ `frozen`（冻结，保留配置但跳过执行）/ `inactive`（已停用）。状态变更通过 `sync` 双向同步至 knowlyr-id，frozen 员工在 pipeline 执行时自动跳过。
 
 <details>
 <summary>字段映射</summary>
@@ -876,7 +885,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-pytest -v    # 1790+ test cases
+pytest -v    # 1860+ test cases
 ```
 
 ---
