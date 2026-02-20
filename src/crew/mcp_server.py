@@ -254,7 +254,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "category": {
                             "type": "string",
-                            "enum": ["decision", "estimate", "finding", "correction"],
+                            "enum": ["decision", "estimate", "finding", "correction", "pattern"],
                             "description": "记忆类别",
                         },
                         "content": {
@@ -277,8 +277,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "shared": {
                             "type": "boolean",
-                            "description": "是否加入共享记忆池（默认 false）",
+                            "description": "是否加入共享记忆池（默认 false，pattern 类型自动为 true）",
                             "default": False,
+                        },
+                        "trigger_condition": {
+                            "type": "string",
+                            "description": "触发条件：什么场景下该用此模式（仅 pattern 类型）",
+                        },
+                        "applicability": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "适用范围：角色/领域标签列表（仅 pattern 类型）",
+                        },
+                        "origin_employee": {
+                            "type": "string",
+                            "description": "来源员工名（仅 pattern 类型，默认当前员工）",
                         },
                     },
                     "required": ["employee", "category", "content"],
@@ -296,7 +309,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "category": {
                             "type": "string",
-                            "enum": ["decision", "estimate", "finding", "correction"],
+                            "enum": ["decision", "estimate", "finding", "correction", "pattern"],
                             "description": "按类别过滤（可选）",
                         },
                         "limit": {
@@ -769,6 +782,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 ttl_days=arguments.get("ttl_days", 0),
                 tags=arguments.get("tags"),
                 shared=arguments.get("shared", False),
+                trigger_condition=arguments.get("trigger_condition", ""),
+                applicability=arguments.get("applicability"),
+                origin_employee=arguments.get("origin_employee", ""),
             )
             return [TextContent(
                 type="text",

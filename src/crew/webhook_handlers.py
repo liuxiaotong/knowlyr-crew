@@ -115,6 +115,8 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
         "team": team,
         "authority": authority,
         "cost_7d": cost_summary,
+        "kpi": employee.kpi,
+        "auto_memory": employee.auto_memory,
     })
 
 
@@ -533,6 +535,26 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         )
         ctx.registry.update(record.task_id, "completed", result=result)
 
+        # 工作日志记录
+        if isinstance(result, dict):
+            try:
+                from crew.id_client import alog_work
+
+                _aid = agent_id or (emp.agent_id if emp else None)
+                if _aid:
+                    await alog_work(
+                        agent_id=_aid,
+                        task_type=name,
+                        task_input=(user_message if isinstance(user_message, str) else "")[:500],
+                        task_output=result.get("output", "")[:2000],
+                        model_used=result.get("model", ""),
+                        tokens_used=_in + _out,
+                        execution_ms=int(_elapsed * 1000),
+                        crew_task_id=record.task_id,
+                    )
+            except Exception:
+                logger.debug("站内消息工作日志记录失败: %s", name)
+
         return JSONResponse(result)
 
     # ── 流式模式 ──
@@ -865,9 +887,13 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     from crew.organization import load_organization, get_effective_authority
     from crew.cost import query_cost_summary, calibrate_employee_costs, fetch_aiberm_billing, fetch_aiberm_balance, fetch_moonshot_balance
 
+    days = int(request.query_params.get("days", "7"))
+    if days not in (7, 30, 90):
+        days = 7
+
     result = discover_employees(ctx.project_dir)
     org = load_organization(project_dir=ctx.project_dir)
-    cost = query_cost_summary(ctx.registry, days=7)
+    cost = query_cost_summary(ctx.registry, days=days)
 
     # 从任意员工配置提取 aiberm API key
     aiberm_billing = None
@@ -876,15 +902,18 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
             aiberm_billing = await fetch_aiberm_billing(
                 api_key=emp.api_key,
                 base_url=emp.base_url,
-                days=7,
+                days=days,
             )
             break
 
-    # aiberm 余额（需要 access token，不是 API key）
+    # aiberm 余额（需要系统访问令牌 + 用户 ID）
     aiberm_balance = None
     aiberm_token = os.environ.get("AIBERM_ACCESS_TOKEN", "")
+    aiberm_user_id = os.environ.get("AIBERM_USER_ID", "")
     if aiberm_token:
-        aiberm_balance = await fetch_aiberm_balance(access_token=aiberm_token)
+        aiberm_balance = await fetch_aiberm_balance(
+            access_token=aiberm_token, user_id=aiberm_user_id,
+        )
     if aiberm_billing is None:
         aiberm_billing = {}
     if aiberm_balance:
@@ -949,9 +978,14 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
         "aiberm_billing": aiberm_billing,
         "moonshot_billing": moonshot_billing,
         "employees": employees_info,
+        "route_categories": {
+            cat_id: {"label": cat.label, "icon": cat.icon}
+            for cat_id, cat in org.route_categories.items()
+        },
         "routing_templates": {
             name: {
                 "label": tmpl.label,
+                "category": tmpl.category,
                 "steps": [
                     {
                         "role": step.role,

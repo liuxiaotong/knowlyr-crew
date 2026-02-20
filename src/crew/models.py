@@ -419,7 +419,15 @@ class RoutingTemplate(BaseModel):
     """协作路由模板."""
 
     label: str = Field(description="模板显示名")
+    category: str = Field(default="", description="分类 ID（engineering/data/business）")
     steps: list[RoutingStep] = Field(description="步骤列表")
+
+
+class RouteCategoryDef(BaseModel):
+    """路由分类定义."""
+
+    label: str = Field(description="分类显示名")
+    icon: str = Field(default="", description="Lucide 图标名")
 
 
 class Organization(BaseModel):
@@ -428,6 +436,9 @@ class Organization(BaseModel):
     teams: dict[str, TeamDef] = Field(default_factory=dict, description="团队")
     authority: dict[str, AuthorityLevel] = Field(
         default_factory=dict, description="权限级别"
+    )
+    route_categories: dict[str, RouteCategoryDef] = Field(
+        default_factory=dict, description="路由分类"
     )
     routing_templates: dict[str, RoutingTemplate] = Field(
         default_factory=dict, description="路由模板"

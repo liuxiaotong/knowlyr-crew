@@ -33,7 +33,7 @@ def _is_retryable(exc: Exception) -> bool:
     """判断异常是否可重试."""
     status = getattr(exc, "status_code", None)
     if status is not None:
-        return status == 429 or status >= 500
+        return status in (408, 429) or status >= 500
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return True
     return False
@@ -210,7 +210,7 @@ def _openai_execute(
     if openai is None:
         raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
 
-    client_kwargs: dict = {"api_key": api_key}
+    client_kwargs: dict = {"api_key": api_key, "timeout": 30.0}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = openai.OpenAI(**client_kwargs)
@@ -277,7 +277,7 @@ async def _openai_aexecute(
     if openai is None:
         raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
 
-    client_kwargs: dict = {"api_key": api_key}
+    client_kwargs: dict = {"api_key": api_key, "timeout": 30.0}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = openai.AsyncOpenAI(**client_kwargs)
@@ -834,7 +834,7 @@ def _openai_execute_with_tools(
     if openai is None:
         raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
 
-    client_kwargs: dict = {"api_key": api_key}
+    client_kwargs: dict = {"api_key": api_key, "timeout": 30.0}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = openai.OpenAI(**client_kwargs)
@@ -902,7 +902,7 @@ async def _openai_aexecute_with_tools(
     if openai is None:
         raise ImportError("openai SDK 未安装。请运行: pip install knowlyr-crew[openai]")
 
-    client_kwargs: dict = {"api_key": api_key}
+    client_kwargs: dict = {"api_key": api_key, "timeout": 30.0}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = openai.AsyncOpenAI(**client_kwargs)

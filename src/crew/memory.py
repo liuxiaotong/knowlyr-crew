@@ -32,7 +32,7 @@ class MemoryEntry(BaseModel):
     created_at: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="创建时间"
     )
-    category: Literal["decision", "estimate", "finding", "correction"] = Field(
+    category: Literal["decision", "estimate", "finding", "correction", "pattern"] = Field(
         description="记忆类别"
     )
     content: str = Field(description="记忆内容")
@@ -48,6 +48,11 @@ class MemoryEntry(BaseModel):
     visibility: Literal["open", "private"] = Field(
         default="open", description="可见性: open=公开, private=仅私聊可见"
     )
+    # Pattern 专有字段（仅 category="pattern" 时使用）
+    trigger_condition: str = Field(default="", description="触发条件：什么场景下该用此模式")
+    applicability: list[str] = Field(default_factory=list, description="适用范围：角色/领域标签")
+    origin_employee: str = Field(default="", description="来源员工：谁发现的此模式")
+    verified_count: int = Field(default=0, description="被验证次数：其他员工确认有效的次数")
 
 
 class MemoryStore:
@@ -218,7 +223,7 @@ class MemoryStore:
     def add(
         self,
         employee: str,
-        category: Literal["decision", "estimate", "finding", "correction"],
+        category: Literal["decision", "estimate", "finding", "correction", "pattern"],
         content: str,
         source_session: str = "",
         confidence: float = 1.0,
@@ -226,6 +231,9 @@ class MemoryStore:
         tags: list[str] | None = None,
         shared: bool = False,
         visibility: Literal["open", "private"] = "open",
+        trigger_condition: str = "",
+        applicability: list[str] | None = None,
+        origin_employee: str = "",
     ) -> MemoryEntry:
         """添加一条记忆."""
         self._ensure_dir()
@@ -238,8 +246,11 @@ class MemoryStore:
             confidence=confidence,
             ttl_days=effective_ttl,
             tags=tags or [],
-            shared=shared,
+            shared=shared if category != "pattern" else True,  # pattern 默认共享
             visibility=visibility,
+            trigger_condition=trigger_condition,
+            applicability=applicability or [],
+            origin_employee=origin_employee or employee,
         )
         with self._employee_file(employee).open("a", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")
@@ -253,7 +264,7 @@ class MemoryStore:
         employee: str,
         session_id: str,
         summary: str,
-        category: Literal["decision", "estimate", "finding", "correction"] = "finding",
+        category: Literal["decision", "estimate", "finding", "correction", "pattern"] = "finding",
     ) -> MemoryEntry:
         """根据会话摘要写入记忆."""
         return self.add(
@@ -471,7 +482,8 @@ class MemoryStore:
                 lines = []
                 for entry in team_entries:
                     cat = {"decision": "决策", "estimate": "估算",
-                           "finding": "发现", "correction": "纠正"}.get(
+                           "finding": "发现", "correction": "纠正",
+                           "pattern": "模式"}.get(
                         entry.category, entry.category)
                     conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
                     lines.append(f"- [{cat}]{conf} ({entry.employee}) {entry.content}")
@@ -489,11 +501,14 @@ class MemoryStore:
                 "estimate": "估算",
                 "finding": "发现",
                 "correction": "纠正",
+                "pattern": "模式",
             }.get(entry.category, entry.category)
             conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
             # proxied 记忆来自代理推理，不是员工本人的真实工作
             proxied = " ⚠️模拟讨论记录，非实际工作" if "proxied" in entry.tags else ""
-            lines.append(f"- [{category_label}]{conf}{proxied} {entry.content}")
+            # pattern 额外显示触发条件
+            trigger = f" [触发: {entry.trigger_condition}]" if entry.category == "pattern" and entry.trigger_condition else ""
+            lines.append(f"- [{category_label}]{conf}{proxied}{trigger} {entry.content}")
         return "\n".join(lines)
 
     def _get_shared_memories(
@@ -520,9 +535,11 @@ class MemoryStore:
                 "estimate": "估算",
                 "finding": "发现",
                 "correction": "纠正",
+                "pattern": "模式",
             }.get(entry.category, entry.category)
             conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
-            lines.append(f"- [{category_label}]{conf}{tag_str} ({entry.employee}) {entry.content}")
+            trigger = f" [触发: {entry.trigger_condition}]" if entry.category == "pattern" and entry.trigger_condition else ""
+            lines.append(f"- [{category_label}]{conf}{tag_str}{trigger} ({entry.employee}) {entry.content}")
         return "\n".join(lines)
 
     def query_shared(
@@ -633,6 +650,97 @@ class MemoryStore:
 
         results.sort(key=lambda e: e.created_at, reverse=True)
         return results[:limit]
+
+    def query_patterns(
+        self,
+        employee: str = "",
+        applicability: list[str] | None = None,
+        limit: int = 10,
+        min_confidence: float = 0.3,
+    ) -> list[MemoryEntry]:
+        """查询可复用的工作模式（跨员工）.
+
+        Args:
+            employee: 当前员工（排除自己的，优先看别人的）
+            applicability: 按适用范围标签过滤（任一匹配即可）
+            limit: 最大返回条数
+            min_confidence: 最低有效置信度
+
+        Returns:
+            pattern 列表（按 verified_count 降序，再按时间降序）
+        """
+        if not self.memory_dir.is_dir():
+            return []
+
+        app_set = set(applicability) if applicability else None
+        all_patterns: list[MemoryEntry] = []
+
+        for jsonl_file in self.memory_dir.glob("*.jsonl"):
+            for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+                if entry.category != "pattern":
+                    continue
+                if entry.superseded_by:
+                    continue
+                if self._is_expired(entry):
+                    continue
+
+                # 适用范围过滤
+                if app_set and not (app_set & set(entry.applicability)):
+                    continue
+
+                decayed = self._apply_decay(entry)
+                if decayed.confidence < min_confidence:
+                    continue
+
+                all_patterns.append(decayed)
+
+        # 排序：verified_count 降序 → 时间降序
+        all_patterns.sort(
+            key=lambda e: (e.verified_count, e.created_at), reverse=True,
+        )
+        return all_patterns[:limit]
+
+    def verify_pattern(self, pattern_id: str) -> bool:
+        """验证一条 pattern（verified_count +1）.
+
+        Returns:
+            True 如果找到并更新，False 如果未找到
+        """
+        for jsonl_file in self.memory_dir.glob("*.jsonl"):
+            lines = jsonl_file.read_text(encoding="utf-8").splitlines()
+            new_lines: list[str] = []
+            found = False
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+                except (json.JSONDecodeError, ValueError):
+                    new_lines.append(stripped)
+                    continue
+
+                if entry.id == pattern_id and entry.category == "pattern":
+                    entry.verified_count += 1
+                    new_lines.append(entry.model_dump_json())
+                    found = True
+                else:
+                    new_lines.append(stripped)
+
+            if found:
+                with file_lock(jsonl_file):
+                    jsonl_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                return True
+
+        return False
 
     def list_employees(self) -> list[str]:
         """列出有记忆的员工."""

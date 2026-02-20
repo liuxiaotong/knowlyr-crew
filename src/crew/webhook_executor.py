@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import json
+import time as _time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,7 @@ async def _execute_task(
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
 
+    _t0 = _time.monotonic()
     try:
         if record.target_type == "pipeline":
             logger.info("执行 pipeline [trace=%s] %s", trace_id, record.target_name)
@@ -117,6 +119,31 @@ async def _execute_task(
 
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
+
+        # 工作日志记录
+        if record.target_type == "employee" and isinstance(result, dict):
+            try:
+                from crew.discovery import discover_employees
+                from crew.id_client import alog_work
+
+                _disc = discover_employees(project_dir=ctx.project_dir)
+                _emp = _disc.get(record.target_name)
+                _aid = agent_id or (_emp.agent_id if _emp else None)
+
+                if _aid:
+                    _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+                    await alog_work(
+                        agent_id=_aid,
+                        task_type=record.target_name,
+                        task_input=record.args.get("task", "")[:500],
+                        task_output=result.get("output", "")[:2000],
+                        model_used=result.get("model", ""),
+                        tokens_used=result.get("input_tokens", 0) + result.get("output_tokens", 0),
+                        execution_ms=_elapsed_ms,
+                        crew_task_id=task_id,
+                    )
+            except Exception:
+                logger.debug("工作日志记录失败: %s", record.target_name)
 
         # B 类权限标记 + 质量评分 + 自动降级检查
         if record.target_type == "employee" and isinstance(result, dict):
@@ -199,8 +226,49 @@ async def _execute_task(
                                 shared=True,
                             )
                             logger.info("自检摘要保存: %s", record.target_name)
+
+                        # 工作模式（pattern）自动提取
+                        pattern_match = _re.search(
+                            r"##\s*工作模式[^\n]*\n+((?:- .+\n?)+)",
+                            output_text,
+                        )
+                        if pattern_match:
+                            if _mem_store is None:
+                                from crew.memory import MemoryStore
+                                _mem_store = MemoryStore(project_dir=ctx.project_dir)
+                            pattern_block = pattern_match.group(1).strip()
+                            # 解析结构化字段
+                            p_name = ""
+                            p_trigger = ""
+                            p_steps = ""
+                            p_roles: list[str] = []
+                            for pl in pattern_block.split("\n"):
+                                pl = pl.strip().lstrip("- ")
+                                if pl.startswith("模式名称:"):
+                                    p_name = pl.split(":", 1)[1].strip()
+                                elif pl.startswith("触发条件:"):
+                                    p_trigger = pl.split(":", 1)[1].strip()
+                                elif pl.startswith("步骤:"):
+                                    p_steps = pl.split(":", 1)[1].strip()
+                                elif pl.startswith("适用角色:"):
+                                    p_roles = [r.strip() for r in pl.split(":", 1)[1].split(",") if r.strip()]
+                            if p_name:
+                                content = f"[模式] {p_name}"
+                                if p_steps:
+                                    content += f" — {p_steps}"
+                                _mem_store.add(
+                                    employee=record.target_name,
+                                    category="pattern",
+                                    content=content,
+                                    source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                    confidence=0.7,
+                                    trigger_condition=p_trigger,
+                                    applicability=p_roles,
+                                    origin_employee=record.target_name,
+                                )
+                                logger.info("工作模式保存: %s → %s", record.target_name, p_name)
                     except Exception as e_mem:
-                        logger.debug("自动记忆/自检保存失败: %s", e_mem)
+                        logger.debug("自动记忆/自检/模式保存失败: %s", e_mem)
 
                 # 自动降级检查（记录成功）
                 record_task_outcome(
@@ -837,6 +905,9 @@ async def _handle_tool_call(
             content=arguments.get("content", ""),
             source_session="",
             visibility=arguments.get("visibility", default_vis),
+            trigger_condition=arguments.get("trigger_condition", ""),
+            applicability=arguments.get("applicability"),
+            origin_employee=arguments.get("origin_employee", ""),
         )
         logger.info("记忆保存: %s → %s (visibility=%s)", employee_name, entry.content[:60], entry.visibility)
         return "已记住。"

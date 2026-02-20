@@ -38,13 +38,13 @@ class TaskRegistry:
 
     Args:
         persist_path: JSONL 持久化文件路径（None 则仅内存模式）.
-        max_history: 持久化保留的最大记录数（默认 500，超出时截断旧记录）.
+        max_history: 持久化保留的最大记录数（默认 5000，超出时截断旧记录）.
     """
 
     def __init__(
         self,
         persist_path: Path | None = None,
-        max_history: int = 500,
+        max_history: int = 5000,
     ) -> None:
         self._tasks: dict[str, TaskRecord] = {}
         self._events: dict[str, asyncio.Event] = {}

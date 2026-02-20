@@ -234,6 +234,29 @@ class CrewEngine:
                     ] + lesson_lines)
             except Exception:
                 pass
+
+            # 可复用工作模式推荐 — 跨员工共享的 pattern
+            try:
+                patterns = memory_store.query_patterns(
+                    employee=employee.name,
+                    applicability=employee.tags,
+                    limit=5,
+                )
+                if patterns:
+                    pattern_lines = []
+                    for p in patterns:
+                        verified = f" ✓{p.verified_count}" if p.verified_count > 0 else ""
+                        trigger = f" [触发: {p.trigger_condition}]" if p.trigger_condition else ""
+                        origin = f" ({p.origin_employee})" if p.origin_employee != employee.name else ""
+                        pattern_lines.append(f"- {p.content}{trigger}{origin}{verified}")
+                    parts.extend([
+                        "", "---", "",
+                        "## 可参考的工作模式", "",
+                        "以下是团队验证过的有效工作模式，适用时可直接采用：",
+                        "",
+                    ] + pattern_lines)
+            except Exception:
+                pass
         except Exception as e:
             logger.debug("记忆加载失败: %s", e)
 

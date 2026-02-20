@@ -3357,7 +3357,7 @@ def memory_list():
 
 @memory.command("show")
 @click.argument("employee")
-@click.option("--category", type=click.Choice(["decision", "estimate", "finding", "correction"]),
+@click.option("--category", type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
               default=None, help="按类别过滤")
 @click.option("-n", "--limit", type=int, default=20, help="返回条数")
 @click.option("--include-expired", is_flag=True, help="包含已过期记忆")
@@ -3382,21 +3382,25 @@ def memory_show(employee: str, category: str | None, limit: int, include_expired
 @memory.command("add")
 @click.argument("employee")
 @click.option("--category", "-c", required=True,
-              type=click.Choice(["decision", "estimate", "finding", "correction"]),
+              type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
               help="记忆类别")
 @click.option("--content", "-m", required=True, help="记忆内容")
 @click.option("--ttl", type=int, default=0, help="生存期天数 (0=永不过期)")
 @click.option("--tags", type=str, default="", help="逗号分隔的语义标签")
 @click.option("--shared", is_flag=True, help="加入共享记忆池")
-def memory_add(employee: str, category: str, content: str, ttl: int, tags: str, shared: bool):
+@click.option("--trigger", type=str, default="", help="触发条件（仅 pattern 类型）")
+@click.option("--applicability", type=str, default="", help="适用范围，逗号分隔（仅 pattern 类型）")
+def memory_add(employee: str, category: str, content: str, ttl: int, tags: str, shared: bool, trigger: str, applicability: str):
     """手动添加员工记忆."""
     from crew.memory import MemoryStore
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    app_list = [a.strip() for a in applicability.split(",") if a.strip()] if applicability else []
     store = MemoryStore()
     entry = store.add(
         employee=employee, category=category, content=content,
         ttl_days=ttl, tags=tag_list, shared=shared,
+        trigger_condition=trigger, applicability=app_list,
     )
     click.echo(f"已添加: [{entry.id}] ({entry.category}) {entry.content}")
 
@@ -3981,20 +3985,117 @@ def agents_list_cmd(output_format: str):
     table.add_column("Nickname", style="bold")
     table.add_column("Title")
     table.add_column("Domains")
-    table.add_column("Status", style="green")
+    table.add_column("Status")
     table.add_column("Heartbeat")
 
+    _status_styles = {"active": "green", "frozen": "yellow", "inactive": "red"}
     for agent in data:
+        status = agent.get("status", "")
+        style = _status_styles.get(status, "dim")
         table.add_row(
             str(agent.get("id", "")),
             agent.get("nickname", ""),
             agent.get("title", ""),
             ", ".join(agent.get("domains", [])),
-            agent.get("status", ""),
+            f"[{style}]{status}[/{style}]",
             str(agent.get("heartbeat_count", 0)),
         )
 
     Console(stderr=True).print(table)
+
+
+def _find_employee(result, name: str):
+    """按 name、character_name 或 trigger 查找员工."""
+    emp = result.get(name)
+    if emp:
+        return emp
+    # 按 character_name 查找
+    for e in result.employees.values():
+        if getattr(e, "character_name", None) == name:
+            return e
+    return None
+
+
+@agents.command("freeze")
+@click.argument("names", nargs=-1, required=True)
+@click.option("--force", is_flag=True, help="跳过确认")
+def agents_freeze_cmd(names: tuple[str, ...], force: bool):
+    """冻结员工（保留数据但禁止执行）."""
+    from crew.discovery import discover_employees
+    from crew.id_client import fetch_agent_identity, update_agent
+
+    result = discover_employees(cache_ttl=0)
+    targets = []
+    for name in names:
+        emp = _find_employee(result, name)
+        if not emp:
+            candidates = list(result.employees.keys())
+            click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
+            raise SystemExit(1)
+        if not getattr(emp, "agent_id", None):
+            click.echo(f"员工 '{emp.name}' 未绑定 Agent，无法冻结", err=True)
+            raise SystemExit(1)
+        targets.append(emp)
+
+    if not force:
+        click.echo("即将冻结以下员工:", err=True)
+        for emp in targets:
+            click.echo(f"  {emp.character_name or emp.name} (#{emp.agent_id})", err=True)
+        if not click.confirm("确认冻结？"):
+            click.echo("已取消", err=True)
+            return
+
+    for emp in targets:
+        identity = fetch_agent_identity(int(emp.agent_id))
+        if identity and identity.agent_status == "frozen":
+            click.echo(f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于冻结状态，跳过", err=True)
+            continue
+        ok = update_agent(int(emp.agent_id), agent_status="frozen")
+        if ok:
+            click.echo(f"✓ {emp.character_name or emp.name} (#{emp.agent_id}) 已冻结", err=True)
+        else:
+            click.echo(f"⚠ {emp.character_name or emp.name} (#{emp.agent_id}) 冻结失败", err=True)
+
+
+@agents.command("unfreeze")
+@click.argument("names", nargs=-1, required=True)
+@click.option("--force", is_flag=True, help="跳过确认")
+def agents_unfreeze_cmd(names: tuple[str, ...], force: bool):
+    """解冻员工（恢复为 active 状态）."""
+    from crew.discovery import discover_employees
+    from crew.id_client import fetch_agent_identity, update_agent
+
+    result = discover_employees(cache_ttl=0)
+    targets = []
+    for name in names:
+        emp = _find_employee(result, name)
+        if not emp:
+            candidates = list(result.employees.keys())
+            click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
+            raise SystemExit(1)
+        if not getattr(emp, "agent_id", None):
+            click.echo(f"员工 '{emp.name}' 未绑定 Agent，无法解冻", err=True)
+            raise SystemExit(1)
+        targets.append(emp)
+
+    if not force:
+        click.echo("即将解冻以下员工:", err=True)
+        for emp in targets:
+            click.echo(f"  {emp.character_name or emp.name} (#{emp.agent_id})", err=True)
+        if not click.confirm("确认解冻？"):
+            click.echo("已取消", err=True)
+            return
+
+    for emp in targets:
+        identity = fetch_agent_identity(int(emp.agent_id))
+        if identity and identity.agent_status == "active":
+            click.echo(f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于活跃状态，跳过", err=True)
+            continue
+        ok = update_agent(int(emp.agent_id), agent_status="active")
+        if ok:
+            click.echo(f"✓ {emp.character_name or emp.name} (#{emp.agent_id}) 已解冻", err=True)
+        else:
+            click.echo(f"⚠ {emp.character_name or emp.name} (#{emp.agent_id}) 解冻失败", err=True)
 
 
 @agents.command("status")

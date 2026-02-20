@@ -162,7 +162,7 @@ def sync_all(
     if push:
         local_ids = set(local_employees.keys())
         for agent_id, agent_data in remote_map.items():
-            if agent_id not in local_ids and agent_data.get("status") != "inactive":
+            if agent_id not in local_ids and agent_data.get("status") not in ("inactive", "frozen"):
                 name = agent_data.get("nickname", str(agent_id))
                 if dry_run:
                     report.disabled.append(f"{name} (#{agent_id}) [dry-run]")

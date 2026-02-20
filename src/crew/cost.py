@@ -112,7 +112,7 @@ def query_cost_summary(
     total_cost = 0.0
     total_tasks = 0
 
-    for record in registry.list_recent(n=500):
+    for record in registry.list_recent(n=5000):
         if record.created_at < cutoff:
             continue
         if record.status != "completed" or not record.result:
@@ -309,16 +309,20 @@ async def fetch_aiberm_billing(
 
 async def fetch_aiberm_balance(
     access_token: str,
+    user_id: str = "",
     base_url: str = "https://aiberm.com",
 ) -> dict[str, Any] | None:
     """从 aiberm（new-api）管理 API 查询账户余额.
 
-    需要 access_token（从 aiberm 网页后台登录获取），不是 API key。
+    需要 access_token（系统访问令牌）+ user_id（New-Api-User header）。
+    两者均可从 aiberm 网页后台个人设置页面获取。
     """
     import httpx
 
     url = f"{base_url.rstrip('/')}/api/user/self"
-    headers = {"Authorization": f"Bearer {access_token}"}
+    headers: dict[str, str] = {"Authorization": f"Bearer {access_token}"}
+    if user_id:
+        headers["New-Api-User"] = user_id
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:

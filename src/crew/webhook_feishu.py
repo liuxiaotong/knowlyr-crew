@@ -547,24 +547,44 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         _now = _dt.now()
         _date_header = f"今天是 {_now.strftime('%Y-%m-%d')}（{_WEEKDAY_CN[_now.weekday()]}）。\n"
 
+        _is_group = msg_event.chat_type == "group"
+        _chat_partner = sender_name if (_is_group and sender_name) else "Kai"
+
         if has_tools:
-            chat_context = (
-                _date_header
-                + "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
-                "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
-                "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
-                "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
-            )
-        if msg_event.chat_type == "group" and sender_name:
-            chat_context += f"\n当前和你说话的人是{sender_name}（不是 Kai）。注意区分群里不同的人。"
+            if _is_group:
+                chat_context = (
+                    _date_header
+                    + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
+                    "注意区分群里不同的人，不要把所有人都当成 Kai。\n"
+                    "像平时一样自然回复。"
+                    "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
+                    "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
+                )
+            else:
+                chat_context = (
+                    _date_header
+                    + "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
+                    "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
+                    "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
+                    "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
+                )
         if not has_tools:
-            chat_context = (
-                _date_header
-                + "这是飞书实时聊天。你现在没有任何业务数据。"
-                "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
-                "Kai 问这些就说「这个我得看看今天的数据才能说」。"
-                "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
-            )
+            if _is_group:
+                chat_context = (
+                    _date_header
+                    + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
+                    "注意区分群里不同的人，不要把所有人都当成 Kai。\n"
+                    "你现在没有任何业务数据。"
+                    "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
+                )
+            else:
+                chat_context = (
+                    _date_header
+                    + "这是飞书实时聊天。你现在没有任何业务数据。"
+                    "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
+                    "Kai 问这些就说「这个我得看看今天的数据才能说」。"
+                    "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
+                )
 
         # 加载对话历史（15 条足够保持上下文，更早的可用 feishu_chat_history 工具回查）
         _history_limit = 15
@@ -627,6 +647,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 result = await _feishu_fast_reply(
                     ctx, emp, task_text, message_history,
                     max_visibility=_visibility,
+                    sender_name=sender_name or "Kai",
                 )
             except Exception as fast_exc:
                 logger.warning("闲聊快速路径失败，回退完整路径: %s", fast_exc)
@@ -694,6 +715,26 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             args=args,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
+
+        # 工作日志记录
+        if isinstance(result, dict):
+            try:
+                from crew.id_client import alog_work
+
+                _aid = emp.agent_id if emp else None
+                if _aid:
+                    await alog_work(
+                        agent_id=_aid,
+                        task_type=employee_name,
+                        task_input=(task_text or "")[:500],
+                        task_output=output_text[:2000],
+                        model_used=result.get("model", ""),
+                        tokens_used=_in_tok + _out_tok,
+                        execution_ms=int(_elapsed * 1000),
+                        crew_task_id=record.task_id,
+                    )
+            except Exception:
+                logger.debug("飞书工作日志记录失败: %s", employee_name)
 
     except Exception as e:
         logger.exception("飞书消息处理失败: %s", e)
