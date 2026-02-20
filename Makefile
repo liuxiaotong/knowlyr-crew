@@ -24,7 +24,8 @@ pull:
 
 ## 第2步: 一键部署员工（推送 + 同步 project-dir + 重启 + 同步到 knowlyr-id）
 push:
-	@echo "=== 推送员工配置到 private/ ==="
+	@echo "=== 推送 private/ 到服务器 ==="
+	rsync -avz private/organization.yaml $(SERVER):/opt/knowlyr-crew/private/organization.yaml
 	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
 	@echo ""
 	@echo "=== 同步 private/ → project-dir ==="
