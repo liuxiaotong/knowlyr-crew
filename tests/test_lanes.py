@@ -29,7 +29,7 @@ class TestLanes:
 
     def test_acquire_closes_fh_on_error(self):
         """acquire() 在写入失败时关闭文件句柄."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         root = Path(tempfile.mkdtemp())
         lane = LaneLock("error:test", root=root)

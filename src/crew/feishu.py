@@ -210,13 +210,13 @@ def parse_message_event(payload: dict[str, Any]) -> FeishuMessageEvent | None:
 
     msg_type = message.get("message_type", "")
 
-    common_kwargs = dict(
-        message_id=message.get("message_id", ""),
-        chat_id=message.get("chat_id", ""),
-        chat_type=message.get("chat_type", "group"),
-        sender_id=sender.get("sender_id", {}).get("open_id", ""),
-        msg_type=msg_type,
-    )
+    common_kwargs = {
+        "message_id": message.get("message_id", ""),
+        "chat_id": message.get("chat_id", ""),
+        "chat_type": message.get("chat_type", "group"),
+        "sender_id": sender.get("sender_id", {}).get("open_id", ""),
+        "msg_type": msg_type,
+    }
 
     if msg_type == "image":
         content_str = message.get("content", "{}")
@@ -408,7 +408,7 @@ async def download_feishu_image(
     return _parse_image_response(resp)
 
 
-def _parse_image_response(resp: "httpx.Response") -> tuple[bytes, str]:
+def _parse_image_response(resp: httpx.Response) -> tuple[bytes, str]:
     """从 httpx 响应中提取图片 bytes 和 media_type."""
     content_type = resp.headers.get("content-type", "image/png")
     if "jpeg" in content_type or "jpg" in content_type:
@@ -605,7 +605,7 @@ async def send_feishu_reply(
 
 
 async def create_calendar_event(
-    token_mgr: "FeishuTokenManager",
+    token_mgr: FeishuTokenManager,
     summary: str,
     start_timestamp: int,
     end_timestamp: int,
@@ -677,7 +677,7 @@ async def create_calendar_event(
 
 
 async def add_attendees_to_event(
-    token_mgr: "FeishuTokenManager",
+    token_mgr: FeishuTokenManager,
     calendar_id: str,
     event_id: str,
     attendee_open_ids: list[str],

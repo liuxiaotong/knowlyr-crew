@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from crew.discovery import discover_employees, _scan_skills_directory
+from crew.discovery import _scan_skills_directory, discover_employees
 
 
 class TestSkillDiscovery:

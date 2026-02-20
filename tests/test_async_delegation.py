@@ -1,13 +1,11 @@
 """异步委派 & 会议编排工具测试."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from crew.task_registry import TaskRegistry
-
 
 # ── helpers ──
 

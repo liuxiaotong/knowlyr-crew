@@ -85,8 +85,9 @@ async def _find_recent_image_in_chat(
     max_messages: int = 5,
 ) -> tuple[str, str] | None:
     """在群聊历史中查找同一发送者最近发的图片，返回 (image_key, message_id)."""
-    import httpx
     import json as _json
+
+    import httpx
 
     token = await token_mgr.get_token()
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
@@ -168,9 +169,9 @@ async def _feishu_fast_reply(
 
     对比完整路径: ~87K tokens → ~8K tokens, 10x 节省.
     """
-    from crew.executor import aexecute_prompt
-
     from datetime import datetime as _dt
+
+    from crew.executor import aexecute_prompt
 
     _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     _now = _dt.now()
@@ -329,6 +330,7 @@ async def _feishu_route_dispatch(
 ) -> None:
     """飞书触发路由模板 — 展开为 chain 异步执行."""
     import json as _json
+
     from crew.organization import load_organization
 
     _reply = send_feishu_reply if msg_event.chat_type == "group" else send_feishu_text
@@ -408,7 +410,6 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
     from crew.feishu import (
         download_feishu_image,
         resolve_employee_from_mention,
-        send_feishu_card,
         send_feishu_reply,
         send_feishu_text,
     )

@@ -541,7 +541,7 @@ class MemoryStore:
                         entry.category, entry.category)
                     conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
                     lines.append(f"- [{cat}]{conf} ({entry.employee}) {entry.content}")
-                parts.append(f"\n### 队友近况\n\n" + "\n".join(lines))
+                parts.append("\n### 队友近况\n\n" + "\n".join(lines))
 
         return "\n".join(parts)
 

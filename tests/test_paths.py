@@ -1,9 +1,6 @@
 """路径辅助函数测试 — paths.py."""
 
-import os
 from pathlib import Path
-
-import pytest
 
 from crew.paths import (
     file_lock,

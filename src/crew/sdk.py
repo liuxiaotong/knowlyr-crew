@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from crew.context_detector import detect_project
 from crew.discovery import discover_employees

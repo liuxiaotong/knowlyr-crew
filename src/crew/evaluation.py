@@ -238,7 +238,7 @@ class EvaluationEngine:
             return None
 
         parts = [
-            f"# 决策回溯评估",
+            "# 决策回溯评估",
             "",
             f"**决策 ID**: {decision.id}",
             f"**员工**: {decision.employee}",

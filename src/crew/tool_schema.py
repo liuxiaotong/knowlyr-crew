@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # crew tool name → sandbox tool name
 CREW_TO_SANDBOX: dict[str, str] = {
     "file_read": "file_read",
@@ -1991,7 +1990,7 @@ TOOL_ROLE_PRESETS["profile-functions"] = AGENT_TOOLS - DENY_FUNCTIONS
 TOOL_ROLE_PRESETS["profile-security"] = AGENT_TOOLS - DENY_SECURITY
 
 
-def resolve_effective_tools(employee: "Employee") -> set[str]:
+def resolve_effective_tools(employee: Employee) -> set[str]:
     """计算员工的有效工具集.
 
     逻辑:
@@ -2021,7 +2020,7 @@ def resolve_effective_tools(employee: "Employee") -> set[str]:
     return effective
 
 
-def validate_permissions(employee: "Employee") -> list[str]:
+def validate_permissions(employee: Employee) -> list[str]:
     """校验权限配置，返回警告列表."""
     warnings: list[str] = []
     if employee.permissions is None:

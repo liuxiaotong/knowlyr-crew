@@ -1,6 +1,5 @@
 """测试 EMPLOYEE.md / 目录格式 解析器."""
 
-import shutil
 from pathlib import Path
 
 import pytest

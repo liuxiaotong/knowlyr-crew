@@ -8,16 +8,16 @@ import logging
 import random
 import threading
 import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from collections.abc import AsyncIterator
-from typing import Any, Callable
+from typing import Any
 
 from crew.models import ToolCall, ToolExecutionResult
 from crew.providers import (
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
-    ZHIPU_BASE_URL,
     QWEN_BASE_URL,
+    ZHIPU_BASE_URL,
     Provider,
     detect_provider,
     resolve_api_key,

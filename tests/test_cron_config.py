@@ -1,8 +1,6 @@
 """Cron 配置测试 — cron_config.py."""
 
-import json
 
-import pytest
 
 from crew.cron_config import (
     CronConfig,
@@ -10,7 +8,6 @@ from crew.cron_config import (
     DeliveryTarget,
     load_cron_config,
 )
-
 
 # ── 模型测试 ──
 

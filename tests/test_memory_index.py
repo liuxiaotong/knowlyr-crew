@@ -1,8 +1,8 @@
 """测试 MemorySearchIndex."""
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from crew.memory import MemoryStore
 from crew.memory_index import MemorySearchIndex

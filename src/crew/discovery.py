@@ -239,7 +239,7 @@ def _discover_employees_uncached(root: Path) -> DiscoveryResult:
         _merge_employee(emp, "private", employees, trigger_map, conflicts)
 
     # 按 model_tier 填充模型默认值
-    from crew.organization import load_organization, apply_model_defaults
+    from crew.organization import apply_model_defaults, load_organization
 
     org = load_organization(project_dir=root)
     apply_model_defaults(employees, org)

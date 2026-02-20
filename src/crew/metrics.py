@@ -6,7 +6,6 @@ import threading
 import time
 from collections import deque
 
-
 _MAX_LATENCY_SAMPLES = 10000
 
 
@@ -79,7 +78,7 @@ class MetricsCollector:
                 self._latency_by_provider[provider].append(latency_ms)
 
     @staticmethod
-    def _latency_stats(samples: "deque[float] | list[float]") -> dict:
+    def _latency_stats(samples: deque[float] | list[float]) -> dict:
         """计算延迟统计信息."""
         if not samples:
             return {"count": 0, "mean_ms": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0}

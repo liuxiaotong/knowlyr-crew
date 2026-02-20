@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,7 +11,7 @@ if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
 
-async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """调用 knowlyr-id /api/stats/briefing."""
     import httpx
 
@@ -25,7 +24,7 @@ async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 
 
-async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """调用 knowlyr-id /api/messages/agent-send."""
     import httpx
 
@@ -44,7 +43,7 @@ async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: "_
 
 
 
-async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """调用 knowlyr-id /api/agents."""
     import httpx
 
@@ -57,7 +56,7 @@ async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 
 
-async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """保存备忘/笔记到 .crew/notes/."""
     import re
     from datetime import datetime
@@ -99,7 +98,7 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 
 
-async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """按昵称查用户详情."""
     import httpx
     name = args.get("name", "")
@@ -115,7 +114,7 @@ async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: "_A
 
 
 
-async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """查 AI 同事最近工作记录."""
     import httpx
     name = args.get("name", "")
@@ -132,7 +131,7 @@ async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx
 
 
 
-async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """列出最近笔记，可选按关键词过滤."""
     keyword = args.get("keyword", "")
     limit = min(args.get("limit", 10), 20)
@@ -159,7 +158,7 @@ async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: "_Ap
 
 
 
-async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """查 Kai 的未读消息概要."""
     import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -172,7 +171,7 @@ async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: "
 
 
 
-async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """查服务器健康状态."""
     import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -184,7 +183,7 @@ async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ct
 
 
 
-async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """标消息已读."""
     import httpx
     mark_all = args.get("all", False)
@@ -222,7 +221,7 @@ async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: "_App
 
 
 
-async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None) -> str:
+async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
     """管理 AI 同事."""
     import httpx
     target_id = args.get("agent_id")
@@ -265,7 +264,7 @@ def _find_report() -> Path | None:
 
 
 async def _tool_project_status(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询 knowlyr 项目状态."""
     import asyncio

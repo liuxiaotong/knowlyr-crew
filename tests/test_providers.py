@@ -7,11 +7,11 @@ import pytest
 
 from crew.providers import (
     API_KEY_ENV_VARS,
-    DEFAULT_MODELS,
     DEEPSEEK_BASE_URL,
+    DEFAULT_MODELS,
     MOONSHOT_BASE_URL,
-    ZHIPU_BASE_URL,
     QWEN_BASE_URL,
+    ZHIPU_BASE_URL,
     Provider,
     detect_provider,
     resolve_api_key,

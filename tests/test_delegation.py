@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from crew.models import ToolCall, ToolExecutionResult
 from crew.tool_schema import _TOOL_SCHEMAS, employee_tools_to_schemas, is_finish_tool
-
 
 # ── helpers ──
 

@@ -1,9 +1,6 @@
 """测试任务注册表."""
 
-import asyncio
-from pathlib import Path
 
-import pytest
 
 from crew.task_registry import TaskRecord, TaskRegistry
 
@@ -267,7 +264,6 @@ class TestTaskRegistryPersistence:
 
     def test_compact_fd_close_on_error(self, tmp_path):
         """原子写入异常时 fd 正确关闭."""
-        import os
         from unittest.mock import patch
 
         path = tmp_path / "tasks.jsonl"

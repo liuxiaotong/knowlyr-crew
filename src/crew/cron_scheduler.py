@@ -110,7 +110,7 @@ class CronScheduler:
         """调度器是否运行中."""
         return self._running
 
-    async def add_schedule(self, schedule: "CronSchedule") -> None:
+    async def add_schedule(self, schedule: CronSchedule) -> None:
         """动态添加定时任务."""
         self._config.schedules.append(schedule)
         if self._running:

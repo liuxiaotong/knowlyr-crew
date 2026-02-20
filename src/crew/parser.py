@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from crew.models import Employee, EmployeeArg, EmployeeOutput, PermissionPolicy, SKILL_TO_TOOL
+from crew.models import SKILL_TO_TOOL, Employee, EmployeeArg, EmployeeOutput, PermissionPolicy
 
 # name 格式：仅小写字母、数字、连字符，不以连字符开头或结尾
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")

@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 try:
     from mcp.server import InitializationOptions, Server
-    from mcp.server.stdio import stdio_server
     from mcp.server.lowlevel.helper_types import ReadResourceContents
+    from mcp.server.stdio import stdio_server
     from mcp.types import (
         GetPromptResult,
         Prompt,
@@ -31,7 +31,12 @@ from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.exceptions import EmployeeNotFoundError
 from crew.log import WorkLogger
-from crew.pipeline import arun_pipeline, discover_pipelines, load_pipeline, run_pipeline, validate_pipeline
+from crew.pipeline import (
+    arun_pipeline,
+    discover_pipelines,
+    load_pipeline,
+    validate_pipeline,
+)
 
 
 def _get_version() -> str:
@@ -918,7 +923,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             )]
 
         elif name == "get_permission_matrix":
-            from crew.tool_schema import resolve_effective_tools, TOOL_ROLE_PRESETS
+            from crew.tool_schema import TOOL_ROLE_PRESETS, resolve_effective_tools
             result = discover_employees(project_dir=_project_dir)
             emp_name = arguments.get("employee")
             employees = list(result.employees.values())
@@ -1100,11 +1105,11 @@ async def serve_sse(
     if not HAS_MCP:
         raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
 
+    import uvicorn
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
-    import uvicorn
 
     server = create_server(project_dir=project_dir)
     sse = SseServerTransport("/messages/")
@@ -1173,11 +1178,11 @@ async def serve_http(
     if not HAS_MCP:
         raise ImportError("MCP 未安装。请运行: pip install knowlyr-crew[mcp]")
 
+    import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
-    import uvicorn
 
     server = create_server(project_dir=project_dir)
     session_manager = StreamableHTTPSessionManager(app=server)

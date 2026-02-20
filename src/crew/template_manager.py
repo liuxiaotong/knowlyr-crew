@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable
 
 from crew.paths import get_global_templates_dir
 
@@ -32,11 +32,11 @@ def _iter_template_files(dir_path: Path, layer: str) -> Iterable[TemplateRecord]
     return records
 
 
-def discover_templates(project_dir: Path | None = None) -> Dict[str, TemplateRecord]:
+def discover_templates(project_dir: Path | None = None) -> dict[str, TemplateRecord]:
     """发现可用模板，项目层覆盖全局，最终覆盖内置."""
     from crew.paths import resolve_project_dir
     root = resolve_project_dir(project_dir)
-    records: Dict[str, TemplateRecord] = {}
+    records: dict[str, TemplateRecord] = {}
 
     for layer, directory in (
         ("builtin", BUILTIN_TEMPLATES_DIR),

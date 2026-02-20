@@ -3,10 +3,9 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 import yaml
 
-from crew.sync import SyncReport, sync_all
+from crew.sync import sync_all
 
 
 def _make_employee_dir(base: Path, name: str, *, agent_id: int | None = None, bio: str = "") -> Path:

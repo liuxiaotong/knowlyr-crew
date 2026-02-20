@@ -10,9 +10,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from crew.webhook_context import _AppContext, _EMPLOYEE_UPDATABLE_FIELDS
-
 import re as _re
+
+from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
+
 
 def _parse_sender_name(extra_context: str | None) -> str | None:
     """从 extra_context 解析发送者名（knowlyr-id 格式: '当前对话用户: XXX'）."""
@@ -31,6 +32,7 @@ async def _health(request: Any) -> Any:
 async def _metrics(request: Any) -> Any:
     """运行时指标."""
     from starlette.responses import JSONResponse
+
     from crew.metrics import get_collector
     return JSONResponse(get_collector().snapshot())
 
@@ -38,6 +40,7 @@ async def _metrics(request: Any) -> Any:
 async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     """返回员工配置和渲染后的 system_prompt（供 knowlyr-id 调用）."""
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
     from crew.tool_schema import employee_tools_to_schemas
@@ -79,7 +82,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
             max_tokens = yaml_config.get("max_tokens")
 
     # 组织架构信息（团队、权限、成本）
-    from crew.organization import load_organization, get_effective_authority
+    from crew.organization import get_effective_authority, load_organization
     org = load_organization(project_dir=ctx.project_dir)
     team = org.get_team(employee.name)
     authority = get_effective_authority(org, employee.name, project_dir=ctx.project_dir)
@@ -123,6 +126,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
     from crew.memory import MemoryStore
 
@@ -234,6 +238,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
 async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     """更新员工配置（model 等）— employee.yaml 是唯一真相源."""
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
@@ -310,7 +315,9 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
 async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     """删除员工（本地文件 + 远端标记为 inactive）."""
     import shutil
+
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
@@ -393,6 +400,7 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
 async def _handle_github(request: Any, ctx: _AppContext) -> Any:
     """处理 GitHub webhook."""
     from starlette.responses import JSONResponse
+
     from crew.webhook_config import (
         match_route,
         resolve_target_args,
@@ -482,7 +490,6 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
     """直接触发 pipeline."""
-    from starlette.responses import JSONResponse
 
     name = request.path_params["name"]
     payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
@@ -529,9 +536,10 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
         # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
         import time as _time
+
         from crew.discovery import discover_employees
-        from crew.webhook_feishu import _needs_tools
         from crew.tool_schema import AGENT_TOOLS
+        from crew.webhook_feishu import _needs_tools
 
         discovery = discover_employees(project_dir=ctx.project_dir)
         emp = discovery.get(name)
@@ -628,7 +636,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     """直接触发路由模板 — 展开为 delegate_chain 执行."""
     import json as _json
+
     from starlette.responses import JSONResponse
+
     from crew.organization import load_organization
 
     name = request.path_params["name"]
@@ -710,9 +720,9 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
     sandbox_cfg = payload.get("sandbox", {})
 
     try:
-        from agentsandbox import Sandbox, SandboxEnv
+        from agentsandbox import Sandbox, SandboxEnv  # noqa: F401
         from agentsandbox.config import SandboxConfig, TaskConfig
-        from knowlyrcore.wrappers import MaxStepsWrapper, RecorderWrapper
+        from knowlyrcore.wrappers import MaxStepsWrapper, RecorderWrapper  # noqa: F401
     except ImportError:
         return JSONResponse(
             {"error": "knowlyr-agent 未安装。请运行: pip install knowlyr-crew[agent]"},
@@ -866,6 +876,7 @@ async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
 async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
     """成本汇总 — GET /api/cost/summary?days=7&employee=xxx&source=work."""
     from starlette.responses import JSONResponse
+
     from crew.cost import query_cost_summary
 
     days = int(request.query_params.get("days", "7"))
@@ -879,13 +890,13 @@ async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
 async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     """恢复员工权限 — POST /api/employees/{identifier}/authority/restore."""
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
     from crew.organization import (
-        load_organization,
-        get_effective_authority,
+        _authority_overrides,
         _load_overrides,
         _save_overrides,
-        _authority_overrides,
+        load_organization,
     )
 
     identifier = request.path_params["identifier"]
@@ -931,10 +942,12 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     """全组织记忆聚合 — GET /api/memory/org?days=7&category=pattern&limit=50."""
+    from datetime import datetime, timedelta
+
     from starlette.responses import JSONResponse
+
     from crew.discovery import discover_employees
     from crew.memory import MemoryStore
-    from datetime import datetime, timedelta
 
     days = int(request.query_params.get("days", "7"))
     category = request.query_params.get("category") or None
@@ -981,9 +994,16 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     """项目状态概览 — 组织架构 + 成本 + 员工列表."""
     from starlette.responses import JSONResponse
+
+    from crew.cost import (
+        calibrate_employee_costs,
+        fetch_aiberm_balance,
+        fetch_aiberm_billing,
+        fetch_moonshot_balance,
+        query_cost_summary,
+    )
     from crew.discovery import discover_employees
-    from crew.organization import load_organization, get_effective_authority
-    from crew.cost import query_cost_summary, calibrate_employee_costs, fetch_aiberm_billing, fetch_aiberm_balance, fetch_moonshot_balance
+    from crew.organization import get_effective_authority, load_organization
 
     days = int(request.query_params.get("days", "7"))
     if days not in (7, 30, 90):

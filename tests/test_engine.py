@@ -148,8 +148,9 @@ class TestCrewEngine:
 
     def test_git_branch_failure_returns_empty(self):
         """_get_git_branch 在 subprocess 失败时返回空串."""
-        from crew.engine import _get_git_branch
         from unittest.mock import patch
+
+        from crew.engine import _get_git_branch
 
         with patch("crew.engine.subprocess.run", side_effect=FileNotFoundError):
             assert _get_git_branch() == ""
@@ -184,7 +185,7 @@ class TestCrewEngine:
 
     def test_render_weekday_variable(self):
         """render() 应替换 {weekday} 为中文星期."""
-        from crew.models import Employee, EmployeeArg
+        from crew.models import Employee
 
         emp = Employee(
             name="weekday-test",

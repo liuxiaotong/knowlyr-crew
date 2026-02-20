@@ -5,12 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from crew.tool_schema import AGENT_TOOLS, _TOOL_SCHEMAS
+from crew.tool_schema import _TOOL_SCHEMAS, AGENT_TOOLS
 
 
 def _run(coro):

@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from crew.feishu_memory import FeishuChatStore, capture_feishu_memory
 
 

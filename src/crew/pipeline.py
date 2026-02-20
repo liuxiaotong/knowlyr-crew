@@ -308,7 +308,8 @@ def _evaluate_check(
     resolved = _resolve_output_refs(check, outputs_by_id, outputs_by_index, prev_output, execute)
     if contains:
         return contains in resolved
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeout
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
             return bool(pool.submit(re.search, matches, resolved).result(timeout=_REGEX_TIMEOUT))
@@ -320,7 +321,7 @@ def _evaluate_check(
 # ── 单步执行 ──
 
 
-def _resolve_agent_identity(agent_id: int | None) -> "AgentIdentity | None":
+def _resolve_agent_identity(agent_id: int | None) -> AgentIdentity | None:
     """获取 agent 身份信息（可选）."""
     if agent_id is None:
         return None
@@ -335,7 +336,7 @@ class AgentDisabledError(RuntimeError):
     """Agent 已停用，拒绝执行."""
 
 
-def _check_agent_active(agent_identity: "AgentIdentity | None", agent_id: int | None) -> None:
+def _check_agent_active(agent_identity: AgentIdentity | None, agent_id: int | None) -> None:
     """如果 agent 已停用则抛出异常."""
     if agent_identity is None:
         return
@@ -361,13 +362,13 @@ def _execute_single_step(
     step: PipelineStep,
     index: int,
     engine: CrewEngine,
-    employees: "DiscoveryResult",
+    employees: DiscoveryResult,
     initial_args: dict[str, str],
     outputs_by_id: dict[str, str],
     outputs_by_index: dict[int, str],
     prev_output: str,
-    agent_identity: "AgentIdentity | None",
-    project_info: "ProjectInfo | None",
+    agent_identity: AgentIdentity | None,
+    project_info: ProjectInfo | None,
     execute: bool,
     api_key: str | None,
     model: str | None,
@@ -970,7 +971,7 @@ async def aresume_pipeline(
 
     # 从 checkpoint 恢复状态
     completed_steps_data = checkpoint.get("completed_steps", [])
-    outputs_by_id: dict[str, str] = {k: v for k, v in checkpoint.get("outputs_by_id", {}).items()}
+    outputs_by_id: dict[str, str] = dict(checkpoint.get("outputs_by_id", {}).items())
     outputs_by_index: dict[int, str] = {int(k): v for k, v in checkpoint.get("outputs_by_index", {}).items()}
     next_flat_index: int = checkpoint.get("next_flat_index", 0)
     next_step_i: int = checkpoint.get("next_step_i", 0)
@@ -1148,13 +1149,13 @@ async def _aexecute_single_step(
     step: PipelineStep,
     index: int,
     engine: CrewEngine,
-    employees: "DiscoveryResult",
+    employees: DiscoveryResult,
     initial_args: dict[str, str],
     outputs_by_id: dict[str, str],
     outputs_by_index: dict[int, str],
     prev_output: str,
-    agent_identity: "AgentIdentity | None",
-    project_info: "ProjectInfo | None",
+    agent_identity: AgentIdentity | None,
+    project_info: ProjectInfo | None,
     api_key: str | None,
     model: str | None,
     exemplar_prompt: str = "",
@@ -1320,7 +1321,7 @@ def discover_pipelines(project_dir: Path | None = None) -> dict[str, Path]:
 
 
 def pipeline_from_action_plan(
-    action_plan: "DiscussionActionPlan",
+    action_plan: DiscussionActionPlan,
     employee_mapping: dict[str, str] | None = None,
 ) -> Pipeline:
     """从讨论行动计划自动生成 Pipeline.
@@ -1334,7 +1335,6 @@ def pipeline_from_action_plan(
         action_plan: 讨论产出的行动计划
         employee_mapping: 角色到员工的映射（如 {"executor": "fullstack-engineer"}）
     """
-    from crew.models import DiscussionActionPlan  # noqa: F811
 
     employee_mapping = employee_mapping or {}
 
@@ -1347,7 +1347,7 @@ def pipeline_from_action_plan(
         )
 
     # 拓扑排序
-    in_degree: dict[str, int] = {aid: 0 for aid in actions}
+    in_degree: dict[str, int] = dict.fromkeys(actions, 0)
     dependents: dict[str, list[str]] = {aid: [] for aid in actions}
     for aid, action in actions.items():
         for dep in action.depends_on:

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
-
 from crew.webhook_context import _GITHUB_API_BASE, _GITHUB_REPO_RE, _GITHUB_TOKEN
 
 
@@ -15,7 +12,7 @@ def _is_valid_github_repo(repo: str) -> bool:
 
 
 async def _tool_github_prs(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库 PR 列表."""
     import httpx
@@ -55,7 +52,7 @@ async def _tool_github_prs(
 
 
 async def _tool_github_issues(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库 Issue 列表."""
     import httpx
@@ -103,11 +100,12 @@ async def _tool_github_issues(
 
 
 async def _tool_github_repo_activity(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库最近活动."""
-    import httpx
     from datetime import datetime, timedelta, timezone
+
+    import httpx
 
     if not _GITHUB_TOKEN:
         return "GitHub 未配置。请设置 GITHUB_TOKEN 环境变量。"

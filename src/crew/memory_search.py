@@ -20,7 +20,7 @@ _EMBED_POOL = ThreadPoolExecutor(max_workers=1)
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """计算余弦相似度."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
@@ -94,12 +94,12 @@ class SemanticMemoryIndex:
             self._conn = conn
         return self._conn
 
-    def _get_embedder(self) -> "_Embedder":
+    def _get_embedder(self) -> _Embedder:
         if self._embedder is None:
             self._embedder = _create_embedder()
         return self._embedder
 
-    def index(self, entry: "MemoryEntry") -> bool:
+    def index(self, entry: MemoryEntry) -> bool:
         """为一条记忆计算 embedding 并存储.
 
         Returns:
@@ -214,7 +214,6 @@ class SemanticMemoryIndex:
 
         embedder = self._get_embedder()
         try:
-            from concurrent.futures import TimeoutError as FuturesTimeout
             future = _EMBED_POOL.submit(embedder.embed, query)
             query_embedding = future.result(timeout=timeout)
         except Exception as e:
@@ -242,7 +241,7 @@ class SemanticMemoryIndex:
         scored.sort(key=lambda x: x[3], reverse=True)
         return scored[:limit]
 
-    def reindex(self, employee: str, entries: list["MemoryEntry"]) -> int:
+    def reindex(self, employee: str, entries: list[MemoryEntry]) -> int:
         """全量重建某员工的索引.
 
         Returns:
@@ -267,7 +266,7 @@ class SemanticMemoryIndex:
         ).fetchone()
         return row[0] > 0 if row else False
 
-    def __enter__(self) -> "SemanticMemoryIndex":
+    def __enter__(self) -> SemanticMemoryIndex:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -326,8 +325,9 @@ class _GeminiEmbedder(_Embedder):
 
     def embed(self, text: str) -> list[float] | None:
         try:
-            import google.generativeai as genai
             from concurrent.futures import ThreadPoolExecutor
+
+            import google.generativeai as genai
 
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(

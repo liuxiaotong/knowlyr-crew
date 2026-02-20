@@ -171,7 +171,6 @@ class TestEvaluationEngine:
 
     def test_evaluate_writes_to_memory(self, tmp_path):
         """评估后应将结论写入员工记忆."""
-        from crew.memory import MemoryStore
         memory_dir = tmp_path / "memory"
         eval_dir = tmp_path / "eval"
 
@@ -202,7 +201,6 @@ class TestEvaluationEngine:
         assert d2_loaded.status == "pending"
 
         # 验证文件完整性 — 所有行都是合法 JSON
-        import json
         decisions_file = eval_dir / "decisions.jsonl"
         for line in decisions_file.read_text().splitlines():
             if line.strip():
@@ -210,7 +208,6 @@ class TestEvaluationEngine:
 
     def test_evaluate_crash_safety(self, tmp_path):
         """os.replace 失败时不应损坏原文件."""
-        import os
         from unittest.mock import patch
 
         eval_dir = tmp_path / "eval"

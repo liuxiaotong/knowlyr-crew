@@ -12,7 +12,6 @@ import pytest
 from crew.feishu import (
     EventDeduplicator,
     FeishuConfig,
-    FeishuMessageEvent,
     FeishuTokenManager,
     load_feishu_config,
     parse_message_event,
@@ -743,7 +742,7 @@ class TestSanitizeFeishuText:
         assert _sanitize_feishu_text(text) == text
 
     def test_truncates_long_text(self):
-        from crew.feishu import _sanitize_feishu_text, _FEISHU_TEXT_MAX_LEN
+        from crew.feishu import _FEISHU_TEXT_MAX_LEN, _sanitize_feishu_text
         long_text = "a" * (_FEISHU_TEXT_MAX_LEN + 500)
         result = _sanitize_feishu_text(long_text)
         assert len(result) == _FEISHU_TEXT_MAX_LEN + 3  # +3 for "..."

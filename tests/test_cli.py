@@ -10,8 +10,8 @@ from click.testing import CliRunner
 
 from crew import __version__
 from crew.cli import main
-from crew.log import WorkLogger
 from crew.id_client import AgentIdentity
+from crew.log import WorkLogger
 
 
 class TestCLI:
@@ -511,7 +511,6 @@ steps:
         assert "未找到" in result.output
 
     def test_checkpoint_list_with_data(self, tmp_path, monkeypatch):
-        import time as _t
         from crew.task_registry import TaskRegistry
 
         (tmp_path / ".crew").mkdir(parents=True)
@@ -558,8 +557,7 @@ steps:
 
     def test_changelog_draft_subprocess_has_timeout(self):
         """changelog_draft 的 subprocess.run 应带 timeout 参数."""
-        import subprocess
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         mock_result = MagicMock()
         mock_result.stdout = "abc1234 test commit\n"

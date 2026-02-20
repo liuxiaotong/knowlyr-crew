@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
     from starlette.applications import Starlette
     from starlette.requests import Request
-    from starlette.responses import JSONResponse, StreamingResponse
+    from starlette.responses import JSONResponse, StreamingResponse  # noqa: F401
     from starlette.routing import Route
 
     HAS_STARLETTE = True
@@ -21,7 +20,6 @@ except ImportError:
 
 from crew.task_registry import TaskRegistry
 from crew.webhook_context import (  # noqa: F401
-    _AppContext,
     _EMPLOYEE_UPDATABLE_FIELDS,
     _GITHUB_API_BASE,
     _GITHUB_REPO_RE,
@@ -32,43 +30,7 @@ from crew.webhook_context import (  # noqa: F401
     _NOTION_API_BASE,
     _NOTION_API_KEY,
     _NOTION_VERSION,
-)
-
-# ── re-export: 工具函数（测试和外部代码仍从 crew.webhook import）──
-from crew.webhook_tools.orchestration import (  # noqa: F401
-    _tool_agent_file_grep,
-    _tool_agent_file_read,
-    _tool_cancel_schedule,
-    _tool_check_meeting,
-    _tool_check_task,
-    _tool_delegate_async,
-    _tool_delegate_chain,
-    _tool_find_free_time,
-    _tool_list_schedules,
-    _tool_list_tasks,
-    _tool_organize_meeting,
-    _tool_query_data,
-    _tool_run_pipeline,
-    _tool_schedule_task,
-)
-from crew.webhook_tools.data_query import (  # noqa: F401
-    _tool_create_note,
-    _tool_get_system_health,
-    _tool_list_agents,
-    _tool_lookup_user,
-    _tool_mark_read,
-    _tool_query_agent_work,
-    _tool_query_stats,
-    _tool_read_messages,
-    _tool_read_notes,
-    _tool_send_message,
-    _tool_update_agent,
-)
-from crew.webhook_tools.external import (  # noqa: F401
-    _tool_web_search,
-)
-from crew.webhook_tools.feishu import (  # noqa: F401
-    _tool_read_feishu_calendar,
+    _AppContext,
 )
 
 # ── re-export: 执行引擎 ──
@@ -86,6 +48,13 @@ from crew.webhook_executor import (  # noqa: F401
     _resume_chain,
     _resume_incomplete_pipelines,
     _stream_employee,
+)
+
+# ── re-export: 飞书处理 ──
+from crew.webhook_feishu import (  # noqa: F401
+    _feishu_dispatch,
+    _find_recent_image_in_chat,
+    _handle_feishu_event,
 )
 
 # ── re-export: HTTP handler ──
@@ -113,12 +82,42 @@ from crew.webhook_handlers import (  # noqa: F401
     _health,
     _metrics,
 )
+from crew.webhook_tools.data_query import (  # noqa: F401
+    _tool_create_note,
+    _tool_get_system_health,
+    _tool_list_agents,
+    _tool_lookup_user,
+    _tool_mark_read,
+    _tool_query_agent_work,
+    _tool_query_stats,
+    _tool_read_messages,
+    _tool_read_notes,
+    _tool_send_message,
+    _tool_update_agent,
+)
+from crew.webhook_tools.external import (  # noqa: F401
+    _tool_web_search,
+)
+from crew.webhook_tools.feishu import (  # noqa: F401
+    _tool_read_feishu_calendar,
+)
 
-# ── re-export: 飞书处理 ──
-from crew.webhook_feishu import (  # noqa: F401
-    _feishu_dispatch,
-    _find_recent_image_in_chat,
-    _handle_feishu_event,
+# ── re-export: 工具函数（测试和外部代码仍从 crew.webhook import）──
+from crew.webhook_tools.orchestration import (  # noqa: F401
+    _tool_agent_file_grep,
+    _tool_agent_file_read,
+    _tool_cancel_schedule,
+    _tool_check_meeting,
+    _tool_check_task,
+    _tool_delegate_async,
+    _tool_delegate_chain,
+    _tool_find_free_time,
+    _tool_list_schedules,
+    _tool_list_tasks,
+    _tool_organize_meeting,
+    _tool_query_data,
+    _tool_run_pipeline,
+    _tool_schedule_task,
 )
 
 
@@ -132,11 +131,11 @@ def _make_handler(ctx: _AppContext, handler):
 def create_webhook_app(
     project_dir: Path | None = None,
     token: str | None = None,
-    config: "WebhookConfig | None" = None,
-    cron_config: "CronConfig | None" = None,
+    config: WebhookConfig | None = None,
+    cron_config: CronConfig | None = None,
     cors_origins: list[str] | None = None,
-    feishu_config: "FeishuConfig | None" = None,
-) -> "Starlette":
+    feishu_config: FeishuConfig | None = None,
+) -> Starlette:
     """创建 webhook Starlette 应用."""
     if not HAS_STARLETTE:
         raise ImportError("starlette 未安装。请运行: pip install knowlyr-crew[webhook]")
@@ -191,7 +190,8 @@ def create_webhook_app(
             if schedule.delivery:
                 record = ctx.registry.get(record.task_id)
                 try:
-                    from crew.delivery import deliver, DeliveryTarget as DT
+                    from crew.delivery import DeliveryTarget as DT
+                    from crew.delivery import deliver
 
                     targets = [DT(**t.model_dump()) for t in schedule.delivery]
                     results = await deliver(

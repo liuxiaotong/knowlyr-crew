@@ -14,7 +14,7 @@ pytest.importorskip("starlette")
 
 from starlette.testclient import TestClient
 
-from crew.task_registry import TaskRecord, TaskRegistry
+from crew.task_registry import TaskRegistry
 from crew.webhook import create_webhook_app
 from crew.webhook_config import (
     RouteTarget,
@@ -26,7 +26,6 @@ from crew.webhook_config import (
     resolve_template,
     verify_github_signature,
 )
-
 
 # ── WebhookConfig 测试 ──
 
@@ -576,9 +575,7 @@ class TestStreamEmployee:
     @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
     def test_stream_returns_sse(self, mock_exec, mock_engine_cls, mock_discover):
         """stream=true 应返回 text/event-stream."""
-        from crew.models import Employee
-
-        from crew.models import DiscoveryResult
+        from crew.models import DiscoveryResult, Employee
 
         emp = Employee(name="test-emp", display_name="Test", description="", body="")
         mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})

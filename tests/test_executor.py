@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crew.executor import ExecutionResult, execute_prompt, aexecute_prompt
+from crew.executor import ExecutionResult, aexecute_prompt, execute_prompt
 
 
 class TestExecutePrompt:
@@ -889,6 +889,7 @@ class TestStreamingMetrics:
     def test_async_streaming_records_metrics(self, mock_get):
         """流消费完毕后自动记录指标."""
         import asyncio
+
         from crew.metrics import get_collector
 
         mock_client = MagicMock()
@@ -911,7 +912,7 @@ class TestStreamingMetrics:
         mock_client.messages.stream = MagicMock()
 
         # 我们直接测试 _MetricsStreamWrapper
-        from crew.executor import _MetricsStreamWrapper, ExecutionResult
+        from crew.executor import ExecutionResult, _MetricsStreamWrapper
 
         mock_result = ExecutionResult(
             content="hello world", model="test", input_tokens=50,
@@ -941,8 +942,7 @@ class TestStreamingMetrics:
 
     def test_streaming_wrapper_exposes_result(self):
         """wrapper.result 透传 inner.result."""
-        import asyncio
-        from crew.executor import _MetricsStreamWrapper, ExecutionResult
+        from crew.executor import ExecutionResult, _MetricsStreamWrapper
 
         mock_result = ExecutionResult(
             content="ok", model="test", input_tokens=1,
@@ -957,6 +957,7 @@ class TestStreamingMetrics:
     def test_streaming_wrapper_handles_error(self):
         """流中异常不影响 wrapper."""
         import asyncio
+
         from crew.executor import _MetricsStreamWrapper
 
         inner = _FakeAsyncStreamWithError(
@@ -1066,7 +1067,8 @@ class TestMetricsLogging:
     def test_record_metrics_failure_logged(self, caplog):
         """_record_metrics 失败时记录 debug 日志."""
         import logging
-        from crew.executor import _record_metrics, ExecutionResult
+
+        from crew.executor import ExecutionResult, _record_metrics
 
         result = ExecutionResult(
             content="test", model="test", input_tokens=10,
@@ -1080,6 +1082,7 @@ class TestMetricsLogging:
     def test_record_failure_logged(self, caplog):
         """_record_failure 失败时记录 debug 日志."""
         import logging
+
         from crew.executor import _record_failure
 
         with caplog.at_level(logging.DEBUG, logger="crew.executor"):

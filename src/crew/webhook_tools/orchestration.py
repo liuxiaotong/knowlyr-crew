@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
-from datetime import datetime
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from crew.webhook_context import _ID_API_BASE, _ID_API_TOKEN
 
@@ -19,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _tool_delegate_async(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """异步委派 — 立即返回 task_id，后台执行."""
     if ctx is None:
@@ -48,7 +45,7 @@ async def _tool_delegate_async(
 
 
 async def _tool_check_task(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询任务状态和结果."""
     if ctx is None:
@@ -103,7 +100,7 @@ async def _tool_check_task(
 
 
 async def _tool_list_tasks(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """列出最近的任务."""
     if ctx is None:
@@ -136,7 +133,7 @@ async def _tool_list_tasks(
 
 
 async def _tool_organize_meeting(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """组织多员工会议（异步）."""
     if ctx is None:
@@ -186,7 +183,7 @@ async def _tool_organize_meeting(
 
 
 async def _tool_check_meeting(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询会议进展（check_task 别名）."""
     return await _tool_check_task(args, agent_id=agent_id, ctx=ctx)
@@ -197,7 +194,7 @@ async def _tool_check_meeting(
 
 
 async def _tool_run_pipeline(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """执行预定义流水线（异步）."""
     if ctx is None:
@@ -234,7 +231,7 @@ async def _tool_run_pipeline(
 
 
 async def _tool_delegate_chain(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """顺序委派链（异步）."""
     if ctx is None:
@@ -266,7 +263,7 @@ async def _tool_delegate_chain(
 
 
 async def _tool_schedule_task(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """创建定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -308,7 +305,7 @@ async def _tool_schedule_task(
 
 
 async def _tool_list_schedules(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """列出定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -332,7 +329,7 @@ async def _tool_list_schedules(
 
 
 async def _tool_cancel_schedule(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """取消定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -350,7 +347,7 @@ async def _tool_cancel_schedule(
 
 
 async def _tool_agent_file_read(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """读取项目目录内的文件."""
     if ctx is None:
@@ -396,7 +393,7 @@ async def _tool_agent_file_read(
 
 
 async def _tool_agent_file_grep(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """在项目目录内搜索文件内容."""
     if ctx is None:
@@ -442,7 +439,7 @@ async def _tool_agent_file_grep(
 
 
 async def _tool_query_data(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询细粒度业务数据."""
     metric = args.get("metric", "")
@@ -471,7 +468,7 @@ async def _tool_query_data(
 
 
 async def _tool_find_free_time(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询飞书用户共同空闲时间."""
     if ctx is None or ctx.feishu_token_mgr is None:
@@ -486,9 +483,9 @@ async def _tool_find_free_time(
     if not user_ids:
         return "错误: 必须提供 user_ids"
 
-    from crew.feishu import get_freebusy
-
     import time as _time
+
+    from crew.feishu import get_freebusy
 
     now = int(_time.time())
     end = now + days * 86400
@@ -559,7 +556,7 @@ async def _tool_find_free_time(
 
 
 async def _tool_query_cost(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询 token 消耗和成本汇总."""
     if ctx is None:
@@ -594,7 +591,7 @@ async def _tool_query_cost(
 
 
 async def _tool_route(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """按路由模板发起委派链."""
     if ctx is None:

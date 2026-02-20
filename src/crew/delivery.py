@@ -6,8 +6,8 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import smtplib
 import os
+import smtplib
 import time
 from email.mime.text import MIMEText
 from typing import Any, Literal

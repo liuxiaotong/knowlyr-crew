@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-
-import pytest
 
 from crew.webhook_tools.engineering import _tool_run_python, _validate_python_code
 

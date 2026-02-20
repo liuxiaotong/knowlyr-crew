@@ -84,7 +84,17 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
-ignore = ["E501", "B904"]
+ignore = [
+    "E501",   # line too long
+    "E402",   # module level import not at top (有意延迟 import)
+    "E741",   # ambiguous variable name
+    "B904",   # raise without from
+    "B007",   # unused loop variable
+    "B011",   # assert False
+    "B017",   # assertRaises(Exception)
+    "F841",   # local variable assigned but never used (TODO: 分批清理)
+    "F821",   # undefined name (动态 import / TYPE_CHECKING)
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]

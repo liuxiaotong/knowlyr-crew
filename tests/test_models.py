@@ -1,11 +1,11 @@
 """数据模型测试 — models.py 核心类与映射."""
 
-import os
-import re
 
 import pytest
 
 from crew.models import (
+    SKILL_TO_TOOL,
+    TOOL_TO_SKILL,
     ActionItem,
     Condition,
     ConditionalBody,
@@ -17,13 +17,10 @@ from crew.models import (
     PermissionPolicy,
     PipelineStep,
     StepResult,
-    SKILL_TO_TOOL,
-    TOOL_TO_SKILL,
     ToolCall,
     ToolExecutionResult,
     WorkLogEntry,
 )
-
 
 # ── TOOL_TO_SKILL / SKILL_TO_TOOL 映射 ──
 

@@ -4,20 +4,17 @@ import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from crew.delivery import (
-    DeliveryResult,
-    DeliveryTarget,
     FEISHU_CARD_CONTENT_MAX,
-    WEBHOOK_TIMEOUT,
     SMTP_TIMEOUT,
-    deliver,
+    WEBHOOK_TIMEOUT,
+    DeliveryTarget,
     _build_feishu_card,
     _deliver_email,
     _deliver_feishu,
     _deliver_webhook,
     _feishu_sign,
+    deliver,
 )
 
 

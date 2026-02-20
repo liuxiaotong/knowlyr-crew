@@ -8,12 +8,11 @@ import pytest
 
 from crew.avatar import (
     AVATAR_SIZE,
-    AVATAR_QUALITY,
     PHOTO_SUFFIX,
+    _get_api_key,
     build_avatar_prompt,
     compress_avatar,
     generate_avatar,
-    _get_api_key,
 )
 
 

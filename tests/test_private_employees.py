@@ -1,9 +1,9 @@
 """员工静态检查 — CI 必跑 + 本地 private 员工扩展检查."""
 
-import yaml
 from pathlib import Path
 
 import pytest
+import yaml
 
 from crew.parser import parse_employee_dir, validate_employee
 
@@ -181,7 +181,7 @@ class TestPrivateOrganization:
 
     @classmethod
     def setup_class(cls):
-        from crew.organization import load_organization, invalidate_cache
+        from crew.organization import invalidate_cache, load_organization
         invalidate_cache()
         cls.org = load_organization(project_dir=PROJECT_DIR)
         cls.emp_names = set()

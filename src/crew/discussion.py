@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 from crew.context_detector import ProjectInfo, detect_project
 from crew.discovery import discover_employees
 from crew.engine import CrewEngine
-from crew.paths import get_global_discussions_dir
 from crew.models import DiscussionPlan, Employee, EmployeeOutput, ParticipantPrompt, RoundPlan
+from crew.paths import get_global_discussions_dir
 
 if TYPE_CHECKING:
     from crew.id_client import AgentIdentity
@@ -341,7 +341,7 @@ def _render_header(
     topic: str,
     goal: str,
     project_info: ProjectInfo | None,
-    agent_identity: "AgentIdentity | None",
+    agent_identity: AgentIdentity | None,
 ) -> list[str]:
     """渲染头部：标题、议题、目标、项目类型."""
     parts = [
@@ -523,7 +523,7 @@ def _render_1v1_meeting(
     engine: CrewEngine,
     initial_args: dict[str, str],
     project_info: ProjectInfo | None,
-    agent_identity: "AgentIdentity | None",
+    agent_identity: AgentIdentity | None,
 ) -> str:
     """渲染 1v1 会议 prompt — 会话式而非多轮结构."""
     info = participants_info[0]
@@ -625,7 +625,7 @@ def render_discussion(
     project_info = detect_project(project_dir) if smart_context else None
 
     # 获取 agent 身份（可选）
-    agent_identity: "AgentIdentity | None" = None
+    agent_identity: AgentIdentity | None = None
     if agent_id is not None:
         try:
             from crew.id_client import fetch_agent_identity

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import urllib.parse
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,10 +9,11 @@ if TYPE_CHECKING:
 
 
 async def _tool_get_datetime(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """获取当前准确日期时间."""
-    from datetime import datetime, timedelta, timezone as _tz
+    from datetime import datetime, timedelta
+    from datetime import timezone as _tz
 
     tz_cn = _tz(timedelta(hours=8))
     now = datetime.now(tz_cn)
@@ -23,7 +23,7 @@ async def _tool_get_datetime(
 
 
 async def _tool_calculate(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """安全计算数学表达式."""
     import ast
@@ -106,7 +106,7 @@ async def _tool_calculate(
 
 
 async def _tool_unit_convert(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """单位换算."""
     value = args.get("value")
@@ -141,7 +141,7 @@ async def _tool_unit_convert(
 
 
 async def _tool_random_pick(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """随机选择 / 掷骰子."""
     import random
@@ -167,11 +167,13 @@ async def _tool_random_pick(
 
 
 async def _tool_holidays(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询中国法定节假日."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as _tz
+
     import httpx
-    from datetime import datetime, timedelta, timezone as _tz
 
     tz_cn = _tz(timedelta(hours=8))
     now = datetime.now(tz_cn)
@@ -196,7 +198,7 @@ async def _tool_holidays(
 
         holidays_data = data.get("holiday", {})
         if not holidays_data:
-            return f"{year}年{'%d月' % month if month else ''}没有节假日数据。"
+            return f"{year}年{f'{month}月' if month else ''}没有节假日数据。"
 
         lines = []
         for date_str, info in sorted(holidays_data.items()):
@@ -208,7 +210,7 @@ async def _tool_holidays(
         if not lines:
             return "没有找到节假日信息。"
 
-        header = f"📅 {year}年{'%d月' % month if month else ''}节假日安排"
+        header = f"📅 {year}年{f'{month}月' if month else ''}节假日安排"
         return f"{header}\n\n" + "\n".join(lines)
     except Exception as e:
         return f"查询节假日失败: {e}"
@@ -216,10 +218,11 @@ async def _tool_holidays(
 
 
 async def _tool_timestamp_convert(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """Unix 时间戳 ↔ 可读时间互转."""
-    from datetime import datetime, timedelta, timezone as _tz
+    from datetime import datetime, timedelta
+    from datetime import timezone as _tz
 
     tz_cn = _tz(timedelta(hours=8))
     input_str = (args.get("input") or "").strip()
@@ -256,7 +259,7 @@ async def _tool_timestamp_convert(
 
 
 async def _tool_text_extract(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """从文本中提取邮箱、手机号、URL、金额等."""
     import re
@@ -304,7 +307,7 @@ async def _tool_text_extract(
 
 
 async def _tool_json_format(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """格式化 JSON."""
     import json as _json
@@ -341,7 +344,7 @@ async def _tool_json_format(
 
 
 async def _tool_password_gen(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """生成安全随机密码."""
     import secrets
@@ -368,7 +371,7 @@ async def _tool_password_gen(
 
 
 async def _tool_ip_lookup(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """查询 IP 地址归属地."""
     import httpx
@@ -406,7 +409,7 @@ async def _tool_ip_lookup(
 
 
 async def _tool_short_url(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """生成短链接（cleanuri.com 免费 API）."""
     import httpx
@@ -435,7 +438,7 @@ async def _tool_short_url(
 
 
 async def _tool_word_count(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """统计文本字数."""
     text = args.get("text") or ""
@@ -476,7 +479,7 @@ async def _tool_word_count(
 
 
 async def _tool_base64_codec(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """Base64 编解码."""
     import base64
@@ -499,7 +502,7 @@ async def _tool_base64_codec(
 
 
 async def _tool_color_convert(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """颜色格式转换."""
     import re
@@ -555,7 +558,7 @@ async def _tool_color_convert(
 
 
 async def _tool_cron_explain(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """解释 cron 表达式."""
     expr = (args.get("expression") or "").strip()
@@ -592,7 +595,7 @@ async def _tool_cron_explain(
     _WEEKDAYS = {"0": "日", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
 
     lines = []
-    for i, (p, name) in enumerate(zip(parts, fields)):
+    for i, (p, name) in enumerate(zip(parts, fields, strict=False)):
         if p == "*":
             lines.append(f"  {name}: 每{name}")
         elif p.startswith("*/"):
@@ -611,7 +614,7 @@ async def _tool_cron_explain(
 
 
 async def _tool_regex_test(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """测试正则表达式."""
     import re
@@ -650,7 +653,7 @@ async def _tool_regex_test(
 
 
 async def _tool_hash_gen(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """计算文本哈希值."""
     import hashlib
@@ -679,7 +682,7 @@ async def _tool_hash_gen(
 
 
 async def _tool_url_codec(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """URL 编解码."""
     from urllib.parse import quote, unquote
@@ -702,7 +705,7 @@ async def _tool_url_codec(
 
 
 async def _tool_diff_text(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """文本对比."""
     import difflib
@@ -723,7 +726,7 @@ async def _tool_diff_text(
 
 
 async def _tool_whois(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """WHOIS 域名查询."""
     import httpx
@@ -762,7 +765,7 @@ async def _tool_whois(
 
 
 async def _tool_dns_lookup(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """DNS 解析."""
     import asyncio
@@ -796,11 +799,12 @@ async def _tool_dns_lookup(
 
 
 async def _tool_http_check(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """网站可用性检查."""
-    import httpx
     import time
+
+    import httpx
 
     url = (args.get("url") or "").strip()
     if not url:
@@ -898,7 +902,7 @@ def _validate_python_code(code: str) -> str | None:
 
 
 async def _tool_run_python(
-    args: dict, *, agent_id: int | None = None, ctx: "_AppContext | None" = None,
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
 ) -> str:
     """在沙箱中执行 Python 代码片段."""
     import asyncio
@@ -945,7 +949,7 @@ async def _tool_run_python(
             proc.kill()  # type: ignore[union-attr]
         except ProcessLookupError:
             pass
-        return "执行超时（超过 %d 秒）。" % timeout
+        return f"执行超时（超过 {timeout} 秒）。"
 
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")

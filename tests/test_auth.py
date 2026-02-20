@@ -186,7 +186,6 @@ class TestRateLimiter:
         app = _make_post_app()
         middleware = RateLimitMiddleware(app, rate=100, window=0.001, skip_paths=[])
         # 模拟大量空桶
-        import time as _time
         for i in range(1100):
             middleware._buckets[f"10.0.{i // 256}.{i % 256}"] = []
         assert len(middleware._buckets) >= 1100

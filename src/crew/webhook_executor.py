@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import json
+import logging
 import time as _time
 import uuid
 from pathlib import Path
@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from crew.exceptions import EmployeeNotFoundError, PipelineNotFoundError
-from crew.webhook_context import _AppContext, _MAX_TOOL_ROUNDS
+from crew.webhook_context import _MAX_TOOL_ROUNDS, _AppContext
 from crew.webhook_tools import get_all_tool_handlers
 
 _TOOL_HANDLERS: dict[str, Any] = get_all_tool_handlers()
@@ -585,7 +585,7 @@ async def _execute_employee_with_tools(
     *,
     agent_id: int | None = None,
     model: str | None = None,
-    user_message: "str | list[dict[str, Any]] | None" = None,
+    user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
@@ -594,8 +594,10 @@ async def _execute_employee_with_tools(
     from crew.executor import aexecute_with_tools
     from crew.providers import Provider, detect_provider
     from crew.tool_schema import (
-        AGENT_TOOLS, employee_tools_to_schemas,
-        get_tool_schema, is_finish_tool, _make_load_tools_schema,
+        AGENT_TOOLS,
+        _make_load_tools_schema,
+        employee_tools_to_schemas,
+        get_tool_schema,
     )
 
     discovery = discover_employees(project_dir=ctx.project_dir)
@@ -619,7 +621,7 @@ async def _execute_employee_with_tools(
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
-        from crew.organization import load_organization, get_effective_authority
+        from crew.organization import get_effective_authority, load_organization
 
         org = load_organization(project_dir=ctx.project_dir)
 
@@ -945,7 +947,7 @@ async def _execute_employee(
     args: dict[str, str],
     agent_id: int | None = None,
     model: str | None = None,
-    user_message: "str | list[dict[str, Any]] | None" = None,
+    user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
@@ -988,16 +990,16 @@ async def _execute_employee(
         from crew.executor import aexecute_prompt
 
         use_model = model or match.model or "claude-sonnet-4-20250514"
-        exec_kwargs = dict(
-            system_prompt=prompt,
-            api_key=match.api_key or None,
-            model=use_model,
-            stream=False,
-            base_url=match.base_url or None,
-            fallback_model=match.fallback_model or None,
-            fallback_api_key=match.fallback_api_key or None,
-            fallback_base_url=match.fallback_base_url or None,
-        )
+        exec_kwargs = {
+            "system_prompt": prompt,
+            "api_key": match.api_key or None,
+            "model": use_model,
+            "stream": False,
+            "base_url": match.base_url or None,
+            "fallback_model": match.fallback_model or None,
+            "fallback_api_key": match.fallback_api_key or None,
+            "fallback_base_url": match.fallback_base_url or None,
+        }
         if user_message:
             exec_kwargs["user_message"] = user_message
         result = await aexecute_prompt(**exec_kwargs)

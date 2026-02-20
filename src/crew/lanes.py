@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from crew.paths import resolve_project_dir
 
@@ -27,7 +28,7 @@ class LaneLock:
         sanitized = lane_name.replace("/", "_").replace(":", "_")
         base = root if root is not None else resolve_project_dir(project_dir) / ".crew" / "lanes"
         self.path = base / f"{sanitized}.lock"
-        self._fh: "Any | None" = None
+        self._fh: Any | None = None
         self._msvcrt_locked = False
 
     def acquire(self) -> None:
@@ -60,7 +61,7 @@ class LaneLock:
         self._fh.close()
         self._fh = None
 
-    def __enter__(self) -> "LaneLock":
+    def __enter__(self) -> LaneLock:
         self.acquire()
         return self
 

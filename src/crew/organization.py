@@ -8,7 +8,6 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -84,7 +83,7 @@ _MODEL_TIER_FIELDS = (
 
 
 def apply_model_defaults(
-    employees: dict[str, "Employee"],
+    employees: dict[str, Employee],
     org: Organization,
 ) -> None:
     """按 model_tier 从 organization.model_defaults 填充员工空字段.
@@ -93,7 +92,6 @@ def apply_model_defaults(
     """
     if not org.model_defaults:
         return
-    from crew.models import Employee  # noqa: F811 — avoid circular at module level
 
     for emp in employees.values():
         if not emp.model_tier:

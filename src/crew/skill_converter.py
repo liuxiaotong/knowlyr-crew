@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from crew.models import Employee, TOOL_TO_SKILL
+from crew.models import TOOL_TO_SKILL, Employee
 
 
 def _tools_to_allowed_tools(tools: list[str]) -> str:

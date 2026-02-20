@@ -1,14 +1,13 @@
 """讨论会模块测试."""
 
-from pathlib import Path
 
 import yaml
 
 from crew.discussion import (
+    _ROUND_TEMPLATES,
     Discussion,
     DiscussionParticipant,
     DiscussionRound,
-    _ROUND_TEMPLATES,
     _resolve_rounds,
     create_adhoc_discussion,
     discover_discussions,
@@ -17,8 +16,7 @@ from crew.discussion import (
     render_discussion_plan,
     validate_discussion,
 )
-from crew.models import DiscussionPlan, ParticipantPrompt, RoundPlan
-
+from crew.models import DiscussionPlan
 
 # ── 数据模型测试 ──
 

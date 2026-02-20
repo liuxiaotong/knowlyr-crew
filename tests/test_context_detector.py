@@ -1,7 +1,6 @@
 """测试项目类型检测器."""
 
 import json
-from pathlib import Path
 
 from crew.context_detector import ProjectInfo, detect_project
 

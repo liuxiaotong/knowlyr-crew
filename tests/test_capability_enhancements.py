@@ -1,6 +1,5 @@
 """姜墨言 8 项能力增强 — 10 个新工具测试."""
 
-import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from crew.task_registry import TaskRegistry
-
 
 # ── helpers ──
 

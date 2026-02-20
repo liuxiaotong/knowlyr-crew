@@ -1,8 +1,7 @@
 """测试流水线引擎."""
 
 import asyncio
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml

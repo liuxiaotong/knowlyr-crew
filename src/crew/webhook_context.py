@@ -34,8 +34,8 @@ class _AppContext:
     def __init__(
         self,
         project_dir: Path | None,
-        config: "WebhookConfig",
-        registry: "TaskRegistry",
+        config: WebhookConfig,
+        registry: TaskRegistry,
     ):
         self.project_dir = project_dir
         self.config = config

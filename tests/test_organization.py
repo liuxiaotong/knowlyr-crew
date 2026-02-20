@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from crew.models import Organization, RoutingStep, RoutingTemplate
+from crew.models import Organization, RoutingStep
 from crew.organization import (
     get_effective_authority,
     invalidate_cache,

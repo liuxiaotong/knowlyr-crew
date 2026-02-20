@@ -94,7 +94,7 @@ CHAT_TRIGGERS = {"feishu"}
 
 
 def query_cost_summary(
-    registry: "TaskRegistry",
+    registry: TaskRegistry,
     employee: str | None = None,
     days: int = 7,
     source: str | None = None,

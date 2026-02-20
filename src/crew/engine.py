@@ -1,7 +1,6 @@
 """执行引擎 — 变量替换 + prompt 生成."""
 
 import logging
-import re
 import subprocess
 from datetime import datetime
 from pathlib import Path

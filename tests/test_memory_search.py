@@ -1,7 +1,6 @@
 """测试语义记忆搜索（混合搜索 + 多后端）."""
 
 import math
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,14 +8,13 @@ import pytest
 from crew.memory import MemoryEntry, MemoryStore
 from crew.memory_search import (
     SemanticMemoryIndex,
-    _GeminiEmbedder,
-    _TfIdfEmbedder,
     _cosine_similarity,
     _create_embedder,
+    _GeminiEmbedder,
     _keyword_score,
+    _TfIdfEmbedder,
     _tokenize,
 )
-
 
 # ── 基础工具 ──
 

@@ -38,7 +38,8 @@ def _try_import_recorder():
             Trajectory,
         )
         from agentrecorder.schema import ToolCall as RecToolCall
-        from knowlyrcore import TaskInfo, ToolResult as RecToolResult
+        from knowlyrcore import TaskInfo
+        from knowlyrcore import ToolResult as RecToolResult
 
         return Trajectory, Step, RecToolCall, RecToolResult, Outcome, TaskInfo
     except ImportError:

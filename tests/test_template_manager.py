@@ -1,6 +1,5 @@
 """模板管理器测试."""
 
-from pathlib import Path
 
 from crew.template_manager import discover_templates, render_template
 

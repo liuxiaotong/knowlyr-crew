@@ -1,7 +1,6 @@
 """Crew CLI — 命令行界面."""
 
 import json
-import jsonschema
 import logging
 import subprocess
 import sys
@@ -10,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import click
+import jsonschema
 
-from crew import __version__
-from crew import sdk
+from crew import __version__, sdk
 from crew.discovery import discover_employees
 from crew.discussion import load_discussion, validate_discussion
 from crew.engine import CrewEngine
@@ -1541,10 +1540,10 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
         )
 
         click.echo(f"已创建: {emp_dir}/")
-        click.echo(f"  ├── employee.yaml")
-        click.echo(f"  ├── prompt.md")
-        click.echo(f"  ├── soul.md")
-        click.echo(f"  └── workflows/")
+        click.echo("  ├── employee.yaml")
+        click.echo("  ├── prompt.md")
+        click.echo("  ├── soul.md")
+        click.echo("  └── workflows/")
 
         if avatar:
             _run_avatar_gen(
@@ -1995,12 +1994,12 @@ def pipeline_show(name: str):
             body = item.condition
             matcher = f"contains '{body.contains}'" if body.contains else f"matches '{body.matches}'"
             click.echo(f"  {i}. [条件] check={body.check} {matcher}")
-            click.echo(f"     then:")
+            click.echo("     then:")
             for j, sub in enumerate(body.then, 1):
                 id_str = f" id={sub.id}" if sub.id else ""
                 click.echo(f"       {i}.T{j} {sub.employee}{id_str}")
             if body.else_:
-                click.echo(f"     else:")
+                click.echo("     else:")
                 for j, sub in enumerate(body.else_, 1):
                     id_str = f" id={sub.id}" if sub.id else ""
                     click.echo(f"       {i}.E{j} {sub.employee}{id_str}")
@@ -2206,7 +2205,7 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
     NAME_OR_PATH 可以是流水线名称或 YAML 文件路径。
     默认 prompt-only 模式，加 --execute 启用 LLM 自动执行。
     """
-    from crew.pipeline import discover_pipelines, load_pipeline, run_pipeline, _flatten_results
+    from crew.pipeline import _flatten_results, discover_pipelines, load_pipeline, run_pipeline
 
     path_obj = Path(name_or_path)
     if path_obj.exists() and path_obj.suffix in (".yaml", ".yml"):
@@ -2227,7 +2226,7 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
     # execute 模式需要 API key
     api_key = None
     if execute:
-        from crew.providers import detect_provider, resolve_api_key, API_KEY_ENV_VARS
+        from crew.providers import detect_provider, resolve_api_key
         effective_model = model or "claude-sonnet-4-20250514"
         try:
             provider = detect_provider(effective_model)
@@ -2565,7 +2564,7 @@ def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: in
         click.echo(f"跳过: {', '.join(skipped)}", err=True)
 
     # 构造 Pipeline 对象
-    from crew.pipeline import Pipeline, run_pipeline, _flatten_results
+    from crew.pipeline import Pipeline, _flatten_results, run_pipeline
 
     p = Pipeline(
         name=f"route:{name}",
@@ -2803,8 +2802,6 @@ def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | 
     from crew.discussion import (
         discover_discussions,
         load_discussion,
-        render_discussion,
-        render_discussion_plan,
         validate_discussion,
     )
 
@@ -3061,8 +3058,6 @@ def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
     """
     from crew.discussion import (
         create_adhoc_discussion,
-        render_discussion,
-        render_discussion_plan,
         validate_discussion,
     )
 
@@ -3314,7 +3309,7 @@ def meetings_export(meeting_id: str, output: Path | None, with_meta: bool):
 @click.option("-o", "--output", type=click.Path(path_type=Path), default="CHANGELOG_DRAFT.md")
 def changelog_draft(since: str | None, limit: int, output: Path):
     """根据 git log 生成 changelog 草稿."""
-    cmd = ["git", "log", f"-n", str(limit), "--pretty=format:%h %s"]
+    cmd = ["git", "log", "-n", str(limit), "--pretty=format:%h %s"]
     if since:
         cmd = ["git", "log", f"{since}..HEAD", "--pretty=format:%h %s"]
     try:
@@ -3535,7 +3530,7 @@ def memory_shared(tags: str | None, limit: int):
 @click.option("--show", is_flag=True, help="显示当前配置")
 def memory_config(ttl: int | None, max_entries: int | None, half_life: float | None, show: bool):
     """查看或设置记忆系统配置."""
-    from crew.memory import MemoryConfig, MemoryStore
+    from crew.memory import MemoryStore
 
     store = MemoryStore()
     config_path = store.memory_dir / "config.json"
@@ -3681,7 +3676,7 @@ def register(name: str, dry_run: bool):
     # 检查头像
     avatar_b64 = _load_avatar_base64(emp)
     if avatar_b64:
-        click.echo(f"  avatar:       ✓ (avatar.webp)", err=True)
+        click.echo("  avatar:       ✓ (avatar.webp)", err=True)
 
     if dry_run:
         click.echo("\n(dry-run 模式，未执行注册)", err=True)
@@ -3730,16 +3725,16 @@ def delete(name: str, force: bool, keep_remote: bool):
         raise SystemExit(1)
 
     # 确认
-    click.echo(f"即将删除员工:", err=True)
+    click.echo("即将删除员工:", err=True)
     click.echo(f"  名称:   {emp.name}", err=True)
     click.echo(f"  显示名: {emp.effective_display_name}", err=True)
     click.echo(f"  路径:   {emp.source_path}", err=True)
     if emp.agent_id:
         click.echo(f"  Agent:  #{emp.agent_id}", err=True)
         if keep_remote:
-            click.echo(f"  远端:   保留（--keep-remote）", err=True)
+            click.echo("  远端:   保留（--keep-remote）", err=True)
         else:
-            click.echo(f"  远端:   将标记为 inactive", err=True)
+            click.echo("  远端:   将标记为 inactive", err=True)
 
     if not force:
         if not click.confirm("确认删除？"):
@@ -3825,7 +3820,7 @@ def _run_avatar_gen(
     avatar_prompt: str = "",
 ) -> None:
     """执行头像生成 + 压缩流程."""
-    from crew.avatar import generate_avatar, compress_avatar
+    from crew.avatar import compress_avatar, generate_avatar
 
     click.echo("正在调用通义万相生成头像...", err=True)
     raw = generate_avatar(
@@ -4498,7 +4493,6 @@ def agent_run(employee_name, task, model, max_steps, repo, base_commit, image, p
         knowlyr-crew agent run test-engineer -t "为 src/utils.py 补充单测" --max-steps 50
     """
     from rich.console import Console
-    from rich.table import Table
 
     console = Console()
 
@@ -4565,8 +4559,8 @@ def trajectory():
 @click.option("-n", "--limit", type=int, default=20, help="显示条数")
 def trajectory_list(limit: int):
     """列出已录制的轨迹."""
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     traj_file = Path(".crew/trajectories/trajectories.jsonl")
     if not traj_file.exists():
@@ -4777,9 +4771,9 @@ def trajectory_convert(output: str | None):
 @trajectory.command("stats")
 def trajectory_stats():
     """显示轨迹数据统计."""
-    from pathlib import Path
     import json
     from collections import Counter
+    from pathlib import Path
 
     traj_file = Path(".crew/trajectories/trajectories.jsonl")
     if not traj_file.exists():
@@ -4814,6 +4808,6 @@ def trajectory_stats():
     click.echo(f"总步数:   {total_steps}")
     click.echo(f"总 Tokens: {total_tokens:,}")
     click.echo(f"成功率:   {success_count}/{len(entries)} ({100*success_count/len(entries):.0f}%)")
-    click.echo(f"\n按员工统计:")
+    click.echo("\n按员工统计:")
     for emp, count in employee_counter.most_common():
         click.echo(f"  {emp}: {count} 条")
