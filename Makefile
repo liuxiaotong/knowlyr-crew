@@ -43,6 +43,14 @@ push:
 	@echo ""
 	@echo "=== 部署完成 ==="
 
+## 注册新员工到 knowlyr-id（需指定 NAME）
+register:
+ifndef NAME
+	$(error 用法: make register NAME=employee-name)
+endif
+	ssh $(SERVER) "set -a && source /opt/knowlyr-crew/.env && set +a && \
+		/opt/knowlyr-crew/venv/bin/knowlyr-crew register $(NAME)"
+
 ## 只推送文件，不重启不同步
 push-only:
 	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
@@ -146,5 +154,5 @@ train-cycle:
 	@echo "数据已就绪。现在用 Claude Code 分析 .crew/trajectories/ 和 .crew/sessions/"
 	@echo "改进 prompt 后运行: make push && make test-employee NAME=ceo-assistant TASK='你的测试任务'"
 
-.PHONY: pull push test-employee push-employee clean-memory clean-trajectories \
+.PHONY: pull push register test-employee push-employee clean-memory clean-trajectories \
         batch score trajectories deploy-engine upgrade-agent train-cycle

@@ -312,7 +312,7 @@ class TestSyncRegister:
     """新员工注册."""
 
     def test_register_new(self, tmp_path):
-        """无 agent_id 时自动注册."""
+        """register=True 时注册新员工."""
         _make_employee_dir(tmp_path, "new-worker")
 
         register_calls = []
@@ -325,7 +325,7 @@ class TestSyncRegister:
             patch("crew.sync.list_agents", return_value=[]),
             patch("crew.sync.register_agent", mock_register),
         ):
-            report = sync_all(tmp_path, push=True, pull=False)
+            report = sync_all(tmp_path, push=True, pull=False, register=True)
 
         assert len(report.registered) == 1
         assert "new-worker" in report.registered[0]
@@ -337,15 +337,30 @@ class TestSyncRegister:
         )
         assert config["agent_id"] == 9999
 
+    def test_skip_new_by_default(self, tmp_path):
+        """默认不注册新员工，只报告."""
+        _make_employee_dir(tmp_path, "new-worker")
+
+        with (
+            patch("crew.sync.list_agents", return_value=[]),
+            patch("crew.sync.register_agent") as mock_reg,
+        ):
+            report = sync_all(tmp_path, push=True, pull=False)
+
+        assert len(report.registered) == 0
+        assert len(report.skipped) == 1
+        assert "new-worker" in report.skipped[0]
+        mock_reg.assert_not_called()
+
     def test_register_failure(self, tmp_path):
-        """注册失败记录错误."""
+        """register=True 时注册失败记录错误."""
         _make_employee_dir(tmp_path, "fail-worker")
 
         with (
             patch("crew.sync.list_agents", return_value=[]),
             patch("crew.sync.register_agent", return_value=None),
         ):
-            report = sync_all(tmp_path, push=True, pull=False)
+            report = sync_all(tmp_path, push=True, pull=False, register=True)
 
         assert len(report.errors) == 1
         assert "注册失败" in report.errors[0][1]

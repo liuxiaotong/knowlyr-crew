@@ -4598,7 +4598,8 @@ def agents_sync_cmd(name: str):
 @click.option("--push-only", is_flag=True, help="仅推送，不拉取")
 @click.option("--pull-only", is_flag=True, help="仅拉取，不推送")
 @click.option("--force", is_flag=True, help="忽略 content_hash，强制推送")
-def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
+@click.option("--register", is_flag=True, help="注册新员工（默认只报告不注册）")
+def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force, register):
     """批量同步所有员工到 knowlyr-id（双向）."""
     from crew.sync import sync_all
 
@@ -4620,6 +4621,7 @@ def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
         push=do_push,
         pull=do_pull,
         force=force,
+        register=register,
     )
 
     if report.registered:

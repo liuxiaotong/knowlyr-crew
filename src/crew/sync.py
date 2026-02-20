@@ -90,6 +90,7 @@ def sync_all(
     push: bool = True,
     pull: bool = True,
     force: bool = False,
+    register: bool = False,
 ) -> SyncReport:
     """批量同步 employees_dir 下所有员工到 knowlyr-id.
 
@@ -99,6 +100,7 @@ def sync_all(
         push: 推送本地数据到 id
         pull: 拉取 id 数据到本地
         force: 忽略 content_hash，强制推送
+        register: 是否注册新员工（默认 False，只报告不注册）
 
     Returns:
         SyncReport 汇总
@@ -157,15 +159,22 @@ def sync_all(
             report.errors.append((name, str(e)))
             logger.warning("同步 %s 失败: %s", name, e)
 
-    # 4. 注册新员工（本地无 agent_id）
-    if push:
-        for emp_dir, config in new_employees:
-            name = config.get("name", emp_dir.name)
-            try:
-                _register_new(emp_dir, config, engine, report, dry_run=dry_run)
-            except Exception as e:
-                report.errors.append((name, str(e)))
-                logger.warning("注册 %s 失败: %s", name, e)
+    # 4. 处理新员工（本地无 agent_id）
+    if push and new_employees:
+        if register:
+            # 显式要求注册时才注册
+            for emp_dir, config in new_employees:
+                name = config.get("name", emp_dir.name)
+                try:
+                    _register_new(emp_dir, config, engine, report, dry_run=dry_run)
+                except Exception as e:
+                    report.errors.append((name, str(e)))
+                    logger.warning("注册 %s 失败: %s", name, e)
+        else:
+            # 默认只报告，不注册
+            for emp_dir, config in new_employees:
+                name = config.get("name", emp_dir.name)
+                report.skipped.append(f"{name} (未注册，用 `knowlyr-crew register {name}` 注册)")
 
     # 5. 禁用已删除的员工（id 有但本地无）
     if push:
