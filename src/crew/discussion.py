@@ -44,7 +44,8 @@ class DiscussionParticipant(BaseModel):
         description="最大同意比例（0.0~1.0），低于 1.0 时强制产生分歧",
     )
     execution_role: Literal["executor", "reviewer", "monitor", "idle"] = Field(
-        default="idle", description="讨论后执行阶段的角色",
+        default="idle",
+        description="讨论后执行阶段的角色",
     )
 
 
@@ -54,18 +55,27 @@ class DiscussionRound(BaseModel):
     name: str = Field(default="", description="轮次名称")
     instruction: str = Field(default="", description="该轮特殊指令")
     interaction: Literal[
-        "free", "round-robin", "challenge", "response",
-        "brainstorm", "vote", "debate",
-        "cross-examine", "steelman-then-attack",
+        "free",
+        "round-robin",
+        "challenge",
+        "response",
+        "brainstorm",
+        "vote",
+        "debate",
+        "cross-examine",
+        "steelman-then-attack",
     ] = Field(default="free", description="互动模式")
     min_disagreements: int = Field(
-        default=0, description="本轮最少产生的分歧数（0=不限制）",
+        default=0,
+        description="本轮最少产生的分歧数（0=不限制）",
     )
     max_words_per_turn: int = Field(
-        default=0, description="每人每轮最大字数（0=不限制），防止独白",
+        default=0,
+        description="每人每轮最大字数（0=不限制），防止独白",
     )
     require_direct_reply: bool = Field(
-        default=False, description="是否要求每人必须引用并回应至少一位他人的具体观点",
+        default=False,
+        description="是否要求每人必须引用并回应至少一位他人的具体观点",
     )
 
 
@@ -78,9 +88,7 @@ class Discussion(BaseModel):
     goal: str = Field(default="", description="讨论目标")
     participants: list[DiscussionParticipant] = Field(description="参与者列表")
     rounds: int | list[DiscussionRound] = Field(default=3, description="讨论轮次")
-    round_template: str | None = Field(
-        default=None, description="轮次模板名称（优先于 rounds）"
-    )
+    round_template: str | None = Field(default=None, description="轮次模板名称（优先于 rounds）")
     mode: Literal["auto", "discussion", "meeting"] = Field(
         default="auto", description="auto=按参与者数自动判断"
     )
@@ -185,11 +193,15 @@ _ROUND_TEMPLATES: dict[str, list[DiscussionRound]] = {
     ],
     "brainstorm-to-decision": [
         DiscussionRound(name="发散", instruction="自由提出创意和方案", interaction="brainstorm"),
-        DiscussionRound(name="筛选讨论", instruction="评估各方案的可行性", interaction="round-robin"),
+        DiscussionRound(
+            name="筛选讨论", instruction="评估各方案的可行性", interaction="round-robin"
+        ),
         DiscussionRound(name="投票决策", instruction="对最终方案投票", interaction="vote"),
     ],
     "adversarial": [
-        DiscussionRound(name="各抒己见", instruction="每位参会者表明立场", interaction="round-robin"),
+        DiscussionRound(
+            name="各抒己见", instruction="每位参会者表明立场", interaction="round-robin"
+        ),
         DiscussionRound(name="质疑挑战", instruction="互相挑战观点", interaction="challenge"),
         DiscussionRound(name="回应辩护", instruction="回应质疑", interaction="response"),
         DiscussionRound(name="共识决议", instruction="达成共识，形成决议"),
@@ -286,9 +298,7 @@ def load_discussion(path: Path) -> Discussion:
     return Discussion(**data)
 
 
-def validate_discussion(
-    discussion: Discussion, project_dir: Path | None = None
-) -> list[str]:
+def validate_discussion(discussion: Discussion, project_dir: Path | None = None) -> list[str]:
     """校验讨论会定义，返回错误列表."""
     errors: list[str] = []
 
@@ -594,7 +604,9 @@ def _render_1v1_meeting(
 
 
 def _log_meeting(
-    discussion: Discussion, prompt: str, initial_args: dict[str, str],
+    discussion: Discussion,
+    prompt: str,
+    initial_args: dict[str, str],
     project_dir: Path | None = None,
 ) -> None:
     """尝试记录会议日志（静默失败）."""
@@ -650,8 +662,14 @@ def render_discussion(
     # 1v1 会议走单独渲染路径
     if discussion.effective_mode == "meeting":
         prompt = _render_1v1_meeting(
-            discussion, topic, goal, participants_info,
-            engine, initial_args, project_info, agent_identity,
+            discussion,
+            topic,
+            goal,
+            participants_info,
+            engine,
+            initial_args,
+            project_info,
+            agent_identity,
         )
         _log_meeting(discussion, prompt, initial_args, project_dir=project_dir)
         return prompt
@@ -660,9 +678,7 @@ def render_discussion(
 
     # 组装各段
     parts: list[str] = []
-    parts.extend(
-        _render_header(discussion, topic, goal, project_info, agent_identity)
-    )
+    parts.extend(_render_header(discussion, topic, goal, project_info, agent_identity))
     parts.extend(
         _render_participants(participants_info, engine, initial_args, bg_mode, project_info)
     )
@@ -774,6 +790,7 @@ def _render_participant_prompt(
     # 历史经验（从持久化记忆注入）
     try:
         from crew.memory import MemoryStore
+
         memory_store = MemoryStore(project_dir=project_dir)
         memory_text = memory_store.format_for_prompt(emp.name, limit=5)
         if memory_text:
@@ -814,83 +831,99 @@ def _render_participant_prompt(
     # ── 对抗性约束 ──
 
     if participant.stance:
-        parts.extend([
-            "## 你的立场",
-            "",
-            f"**预设立场**: {participant.stance}",
-            "你的发言必须体现这一立场倾向，即使其他参会者不同意。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 你的立场",
+                "",
+                f"**预设立场**: {participant.stance}",
+                "你的发言必须体现这一立场倾向，即使其他参会者不同意。",
+                "",
+            ]
+        )
 
     if participant.must_challenge:
         names = ", ".join(participant.must_challenge)
-        parts.extend([
-            "## 必须质疑",
-            "",
-            f"你必须对 **{names}** 的观点提出至少一个实质性挑战。",
-            "不可以只说「我同意」或「补充一下」——你必须找到不同意的地方。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 必须质疑",
+                "",
+                f"你必须对 **{names}** 的观点提出至少一个实质性挑战。",
+                "不可以只说「我同意」或「补充一下」——你必须找到不同意的地方。",
+                "",
+            ]
+        )
 
     if participant.max_agree_ratio < 1.0:
         pct = int(participant.max_agree_ratio * 100)
-        parts.extend([
-            "## 分歧配额",
-            "",
-            f"对于他人提出的观点，你最多只能完全同意 {pct}%。",
-            "其余必须提出替代方案、补充条件或反对意见。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 分歧配额",
+                "",
+                f"对于他人提出的观点，你最多只能完全同意 {pct}%。",
+                "其余必须提出替代方案、补充条件或反对意见。",
+                "",
+            ]
+        )
 
     # 争议种子注入（首轮）
     if discussion.tension_seeds and is_first_round:
         parts.extend(["## 需要讨论的争议点", ""])
         for i, seed in enumerate(discussion.tension_seeds, 1):
             parts.append(f"{i}. {seed}")
-        parts.extend([
-            "",
-            "你必须对上述至少一个争议点表明明确立场。",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "你必须对上述至少一个争议点表明明确立场。",
+                "",
+            ]
+        )
 
     # 反独白约束
     if isinstance(round_info, DiscussionRound) and round_info.max_words_per_turn > 0:
-        parts.extend([
-            "## 字数限制",
-            "",
-            f"本轮发言不超过 **{round_info.max_words_per_turn}** 字。精练表达，不要堆砌长段落。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 字数限制",
+                "",
+                f"本轮发言不超过 **{round_info.max_words_per_turn}** 字。精练表达，不要堆砌长段落。",
+                "",
+            ]
+        )
 
     if isinstance(round_info, DiscussionRound) and round_info.require_direct_reply:
-        parts.extend([
-            "## 直接回应要求",
-            "",
-            "你必须引用（用 > 引用标记）至少一位参会者上一轮发言中的具体句子，",
-            "然后表明同意、反对或修改，不可笼统评论。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 直接回应要求",
+                "",
+                "你必须引用（用 > 引用标记）至少一位参会者上一轮发言中的具体句子，",
+                "然后表明同意、反对或修改，不可笼统评论。",
+                "",
+            ]
+        )
 
     if isinstance(round_info, DiscussionRound) and round_info.min_disagreements > 0:
-        parts.extend([
-            "## 最低分歧要求",
-            "",
-            f"本轮你必须至少提出 **{round_info.min_disagreements}** 个实质性分歧点。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 最低分歧要求",
+                "",
+                f"本轮你必须至少提出 **{round_info.min_disagreements}** 个实质性分歧点。",
+                "",
+            ]
+        )
 
     # ── 去重约束（非首轮）──
 
     if not is_first_round:
-        parts.extend([
-            "## 发言约束",
-            "",
-            "- **禁止重复**: 不要重述你在前几轮已经说过的观点。如果立场没变，用一句话确认即可。",
-            "- **增量贡献**: 每次发言必须包含至少一个新信息、新论点或新方案。",
-            "- **引用回应**: 回应他人时，必须引用其具体的原文片段（用 > 引用标记）。",
-            "- **标记状态**: 对每个讨论点标注 [已共识] [有分歧] [待决]。",
-            "",
-        ])
+        parts.extend(
+            [
+                "## 发言约束",
+                "",
+                "- **禁止重复**: 不要重述你在前几轮已经说过的观点。如果立场没变，用一句话确认即可。",
+                "- **增量贡献**: 每次发言必须包含至少一个新信息、新论点或新方案。",
+                "- **引用回应**: 回应他人时，必须引用其具体的原文片段（用 > 引用标记）。",
+                "- **标记状态**: 对每个讨论点标注 [已共识] [有分歧] [待决]。",
+                "",
+            ]
+        )
 
     return "\n".join(parts)
 
@@ -923,54 +956,58 @@ def _render_synthesis_prompt(
             parts.append(f"- {p.employee}（{role_label}）")
     parts.append("")
 
-    parts.extend([
-        "## 所有讨论记录",
-        "",
-        "{all_rounds}",
-        "",
-        "---",
-        "",
-    ])
+    parts.extend(
+        [
+            "## 所有讨论记录",
+            "",
+            "{all_rounds}",
+            "",
+            "---",
+            "",
+        ]
+    )
 
     parts.append(_OUTPUT_TEMPLATES[discussion.output_format])
 
     # ActionPlan 输出
     if discussion.action_output:
-        parts.extend([
-            "",
-            "---",
-            "",
-            "## 行动计划（结构化 JSON）",
-            "",
-            "在会议纪要之后，你还 **必须** 输出一份结构化的行动计划（JSON 格式）：",
-            "",
-            "```json",
-            "{",
-            '  "decisions": ["决策1", "决策2"],',
-            '  "unresolved": ["未解决的分歧1"],',
-            '  "actions": [',
-            "    {",
-            '      "id": "A1",',
-            '      "description": "具体任务描述",',
-            '      "assignee_role": "executor",',
-            '      "assignee_employee": "员工名称（可选）",',
-            '      "depends_on": [],',
-            '      "priority": "P0",',
-            '      "verification": "怎样算完成",',
-            '      "phase": "implement"',
-            "    }",
-            "  ],",
-            '  "review_criteria": ["验收标准1", "验收标准2"]',
-            "}",
-            "```",
-            "",
-            "**重要**：",
-            "- actions 中每个任务必须可独立执行，不可笼统",
-            "- depends_on 用于标记任务间依赖（如类型变更必须先于组件开发）",
-            "- phase 用于区分 research / implement / review / deploy 阶段",
-            "- 每个 action 必须指定 verification（验证方式）",
-            "",
-        ])
+        parts.extend(
+            [
+                "",
+                "---",
+                "",
+                "## 行动计划（结构化 JSON）",
+                "",
+                "在会议纪要之后，你还 **必须** 输出一份结构化的行动计划（JSON 格式）：",
+                "",
+                "```json",
+                "{",
+                '  "decisions": ["决策1", "决策2"],',
+                '  "unresolved": ["未解决的分歧1"],',
+                '  "actions": [',
+                "    {",
+                '      "id": "A1",',
+                '      "description": "具体任务描述",',
+                '      "assignee_role": "executor",',
+                '      "assignee_employee": "员工名称（可选）",',
+                '      "depends_on": [],',
+                '      "priority": "P0",',
+                '      "verification": "怎样算完成",',
+                '      "phase": "implement"',
+                "    }",
+                "  ],",
+                '  "review_criteria": ["验收标准1", "验收标准2"]',
+                "}",
+                "```",
+                "",
+                "**重要**：",
+                "- actions 中每个任务必须可独立执行，不可笼统",
+                "- depends_on 用于标记任务间依赖（如类型变更必须先于组件开发）",
+                "- phase 用于区分 research / implement / review / deploy 阶段",
+                "- 每个 action 必须指定 verification（验证方式）",
+                "",
+            ]
+        )
 
     # 自动保存
     if discussion.output is not None and discussion.output.filename:
@@ -1027,11 +1064,29 @@ def render_discussion_plan(
         round_list: list[DiscussionRound | dict] = []
         for i in range(1, rounds + 1):
             if i == 1:
-                round_list.append({"name": "开场", "instruction": "每位参会者从自身专业角度给出初步观点。", "interaction": "round-robin"})
+                round_list.append(
+                    {
+                        "name": "开场",
+                        "instruction": "每位参会者从自身专业角度给出初步观点。",
+                        "interaction": "round-robin",
+                    }
+                )
             elif i == rounds:
-                round_list.append({"name": "总结与决议", "instruction": "基于前几轮讨论，达成共识，形成明确的决议和行动项。", "interaction": "free"})
+                round_list.append(
+                    {
+                        "name": "总结与决议",
+                        "instruction": "基于前几轮讨论，达成共识，形成明确的决议和行动项。",
+                        "interaction": "free",
+                    }
+                )
             else:
-                round_list.append({"name": "深入讨论", "instruction": "回应前轮观点，深入探讨分歧点，提出具体方案。", "interaction": "free"})
+                round_list.append(
+                    {
+                        "name": "深入讨论",
+                        "instruction": "回应前轮观点，深入探讨分歧点，提出具体方案。",
+                        "interaction": "free",
+                    }
+                )
     else:
         round_list = list(rounds)
 
@@ -1076,61 +1131,71 @@ def render_discussion_plan(
             ]
 
             if emp.research_instructions:
-                r_parts.extend([
-                    "## 预研指令",
-                    "",
-                    emp.research_instructions,
-                    "",
-                ])
+                r_parts.extend(
+                    [
+                        "## 预研指令",
+                        "",
+                        emp.research_instructions,
+                        "",
+                    ]
+                )
             else:
                 # 根据工具自动生成通用预研指令
-                r_parts.extend([
-                    "## 预研指令",
-                    "",
-                    f"请根据议题「{topic}」，使用你的工具收集相关信息。",
-                ])
+                r_parts.extend(
+                    [
+                        "## 预研指令",
+                        "",
+                        f"请根据议题「{topic}」，使用你的工具收集相关信息。",
+                    ]
+                )
                 if emp.context:
                     r_parts.append(f"建议先读取以下文件：{', '.join(emp.context)}")
                 r_parts.append("")
 
-            r_parts.extend([
-                "## 输出格式",
-                "",
-                "以 JSON 格式输出你的发现：",
-                "",
-                "```json",
-                "{",
-                '  "findings": [',
-                '    {"id": "F1", "content": "发现内容", "source": "工具/文件来源"},',
-                '    {"id": "F2", "content": "发现内容", "source": "工具/文件来源"}',
-                "  ]",
-                "}",
-                "```",
-                "",
-                "这些发现将注入你在讨论中的 prompt，作为你发言的依据。",
-            ])
+            r_parts.extend(
+                [
+                    "## 输出格式",
+                    "",
+                    "以 JSON 格式输出你的发现：",
+                    "",
+                    "```json",
+                    "{",
+                    '  "findings": [',
+                    '    {"id": "F1", "content": "发现内容", "source": "工具/文件来源"},',
+                    '    {"id": "F2", "content": "发现内容", "source": "工具/文件来源"}',
+                    "  ]",
+                    "}",
+                    "```",
+                    "",
+                    "这些发现将注入你在讨论中的 prompt，作为你发言的依据。",
+                ]
+            )
 
-            research_prompts.append(ParticipantPrompt(
-                employee_name=emp.name,
-                character_name=emp.character_name,
-                role=p.role,
-                prompt="\n".join(r_parts),
-            ))
+            research_prompts.append(
+                ParticipantPrompt(
+                    employee_name=emp.name,
+                    character_name=emp.character_name,
+                    role=p.role,
+                    prompt="\n".join(r_parts),
+                )
+            )
 
         if research_prompts:
-            plan_rounds.append(RoundPlan(
-                round_number=0,
-                name="预研",
-                instruction="各参会者使用工具收集真实数据",
-                interaction="free",
-                participant_prompts=research_prompts,
-            ))
+            plan_rounds.append(
+                RoundPlan(
+                    round_number=0,
+                    name="预研",
+                    instruction="各参会者使用工具收集真实数据",
+                    interaction="free",
+                    participant_prompts=research_prompts,
+                )
+            )
 
     total_rounds = len(round_list)
 
     for idx, round_info in enumerate(round_list):
         round_number = idx + 1
-        is_first_round = (idx == 0)
+        is_first_round = idx == 0
 
         # 轮次元数据
         if isinstance(round_info, DiscussionRound):
@@ -1149,11 +1214,13 @@ def render_discussion_plan(
             emp: Employee | None = info["employee"]
 
             if emp is None:
-                participant_prompts.append(ParticipantPrompt(
-                    employee_name=p.employee,
-                    role=p.role,
-                    prompt=f"# 错误\n\n未找到员工: {p.employee}",
-                ))
+                participant_prompts.append(
+                    ParticipantPrompt(
+                        employee_name=p.employee,
+                        role=p.role,
+                        prompt=f"# 错误\n\n未找到员工: {p.employee}",
+                    )
+                )
                 continue
 
             # 其他参会者
@@ -1176,20 +1243,24 @@ def render_discussion_plan(
                 project_dir=project_dir,
             )
 
-            participant_prompts.append(ParticipantPrompt(
-                employee_name=emp.name,
-                character_name=emp.character_name,
-                role=p.role,
-                prompt=prompt_text,
-            ))
+            participant_prompts.append(
+                ParticipantPrompt(
+                    employee_name=emp.name,
+                    character_name=emp.character_name,
+                    role=p.role,
+                    prompt=prompt_text,
+                )
+            )
 
-        plan_rounds.append(RoundPlan(
-            round_number=round_number,
-            name=rnd_name,
-            instruction=rnd_instruction,
-            interaction=rnd_interaction,
-            participant_prompts=participant_prompts,
-        ))
+        plan_rounds.append(
+            RoundPlan(
+                round_number=round_number,
+                name=rnd_name,
+                instruction=rnd_instruction,
+                interaction=rnd_interaction,
+                participant_prompts=participant_prompts,
+            )
+        )
 
     # 汇总 prompt
     synthesis = _render_synthesis_prompt(discussion, topic, goal, participants_info)
@@ -1203,7 +1274,12 @@ def render_discussion_plan(
     )
 
     # 记录会议
-    _log_meeting(discussion, f"[orchestrated plan] {len(plan_rounds)} rounds", initial_args, project_dir=project_dir)
+    _log_meeting(
+        discussion,
+        f"[orchestrated plan] {len(plan_rounds)} rounds",
+        initial_args,
+        project_dir=project_dir,
+    )
 
     return plan
 
@@ -1237,6 +1313,7 @@ def discover_discussions(project_dir: Path | None = None) -> dict[str, Path]:
 
     # 项目讨论会（覆盖同名内置和全局）
     from crew.paths import resolve_project_dir
+
     root = resolve_project_dir(project_dir)
     project_dir_path = root / ".crew" / DISCUSSIONS_DIR_NAME
     if project_dir_path.is_dir():

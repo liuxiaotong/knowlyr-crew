@@ -1,6 +1,5 @@
 """讨论会模块测试."""
 
-
 import yaml
 
 from crew.discussion import (
@@ -388,9 +387,7 @@ class TestRenderDiscussion:
                 DiscussionParticipant(employee="test-engineer"),
             ],
         )
-        prompt = render_discussion(
-            d, initial_args={"target": "auth.py"}, smart_context=False
-        )
+        prompt = render_discussion(d, initial_args={"target": "auth.py"}, smart_context=False)
         assert "评审 auth.py 的设计" in prompt
         assert "形成 auth.py 的改进方案" in prompt
 
@@ -683,9 +680,7 @@ class TestDiscoverDiscussions:
                 {"employee": "test-engineer"},
             ],
         }
-        (d_dir / "architecture-review.yaml").write_text(
-            yaml.dump(data, allow_unicode=True)
-        )
+        (d_dir / "architecture-review.yaml").write_text(yaml.dump(data, allow_unicode=True))
         discussions = discover_discussions(project_dir=tmp_path)
         d = load_discussion(discussions["architecture-review"])
         assert d.description == "自定义版"
@@ -947,4 +942,5 @@ class TestTopicFilenameTruncation:
 
     def test_topic_filename_max_length_constant(self):
         from crew.discussion import _TOPIC_FILENAME_MAX_LENGTH
+
         assert _TOPIC_FILENAME_MAX_LENGTH == 60

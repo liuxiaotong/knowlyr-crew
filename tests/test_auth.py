@@ -192,7 +192,11 @@ class TestRateLimiter:
 
         client = TestClient(
             Starlette(
-                routes=[Route("/upload", endpoint=lambda r: JSONResponse({"ok": True}), methods=["POST"])],
+                routes=[
+                    Route(
+                        "/upload", endpoint=lambda r: JSONResponse({"ok": True}), methods=["POST"]
+                    )
+                ],
                 middleware=[],
             )
         )
@@ -240,4 +244,5 @@ class TestMagicNumberConstants:
 
     def test_bucket_cleanup_threshold(self):
         from crew.auth import RateLimitMiddleware
+
         assert RateLimitMiddleware._BUCKET_CLEANUP_THRESHOLD == 1000

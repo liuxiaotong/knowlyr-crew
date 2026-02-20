@@ -39,7 +39,11 @@ class MeetingLogger:
     """
 
     def __init__(self, meetings_dir: Path | None = None, *, project_dir: Path | None = None):
-        self.meetings_dir = meetings_dir if meetings_dir is not None else resolve_project_dir(project_dir) / ".crew" / "meetings"
+        self.meetings_dir = (
+            meetings_dir
+            if meetings_dir is not None
+            else resolve_project_dir(project_dir) / ".crew" / "meetings"
+        )
 
     def save(
         self,
@@ -81,9 +85,7 @@ class MeetingLogger:
 
         return meeting_id
 
-    def list(
-        self, limit: int = 20, keyword: str | None = None
-    ) -> list[MeetingRecord]:
+    def list(self, limit: int = 20, keyword: str | None = None) -> list[MeetingRecord]:
         """列出历史会议，最新在前."""
         index_path = self.meetings_dir / "index.jsonl"
         if not index_path.exists():

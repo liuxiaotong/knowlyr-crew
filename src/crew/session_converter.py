@@ -223,7 +223,9 @@ def convert_sessions_batch(
 
     logger.info(
         "转换完成: %d 条 trajectory, 跳过 %d 条 (origin 过滤: %s)",
-        len(trajectories), skipped, origin,
+        len(trajectories),
+        skipped,
+        origin,
     )
     return trajectories
 

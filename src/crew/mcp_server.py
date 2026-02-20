@@ -43,6 +43,7 @@ def _get_version() -> str:
     """读取包版本."""
     try:
         from importlib.metadata import version
+
         return version("knowlyr-crew")
     except Exception:
         return "unknown"
@@ -546,9 +547,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             emp = result.get(emp_name)
             if emp is None:
                 return [TextContent(type="text", text=f"未找到员工: {emp_name}")]
-            data = emp.model_dump(mode="json", exclude={
-                "source_path", "api_key", "fallback_api_key", "fallback_base_url",
-            })
+            data = emp.model_dump(
+                mode="json",
+                exclude={
+                    "source_path",
+                    "api_key",
+                    "fallback_api_key",
+                    "fallback_base_url",
+                },
+            )
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         elif name == "run_employee":
@@ -569,6 +576,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if agent_id is not None:
                 try:
                     from crew.id_client import afetch_agent_identity
+
                     agent_identity = await afetch_agent_identity(agent_id)
                 except Exception:
                     pass
@@ -576,7 +584,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
             # 智能上下文检测
             project_info = detect_project(_project_dir)
 
-            prompt = engine.prompt(emp, args=emp_args, agent_identity=agent_identity, project_info=project_info)
+            prompt = engine.prompt(
+                emp, args=emp_args, agent_identity=agent_identity, project_info=project_info
+            )
 
             # 记录工作日志
             try:
@@ -590,6 +600,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if agent_id is not None:
                 try:
                     from crew.id_client import asend_heartbeat
+
                     await asend_heartbeat(agent_id, detail=f"employee={emp.name}")
                 except Exception:
                     pass
@@ -601,10 +612,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
             emp_name = arguments.get("employee_name")
             limit = arguments.get("limit", 10)
             sessions = logger.list_sessions(employee_name=emp_name, limit=limit)
-            return [TextContent(
-                type="text",
-                text=json.dumps(sessions, ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(sessions, ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "detect_project":
             arg_project_dir = arguments.get("project_dir")
@@ -619,6 +632,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "list_pipelines":
             pipelines = discover_pipelines(project_dir=_project_dir)
+
             def _step_summary(s):
                 if hasattr(s, "employee"):
                     return s.employee
@@ -633,12 +647,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
             data = []
             for pname, ppath in pipelines.items():
                 pl = load_pipeline(ppath)
-                data.append({
-                    "name": pname,
-                    "description": pl.description,
-                    "steps": [_step_summary(s) for s in pl.steps],
-                    "path": str(ppath),
-                })
+                data.append(
+                    {
+                        "name": pname,
+                        "description": pl.description,
+                        "steps": [_step_summary(s) for s in pl.steps],
+                        "path": str(ppath),
+                    }
+                )
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         elif name == "run_pipeline":
@@ -669,6 +685,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             api_key = None
             if execute:
                 from crew.providers import detect_provider, resolve_api_key
+
                 eff_model = pl_model or "claude-sonnet-4-20250514"
                 try:
                     _prov = detect_provider(eff_model)
@@ -697,13 +714,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 try:
                     d = load_discussion(dpath)
                     rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
-                    data.append({
-                        "name": dname,
-                        "description": d.description,
-                        "participants": [p.employee for p in d.participants],
-                        "rounds": rounds_count,
-                        "path": str(dpath),
-                    })
+                    data.append(
+                        {
+                            "name": dname,
+                            "description": d.description,
+                            "participants": [p.employee for p in d.participants],
+                            "rounds": rounds_count,
+                            "path": str(dpath),
+                        }
+                    )
                 except Exception:
                     data.append({"name": dname, "error": "解析失败", "path": str(dpath)})
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
@@ -763,10 +782,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     smart_context=smart_context,
                     project_dir=_project_dir,
                 )
-                return [TextContent(
-                    type="text",
-                    text=plan.model_dump_json(indent=2),
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text=plan.model_dump_json(indent=2),
+                    )
+                ]
             else:
                 prompt = render_discussion(
                     discussion,
@@ -779,6 +800,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "add_memory":
             from crew.memory import MemoryStore
+
             store = MemoryStore(project_dir=_project_dir)
             entry = store.add(
                 employee=arguments["employee"],
@@ -792,13 +814,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 applicability=arguments.get("applicability"),
                 origin_employee=arguments.get("origin_employee", ""),
             )
-            return [TextContent(
-                type="text",
-                text=json.dumps(entry.model_dump(), ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(entry.model_dump(), ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "query_memory":
             from crew.memory import MemoryStore
+
             store = MemoryStore(project_dir=_project_dir)
             entries = store.query(
                 employee=arguments["employee"],
@@ -806,13 +831,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 limit=arguments.get("limit", 20),
             )
             data = [e.model_dump() for e in entries]
-            return [TextContent(
-                type="text",
-                text=json.dumps(data, ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(data, ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "track_decision":
             from crew.evaluation import EvaluationEngine
+
             engine = EvaluationEngine(project_dir=_project_dir)
             decision = engine.track(
                 employee=arguments["employee"],
@@ -821,13 +849,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 expected_outcome=arguments.get("expected_outcome", ""),
                 meeting_id=arguments.get("meeting_id", ""),
             )
-            return [TextContent(
-                type="text",
-                text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "evaluate_decision":
             from crew.evaluation import EvaluationEngine
+
             engine = EvaluationEngine(project_dir=_project_dir)
             decision = engine.evaluate(
                 decision_id=arguments["decision_id"],
@@ -836,10 +867,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
             )
             if decision is None:
                 return [TextContent(type="text", text=f"未找到决策: {arguments['decision_id']}")]
-            return [TextContent(
-                type="text",
-                text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "list_meeting_history":
             from crew.meeting_log import MeetingLogger
@@ -874,13 +907,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 human_feedback=arguments.get("human_feedback", ""),
             )
             if result:
-                return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-            return [TextContent(type="text", text="提交失败 — 请检查 knowlyr-id 连接和 AGENT_API_TOKEN 配置")]
+                return [
+                    TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))
+                ]
+            return [
+                TextContent(
+                    type="text", text="提交失败 — 请检查 knowlyr-id 连接和 AGENT_API_TOKEN 配置"
+                )
+            ]
 
         elif name == "crew_status":
             agent_id = arguments.get("agent_id")
             if agent_id is not None:
                 from crew.id_client import afetch_agent_identity
+
                 identity = await afetch_agent_identity(agent_id)
                 if identity is None:
                     return [TextContent(type="text", text=f"未找到 Agent: {agent_id}")]
@@ -891,39 +931,51 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     "model": identity.model,
                     "memory_length": len(identity.memory) if identity.memory else 0,
                 }
-                return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+                return [
+                    TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))
+                ]
             else:
                 from crew.id_client import alist_agents
+
                 agents = await alist_agents()
                 if agents is None:
                     return [TextContent(type="text", text="查询失败 — 请检查 knowlyr-id 连接")]
-                return [TextContent(type="text", text=json.dumps(agents, ensure_ascii=False, indent=2))]
+                return [
+                    TextContent(type="text", text=json.dumps(agents, ensure_ascii=False, indent=2))
+                ]
 
         elif name == "list_tool_schemas":
             from crew.tool_schema import _TOOL_SCHEMAS, TOOL_ROLE_PRESETS
+
             role = arguments.get("role")
             if role:
                 preset = TOOL_ROLE_PRESETS.get(role)
                 if preset is None:
                     available = sorted(TOOL_ROLE_PRESETS.keys())
-                    return [TextContent(
-                        type="text",
-                        text=f"未知角色: {role}\n可用角色: {', '.join(available)}",
-                    )]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"未知角色: {role}\n可用角色: {', '.join(available)}",
+                        )
+                    ]
                 tool_names = sorted(preset)
             else:
                 tool_names = sorted(_TOOL_SCHEMAS.keys())
             data = [
                 {"name": t, "description": _TOOL_SCHEMAS[t]["description"]}
-                for t in tool_names if t in _TOOL_SCHEMAS
+                for t in tool_names
+                if t in _TOOL_SCHEMAS
             ]
-            return [TextContent(
-                type="text",
-                text=json.dumps(data, ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(data, ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "get_permission_matrix":
             from crew.tool_schema import TOOL_ROLE_PRESETS, resolve_effective_tools
+
             result = discover_employees(project_dir=_project_dir)
             emp_name = arguments.get("employee")
             employees = list(result.employees.values())
@@ -941,19 +993,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     "tools_declared": len(emp.tools),
                     "tools_effective": len(effective),
                     "permissions": (
-                        emp.permissions.model_dump(mode="json")
-                        if emp.permissions else None
+                        emp.permissions.model_dump(mode="json") if emp.permissions else None
                     ),
                     "effective_tools": sorted(effective),
                 }
                 matrix.append(entry)
-            return [TextContent(
-                type="text",
-                text=json.dumps(matrix, ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(matrix, ensure_ascii=False, indent=2),
+                )
+            ]
 
         elif name == "get_audit_log":
             from crew.permission import get_audit_logger
+
             audit = get_audit_logger()
             log_path = audit._ensure_dir()
             if not log_path.exists():
@@ -973,10 +1027,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     continue
                 records.append(record)
             records = records[-limit:]
-            return [TextContent(
-                type="text",
-                text=json.dumps(records, ensure_ascii=False, indent=2),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(records, ensure_ascii=False, indent=2),
+                )
+            ]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 
@@ -996,17 +1052,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 )
                 for a in emp.args
             ]
-            prompts.append(Prompt(
-                name=emp.name,
-                title=emp.effective_display_name,
-                description=emp.description,
-                arguments=arguments or None,
-            ))
+            prompts.append(
+                Prompt(
+                    name=emp.name,
+                    title=emp.effective_display_name,
+                    description=emp.description,
+                    arguments=arguments or None,
+                )
+            )
         return prompts
 
     @server.get_prompt()
     async def get_prompt(
-        name: str, arguments: dict[str, str] | None,
+        name: str,
+        arguments: dict[str, str] | None,
     ) -> GetPromptResult:
         """获取渲染后的 prompt."""
         result = discover_employees(project_dir=_project_dir)
@@ -1056,7 +1115,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
         if not uri_str.startswith(prefix):
             raise ValueError(f"未知资源: {uri_str}")
 
-        emp_name = uri_str[len(prefix):]
+        emp_name = uri_str[len(prefix) :]
         result = discover_employees(project_dir=_project_dir)
         emp = result.get(emp_name)
         if emp is None:
@@ -1117,23 +1176,30 @@ async def serve_sse(
 
     async def handle_sse(request):
         async with sse.connect_sse(
-            request.scope, request.receive, request._send,
+            request.scope,
+            request.receive,
+            request._send,
         ) as (read_stream, write_stream):
             await server.run(
-                read_stream, write_stream, server.create_initialization_options(),
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
             )
 
     async def health(request):
         emp_count = len(discover_employees(project_dir=project_dir).employees)
-        return JSONResponse({
-            "status": "ok",
-            "version": _get_version(),
-            "employees": emp_count,
-            "uptime_seconds": round(_time.monotonic() - _start),
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": _get_version(),
+                "employees": emp_count,
+                "uptime_seconds": round(_time.monotonic() - _start),
+            }
+        )
 
     async def metrics(request):
         from crew.metrics import get_collector
+
         return JSONResponse(get_collector().snapshot())
 
     _heartbeat_mgr = None
@@ -1162,6 +1228,7 @@ async def serve_sse(
     )
     if api_token:
         from crew.auth import BearerTokenMiddleware
+
         app.add_middleware(BearerTokenMiddleware, token=api_token)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
@@ -1193,15 +1260,18 @@ async def serve_http(
 
     async def health(request):
         emp_count = len(discover_employees(project_dir=project_dir).employees)
-        return JSONResponse({
-            "status": "ok",
-            "version": _get_version(),
-            "employees": emp_count,
-            "uptime_seconds": round(_time.monotonic() - _start),
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": _get_version(),
+                "employees": emp_count,
+                "uptime_seconds": round(_time.monotonic() - _start),
+            }
+        )
 
     async def metrics(request):
         from crew.metrics import get_collector
+
         return JSONResponse(get_collector().snapshot())
 
     async def lifespan(app):
@@ -1228,6 +1298,7 @@ async def serve_http(
     )
     if api_token:
         from crew.auth import BearerTokenMiddleware
+
         app.add_middleware(BearerTokenMiddleware, token=api_token)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")

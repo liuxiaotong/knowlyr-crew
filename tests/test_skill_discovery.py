@@ -24,14 +24,17 @@ class TestSkillDiscovery:
             skills_dir = Path(tmpdir)
             skill_dir = skills_dir / "my-scanner"
             skill_dir.mkdir()
-            (skill_dir / "SKILL.md").write_text("""---
+            (skill_dir / "SKILL.md").write_text(
+                """---
 name: my-scanner
 description: 扫描测试
 allowed-tools: Read Grep
 ---
 
 扫描内容。
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             employees = _scan_skills_directory(skills_dir)
             assert len(employees) == 1
@@ -45,13 +48,16 @@ allowed-tools: Read Grep
             project_dir = Path(tmpdir)
             skills_dir = project_dir / ".claude" / "skills" / "skill-test"
             skills_dir.mkdir(parents=True)
-            (skills_dir / "SKILL.md").write_text("""---
+            (skills_dir / "SKILL.md").write_text(
+                """---
 name: skill-test
 description: 发现层测试
 ---
 
 技能正文。
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             result = discover_employees(project_dir=project_dir)
             assert "skill-test" in result.employees
@@ -65,24 +71,30 @@ description: 发现层测试
             # 创建 skill 层
             skill_dir = project_dir / ".claude" / "skills" / "my-emp"
             skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text("""---
+            (skill_dir / "SKILL.md").write_text(
+                """---
 name: my-emp
 description: skill 层版本
 ---
 
 技能版本。
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             # 创建 private 层
             crew_dir = project_dir / "private" / "employees"
             crew_dir.mkdir(parents=True)
-            (crew_dir / "my-emp.md").write_text("""---
+            (crew_dir / "my-emp.md").write_text(
+                """---
 name: my-emp
 description: project 层版本
 ---
 
 项目版本。
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             result = discover_employees(project_dir=project_dir)
             emp = result.employees["my-emp"]

@@ -78,6 +78,7 @@ def _get_httpx():
     """延迟导入 httpx，未安装时返回 None."""
     try:
         import httpx
+
         return httpx
     except ImportError:
         return None
@@ -507,7 +508,8 @@ async def asend_heartbeat(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                url, headers=_headers(token),
+                url,
+                headers=_headers(token),
                 json=payload if payload else None,
                 timeout=5.0,
             )
@@ -868,8 +870,16 @@ def log_work(
         return None
     url = f"{base_url}/api/work"
     payload = _build_work_payload(
-        agent_id, task_type, task_input, task_output,
-        auto_score, crew_task_id, tokens_used, model_used, execution_ms, error,
+        agent_id,
+        task_type,
+        task_input,
+        task_output,
+        auto_score,
+        crew_task_id,
+        tokens_used,
+        model_used,
+        execution_ms,
+        error,
     )
     try:
         resp = httpx.post(url, headers=_headers(token), json=payload, timeout=10.0)
@@ -912,8 +922,16 @@ async def alog_work(
         return None
     url = f"{base_url}/api/work"
     payload = _build_work_payload(
-        agent_id, task_type, task_input, task_output,
-        auto_score, crew_task_id, tokens_used, model_used, execution_ms, error,
+        agent_id,
+        task_type,
+        task_input,
+        task_output,
+        auto_score,
+        crew_task_id,
+        tokens_used,
+        model_used,
+        execution_ms,
+        error,
     )
     try:
         async with httpx.AsyncClient() as client:

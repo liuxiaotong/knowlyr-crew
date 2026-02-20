@@ -35,7 +35,9 @@ class DiscussionInput(BaseModel):
     date: str = Field(default="", description="日期 (YYYY-MM-DD)，默认今天")
     source: str = Field(default="claude-code", description="讨论来源")
     context: str = Field(default="", description="讨论背景")
-    runtime_model: str = Field(default="", description="实际推理模型（讨论环境的模型，如 claude-opus-4-6）")
+    runtime_model: str = Field(
+        default="", description="实际推理模型（讨论环境的模型，如 claude-opus-4-6）"
+    )
     participants: list[ParticipantInput] = Field(default_factory=list)
     shared_conclusions: list[str] = Field(default_factory=list, description="团队共识")
 
@@ -150,14 +152,11 @@ class DiscussionIngestor:
 
             # 标注推理环境：当 runtime_model 与 native_model 不同时标记为代理推理
             is_proxied = bool(
-                data.runtime_model
-                and p.native_model
-                and data.runtime_model != p.native_model
+                data.runtime_model and p.native_model and data.runtime_model != p.native_model
             )
             if is_proxied:
                 parts.append(
-                    f"[推理环境：由 {data.runtime_model} 代理推理，"
-                    f"本人模型为 {p.native_model}]"
+                    f"[推理环境：由 {data.runtime_model} 代理推理，本人模型为 {p.native_model}]"
                 )
             elif data.runtime_model:
                 parts.append(f"[推理环境：{data.runtime_model}]")
@@ -191,9 +190,7 @@ class DiscussionIngestor:
             "meeting_id": meeting_id,
             "name": f"external-{data.source}",
             "topic": data.topic,
-            "participants": [
-                p.slug or self.resolve_slug(p.name) for p in data.participants
-            ],
+            "participants": [p.slug or self.resolve_slug(p.name) for p in data.participants],
             "mode": "external-ingest",
             "rounds": 1,
             "output_format": "memory",

@@ -41,7 +41,7 @@ def _is_retryable(exc: Exception) -> bool:
 
 def _retry_delay(attempt: int) -> float:
     """指数退避延迟（秒）: 2^attempt + random jitter."""
-    return float(2 ** attempt) + random.uniform(0, 0.5)
+    return float(2**attempt) + random.uniform(0, 0.5)
 
 
 # ── Lazy SDK imports ──
@@ -165,6 +165,7 @@ async def _anthropic_aexecute(
         kwargs["temperature"] = temperature
 
     if stream:
+
         async def _stream() -> AsyncIterator[str]:
             collected: list[str] = []
             async with client.messages.stream(**kwargs) as resp:
@@ -179,6 +180,7 @@ async def _anthropic_aexecute(
                 output_tokens=final.usage.output_tokens,
                 stop_reason=final.stop_reason,
             )
+
         return _stream()
 
     resp = await client.messages.create(**kwargs)
@@ -296,6 +298,7 @@ async def _openai_aexecute(
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     if stream:
+
         async def _stream() -> AsyncIterator[str]:
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
@@ -318,6 +321,7 @@ async def _openai_aexecute(
                 output_tokens=output_tokens,
                 stop_reason="stop",
             )
+
         return _stream()
 
     resp = await client.chat.completions.create(**kwargs)
@@ -347,7 +351,9 @@ def _gemini_execute(
 ) -> ExecutionResult:
     genai = _get_genai()
     if genai is None:
-        raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
+        raise ImportError(
+            "google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]"
+        )
 
     gen_config = {}
     if temperature is not None:
@@ -402,7 +408,9 @@ async def _gemini_aexecute(
 ) -> ExecutionResult | AsyncIterator[str]:
     genai = _get_genai()
     if genai is None:
-        raise ImportError("google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]")
+        raise ImportError(
+            "google-generativeai SDK 未安装。请运行: pip install knowlyr-crew[gemini]"
+        )
 
     gen_config = {}
     if temperature is not None:
@@ -419,6 +427,7 @@ async def _gemini_aexecute(
         )
 
     if stream:
+
         async def _stream() -> AsyncIterator[str]:
             response = await client.generate_content_async(user_message, stream=True)
             collected = []
@@ -434,6 +443,7 @@ async def _gemini_aexecute(
                 output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
                 stop_reason="stop",
             )
+
         return _stream()
 
     response = await client.generate_content_async(user_message)
@@ -573,19 +583,37 @@ def execute_prompt(
             # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
             if base_url:
                 result = _openai_execute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream, on_chunk,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
+                    on_chunk,
                     base_url=base_url,
                 )
             elif provider == Provider.ANTHROPIC:
                 result = _anthropic_execute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream, on_chunk,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
+                    on_chunk,
                 )
             elif provider == Provider.GEMINI:
                 result = _gemini_execute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream, on_chunk,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
+                    on_chunk,
                 )
             else:
                 effective_base_url = {
@@ -595,8 +623,14 @@ def execute_prompt(
                     Provider.QWEN: QWEN_BASE_URL,
                 }.get(provider)
                 result = _openai_execute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream, on_chunk,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
+                    on_chunk,
                     base_url=effective_base_url,
                 )
             _record_metrics(provider.value, result, time.monotonic() - t0)
@@ -607,7 +641,10 @@ def execute_prompt(
                 delay = _retry_delay(attempt)
                 logger.warning(
                     "LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
-                    attempt + 1, MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 time.sleep(delay)
                 last_exc = e
@@ -667,19 +704,34 @@ async def aexecute_prompt(
             # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
             if base_url:
                 result = await _openai_aexecute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
                     base_url=base_url,
                 )
             elif provider == Provider.ANTHROPIC:
                 result = await _anthropic_aexecute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
                 )
             elif provider == Provider.GEMINI:
                 result = await _gemini_aexecute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
                 )
             else:
                 effective_base_url = {
@@ -689,8 +741,13 @@ async def aexecute_prompt(
                     Provider.QWEN: QWEN_BASE_URL,
                 }.get(provider)
                 result = await _openai_aexecute(
-                    system_prompt, user_message, resolved_key, model,
-                    temperature, max_tokens, stream,
+                    system_prompt,
+                    user_message,
+                    resolved_key,
+                    model,
+                    temperature,
+                    max_tokens,
+                    stream,
                     base_url=effective_base_url,
                 )
             if not stream and isinstance(result, ExecutionResult):
@@ -703,7 +760,10 @@ async def aexecute_prompt(
                 delay = _retry_delay(attempt)
                 logger.warning(
                     "LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
-                    attempt + 1, MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 await asyncio.sleep(delay)
                 last_exc = e
@@ -762,11 +822,13 @@ def _anthropic_execute_with_tools(
         if block.type == "text":
             text_parts.append(block.text)
         elif block.type == "tool_use":
-            tool_calls.append(ToolCall(
-                id=block.id,
-                name=block.name,
-                arguments=block.input if isinstance(block.input, dict) else {},
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=block.id,
+                    name=block.name,
+                    arguments=block.input if isinstance(block.input, dict) else {},
+                )
+            )
 
     return ToolExecutionResult(
         content="\n".join(text_parts),
@@ -805,11 +867,13 @@ async def _anthropic_aexecute_with_tools(
         if block.type == "text":
             text_parts.append(block.text)
         elif block.type == "tool_use":
-            tool_calls.append(ToolCall(
-                id=block.id,
-                name=block.name,
-                arguments=block.input if isinstance(block.input, dict) else {},
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=block.id,
+                    name=block.name,
+                    arguments=block.input if isinstance(block.input, dict) else {},
+                )
+            )
 
     return ToolExecutionResult(
         content="\n".join(text_parts),
@@ -842,14 +906,16 @@ def _openai_execute_with_tools(
     # 转换 Anthropic 格式 tools 为 OpenAI 格式
     openai_tools = []
     for t in tools:
-        openai_tools.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": t.get("input_schema", {}),
-            },
-        })
+        openai_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {}),
+                },
+            }
+        )
 
     full_messages = [{"role": "system", "content": system_prompt}] + messages
     kwargs: dict = {
@@ -873,11 +939,13 @@ def _openai_execute_with_tools(
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
             except json.JSONDecodeError:
                 args = {}
-            tool_calls.append(ToolCall(
-                id=tc.id,
-                name=tc.function.name,
-                arguments=args,
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args,
+                )
+            )
 
     return ToolExecutionResult(
         content=content,
@@ -909,14 +977,16 @@ async def _openai_aexecute_with_tools(
 
     openai_tools = []
     for t in tools:
-        openai_tools.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": t.get("input_schema", {}),
-            },
-        })
+        openai_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {}),
+                },
+            }
+        )
 
     full_messages = [{"role": "system", "content": system_prompt}] + messages
     kwargs: dict = {
@@ -940,11 +1010,13 @@ async def _openai_aexecute_with_tools(
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
             except json.JSONDecodeError:
                 args = {}
-            tool_calls.append(ToolCall(
-                id=tc.id,
-                name=tc.function.name,
-                arguments=args,
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args,
+                )
+            )
 
     return ToolExecutionResult(
         content=content,
@@ -992,16 +1064,29 @@ def execute_with_tools(
             # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
             if base_url:
                 result = _openai_execute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                     base_url=base_url,
                 )
             elif provider == Provider.ANTHROPIC:
                 result = _anthropic_execute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                 )
             elif provider in (
-                Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
-                Provider.ZHIPU, Provider.QWEN,
+                Provider.OPENAI,
+                Provider.DEEPSEEK,
+                Provider.MOONSHOT,
+                Provider.ZHIPU,
+                Provider.QWEN,
             ):
                 effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
@@ -1010,23 +1095,37 @@ def execute_with_tools(
                     Provider.QWEN: QWEN_BASE_URL,
                 }.get(provider)
                 result = _openai_execute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                     base_url=effective_base_url,
                 )
             else:
                 raise ValueError(f"Provider {provider} 暂不支持 tool_use")
-            _record_metrics(provider.value, ExecutionResult(
-                content=result.content, model=result.model,
-                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                stop_reason=result.stop_reason,
-            ), time.monotonic() - t0)
+            _record_metrics(
+                provider.value,
+                ExecutionResult(
+                    content=result.content,
+                    model=result.model,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    stop_reason=result.stop_reason,
+                ),
+                time.monotonic() - t0,
+            )
             return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):
                 delay = _retry_delay(attempt)
                 logger.warning(
                     "Tool-use LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
-                    attempt + 1, MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 time.sleep(delay)
                 last_exc = e
@@ -1078,16 +1177,29 @@ async def aexecute_with_tools(
             # base_url 显式指定时，强制走 OpenAI 兼容路径（API 代理）
             if base_url:
                 result = await _openai_aexecute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                     base_url=base_url,
                 )
             elif provider == Provider.ANTHROPIC:
                 result = await _anthropic_aexecute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                 )
             elif provider in (
-                Provider.OPENAI, Provider.DEEPSEEK, Provider.MOONSHOT,
-                Provider.ZHIPU, Provider.QWEN,
+                Provider.OPENAI,
+                Provider.DEEPSEEK,
+                Provider.MOONSHOT,
+                Provider.ZHIPU,
+                Provider.QWEN,
             ):
                 effective_base_url = {
                     Provider.DEEPSEEK: DEEPSEEK_BASE_URL,
@@ -1096,23 +1208,37 @@ async def aexecute_with_tools(
                     Provider.QWEN: QWEN_BASE_URL,
                 }.get(provider)
                 result = await _openai_aexecute_with_tools(
-                    system_prompt, messages, tools, resolved_key, model, max_tokens,
+                    system_prompt,
+                    messages,
+                    tools,
+                    resolved_key,
+                    model,
+                    max_tokens,
                     base_url=effective_base_url,
                 )
             else:
                 raise ValueError(f"Provider {provider} 暂不支持 tool_use")
-            _record_metrics(provider.value, ExecutionResult(
-                content=result.content, model=result.model,
-                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                stop_reason=result.stop_reason,
-            ), time.monotonic() - t0)
+            _record_metrics(
+                provider.value,
+                ExecutionResult(
+                    content=result.content,
+                    model=result.model,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    stop_reason=result.stop_reason,
+                ),
+                time.monotonic() - t0,
+            )
             return result
         except Exception as e:
             if attempt < MAX_RETRIES and _is_retryable(e):
                 delay = _retry_delay(attempt)
                 logger.warning(
                     "Async tool-use LLM 调用失败 (attempt %d/%d), %0.1fs 后重试: %s",
-                    attempt + 1, MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 await asyncio.sleep(delay)
                 last_exc = e

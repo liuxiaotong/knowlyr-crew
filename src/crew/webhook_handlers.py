@@ -26,6 +26,7 @@ def _parse_sender_name(extra_context: str | None) -> str | None:
 async def _health(request: Any) -> Any:
     """健康检查."""
     from starlette.responses import JSONResponse
+
     return JSONResponse({"status": "ok", "service": "crew-webhook"})
 
 
@@ -34,6 +35,7 @@ async def _metrics(request: Any) -> Any:
     from starlette.responses import JSONResponse
 
     from crew.metrics import get_collector
+
     return JSONResponse(get_collector().snapshot())
 
 
@@ -75,6 +77,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
         yaml_path = employee.source_path / "employee.yaml"
         if yaml_path.exists():
             import yaml
+
             with open(yaml_path) as f:
                 yaml_config = yaml.safe_load(f) or {}
             bio = yaml_config.get("bio", "")
@@ -83,12 +86,14 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
 
     # 组织架构信息（团队、权限、成本）
     from crew.organization import get_effective_authority, load_organization
+
     org = load_organization(project_dir=ctx.project_dir)
     team = org.get_team(employee.name)
     authority = get_effective_authority(org, employee.name, project_dir=ctx.project_dir)
 
     # 7 天成本
     from crew.cost import query_cost_summary
+
     cost_summary = query_cost_summary(ctx.registry, employee=employee.name, days=7)
 
     # 推理模型不支持自定义 temperature（kimi-k2.5, o1, o3, deepseek-r 等）
@@ -97,30 +102,32 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     if any(_model.startswith(p) for p in _REASONING_PREFIXES):
         temperature = 1
 
-    return JSONResponse({
-        "name": employee.name,
-        "character_name": employee.character_name,
-        "display_name": employee.display_name,
-        "description": employee.description,
-        "bio": bio,
-        "version": employee.version,
-        "model": employee.model,
-        "model_tier": employee.model_tier,
-        "base_url": employee.base_url,
-        "fallback_model": employee.fallback_model,
-        "fallback_base_url": employee.fallback_base_url,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "tools": employee.tools,
-        "tool_schemas": tool_schemas,
-        "system_prompt": system_prompt,
-        "agent_id": employee.agent_id,
-        "team": team,
-        "authority": authority,
-        "cost_7d": cost_summary,
-        "kpi": employee.kpi,
-        "auto_memory": employee.auto_memory,
-    })
+    return JSONResponse(
+        {
+            "name": employee.name,
+            "character_name": employee.character_name,
+            "display_name": employee.display_name,
+            "description": employee.description,
+            "bio": bio,
+            "version": employee.version,
+            "model": employee.model,
+            "model_tier": employee.model_tier,
+            "base_url": employee.base_url,
+            "fallback_model": employee.fallback_model,
+            "fallback_base_url": employee.fallback_base_url,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": employee.tools,
+            "tool_schemas": tool_schemas,
+            "system_prompt": system_prompt,
+            "agent_id": employee.agent_id,
+            "team": team,
+            "authority": authority,
+            "cost_7d": cost_summary,
+            "kpi": employee.kpi,
+            "auto_memory": employee.auto_memory,
+        }
+    )
 
 
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
@@ -198,6 +205,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     # Token 预算截断：粗估 1 token ≈ 3 中文字符 / 4 英文字符
     if max_tokens > 0:
         import json as _json
+
         budget_chars = max_tokens * 3  # 保守估计
         # soul 优先保留，记忆按顺序截断
         soul_chars = len(soul)
@@ -273,7 +281,9 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
 
     if not updates:
         return JSONResponse(
-            {"error": f"No updatable fields. Allowed: {', '.join(sorted(_EMPLOYEE_UPDATABLE_FIELDS))}"},
+            {
+                "error": f"No updatable fields. Allowed: {', '.join(sorted(_EMPLOYEE_UPDATABLE_FIELDS))}"
+            },
             status_code=400,
         )
 
@@ -304,12 +314,14 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
         except Exception:
             logger.warning("同步到 knowlyr-id 失败（更新已写入本地）: %s", identifier)
 
-    return JSONResponse({
-        "ok": True,
-        "updated": updates,
-        "synced_to_id": synced,
-        "employee": employee.name,
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "updated": updates,
+            "synced_to_id": synced,
+            "employee": employee.name,
+        }
+    )
 
 
 async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
@@ -358,16 +370,19 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
             from crew.id_client import aupdate_agent
 
             remote_disabled = await aupdate_agent(
-                agent_id=employee.agent_id, agent_status="inactive",
+                agent_id=employee.agent_id,
+                agent_status="inactive",
             )
         except Exception:
             logger.warning("远端禁用失败: Agent #%s", employee.agent_id)
 
-    return JSONResponse({
-        "ok": True,
-        "deleted": employee.name,
-        "remote_disabled": remote_disabled,
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "deleted": employee.name,
+            "remote_disabled": remote_disabled,
+        }
+    )
 
 
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
@@ -385,13 +400,15 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
         data = DiscussionInput(**payload)
         ingestor = DiscussionIngestor(project_dir=ctx.project_dir)
         results = ingestor.ingest(data)
-        return JSONResponse({
-            "ok": True,
-            "topic": data.topic,
-            "memories_written": results["memories_written"],
-            "meeting_id": results.get("meeting_id"),
-            "participants": results["participants"],
-        })
+        return JSONResponse(
+            {
+                "ok": True,
+                "topic": data.topic,
+                "memories_written": results["memories_written"],
+                "meeting_id": results.get("meeting_id"),
+                "participants": results["participants"],
+            }
+        )
     except Exception as e:
         logger.exception("记忆导入失败")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -428,6 +445,7 @@ async def _handle_github(request: Any, ctx: _AppContext) -> Any:
 
     args = resolve_target_args(route.target, payload)
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="github",
@@ -453,6 +471,7 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
 
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="openclaw",
@@ -478,6 +497,7 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
 
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="generic",
@@ -492,12 +512,15 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
     """直接触发 pipeline."""
 
     name = request.path_params["name"]
-    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
     args = payload.get("args", {})
     sync = payload.get("sync", False)
     agent_id = payload.get("agent_id")
 
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="direct",
@@ -514,7 +537,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     from starlette.responses import JSONResponse
 
     name = request.path_params["name"]
-    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
     args = payload.get("args", {})
     sync = payload.get("sync", False)
     stream = payload.get("stream", False)
@@ -543,9 +568,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
         discovery = discover_employees(project_dir=ctx.project_dir)
         emp = discovery.get(name)
-        has_tools = any(
-            t in AGENT_TOOLS for t in (emp.tools or [])
-        ) if emp else False
+        has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
         use_fast_path = (
             has_tools
             and emp is not None
@@ -557,8 +580,11 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         _t0 = _time.monotonic()
         if use_fast_path:
             from crew.webhook_feishu import _feishu_fast_reply
+
             result = await _feishu_fast_reply(
-                ctx, emp, user_message,
+                ctx,
+                emp,
+                user_message,
                 message_history=message_history,
                 max_visibility="private",
                 extra_context=extra_context,
@@ -566,9 +592,13 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             )
         else:
             import crew.webhook as _wh
+
             result = await _wh._execute_employee(
-                ctx, name, args,
-                agent_id=agent_id, model=model,
+                ctx,
+                name,
+                args,
+                agent_id=agent_id,
+                model=model,
                 user_message=user_message,
                 message_history=message_history,
             )
@@ -580,7 +610,13 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
         logger.warning(
             "站内回复 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
-            _path, _elapsed, _m, _in, _out, name, user_message[:40],
+            _path,
+            _elapsed,
+            _m,
+            _in,
+            _out,
+            name,
+            user_message[:40],
         )
 
         # 记录任务用于成本追踪
@@ -617,10 +653,12 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     # ── 流式模式 ──
     if stream:
         import crew.webhook as _wh
+
         return await _wh._stream_employee(ctx, name, args, agent_id=agent_id, model=model)
 
     # ── 原有同步/异步模式 ──
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="direct",
@@ -642,7 +680,9 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     from crew.organization import load_organization
 
     name = request.path_params["name"]
-    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
     task = payload.get("args", {}).get("task", "") or payload.get("task", "")
     overrides = payload.get("overrides", {})
     sync = payload.get("sync", False)
@@ -691,6 +731,7 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     chain_name = " → ".join(s["employee_name"] for s in steps)
 
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="direct",
@@ -708,7 +749,9 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
     from starlette.responses import JSONResponse, StreamingResponse
 
     name = request.path_params["name"]
-    payload = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
     task_desc = payload.get("task", "")
     if not task_desc:
         return JSONResponse({"error": "缺少 task 参数"}, status_code=400)
@@ -821,6 +864,7 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
 
     import crew.webhook as _wh
+
     return await _wh._dispatch_task(
         ctx,
         trigger="replay",
@@ -846,7 +890,8 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "task not found"}, status_code=404)
     if record.status != "awaiting_approval":
         return JSONResponse(
-            {"error": f"任务状态为 {record.status}，无法审批"}, status_code=400,
+            {"error": f"任务状态为 {record.status}，无法审批"},
+            status_code=400,
         )
 
     if action == "reject":
@@ -866,11 +911,13 @@ async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
 
     if ctx.scheduler is None:
         return JSONResponse({"enabled": False, "schedules": []})
-    return JSONResponse({
-        "enabled": True,
-        "running": ctx.scheduler.running,
-        "schedules": ctx.scheduler.get_next_runs(),
-    })
+    return JSONResponse(
+        {
+            "enabled": True,
+            "running": ctx.scheduler.running,
+            "schedules": ctx.scheduler.get_next_runs(),
+        }
+    )
 
 
 async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
@@ -920,24 +967,28 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     if override is None:
         org = load_organization(project_dir=ctx.project_dir)
         current = org.get_authority(employee.name)
-        return JSONResponse({
-            "ok": True,
-            "employee": employee.name,
-            "authority": current,
-            "message": "无覆盖记录，权限未变更",
-        })
+        return JSONResponse(
+            {
+                "ok": True,
+                "employee": employee.name,
+                "authority": current,
+                "message": "无覆盖记录，权限未变更",
+            }
+        )
 
     _save_overrides(ctx.project_dir)
     org = load_organization(project_dir=ctx.project_dir)
     restored = org.get_authority(employee.name)
 
-    return JSONResponse({
-        "ok": True,
-        "employee": employee.name,
-        "authority": restored,
-        "previous_override": override,
-        "message": f"权限已恢复: {override['level']} → {restored}",
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "employee": employee.name,
+            "authority": restored,
+            "previous_override": override,
+            "message": f"权限已恢复: {override['level']} → {restored}",
+        }
+    )
 
 
 async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
@@ -959,8 +1010,11 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
     all_memories: list[dict] = []
     stats: dict[str, int] = {
-        "decision": 0, "estimate": 0, "finding": 0,
-        "correction": 0, "pattern": 0,
+        "decision": 0,
+        "estimate": 0,
+        "finding": 0,
+        "correction": 0,
+        "pattern": 0,
     }
 
     for emp_name in result.employees:
@@ -968,27 +1022,31 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
         for m in entries:
             stats[m.category] = stats.get(m.category, 0) + 1
             if not cutoff or m.created_at >= cutoff:
-                all_memories.append({
-                    "employee": m.employee,
-                    "category": m.category,
-                    "content": m.content,
-                    "created_at": m.created_at,
-                    "confidence": m.confidence,
-                    "tags": m.tags,
-                    "shared": m.shared,
-                    "trigger_condition": getattr(m, "trigger_condition", ""),
-                    "applicability": getattr(m, "applicability", []),
-                    "origin_employee": getattr(m, "origin_employee", ""),
-                    "verified_count": getattr(m, "verified_count", 0),
-                })
+                all_memories.append(
+                    {
+                        "employee": m.employee,
+                        "category": m.category,
+                        "content": m.content,
+                        "created_at": m.created_at,
+                        "confidence": m.confidence,
+                        "tags": m.tags,
+                        "shared": m.shared,
+                        "trigger_condition": getattr(m, "trigger_condition", ""),
+                        "applicability": getattr(m, "applicability", []),
+                        "origin_employee": getattr(m, "origin_employee", ""),
+                        "verified_count": getattr(m, "verified_count", 0),
+                    }
+                )
 
     all_memories.sort(key=lambda x: x["created_at"], reverse=True)
 
-    return JSONResponse({
-        "memories": all_memories[:limit],
-        "stats": stats,
-        "total": sum(stats.values()),
-    })
+    return JSONResponse(
+        {
+            "memories": all_memories[:limit],
+            "stats": stats,
+            "total": sum(stats.values()),
+        }
+    )
 
 
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
@@ -1030,7 +1088,8 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     aiberm_user_id = os.environ.get("AIBERM_USER_ID", "")
     if aiberm_token:
         aiberm_balance = await fetch_aiberm_balance(
-            access_token=aiberm_token, user_id=aiberm_user_id,
+            access_token=aiberm_token,
+            user_id=aiberm_user_id,
         )
     if aiberm_billing is None:
         aiberm_billing = {}
@@ -1065,16 +1124,18 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     for name, emp in sorted(result.employees.items()):
         team = org.get_team(name)
         authority = get_effective_authority(org, name, project_dir=ctx.project_dir)
-        employees_info.append({
-            "name": name,
-            "character_name": emp.character_name,
-            "display_name": emp.display_name,
-            "description": emp.description,
-            "model": emp.model,
-            "agent_id": emp.agent_id,
-            "team": team,
-            "authority": authority,
-        })
+        employees_info.append(
+            {
+                "name": name,
+                "character_name": emp.character_name,
+                "display_name": emp.display_name,
+                "description": emp.description,
+                "model": emp.model,
+                "agent_id": emp.agent_id,
+                "team": team,
+                "authority": authority,
+            }
+        )
 
     # 团队汇总
     teams_info = {}
@@ -1085,64 +1146,66 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
             "members": team.members,
         }
 
-    return JSONResponse({
-        "total_employees": len(result.employees),
-        "teams": teams_info,
-        "authority_levels": {
-            level: {"label": auth.label, "count": len(auth.members)}
-            for level, auth in org.authority.items()
-        },
-        "cost_7d": cost,
-        "aiberm_billing": aiberm_billing,
-        "moonshot_billing": moonshot_billing,
-        "employees": employees_info,
-        "route_categories": {
-            cat_id: {"label": cat.label, "icon": cat.icon}
-            for cat_id, cat in org.route_categories.items()
-        },
-        "routing_templates": {
-            name: {
-                "label": tmpl.label,
-                "category": tmpl.category,
-                "steps": [
-                    {
-                        "role": step.role,
-                        "employee": step.employee,
-                        "employees": step.employees or [],
-                        "team": step.team,
-                        "description": step.description,
-                        "optional": step.optional,
-                        "approval": step.approval,
-                        "human": step.human,
-                        "icon": step.icon,
-                        "ci": step.ci,
-                    }
-                    for step in tmpl.steps
-                ],
-                "extra_flows": [
-                    [
+    return JSONResponse(
+        {
+            "total_employees": len(result.employees),
+            "teams": teams_info,
+            "authority_levels": {
+                level: {"label": auth.label, "count": len(auth.members)}
+                for level, auth in org.authority.items()
+            },
+            "cost_7d": cost,
+            "aiberm_billing": aiberm_billing,
+            "moonshot_billing": moonshot_billing,
+            "employees": employees_info,
+            "route_categories": {
+                cat_id: {"label": cat.label, "icon": cat.icon}
+                for cat_id, cat in org.route_categories.items()
+            },
+            "routing_templates": {
+                name: {
+                    "label": tmpl.label,
+                    "category": tmpl.category,
+                    "steps": [
                         {
-                            "role": s.role,
-                            "description": s.description,
-                            "icon": s.icon,
-                            "ci": s.ci,
-                            "employee": s.employee,
-                            "employees": s.employees or [],
-                            "team": s.team,
-                            "optional": s.optional,
-                            "approval": s.approval,
-                            "human": s.human,
+                            "role": step.role,
+                            "employee": step.employee,
+                            "employees": step.employees or [],
+                            "team": step.team,
+                            "description": step.description,
+                            "optional": step.optional,
+                            "approval": step.approval,
+                            "human": step.human,
+                            "icon": step.icon,
+                            "ci": step.ci,
                         }
-                        for s in flow
-                    ]
-                    for flow in tmpl.extra_flows
-                ],
-                "tags": tmpl.tags,
-                "tag_style": tmpl.tag_style,
-                "repo": tmpl.repo,
-                "notes": tmpl.notes,
-                "warnings": tmpl.warnings,
-            }
-            for name, tmpl in org.routing_templates.items()
-        },
-    })
+                        for step in tmpl.steps
+                    ],
+                    "extra_flows": [
+                        [
+                            {
+                                "role": s.role,
+                                "description": s.description,
+                                "icon": s.icon,
+                                "ci": s.ci,
+                                "employee": s.employee,
+                                "employees": s.employees or [],
+                                "team": s.team,
+                                "optional": s.optional,
+                                "approval": s.approval,
+                                "human": s.human,
+                            }
+                            for s in flow
+                        ]
+                        for flow in tmpl.extra_flows
+                    ],
+                    "tags": tmpl.tags,
+                    "tag_style": tmpl.tag_style,
+                    "repo": tmpl.repo,
+                    "notes": tmpl.notes,
+                    "warnings": tmpl.warnings,
+                }
+                for name, tmpl in org.routing_templates.items()
+            },
+        }
+    )

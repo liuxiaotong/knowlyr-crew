@@ -57,7 +57,10 @@ class MetricsCollector:
             if provider:
                 if provider not in self._by_provider:
                     self._by_provider[provider] = {
-                        "calls": 0, "success": 0, "failed": 0, "errors": {},
+                        "calls": 0,
+                        "success": 0,
+                        "failed": 0,
+                        "errors": {},
                     }
                 self._by_provider[provider]["calls"] += 1
                 if success:

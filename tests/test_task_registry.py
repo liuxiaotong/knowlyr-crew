@@ -1,7 +1,5 @@
 """测试任务注册表."""
 
-
-
 from crew.task_registry import TaskRecord, TaskRegistry
 
 
@@ -112,6 +110,7 @@ class TestTaskRegistryThreadSafety:
     def test_concurrent_create(self):
         """多线程同时 create 无异常."""
         import threading
+
         registry = TaskRegistry()
         errors = []
 
@@ -133,6 +132,7 @@ class TestTaskRegistryThreadSafety:
     def test_concurrent_update(self):
         """多线程同时 update 无丢失."""
         import threading
+
         registry = TaskRegistry()
         records = [
             registry.create(trigger="direct", target_type="employee", target_name=f"e-{i}")

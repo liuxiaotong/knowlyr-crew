@@ -63,10 +63,12 @@ class TestPipelineModels:
         assert len(pl.steps) == 1
 
     def test_parallel_group(self):
-        group = ParallelGroup(parallel=[
-            PipelineStep(employee="a", id="a1"),
-            PipelineStep(employee="b"),
-        ])
+        group = ParallelGroup(
+            parallel=[
+                PipelineStep(employee="a", id="a1"),
+                PipelineStep(employee="b"),
+            ]
+        )
         assert len(group.parallel) == 2
         assert group.parallel[0].id == "a1"
 
@@ -75,10 +77,12 @@ class TestPipelineModels:
             name="test",
             steps=[
                 PipelineStep(employee="code-reviewer"),
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="security-auditor"),
-                    PipelineStep(employee="test-engineer"),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="security-auditor"),
+                        PipelineStep(employee="test-engineer"),
+                    ]
+                ),
                 PipelineStep(employee="pr-creator"),
             ],
         )
@@ -122,10 +126,12 @@ class TestLoadPipeline:
             "name": "test-parallel",
             "steps": [
                 {"employee": "code-reviewer"},
-                {"parallel": [
-                    {"employee": "security-auditor", "id": "sec"},
-                    {"employee": "test-engineer"},
-                ]},
+                {
+                    "parallel": [
+                        {"employee": "security-auditor", "id": "sec"},
+                        {"employee": "test-engineer"},
+                    ]
+                },
                 {"employee": "pr-creator"},
             ],
         }
@@ -138,7 +144,6 @@ class TestLoadPipeline:
         assert isinstance(pl.steps[2], PipelineStep)
         assert len(pl.steps[1].parallel) == 2
         assert pl.steps[1].parallel[0].id == "sec"
-
 
 
 class TestValidatePipeline:
@@ -182,10 +187,12 @@ class TestValidatePipeline:
         pl = Pipeline(
             name="par",
             steps=[
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="code-reviewer", id="a"),
-                    PipelineStep(employee="nonexistent-worker", id="b"),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="code-reviewer", id="a"),
+                        PipelineStep(employee="nonexistent-worker", id="b"),
+                    ]
+                ),
             ],
         )
         errors = validate_pipeline(pl)
@@ -197,13 +204,21 @@ class TestResolveOutputRefs:
 
     def test_prompt_mode_preserves_placeholders(self):
         result = _resolve_output_refs(
-            "{prev}", {}, {}, "actual output", execute=False,
+            "{prev}",
+            {},
+            {},
+            "actual output",
+            execute=False,
         )
         assert result == "{prev}"
 
     def test_execute_mode_resolves_prev(self):
         result = _resolve_output_refs(
-            "Context: {prev}", {}, {}, "review result", execute=True,
+            "Context: {prev}",
+            {},
+            {},
+            "review result",
+            execute=True,
         )
         assert result == "Context: review result"
 
@@ -305,10 +320,12 @@ class TestRunPipeline:
         pl = Pipeline(
             name="par-test",
             steps=[
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="code-reviewer", id="a", args={"target": "main"}),
-                    PipelineStep(employee="test-engineer", id="b", args={"target": "main"}),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="code-reviewer", id="a", args={"target": "main"}),
+                        PipelineStep(employee="test-engineer", id="b", args={"target": "main"}),
+                    ]
+                ),
             ],
         )
         result = run_pipeline(pl, smart_context=False)
@@ -339,7 +356,8 @@ class TestRunPipeline:
         )
         callback_results = []
         result = run_pipeline(
-            pl, smart_context=False,
+            pl,
+            smart_context=False,
             on_step_complete=lambda r, cp: callback_results.append(r.employee),
         )
         assert len(callback_results) == 2
@@ -350,10 +368,12 @@ class TestRunPipeline:
             name="idx-test",
             steps=[
                 PipelineStep(employee="code-reviewer"),
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="test-engineer"),
-                    PipelineStep(employee="code-reviewer"),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="test-engineer"),
+                        PipelineStep(employee="code-reviewer"),
+                    ]
+                ),
                 PipelineStep(employee="code-reviewer"),
             ],
         )
@@ -383,7 +403,11 @@ class TestDiscoverPipelines:
     def test_project_overrides_builtin(self, tmp_path):
         pl_dir = tmp_path / ".crew" / "pipelines"
         pl_dir.mkdir(parents=True)
-        data = {"name": "full-review", "description": "自定义", "steps": [{"employee": "code-reviewer"}]}
+        data = {
+            "name": "full-review",
+            "description": "自定义",
+            "steps": [{"employee": "code-reviewer"}],
+        }
         (pl_dir / "full-review.yaml").write_text(yaml.dump(data))
         pipelines = discover_pipelines(project_dir=tmp_path)
         # 项目流水线应覆盖内置
@@ -398,7 +422,12 @@ class TestBuildCheckpoint:
     def test_basic(self):
         r1 = StepResult(employee="a", step_index=0, args={}, prompt="p1", output="out1")
         checkpoint = _build_checkpoint(
-            "test-pl", [r1], {"a": "out1"}, {0: "out1"}, 1, 1,
+            "test-pl",
+            [r1],
+            {"a": "out1"},
+            {0: "out1"},
+            1,
+            1,
         )
         assert checkpoint["pipeline_name"] == "test-pl"
         assert len(checkpoint["completed_steps"]) == 1
@@ -410,7 +439,12 @@ class TestBuildCheckpoint:
         r1 = StepResult(employee="a", step_index=0, args={}, prompt="p1", output="o1")
         r2 = StepResult(employee="b", step_index=1, args={}, prompt="p2", output="o2")
         checkpoint = _build_checkpoint(
-            "test", [[r1, r2]], {}, {0: "o1", 1: "o2"}, 2, 1,
+            "test",
+            [[r1, r2]],
+            {},
+            {0: "o1", 1: "o2"},
+            2,
+            1,
         )
         assert len(checkpoint["completed_steps"]) == 1
         assert isinstance(checkpoint["completed_steps"][0], list)
@@ -468,11 +502,20 @@ class TestResumePipeline:
         """从第 1 步的 checkpoint 恢复，跳过第 0 步."""
         # 模拟 checkpoint: 第 0 步已完成
         r0 = StepResult(
-            employee="code-reviewer", step_id="review", step_index=0,
-            args={"target": "main"}, prompt="prompt0", output="review output",
+            employee="code-reviewer",
+            step_id="review",
+            step_index=0,
+            args={"target": "main"},
+            prompt="prompt0",
+            output="review output",
         )
         checkpoint = _build_checkpoint(
-            "test-pl", [r0], {"review": "review output"}, {0: "review output"}, 1, 1,
+            "test-pl",
+            [r0],
+            {"review": "review output"},
+            {0: "review output"},
+            1,
+            1,
         )
 
         pl = Pipeline(
@@ -497,15 +540,26 @@ class TestResumePipeline:
     def test_resume_all_completed(self):
         """所有步骤都已完成，恢复无操作."""
         r0 = StepResult(
-            employee="code-reviewer", step_index=0,
-            args={"target": "main"}, prompt="p0", output="o0",
+            employee="code-reviewer",
+            step_index=0,
+            args={"target": "main"},
+            prompt="p0",
+            output="o0",
         )
         r1 = StepResult(
-            employee="test-engineer", step_index=1,
-            args={"target": "main"}, prompt="p1", output="o1",
+            employee="test-engineer",
+            step_index=1,
+            args={"target": "main"},
+            prompt="p1",
+            output="o1",
         )
         checkpoint = _build_checkpoint(
-            "test-pl", [r0, r1], {}, {0: "o0", 1: "o1"}, 2, 2,
+            "test-pl",
+            [r0, r1],
+            {},
+            {0: "o0", 1: "o1"},
+            2,
+            2,
         )
 
         pl = Pipeline(
@@ -551,8 +605,11 @@ class TestResumeExecuteParam:
     def test_resume_prompt_only(self):
         """execute=False 时走 prompt-only 模式."""
         r0 = StepResult(
-            employee="code-reviewer", step_index=0,
-            args={"target": "main"}, prompt="p0", output="o0",
+            employee="code-reviewer",
+            step_index=0,
+            args={"target": "main"},
+            prompt="p0",
+            output="o0",
         )
         checkpoint = _build_checkpoint("test", [r0], {}, {0: "o0"}, 1, 1)
         pl = Pipeline(
@@ -562,7 +619,9 @@ class TestResumeExecuteParam:
                 PipelineStep(employee="test-engineer", args={"target": "main"}),
             ],
         )
-        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=False))
+        result = _run(
+            aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=False)
+        )
         assert result.mode == "prompt"
         assert len(result.steps) == 2
 
@@ -581,7 +640,9 @@ class TestResumeExecuteParam:
             steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
         )
         # execute=True 但无 API key → prompt-only 实际，但 mode 仍为 execute
-        result = _run(aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=True))
+        result = _run(
+            aresume_pipeline(pl, checkpoint=checkpoint, smart_context=False, execute=True)
+        )
         assert result.mode == "execute"
 
 
@@ -591,9 +652,13 @@ class TestFailFast:
     def _make_error_step(self, employee, error_msg="test error"):
         """创建一个会返回错误的 StepResult."""
         return StepResult(
-            employee=employee, step_index=0,
-            args={}, prompt="p", output="",
-            error=True, error_message=error_msg,
+            employee=employee,
+            step_index=0,
+            args={},
+            prompt="p",
+            output="",
+            error=True,
+            error_message=error_msg,
         )
 
     def test_fail_fast_stops_pipeline(self):
@@ -612,13 +677,19 @@ class TestFailFast:
         def _patched_exec(step, index, engine, employees, *args, **kwargs):
             if step.employee == "test-engineer":
                 return StepResult(
-                    employee=step.employee, step_id=step.id, step_index=index,
-                    args=step.args, prompt="p", output="",
-                    error=True, error_message="mock failure",
+                    employee=step.employee,
+                    step_id=step.id,
+                    step_index=index,
+                    args=step.args,
+                    prompt="p",
+                    output="",
+                    error=True,
+                    error_message="mock failure",
                 )
             return original_exec(step, index, engine, employees, *args, **kwargs)
 
         import crew.pipeline as _pl_mod
+
         original_exec = _pl_mod._execute_single_step
         with patch.object(_pl_mod, "_execute_single_step", side_effect=_patched_exec):
             result = run_pipeline(pl, smart_context=False, fail_fast=True)
@@ -641,6 +712,7 @@ class TestFailFast:
         )
 
         import crew.pipeline as _pl_mod
+
         real_exec = _pl_mod._execute_single_step
         call_count = [0]
 
@@ -648,9 +720,14 @@ class TestFailFast:
             call_count[0] += 1
             if step.employee == "code-reviewer":
                 return StepResult(
-                    employee=step.employee, step_id=step.id, step_index=index,
-                    args=step.args, prompt="p", output="",
-                    error=True, error_message="mock failure",
+                    employee=step.employee,
+                    step_id=step.id,
+                    step_index=index,
+                    args=step.args,
+                    prompt="p",
+                    output="",
+                    error=True,
+                    error_message="mock failure",
                 )
             return real_exec(step, index, engine, employees, *a, **kw)
 
@@ -671,20 +748,28 @@ class TestFailFast:
         checkpoints = []
 
         import crew.pipeline as _pl_mod
+
         real_exec = _pl_mod._execute_single_step
 
         def _failing_exec(step, index, engine, employees, *a, **kw):
             if step.employee == "test-engineer":
                 return StepResult(
-                    employee=step.employee, step_id=step.id, step_index=index,
-                    args=step.args, prompt="p", output="",
-                    error=True, error_message="fail",
+                    employee=step.employee,
+                    step_id=step.id,
+                    step_index=index,
+                    args=step.args,
+                    prompt="p",
+                    output="",
+                    error=True,
+                    error_message="fail",
                 )
             return real_exec(step, index, engine, employees, *a, **kw)
 
         with patch.object(_pl_mod, "_execute_single_step", side_effect=_failing_exec):
             result = run_pipeline(
-                pl, smart_context=False, fail_fast=True,
+                pl,
+                smart_context=False,
+                fail_fast=True,
                 on_step_complete=lambda r, cp: checkpoints.append(cp),
             )
 
@@ -708,7 +793,8 @@ class TestSyncCheckpointCallback:
         )
         checkpoints = []
         result = run_pipeline(
-            pl, smart_context=False,
+            pl,
+            smart_context=False,
             on_step_complete=lambda r, cp: checkpoints.append((r.employee, cp)),
         )
         assert len(checkpoints) == 2
@@ -729,7 +815,8 @@ class TestStepsHash:
         )
         checkpoints = []
         run_pipeline(
-            pl, smart_context=False,
+            pl,
+            smart_context=False,
             on_step_complete=lambda r, cp: checkpoints.append(cp),
         )
         assert "steps_hash" in checkpoints[0]
@@ -758,8 +845,11 @@ class TestStepsHash:
     def test_resume_with_changed_pipeline(self):
         """Pipeline 定义变更时正常恢复（不阻止）."""
         r0 = StepResult(
-            employee="code-reviewer", step_index=0,
-            args={"target": "main"}, prompt="p0", output="o0",
+            employee="code-reviewer",
+            step_index=0,
+            args={"target": "main"},
+            prompt="p0",
+            output="o0",
         )
         # 用旧 pipeline 的 hash 构建 checkpoint
         old_pl = Pipeline(
@@ -781,7 +871,9 @@ class TestStepsHash:
             ],
         )
 
-        result = _run(aresume_pipeline(new_pl, checkpoint=checkpoint, smart_context=False, execute=False))
+        result = _run(
+            aresume_pipeline(new_pl, checkpoint=checkpoint, smart_context=False, execute=False)
+        )
         assert len(result.steps) == 2
         assert result.steps[1].employee == "doc-writer"
 
@@ -793,13 +885,20 @@ class TestRetryFailed:
         """回退到第一个失败步骤."""
         # 模拟 checkpoint: 步骤 0 成功，步骤 1 失败
         r0 = StepResult(
-            employee="code-reviewer", step_index=0,
-            args={"target": "main"}, prompt="p0", output="o0",
+            employee="code-reviewer",
+            step_index=0,
+            args={"target": "main"},
+            prompt="p0",
+            output="o0",
         ).model_dump(mode="json")
         r1 = StepResult(
-            employee="test-engineer", step_index=1,
-            args={"target": "main"}, prompt="p1", output="",
-            error=True, error_message="original failure",
+            employee="test-engineer",
+            step_index=1,
+            args={"target": "main"},
+            prompt="p1",
+            output="",
+            error=True,
+            error_message="original failure",
         ).model_dump(mode="json")
 
         checkpoint = {
@@ -823,7 +922,9 @@ class TestRetryFailed:
         assert first_error_idx == 1
         checkpoint["completed_steps"] = completed[:first_error_idx]
         checkpoint["next_step_i"] = first_error_idx
-        flat = sum(len(item) if isinstance(item, list) else 1 for item in checkpoint["completed_steps"])
+        flat = sum(
+            len(item) if isinstance(item, list) else 1 for item in checkpoint["completed_steps"]
+        )
         checkpoint["next_flat_index"] = flat
 
         assert checkpoint["next_step_i"] == 1
@@ -841,8 +942,8 @@ class TestPipelineToMermaid:
         )
         mermaid = pipeline_to_mermaid(pl)
         assert "graph LR" in mermaid
-        assert '开始' in mermaid
-        assert '结束' in mermaid
+        assert "开始" in mermaid
+        assert "结束" in mermaid
         assert '"code-reviewer"' in mermaid
 
     def test_multiple_steps(self):
@@ -865,10 +966,12 @@ class TestPipelineToMermaid:
         pl = Pipeline(
             name="parallel",
             steps=[
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="test-engineer", args={}),
-                    PipelineStep(employee="refactor-guide", args={}),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="test-engineer", args={}),
+                        PipelineStep(employee="refactor-guide", args={}),
+                    ]
+                ),
             ],
         )
         mermaid = pipeline_to_mermaid(pl)
@@ -897,10 +1000,12 @@ class TestPipelineToMermaid:
             name="mixed",
             steps=[
                 PipelineStep(employee="code-reviewer", id="review", args={}),
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="test-engineer", args={}),
-                    PipelineStep(employee="refactor-guide", args={}),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="test-engineer", args={}),
+                        PipelineStep(employee="refactor-guide", args={}),
+                    ]
+                ),
                 PipelineStep(employee="pr-creator", id="pr", args={}),
             ],
         )
@@ -919,6 +1024,7 @@ class TestOutputRefWarning:
     def test_unresolved_ref_warns(self, caplog):
         """未解析的引用应产生 warning 日志."""
         import logging
+
         with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
             result = _resolve_output_refs(
                 "{steps.missing.output}",
@@ -933,6 +1039,7 @@ class TestOutputRefWarning:
     def test_unresolved_index_ref_warns(self, caplog):
         """未解析的索引引用应产生 warning 日志."""
         import logging
+
         with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
             result = _resolve_output_refs(
                 "{steps.99.output}",
@@ -947,6 +1054,7 @@ class TestOutputRefWarning:
     def test_resolved_ref_no_warning(self, caplog):
         """已解析的引用不应产生 warning."""
         import logging
+
         with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
             result = _resolve_output_refs(
                 "{steps.review.output}",
@@ -963,10 +1071,12 @@ class TestOutputRefWarning:
         pl = Pipeline(
             name="par-prev",
             steps=[
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="code-reviewer", id="a", args={"target": "main"}),
-                    PipelineStep(employee="test-engineer", id="b", args={"target": "main"}),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="code-reviewer", id="a", args={"target": "main"}),
+                        PipelineStep(employee="test-engineer", id="b", args={"target": "main"}),
+                    ]
+                ),
                 PipelineStep(employee="doc-writer", args={"target": "main"}),
             ],
         )
@@ -990,10 +1100,12 @@ class TestParallelStepErrorLogging:
         pl = Pipeline(
             name="error-log-test",
             steps=[
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="nonexistent-employee", args={}),
-                    PipelineStep(employee="code-reviewer", args={"target": "main"}),
-                ]),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="nonexistent-employee", args={}),
+                        PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                    ]
+                ),
             ],
         )
         with caplog.at_level(logging.WARNING, logger="crew.pipeline"):
@@ -1013,6 +1125,7 @@ class TestAsyncGatherTimeout:
     def test_timeout_constant_exists(self):
         """超时常量应该有合理的值."""
         from crew.pipeline import _ASYNC_STEP_TIMEOUT
+
         assert _ASYNC_STEP_TIMEOUT > 0
         assert _ASYNC_STEP_TIMEOUT <= 3600  # 不超过 1 小时
 
@@ -1077,10 +1190,13 @@ class TestConditionModel:
         assert body.else_ == []
 
     def test_conditional_step(self):
-        step = ConditionalStep(condition=ConditionalBody(
-            check="{prev}", contains="yes",
-            then=[PipelineStep(employee="a")],
-        ))
+        step = ConditionalStep(
+            condition=ConditionalBody(
+                check="{prev}",
+                contains="yes",
+                then=[PipelineStep(employee="a")],
+            )
+        )
         assert step.condition.check == "{prev}"
 
     def test_loop_body(self):
@@ -1093,10 +1209,12 @@ class TestConditionModel:
         assert len(body.steps) == 1
 
     def test_loop_step(self):
-        step = LoopStep(loop=LoopBody(
-            steps=[PipelineStep(employee="a")],
-            until=Condition(check="{prev}", contains="done"),
-        ))
+        step = LoopStep(
+            loop=LoopBody(
+                steps=[PipelineStep(employee="a")],
+                until=Condition(check="{prev}", contains="done"),
+            )
+        )
         assert step.loop.max_iterations == 5  # default
 
     def test_loop_max_iterations_bounds(self):
@@ -1139,10 +1257,18 @@ class TestEvaluateCheck:
         assert _evaluate_check("{prev}", "", r"\d+", {}, {}, "no numbers", execute=True) is False
 
     def test_resolves_step_ref(self):
-        assert _evaluate_check(
-            "{steps.review.output}", "LGTM", "",
-            {"review": "LGTM, ship it"}, {}, "", execute=True,
-        ) is True
+        assert (
+            _evaluate_check(
+                "{steps.review.output}",
+                "LGTM",
+                "",
+                {"review": "LGTM, ship it"},
+                {},
+                "",
+                execute=True,
+            )
+            is True
+        )
 
 
 class TestLoadPipelineConditionLoop:
@@ -1153,12 +1279,14 @@ class TestLoadPipelineConditionLoop:
             "name": "cond-test",
             "steps": [
                 {"employee": "classifier", "id": "classify"},
-                {"condition": {
-                    "check": "{steps.classify.output}",
-                    "contains": "critical",
-                    "then": [{"employee": "security-auditor"}],
-                    "else": [{"employee": "code-reviewer"}],
-                }},
+                {
+                    "condition": {
+                        "check": "{steps.classify.output}",
+                        "contains": "critical",
+                        "then": [{"employee": "security-auditor"}],
+                        "else": [{"employee": "code-reviewer"}],
+                    }
+                },
             ],
         }
         f = tmp_path / "cond.yaml"
@@ -1175,11 +1303,13 @@ class TestLoadPipelineConditionLoop:
         data = {
             "name": "cond-no-else",
             "steps": [
-                {"condition": {
-                    "check": "{prev}",
-                    "contains": "skip",
-                    "then": [{"employee": "code-reviewer"}],
-                }},
+                {
+                    "condition": {
+                        "check": "{prev}",
+                        "contains": "skip",
+                        "then": [{"employee": "code-reviewer"}],
+                    }
+                },
             ],
         }
         f = tmp_path / "cond2.yaml"
@@ -1192,13 +1322,15 @@ class TestLoadPipelineConditionLoop:
         data = {
             "name": "loop-test",
             "steps": [
-                {"loop": {
-                    "steps": [
-                        {"employee": "code-reviewer", "id": "review"},
-                    ],
-                    "until": {"check": "{steps.review.output}", "contains": "LGTM"},
-                    "max_iterations": 3,
-                }},
+                {
+                    "loop": {
+                        "steps": [
+                            {"employee": "code-reviewer", "id": "review"},
+                        ],
+                        "until": {"check": "{steps.review.output}", "contains": "LGTM"},
+                        "max_iterations": 3,
+                    }
+                },
             ],
         }
         f = tmp_path / "loop.yaml"
@@ -1214,19 +1346,25 @@ class TestLoadPipelineConditionLoop:
             "name": "mixed",
             "steps": [
                 {"employee": "classifier", "id": "c"},
-                {"parallel": [
-                    {"employee": "a"},
-                    {"employee": "b"},
-                ]},
-                {"condition": {
-                    "check": "{prev}",
-                    "contains": "yes",
-                    "then": [{"employee": "x"}],
-                }},
-                {"loop": {
-                    "steps": [{"employee": "y"}],
-                    "until": {"check": "{prev}", "contains": "done"},
-                }},
+                {
+                    "parallel": [
+                        {"employee": "a"},
+                        {"employee": "b"},
+                    ]
+                },
+                {
+                    "condition": {
+                        "check": "{prev}",
+                        "contains": "yes",
+                        "then": [{"employee": "x"}],
+                    }
+                },
+                {
+                    "loop": {
+                        "steps": [{"employee": "y"}],
+                        "until": {"check": "{prev}", "contains": "done"},
+                    }
+                },
                 {"employee": "z"},
             ],
         }
@@ -1247,10 +1385,15 @@ class TestValidateConditionLoop:
     def test_validate_condition_unknown_employee(self):
         pl = Pipeline(
             name="bad",
-            steps=[ConditionalStep(condition=ConditionalBody(
-                check="{prev}", contains="x",
-                then=[PipelineStep(employee="nonexistent-worker")],
-            ))],
+            steps=[
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="nonexistent-worker")],
+                    )
+                )
+            ],
         )
         errors = validate_pipeline(pl)
         assert any("nonexistent-worker" in e for e in errors)
@@ -1258,11 +1401,16 @@ class TestValidateConditionLoop:
     def test_validate_condition_else_unknown(self):
         pl = Pipeline(
             name="bad2",
-            steps=[ConditionalStep(condition=ConditionalBody(
-                check="{prev}", contains="x",
-                then=[PipelineStep(employee="code-reviewer")],
-                **{"else": [PipelineStep(employee="nonexistent-worker")]},
-            ))],
+            steps=[
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer")],
+                        **{"else": [PipelineStep(employee="nonexistent-worker")]},
+                    )
+                )
+            ],
         )
         errors = validate_pipeline(pl)
         assert any("nonexistent-worker" in e for e in errors)
@@ -1270,10 +1418,14 @@ class TestValidateConditionLoop:
     def test_validate_loop_unknown_employee(self):
         pl = Pipeline(
             name="bad3",
-            steps=[LoopStep(loop=LoopBody(
-                steps=[PipelineStep(employee="nonexistent-worker")],
-                until=Condition(check="{prev}", contains="x"),
-            ))],
+            steps=[
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="nonexistent-worker")],
+                        until=Condition(check="{prev}", contains="x"),
+                    )
+                )
+            ],
         )
         errors = validate_pipeline(pl)
         assert any("nonexistent-worker" in e for e in errors)
@@ -1281,10 +1433,15 @@ class TestValidateConditionLoop:
     def test_validate_condition_valid(self):
         pl = Pipeline(
             name="ok",
-            steps=[ConditionalStep(condition=ConditionalBody(
-                check="{prev}", contains="x",
-                then=[PipelineStep(employee="code-reviewer")],
-            ))],
+            steps=[
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer")],
+                    )
+                )
+            ],
         )
         errors = validate_pipeline(pl)
         assert errors == []
@@ -1292,10 +1449,14 @@ class TestValidateConditionLoop:
     def test_validate_loop_valid(self):
         pl = Pipeline(
             name="ok",
-            steps=[LoopStep(loop=LoopBody(
-                steps=[PipelineStep(employee="code-reviewer")],
-                until=Condition(check="{prev}", contains="x"),
-            ))],
+            steps=[
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="code-reviewer")],
+                        until=Condition(check="{prev}", contains="x"),
+                    )
+                )
+            ],
         )
         errors = validate_pipeline(pl)
         assert errors == []
@@ -1310,12 +1471,14 @@ class TestRunPipelineCondition:
             name="cond-prompt",
             steps=[
                 PipelineStep(employee="code-reviewer", args={"target": "main"}),
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}",
-                    contains="critical",
-                    then=[PipelineStep(employee="test-engineer", args={"target": "main"})],
-                    **{"else": [PipelineStep(employee="doc-writer", args={"target": "main"})]},
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="critical",
+                        then=[PipelineStep(employee="test-engineer", args={"target": "main"})],
+                        **{"else": [PipelineStep(employee="doc-writer", args={"target": "main"})]},
+                    )
+                ),
             ],
         )
         result = run_pipeline(pl, smart_context=False)
@@ -1331,11 +1494,13 @@ class TestRunPipelineCondition:
         pl = Pipeline(
             name="branch-label",
             steps=[
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}",
-                    contains="x",
-                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    )
+                ),
             ],
         )
         result = run_pipeline(pl, smart_context=False)
@@ -1350,13 +1515,16 @@ class TestRunPipelineCondition:
             name="idx",
             steps=[
                 PipelineStep(employee="code-reviewer"),  # flat=0
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}", contains="x",
-                    then=[
-                        PipelineStep(employee="test-engineer"),  # flat=1
-                        PipelineStep(employee="doc-writer"),  # flat=2
-                    ],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[
+                            PipelineStep(employee="test-engineer"),  # flat=1
+                            PipelineStep(employee="doc-writer"),  # flat=2
+                        ],
+                    )
+                ),
                 PipelineStep(employee="code-reviewer"),  # flat=3
             ],
         )
@@ -1375,10 +1543,13 @@ class TestRunPipelineCondition:
         pl = Pipeline(
             name="prev-cond",
             steps=[
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}", contains="x",
-                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    )
+                ),
                 PipelineStep(employee="test-engineer", args={"target": "main"}),
             ],
         )
@@ -1396,14 +1567,16 @@ class TestRunPipelineLoop:
         pl = Pipeline(
             name="loop-prompt",
             steps=[
-                LoopStep(loop=LoopBody(
-                    steps=[
-                        PipelineStep(employee="code-reviewer", args={"target": "main"}),
-                        PipelineStep(employee="test-engineer", args={"target": "main"}),
-                    ],
-                    until=Condition(check="{prev}", contains="LGTM"),
-                    max_iterations=5,
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[
+                            PipelineStep(employee="code-reviewer", args={"target": "main"}),
+                            PipelineStep(employee="test-engineer", args={"target": "main"}),
+                        ],
+                        until=Condition(check="{prev}", contains="LGTM"),
+                        max_iterations=5,
+                    )
+                ),
             ],
         )
         result = run_pipeline(pl, smart_context=False)
@@ -1416,11 +1589,13 @@ class TestRunPipelineLoop:
         pl = Pipeline(
             name="loop-label",
             steps=[
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                    until=Condition(check="{prev}", contains="LGTM"),
-                    max_iterations=1,
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                        until=Condition(check="{prev}", contains="LGTM"),
+                        max_iterations=1,
+                    )
+                ),
             ],
         )
         result = run_pipeline(pl, smart_context=False)
@@ -1435,10 +1610,14 @@ class TestRunPipelineLoop:
             name="loop-idx",
             steps=[
                 PipelineStep(employee="code-reviewer"),  # flat=0
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="test-engineer")],  # flat=1 (single iteration prompt-only)
-                    until=Condition(check="{prev}", contains="done"),
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[
+                            PipelineStep(employee="test-engineer")
+                        ],  # flat=1 (single iteration prompt-only)
+                        until=Condition(check="{prev}", contains="done"),
+                    )
+                ),
                 PipelineStep(employee="code-reviewer"),  # flat=2
             ],
         )
@@ -1460,10 +1639,13 @@ class TestAsyncConditionLoop:
         pl = Pipeline(
             name="async-cond",
             steps=[
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}", contains="x",
-                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    )
+                ),
             ],
         )
         result = _run(arun_pipeline(pl, smart_context=False))
@@ -1475,11 +1657,13 @@ class TestAsyncConditionLoop:
         pl = Pipeline(
             name="async-loop",
             steps=[
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                    until=Condition(check="{prev}", contains="LGTM"),
-                    max_iterations=2,
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                        until=Condition(check="{prev}", contains="LGTM"),
+                        max_iterations=2,
+                    )
+                ),
             ],
         )
         result = _run(arun_pipeline(pl, smart_context=False))
@@ -1491,10 +1675,13 @@ class TestAsyncConditionLoop:
         pl = Pipeline(
             name="cp-cond",
             steps=[
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}", contains="x",
-                    then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="code-reviewer", args={"target": "main"})],
+                    )
+                ),
                 PipelineStep(employee="test-engineer", args={"target": "main"}),
             ],
         )
@@ -1515,12 +1702,14 @@ class TestMermaidConditionLoop:
             name="cond",
             steps=[
                 PipelineStep(employee="classifier", id="classify"),
-                ConditionalStep(condition=ConditionalBody(
-                    check="{steps.classify.output}",
-                    contains="critical",
-                    then=[PipelineStep(employee="security-auditor")],
-                    **{"else": [PipelineStep(employee="code-reviewer")]},
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{steps.classify.output}",
+                        contains="critical",
+                        then=[PipelineStep(employee="security-auditor")],
+                        **{"else": [PipelineStep(employee="code-reviewer")]},
+                    )
+                ),
             ],
         )
         mermaid = pipeline_to_mermaid(pl)
@@ -1535,11 +1724,13 @@ class TestMermaidConditionLoop:
         pl = Pipeline(
             name="cond-no-else",
             steps=[
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}",
-                    contains="skip",
-                    then=[PipelineStep(employee="code-reviewer")],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="skip",
+                        then=[PipelineStep(employee="code-reviewer")],
+                    )
+                ),
             ],
         )
         mermaid = pipeline_to_mermaid(pl)
@@ -1551,11 +1742,13 @@ class TestMermaidConditionLoop:
         pl = Pipeline(
             name="loop",
             steps=[
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="code-reviewer", id="review")],
-                    until=Condition(check="{steps.review.output}", contains="LGTM"),
-                    max_iterations=3,
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="code-reviewer", id="review")],
+                        until=Condition(check="{steps.review.output}", contains="LGTM"),
+                        max_iterations=3,
+                    )
+                ),
             ],
         )
         mermaid = pipeline_to_mermaid(pl)
@@ -1570,21 +1763,27 @@ class TestMermaidConditionLoop:
             name="mixed",
             steps=[
                 PipelineStep(employee="start-worker", id="start"),
-                ParallelGroup(parallel=[
-                    PipelineStep(employee="a"),
-                    PipelineStep(employee="b"),
-                ]),
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}",
-                    contains="yes",
-                    then=[PipelineStep(employee="x")],
-                    **{"else": [PipelineStep(employee="y")]},
-                )),
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="z")],
-                    until=Condition(check="{prev}", contains="done"),
-                    max_iterations=2,
-                )),
+                ParallelGroup(
+                    parallel=[
+                        PipelineStep(employee="a"),
+                        PipelineStep(employee="b"),
+                    ]
+                ),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="yes",
+                        then=[PipelineStep(employee="x")],
+                        **{"else": [PipelineStep(employee="y")]},
+                    )
+                ),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="z")],
+                        until=Condition(check="{prev}", contains="done"),
+                        max_iterations=2,
+                    )
+                ),
             ],
         )
         mermaid = pipeline_to_mermaid(pl)
@@ -1605,10 +1804,13 @@ class TestPipelineWithConditionLoop:
             name="test",
             steps=[
                 PipelineStep(employee="a"),
-                ConditionalStep(condition=ConditionalBody(
-                    check="{prev}", contains="x",
-                    then=[PipelineStep(employee="b")],
-                )),
+                ConditionalStep(
+                    condition=ConditionalBody(
+                        check="{prev}",
+                        contains="x",
+                        then=[PipelineStep(employee="b")],
+                    )
+                ),
             ],
         )
         assert len(pl.steps) == 2
@@ -1618,10 +1820,12 @@ class TestPipelineWithConditionLoop:
         pl = Pipeline(
             name="test",
             steps=[
-                LoopStep(loop=LoopBody(
-                    steps=[PipelineStep(employee="a")],
-                    until=Condition(check="{prev}", contains="done"),
-                )),
+                LoopStep(
+                    loop=LoopBody(
+                        steps=[PipelineStep(employee="a")],
+                        until=Condition(check="{prev}", contains="done"),
+                    )
+                ),
                 PipelineStep(employee="b"),
             ],
         )

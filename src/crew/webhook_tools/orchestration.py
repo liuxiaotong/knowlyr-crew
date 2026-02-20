@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _tool_delegate_async(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """异步委派 — 立即返回 task_id，后台执行."""
     if ctx is None:
@@ -39,13 +42,16 @@ async def _tool_delegate_async(
         args={"task": task_desc},
     )
     from crew.webhook_executor import _execute_task
+
     asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
     return f"已异步委派给 {employee_name}。任务 ID: {record.task_id}"
 
 
-
 async def _tool_check_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询任务状态和结果."""
     if ctx is None:
@@ -98,9 +104,11 @@ async def _tool_check_task(
     return "\n".join(lines)
 
 
-
 async def _tool_list_tasks(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """列出最近的任务."""
     if ctx is None:
@@ -133,7 +141,10 @@ async def _tool_list_tasks(
 
 
 async def _tool_organize_meeting(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """组织多员工会议（异步）."""
     if ctx is None:
@@ -172,6 +183,7 @@ async def _tool_organize_meeting(
         },
     )
     from crew.webhook_executor import _execute_task
+
     asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
     return (
         f"已组织会议。会议 ID: {record.task_id}\n"
@@ -181,9 +193,11 @@ async def _tool_organize_meeting(
     )
 
 
-
 async def _tool_check_meeting(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询会议进展（check_task 别名）."""
     return await _tool_check_task(args, agent_id=agent_id, ctx=ctx)
@@ -192,9 +206,11 @@ async def _tool_check_meeting(
 # ── Pipeline / Chain / 定时 / 文件 / 数据 / 日程 ──
 
 
-
 async def _tool_run_pipeline(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """执行预定义流水线（异步）."""
     if ctx is None:
@@ -204,6 +220,7 @@ async def _tool_run_pipeline(
     pipeline_args = args.get("args", {})
     if isinstance(pipeline_args, str):
         import json as _json
+
         try:
             pipeline_args = _json.loads(pipeline_args)
         except Exception:
@@ -223,6 +240,7 @@ async def _tool_run_pipeline(
         args={k: str(v) for k, v in pipeline_args.items()},
     )
     from crew.webhook_executor import _execute_task
+
     asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
     return f"已启动流水线 {name}。任务 ID: {record.task_id}（异步执行中）"
 
@@ -231,7 +249,10 @@ async def _tool_run_pipeline(
 
 
 async def _tool_delegate_chain(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """顺序委派链（异步）."""
     if ctx is None:
@@ -244,7 +265,9 @@ async def _tool_delegate_chain(
     from crew.discovery import discover_employees
 
     discovery = discover_employees(project_dir=ctx.project_dir)
-    missing = [s["employee_name"] for s in steps if discovery.get(s.get("employee_name", "")) is None]
+    missing = [
+        s["employee_name"] for s in steps if discovery.get(s.get("employee_name", "")) is None
+    ]
     if missing:
         return f"错误：未找到员工 {', '.join(missing)}"
 
@@ -257,13 +280,16 @@ async def _tool_delegate_chain(
         args={"steps_json": __import__("json").dumps(steps, ensure_ascii=False)},
     )
     from crew.webhook_executor import _execute_task
+
     asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
     return f"已启动委派链: {chain_name}。任务 ID: {record.task_id}（异步执行中）"
 
 
-
 async def _tool_schedule_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """创建定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -280,6 +306,7 @@ async def _tool_schedule_task(
     # 检查 cron 表达式
     try:
         from croniter import croniter
+
         if not croniter.is_valid(cron_expr):
             return f"错误: 无效的 cron 表达式 '{cron_expr}'"
     except ImportError:
@@ -303,9 +330,11 @@ async def _tool_schedule_task(
     return f"已创建定时任务 '{name}'（{cron_expr} → {emp_name}）"
 
 
-
 async def _tool_list_schedules(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """列出定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -327,9 +356,11 @@ async def _tool_list_schedules(
     return "\n".join(lines)
 
 
-
 async def _tool_cancel_schedule(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """取消定时任务."""
     if ctx is None or ctx.scheduler is None:
@@ -345,9 +376,11 @@ async def _tool_cancel_schedule(
     return f"未找到定时任务 '{name}'"
 
 
-
 async def _tool_agent_file_read(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取项目目录内的文件."""
     if ctx is None:
@@ -391,9 +424,11 @@ async def _tool_agent_file_read(
         return f"读取失败: {e}"
 
 
-
 async def _tool_agent_file_grep(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在项目目录内搜索文件内容."""
     if ctx is None:
@@ -415,10 +450,21 @@ async def _tool_agent_file_grep(
 
     import subprocess
 
-    cmd = ["grep", "-rn", "--max-count=200", "--include", file_pattern or "*", pattern, str(search_path)]
+    cmd = [
+        "grep",
+        "-rn",
+        "--max-count=200",
+        "--include",
+        file_pattern or "*",
+        pattern,
+        str(search_path),
+    ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=10,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
             cwd=str(project_dir),
         )
         output = result.stdout.strip()
@@ -437,9 +483,11 @@ async def _tool_agent_file_grep(
         return f"搜索失败: {e}"
 
 
-
 async def _tool_query_data(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询细粒度业务数据."""
     metric = args.get("metric", "")
@@ -466,9 +514,11 @@ async def _tool_query_data(
         return f"查询失败: {e}"
 
 
-
 async def _tool_find_free_time(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询飞书用户共同空闲时间."""
     if ctx is None or ctx.feishu_token_mgr is None:
@@ -554,9 +604,11 @@ async def _tool_find_free_time(
 # ── Tool handlers（调用 knowlyr-id API）──
 
 
-
 async def _tool_query_cost(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询 token 消耗和成本汇总."""
     if ctx is None:
@@ -589,9 +641,11 @@ async def _tool_query_cost(
     return "\n".join(lines)
 
 
-
 async def _tool_route(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """按路由模板发起委派链."""
     if ctx is None:
@@ -648,7 +702,9 @@ async def _tool_route(
         return f"错误: 模板 '{template_name}' 展开后没有有效步骤"
 
     result = await _tool_delegate_chain(
-        {"steps": steps}, agent_id=agent_id, ctx=ctx,
+        {"steps": steps},
+        agent_id=agent_id,
+        ctx=ctx,
     )
     if skipped:
         result += f"\n\n跳过的步骤: {', '.join(skipped)}"

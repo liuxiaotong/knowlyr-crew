@@ -67,11 +67,14 @@ def verify_github_signature(
         return False
     if not signature.startswith("sha256="):
         return False
-    expected = "sha256=" + hmac.new(
-        secret.encode("utf-8"),
-        payload_body,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            secret.encode("utf-8"),
+            payload_body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return hmac.compare_digest(signature, expected)
 
 
@@ -84,6 +87,7 @@ def resolve_template(value: str, payload: dict[str, Any]) -> str:
         >>> resolve_template("{{pull_request.head.ref}}", {"pull_request": {"head": {"ref": "feat/x"}}})
         'feat/x'
     """
+
     def _replace(match: re.Match) -> str:
         path = match.group(1).strip()
         obj: Any = payload

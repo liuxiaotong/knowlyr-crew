@@ -66,16 +66,12 @@ class TestDetectProject:
         assert info.test_framework == "pytest"
 
     def test_detect_python_fastapi(self, tmp_path):
-        (tmp_path / "pyproject.toml").write_text(
-            '[project]\ndependencies = ["fastapi"]\n'
-        )
+        (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["fastapi"]\n')
         info = detect_project(tmp_path)
         assert info.framework == "fastapi"
 
     def test_detect_python_django(self, tmp_path):
-        (tmp_path / "pyproject.toml").write_text(
-            '[project]\ndependencies = ["django"]\n'
-        )
+        (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["django"]\n')
         info = detect_project(tmp_path)
         assert info.framework == "django"
 

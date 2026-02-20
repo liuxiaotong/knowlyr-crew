@@ -55,9 +55,13 @@ class TestFreeze:
         emp = _make_emp("refactor-guide", "顾然", 3054)
         discovery = _make_discovery(emp)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")), \
-             patch("crew.id_client.update_agent", return_value=True) as mock_update:
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")
+            ),
+            patch("crew.id_client.update_agent", return_value=True) as mock_update,
+        ):
             result = runner.invoke(main, ["agents", "freeze", "顾然", "--force"])
 
         assert result.exit_code == 0
@@ -70,12 +74,17 @@ class TestFreeze:
         emp2 = _make_emp("pr-creator", "秦合", 3055)
         discovery = _make_discovery(emp1, emp2)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", side_effect=[
-                 _make_identity(3054, "active"),
-                 _make_identity(3055, "active"),
-             ]), \
-             patch("crew.id_client.update_agent", return_value=True) as mock_update:
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity",
+                side_effect=[
+                    _make_identity(3054, "active"),
+                    _make_identity(3055, "active"),
+                ],
+            ),
+            patch("crew.id_client.update_agent", return_value=True) as mock_update,
+        ):
             result = runner.invoke(main, ["agents", "freeze", "顾然", "秦合", "--force"])
 
         assert result.exit_code == 0
@@ -86,9 +95,13 @@ class TestFreeze:
         emp = _make_emp("refactor-guide", "顾然", 3054)
         discovery = _make_discovery(emp)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "frozen")), \
-             patch("crew.id_client.update_agent") as mock_update:
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "frozen")
+            ),
+            patch("crew.id_client.update_agent") as mock_update,
+        ):
             result = runner.invoke(main, ["agents", "freeze", "顾然", "--force"])
 
         assert result.exit_code == 0
@@ -121,9 +134,13 @@ class TestFreeze:
         emp = _make_emp("refactor-guide", "顾然", 3054)
         discovery = _make_discovery(emp)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")), \
-             patch("crew.id_client.update_agent", return_value=False):
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")
+            ),
+            patch("crew.id_client.update_agent", return_value=False),
+        ):
             result = runner.invoke(main, ["agents", "freeze", "顾然", "--force"])
 
         assert result.exit_code == 0
@@ -141,9 +158,13 @@ class TestUnfreeze:
         emp = _make_emp("refactor-guide", "顾然", 3054)
         discovery = _make_discovery(emp)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "frozen")), \
-             patch("crew.id_client.update_agent", return_value=True) as mock_update:
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "frozen")
+            ),
+            patch("crew.id_client.update_agent", return_value=True) as mock_update,
+        ):
             result = runner.invoke(main, ["agents", "unfreeze", "顾然", "--force"])
 
         assert result.exit_code == 0
@@ -155,9 +176,13 @@ class TestUnfreeze:
         emp = _make_emp("refactor-guide", "顾然", 3054)
         discovery = _make_discovery(emp)
 
-        with patch("crew.discovery.discover_employees", return_value=discovery), \
-             patch("crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")), \
-             patch("crew.id_client.update_agent") as mock_update:
+        with (
+            patch("crew.discovery.discover_employees", return_value=discovery),
+            patch(
+                "crew.id_client.fetch_agent_identity", return_value=_make_identity(3054, "active")
+            ),
+            patch("crew.id_client.update_agent") as mock_update,
+        ):
             result = runner.invoke(main, ["agents", "unfreeze", "顾然", "--force"])
 
         assert result.exit_code == 0
@@ -175,10 +200,15 @@ class TestSyncFrozenCompat:
         """sync 不会把 frozen 的员工标为 inactive."""
         from crew.sync import sync_all
 
-        with patch("crew.sync.list_agents", return_value=[
-            {"id": 3054, "nickname": "顾然", "status": "frozen"},
-        ]), \
-             patch("crew.sync.update_agent", return_value=True) as mock_update:
+        with (
+            patch(
+                "crew.sync.list_agents",
+                return_value=[
+                    {"id": 3054, "nickname": "顾然", "status": "frozen"},
+                ],
+            ),
+            patch("crew.sync.update_agent", return_value=True) as mock_update,
+        ):
             report = sync_all(tmp_path, push=True, pull=False)
 
         assert len(report.disabled) == 0

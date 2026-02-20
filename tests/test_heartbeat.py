@@ -25,9 +25,11 @@ class TestHeartbeatManager:
             heartbeat_ids.append(agent_id)
             return True
 
-        with patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False), \
-             patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=mock_agents), \
-             patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat):
+        with (
+            patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False),
+            patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=mock_agents),
+            patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat),
+        ):
             mgr = HeartbeatManager(interval=0.2)
             await mgr.start()
             assert mgr.running
@@ -54,9 +56,11 @@ class TestHeartbeatManager:
             heartbeat_ids.append(agent_id)
             return True
 
-        with patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False), \
-             patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=mock_agents), \
-             patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat):
+        with (
+            patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False),
+            patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=mock_agents),
+            patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat),
+        ):
             mgr = HeartbeatManager(interval=0.2)
             await mgr.start()
             await asyncio.sleep(0.5)
@@ -94,9 +98,11 @@ class TestHeartbeatManager:
             heartbeat_ids.append(agent_id)
             return True
 
-        with patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False), \
-             patch("crew.id_client.alist_agents", side_effect=_failing_list), \
-             patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat):
+        with (
+            patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False),
+            patch("crew.id_client.alist_agents", side_effect=_failing_list),
+            patch("crew.id_client.asend_heartbeat", side_effect=_mock_heartbeat),
+        ):
             mgr = HeartbeatManager(interval=0.2)
             await mgr.start()
             await asyncio.sleep(0.8)
@@ -112,9 +118,11 @@ class TestHeartbeatManager:
         mgr = HeartbeatManager()
         assert not mgr.running
 
-        with patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False), \
-             patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=[]), \
-             patch("crew.id_client.asend_heartbeat", new_callable=AsyncMock):
+        with (
+            patch.dict(os.environ, {"AGENT_API_TOKEN": "test-token"}, clear=False),
+            patch("crew.id_client.alist_agents", new_callable=AsyncMock, return_value=[]),
+            patch("crew.id_client.asend_heartbeat", new_callable=AsyncMock),
+        ):
             await mgr.start()
             assert mgr.running
             await mgr.stop()

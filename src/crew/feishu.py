@@ -302,11 +302,13 @@ def _parse_mentions(raw_mentions: list, text: str) -> list[dict[str, str]]:
     """解析 @mention 列表."""
     mentions: list[dict[str, str]] = []
     for m in raw_mentions:
-        mentions.append({
-            "key": m.get("key", ""),
-            "id": m.get("id", {}).get("open_id", ""),
-            "name": m.get("name", ""),
-        })
+        mentions.append(
+            {
+                "key": m.get("key", ""),
+                "id": m.get("id", {}).get("open_id", ""),
+                "name": m.get("name", ""),
+            }
+        )
     return mentions
 
 
@@ -351,7 +353,7 @@ def resolve_employee_from_mention(
         prefixes = [emp.name, emp.display_name, emp.character_name] + emp.triggers
         for prefix in prefixes:
             if prefix and text.startswith(prefix):
-                remaining = text[len(prefix):].strip()
+                remaining = text[len(prefix) :].strip()
                 return emp.name, remaining or text
 
     if default_employee:
@@ -389,9 +391,11 @@ async def download_feishu_image(
                     # 成功拿到二进制图片
                     return _parse_image_response(resp)
             import logging as _logging
+
             _logging.getLogger(__name__).warning(
                 "飞书消息资源下载失败: status=%s body=%s",
-                resp.status_code, resp.text[:300],
+                resp.status_code,
+                resp.text[:300],
             )
 
         # 回退：图片接口
@@ -399,9 +403,11 @@ async def download_feishu_image(
         resp = await client.get(url, headers=headers, params={"image_type": "message"})
         if resp.status_code != 200:
             import logging as _logging
+
             _logging.getLogger(__name__).warning(
                 "飞书图片下载响应: status=%s body=%s",
-                resp.status_code, resp.text[:300],
+                resp.status_code,
+                resp.text[:300],
             )
             resp.raise_for_status()
 
@@ -469,10 +475,7 @@ def _sanitize_feishu_text(text: str) -> str:
     # Markdown → 纯文本
     cleaned = _strip_markdown(text)
     # 去除 null bytes 和 C0 控制字符（保留 \n \r \t）
-    cleaned = "".join(
-        c for c in cleaned
-        if c in ("\n", "\r", "\t") or (ord(c) >= 0x20)
-    )
+    cleaned = "".join(c for c in cleaned if c in ("\n", "\r", "\t") or (ord(c) >= 0x20))
     if len(cleaned) > _FEISHU_TEXT_MAX_LEN:
         cleaned = cleaned[:_FEISHU_TEXT_MAX_LEN] + "..."
     return cleaned
@@ -543,17 +546,22 @@ async def send_feishu_text(
     text = _sanitize_feishu_text(text)
     content = {"text": text}
     data = await send_feishu_message(
-        token_manager, chat_id, content=content, msg_type="text",
+        token_manager,
+        chat_id,
+        content=content,
+        msg_type="text",
     )
     if data.get("code") == 230001:
         # 激进清洗：只保留基本文字和换行
-        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：""''（）—…]", "", text)
+        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：" "''（）—…]", "", text)
         plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
         if plain:
             logger.warning("飞书 230001 降级重试 (len=%d→%d)", len(text), len(plain))
             data = await send_feishu_message(
-                token_manager, chat_id,
-                content={"text": plain}, msg_type="text",
+                token_manager,
+                chat_id,
+                content={"text": plain},
+                msg_type="text",
             )
     return data
 
@@ -589,7 +597,7 @@ async def send_feishu_reply(
         logger.warning("飞书回复发送失败: %s (code=%d)", msg, code)
 
     if data.get("code") == 230001:
-        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：""''（）—…]", "", text)
+        plain = re.sub(r"[^\w\s\u4e00-\u9fff\u3000-\u303f，。！？、；：" "''（）—…]", "", text)
         plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
         if plain:
             logger.warning("飞书回复 230001 降级重试 (len=%d→%d)", len(text), len(plain))
@@ -657,14 +665,19 @@ async def create_calendar_event(
             if code != 0:
                 logger.warning(
                     "飞书创建日程 API 失败: code=%s msg=%s cal_id=%s summary=%s",
-                    code, msg, cal_id, summary,
+                    code,
+                    msg,
+                    cal_id,
+                    summary,
                 )
                 return {"ok": False, "error": msg or "未知错误"}
             event = data.get("data", {}).get("event", {})
             event_id = event.get("event_id", "")
             logger.info(
                 "飞书创建日程成功: event_id=%s cal_id=%s summary=%s",
-                event_id, cal_id, summary,
+                event_id,
+                cal_id,
+                summary,
             )
             return {
                 "ok": True,
@@ -699,9 +712,7 @@ async def add_attendees_to_event(
         return {"ok": True}
 
     token = await token_mgr.get_token()
-    attendees = [
-        {"type": "user", "user_id": oid} for oid in attendee_open_ids
-    ]
+    attendees = [{"type": "user", "user_id": oid} for oid in attendee_open_ids]
     body = {"attendees": attendees, "need_notification": True}
 
     try:

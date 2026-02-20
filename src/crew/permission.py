@@ -105,7 +105,9 @@ class PermissionGuard:
         if tool_name not in self.allowed:
             self._log(tool_name, False)
             logger.warning(
-                "权限拒绝: %s 尝试调用 %s", self.employee_name, tool_name,
+                "权限拒绝: %s 尝试调用 %s",
+                self.employee_name,
+                tool_name,
             )
             raise PermissionDenied(self.employee_name, tool_name)
         self._log(tool_name, True)

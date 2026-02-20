@@ -123,8 +123,10 @@ from crew.webhook_tools.orchestration import (  # noqa: F401
 
 def _make_handler(ctx: _AppContext, handler):
     """包装 handler，注入 context."""
+
     async def wrapper(request: Request):
         return await handler(request, ctx)
+
     return wrapper
 
 
@@ -162,7 +164,8 @@ def create_webhook_app(
 
         ctx.feishu_config = feishu_config
         ctx.feishu_token_mgr = FeishuTokenManager(
-            feishu_config.app_id, feishu_config.app_secret,
+            feishu_config.app_id,
+            feishu_config.app_secret,
         )
         ctx.feishu_dedup = EventDeduplicator()
 
@@ -202,7 +205,9 @@ def create_webhook_app(
                     )
                     for r in results:
                         if not r.success:
-                            logger.warning("投递失败 [%s → %s]: %s", schedule.name, r.target_type, r.detail)
+                            logger.warning(
+                                "投递失败 [%s → %s]: %s", schedule.name, r.target_type, r.detail
+                            )
                 except Exception as e:
                     logger.warning("投递异常 [%s]: %s", schedule.name, e)
 
@@ -215,24 +220,78 @@ def create_webhook_app(
         Route("/webhook/github", endpoint=_make_handler(ctx, _handle_github), methods=["POST"]),
         Route("/webhook/openclaw", endpoint=_make_handler(ctx, _handle_openclaw), methods=["POST"]),
         Route("/webhook", endpoint=_make_handler(ctx, _handle_generic), methods=["POST"]),
-        Route("/run/pipeline/{name}", endpoint=_make_handler(ctx, _handle_run_pipeline), methods=["POST"]),
-        Route("/run/route/{name}", endpoint=_make_handler(ctx, _handle_run_route), methods=["POST"]),
-        Route("/run/employee/{name}", endpoint=_make_handler(ctx, _handle_run_employee), methods=["POST"]),
-        Route("/agent/run/{name}", endpoint=_make_handler(ctx, _handle_agent_run), methods=["POST"]),
-        Route("/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]),
-        Route("/tasks/{task_id}/replay", endpoint=_make_handler(ctx, _handle_task_replay), methods=["POST"]),
-        Route("/api/tasks/{task_id}/approve", endpoint=_make_handler(ctx, _handle_task_approve), methods=["POST"]),
+        Route(
+            "/run/pipeline/{name}",
+            endpoint=_make_handler(ctx, _handle_run_pipeline),
+            methods=["POST"],
+        ),
+        Route(
+            "/run/route/{name}", endpoint=_make_handler(ctx, _handle_run_route), methods=["POST"]
+        ),
+        Route(
+            "/run/employee/{name}",
+            endpoint=_make_handler(ctx, _handle_run_employee),
+            methods=["POST"],
+        ),
+        Route(
+            "/agent/run/{name}", endpoint=_make_handler(ctx, _handle_agent_run), methods=["POST"]
+        ),
+        Route(
+            "/tasks/{task_id}", endpoint=_make_handler(ctx, _handle_task_status), methods=["GET"]
+        ),
+        Route(
+            "/tasks/{task_id}/replay",
+            endpoint=_make_handler(ctx, _handle_task_replay),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/tasks/{task_id}/approve",
+            endpoint=_make_handler(ctx, _handle_task_approve),
+            methods=["POST"],
+        ),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
-        Route("/api/employees/{identifier}/prompt", endpoint=_make_handler(ctx, _handle_employee_prompt), methods=["GET"]),
-        Route("/api/employees/{identifier}/state", endpoint=_make_handler(ctx, _handle_employee_state), methods=["GET"]),
-        Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_update), methods=["PUT"]),
-        Route("/api/employees/{identifier}", endpoint=_make_handler(ctx, _handle_employee_delete), methods=["DELETE"]),
-        Route("/api/employees/{identifier}/authority/restore", endpoint=_make_handler(ctx, _handle_authority_restore), methods=["POST"]),
-        Route("/api/memory/ingest", endpoint=_make_handler(ctx, _handle_memory_ingest), methods=["POST"]),
-        Route("/api/memory/org", endpoint=_make_handler(ctx, _handle_org_memories), methods=["GET"]),
-        Route("/api/cost/summary", endpoint=_make_handler(ctx, _handle_cost_summary), methods=["GET"]),
-        Route("/api/project/status", endpoint=_make_handler(ctx, _handle_project_status), methods=["GET"]),
+        Route(
+            "/api/employees/{identifier}/prompt",
+            endpoint=_make_handler(ctx, _handle_employee_prompt),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/employees/{identifier}/state",
+            endpoint=_make_handler(ctx, _handle_employee_state),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/employees/{identifier}",
+            endpoint=_make_handler(ctx, _handle_employee_update),
+            methods=["PUT"],
+        ),
+        Route(
+            "/api/employees/{identifier}",
+            endpoint=_make_handler(ctx, _handle_employee_delete),
+            methods=["DELETE"],
+        ),
+        Route(
+            "/api/employees/{identifier}/authority/restore",
+            endpoint=_make_handler(ctx, _handle_authority_restore),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/memory/ingest",
+            endpoint=_make_handler(ctx, _handle_memory_ingest),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/memory/org", endpoint=_make_handler(ctx, _handle_org_memories), methods=["GET"]
+        ),
+        Route(
+            "/api/cost/summary", endpoint=_make_handler(ctx, _handle_cost_summary), methods=["GET"]
+        ),
+        Route(
+            "/api/project/status",
+            endpoint=_make_handler(ctx, _handle_project_status),
+            methods=["GET"],
+        ),
     ]
 
     async def on_startup():
@@ -246,9 +305,7 @@ def create_webhook_app(
         if not _os.environ.get("FEISHU_CALENDAR_ID") and not (
             feishu_config and feishu_config.calendar_id
         ):
-            logger.info(
-                "FEISHU_CALENDAR_ID 未设置且 feishu.yaml 无 calendar_id — 日历功能将不可用"
-            )
+            logger.info("FEISHU_CALENDAR_ID 未设置且 feishu.yaml 无 calendar_id — 日历功能将不可用")
 
         if scheduler:
             await scheduler.start()
@@ -318,6 +375,7 @@ def serve_webhook(
     cron_config = None
     if enable_cron:
         from crew.cron_config import load_cron_config
+
         cron_config = load_cron_config(project_dir)
 
     feishu_cfg = None

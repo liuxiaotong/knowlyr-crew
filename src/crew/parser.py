@@ -405,12 +405,13 @@ def _extract_skill_metadata(body: str) -> tuple[dict, str]:
         return {}, body
 
     import json
+
     try:
         metadata = json.loads(match.group(1))
     except (json.JSONDecodeError, ValueError):
         return {}, body
 
-    clean_body = body[:match.start()] + body[match.end():]
+    clean_body = body[: match.start()] + body[match.end() :]
     clean_body = clean_body.strip()
     return metadata, clean_body
 

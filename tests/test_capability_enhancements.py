@@ -141,12 +141,17 @@ class TestExecuteChain:
         mock_result.content = "审查通过"
 
         with (
-            patch("crew.discovery.discover_employees", return_value={
-                "code-reviewer": mock_emp,
-                "doc-writer": mock_emp,
-            }),
+            patch(
+                "crew.discovery.discover_employees",
+                return_value={
+                    "code-reviewer": mock_emp,
+                    "doc-writer": mock_emp,
+                },
+            ),
             patch("crew.engine.CrewEngine") as MockEngine,
-            patch("crew.executor.aexecute_prompt", new_callable=AsyncMock, return_value=mock_result),
+            patch(
+                "crew.executor.aexecute_prompt", new_callable=AsyncMock, return_value=mock_result
+            ),
         ):
             MockEngine.return_value.prompt.return_value = "system prompt"
             result = await _execute_chain(ctx, "task-123", steps)
@@ -170,12 +175,19 @@ class TestExecuteChain:
         results = iter([MagicMock(content="第一步结果"), MagicMock(content="第二步结果")])
 
         with (
-            patch("crew.discovery.discover_employees", return_value={
-                "code-reviewer": mock_emp,
-                "doc-writer": mock_emp,
-            }),
+            patch(
+                "crew.discovery.discover_employees",
+                return_value={
+                    "code-reviewer": mock_emp,
+                    "doc-writer": mock_emp,
+                },
+            ),
             patch("crew.engine.CrewEngine") as MockEngine,
-            patch("crew.executor.aexecute_prompt", new_callable=AsyncMock, side_effect=lambda **kw: next(results)),
+            patch(
+                "crew.executor.aexecute_prompt",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: next(results),
+            ),
         ):
             MockEngine.return_value.prompt.return_value = "system prompt"
             result = await _execute_chain(ctx, "task-456", steps)
@@ -200,8 +212,12 @@ class TestScheduleTask:
         with patch("croniter.croniter") as mock_croniter:
             mock_croniter.is_valid.return_value = True
             result = await _tool_schedule_task(
-                {"name": "daily-briefing", "cron": "0 9 * * *",
-                 "employee_name": "ceo-assistant", "task": "发简报"},
+                {
+                    "name": "daily-briefing",
+                    "cron": "0 9 * * *",
+                    "employee_name": "ceo-assistant",
+                    "task": "发简报",
+                },
                 ctx=ctx,
             )
         assert "daily-briefing" in result
@@ -235,8 +251,7 @@ class TestScheduleTask:
         with patch("croniter.croniter") as mock_croniter:
             mock_croniter.is_valid.return_value = True
             result = await _tool_schedule_task(
-                {"name": "existing", "cron": "0 9 * * *",
-                 "employee_name": "a", "task": "b"},
+                {"name": "existing", "cron": "0 9 * * *", "employee_name": "a", "task": "b"},
                 ctx=ctx,
             )
         assert "已存在" in result
@@ -259,9 +274,14 @@ class TestListSchedules:
 
         ctx = _make_ctx(tmp_path, with_scheduler=True)
         ctx.scheduler.get_next_runs.return_value = [
-            {"name": "daily", "cron": "0 9 * * *", "target_type": "employee",
-             "target_name": "ceo-assistant", "next_run": "2026-02-17T09:00:00",
-             "missed_count": 0},
+            {
+                "name": "daily",
+                "cron": "0 9 * * *",
+                "target_type": "employee",
+                "target_name": "ceo-assistant",
+                "next_run": "2026-02-17T09:00:00",
+                "missed_count": 0,
+            },
         ]
         result = await _tool_list_schedules({}, ctx=ctx)
         assert "daily" in result
@@ -462,7 +482,8 @@ class TestFindFreeTime:
         ctx = _make_ctx(tmp_path)
         ctx.feishu_token_mgr = None
         result = await _tool_find_free_time(
-            {"user_ids": ["ou_xxx"]}, ctx=ctx,
+            {"user_ids": ["ou_xxx"]},
+            ctx=ctx,
         )
         assert "错误" in result or "未配置" in result
 
@@ -482,8 +503,11 @@ class TestFindFreeTime:
         ctx = _make_ctx(tmp_path)
         ctx.feishu_token_mgr = MagicMock()
 
-        with patch("crew.feishu.get_freebusy", new_callable=AsyncMock,
-                    return_value={"error": "token expired"}):
+        with patch(
+            "crew.feishu.get_freebusy",
+            new_callable=AsyncMock,
+            return_value={"error": "token expired"},
+        ):
             result = await _tool_find_free_time(
                 {"user_ids": "ou_xxx,ou_yyy", "days": 3},
                 ctx=ctx,
@@ -510,7 +534,10 @@ class TestExecuteTaskChain:
             args={"steps_json": json.dumps(steps)},
         )
 
-        mock_result = {"steps": [{"employee": "code-reviewer", "content": "done"}], "final_output": "done"}
+        mock_result = {
+            "steps": [{"employee": "code-reviewer", "content": "done"}],
+            "final_output": "done",
+        }
 
         with patch("crew.webhook._execute_chain", new_callable=AsyncMock, return_value=mock_result):
             await _execute_task(ctx, record.task_id)
@@ -659,10 +686,15 @@ class TestSchemaRegistration:
         from crew.tool_schema import AGENT_TOOLS
 
         new_tools = [
-            "run_pipeline", "delegate_chain",
-            "schedule_task", "list_schedules", "cancel_schedule",
-            "agent_file_read", "agent_file_grep",
-            "query_data", "find_free_time",
+            "run_pipeline",
+            "delegate_chain",
+            "schedule_task",
+            "list_schedules",
+            "cancel_schedule",
+            "agent_file_read",
+            "agent_file_grep",
+            "query_data",
+            "find_free_time",
         ]
         for tool in new_tools:
             assert tool in AGENT_TOOLS, f"{tool} not in AGENT_TOOLS"
@@ -671,10 +703,15 @@ class TestSchemaRegistration:
         from crew.tool_schema import _TOOL_SCHEMAS
 
         new_tools = [
-            "run_pipeline", "delegate_chain",
-            "schedule_task", "list_schedules", "cancel_schedule",
-            "agent_file_read", "agent_file_grep",
-            "query_data", "find_free_time",
+            "run_pipeline",
+            "delegate_chain",
+            "schedule_task",
+            "list_schedules",
+            "cancel_schedule",
+            "agent_file_read",
+            "agent_file_grep",
+            "query_data",
+            "find_free_time",
         ]
         for tool in new_tools:
             assert tool in _TOOL_SCHEMAS, f"{tool} not in _TOOL_SCHEMAS"
@@ -687,10 +724,15 @@ class TestSchemaRegistration:
         from crew.webhook import _TOOL_HANDLERS
 
         new_tools = [
-            "run_pipeline", "delegate_chain",
-            "schedule_task", "list_schedules", "cancel_schedule",
-            "agent_file_read", "agent_file_grep",
-            "query_data", "find_free_time",
+            "run_pipeline",
+            "delegate_chain",
+            "schedule_task",
+            "list_schedules",
+            "cancel_schedule",
+            "agent_file_read",
+            "agent_file_grep",
+            "query_data",
+            "find_free_time",
         ]
         for tool in new_tools:
             assert tool in _TOOL_HANDLERS, f"{tool} not in _TOOL_HANDLERS"

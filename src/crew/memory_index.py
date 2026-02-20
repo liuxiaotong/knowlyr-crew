@@ -118,9 +118,7 @@ class MemorySearchIndex:
             json.dumps(metadata or {}, ensure_ascii=False),
             created_at,
         )
-        conn.execute(
-            "INSERT OR REPLACE INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", payload
-        )
+        conn.execute("INSERT OR REPLACE INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", payload)
         conn.execute(
             "INSERT INTO entries_fts(rowid, content, title, employee)"
             " VALUES ((SELECT rowid FROM entries WHERE id=?), ?, ?, ?)",
@@ -186,9 +184,7 @@ class MemorySearchIndex:
                     continue
                 metadata = data.get("metadata", {}) or {}
                 employee = (
-                    metadata.get("employee")
-                    or start_metadata.get("employee")
-                    or session_subject
+                    metadata.get("employee") or start_metadata.get("employee") or session_subject
                 )
                 title = f"{session_id} ({role})"
                 entry_id = f"session:{session_id}:{idx}"

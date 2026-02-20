@@ -68,7 +68,10 @@ class CronScheduler:
         cron = croniter(schedule.cron, datetime.now())
         logger.info(
             "Cron 任务 [%s] 已注册: %s → %s/%s",
-            schedule.name, schedule.cron, schedule.target_type, schedule.target_name,
+            schedule.name,
+            schedule.cron,
+            schedule.target_type,
+            schedule.target_name,
         )
 
         consecutive_errors = 0
@@ -80,10 +83,14 @@ class CronScheduler:
                     await asyncio.sleep(delay)
                 else:
                     if delay < -60:
-                        self._missed_counts[schedule.name] = self._missed_counts.get(schedule.name, 0) + 1
+                        self._missed_counts[schedule.name] = (
+                            self._missed_counts.get(schedule.name, 0) + 1
+                        )
                         logger.warning(
                             "Cron 漏执行 [%s]: 延迟 %.0fs (累计 %d 次)",
-                            schedule.name, -delay, self._missed_counts[schedule.name],
+                            schedule.name,
+                            -delay,
+                            self._missed_counts[schedule.name],
                         )
                     await asyncio.sleep(0)  # 让出事件循环
                 if not self._running:
@@ -96,7 +103,7 @@ class CronScheduler:
             except Exception:
                 consecutive_errors += 1
                 self._error_counts[schedule.name] = self._error_counts.get(schedule.name, 0) + 1
-                backoff = min(2 ** consecutive_errors, 60)
+                backoff = min(2**consecutive_errors, 60)
                 logger.exception("Cron 任务执行异常: [%s], %.0fs 后重试", schedule.name, backoff)
                 await asyncio.sleep(backoff)
 
@@ -154,18 +161,22 @@ class CronScheduler:
             try:
                 cron = croniter(schedule.cron, now)
                 next_dt = cron.get_next(datetime)
-                result.append({
-                    "name": schedule.name,
-                    "cron": schedule.cron,
-                    "target_type": schedule.target_type,
-                    "target_name": schedule.target_name,
-                    "next_run": next_dt.isoformat(),
-                    "missed_count": self._missed_counts.get(schedule.name, 0),
-                })
+                result.append(
+                    {
+                        "name": schedule.name,
+                        "cron": schedule.cron,
+                        "target_type": schedule.target_type,
+                        "target_name": schedule.target_name,
+                        "next_run": next_dt.isoformat(),
+                        "missed_count": self._missed_counts.get(schedule.name, 0),
+                    }
+                )
             except Exception:
-                result.append({
-                    "name": schedule.name,
-                    "cron": schedule.cron,
-                    "error": "invalid cron expression",
-                })
+                result.append(
+                    {
+                        "name": schedule.name,
+                        "cron": schedule.cron,
+                        "error": "invalid cron expression",
+                    }
+                )
         return result

@@ -128,7 +128,9 @@ class TestSemanticMemoryIndex:
         entries = [
             MemoryEntry(id="1", employee="bot", category="finding", content="用户偏好暗色主题"),
             MemoryEntry(id="2", employee="bot", category="finding", content="API 接口需要鉴权"),
-            MemoryEntry(id="3", employee="bot", category="decision", content="数据库选用 PostgreSQL"),
+            MemoryEntry(
+                id="3", employee="bot", category="decision", content="数据库选用 PostgreSQL"
+            ),
         ]
 
         for e in entries:
@@ -185,7 +187,9 @@ class TestSemanticMemoryIndex:
     def test_different_employees(self, tmp_path):
         index = SemanticMemoryIndex(tmp_path / "memory")
 
-        index.index(MemoryEntry(id="1", employee="alice", category="finding", content="Alice 的发现"))
+        index.index(
+            MemoryEntry(id="1", employee="alice", category="finding", content="Alice 的发现")
+        )
         index.index(MemoryEntry(id="2", employee="bob", category="finding", content="Bob 的发现"))
 
         results_alice = index.search("alice", "发现", limit=10)
@@ -208,7 +212,9 @@ class TestHybridSearch:
 
         entries = [
             MemoryEntry(id="1", employee="bot", category="finding", content="用户偏好暗色主题"),
-            MemoryEntry(id="2", employee="bot", category="decision", content="数据库选用 PostgreSQL"),
+            MemoryEntry(
+                id="2", employee="bot", category="decision", content="数据库选用 PostgreSQL"
+            ),
             MemoryEntry(id="3", employee="bot", category="finding", content="后端框架用 FastAPI"),
         ]
         for e in entries:
@@ -298,29 +304,47 @@ class TestCreateEmbedder:
         assert isinstance(embedder, _TfIdfEmbedder)
 
     def test_openai_key_but_import_fails(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
-             patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("no openai")):
+        with (
+            patch.dict(
+                "os.environ", {"OPENAI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False
+            ),
+            patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("no openai")),
+        ):
             embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
 
     def test_gemini_key_selected(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False), \
-             patch("crew.memory_search._GeminiEmbedder") as mock_cls:
+        with (
+            patch.dict(
+                "os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False
+            ),
+            patch("crew.memory_search._GeminiEmbedder") as mock_cls,
+        ):
             mock_cls.return_value = MagicMock(spec=_GeminiEmbedder)
             embedder = _create_embedder()
         mock_cls.assert_called_once()
 
     def test_gemini_key_but_import_fails(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False), \
-             patch("crew.memory_search._GeminiEmbedder", side_effect=Exception("no genai")):
+        with (
+            patch.dict(
+                "os.environ", {"OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}, clear=False
+            ),
+            patch("crew.memory_search._GeminiEmbedder", side_effect=Exception("no genai")),
+        ):
             embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
 
     def test_openai_preferred_over_gemini(self):
         """两个 key 都有时优先 OpenAI."""
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "oai-key", "GOOGLE_API_KEY": "goog-key"}, clear=False), \
-             patch("crew.memory_search._OpenAIEmbedder") as mock_oai, \
-             patch("crew.memory_search._GeminiEmbedder") as mock_gem:
+        with (
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "oai-key", "GOOGLE_API_KEY": "goog-key"},
+                clear=False,
+            ),
+            patch("crew.memory_search._OpenAIEmbedder") as mock_oai,
+            patch("crew.memory_search._GeminiEmbedder") as mock_gem,
+        ):
             mock_oai.return_value = MagicMock()
             embedder = _create_embedder()
         mock_oai.assert_called_once()
@@ -371,7 +395,9 @@ class TestEmbeddingTimeout:
                 with patch("crew.memory_search.ThreadPoolExecutor") as mock_pool:
                     mock_future = MagicMock()
                     mock_future.result.return_value = {"embedding": [0.1] * 256}
-                    mock_pool.return_value.__enter__ = MagicMock(return_value=mock_pool.return_value)
+                    mock_pool.return_value.__enter__ = MagicMock(
+                        return_value=mock_pool.return_value
+                    )
                     mock_pool.return_value.__exit__ = MagicMock(return_value=False)
                     mock_pool.return_value.submit.return_value = mock_future
 
@@ -507,8 +533,12 @@ class TestConnectionSafety:
         import logging
 
         with caplog.at_level(logging.DEBUG, logger="crew.memory_search"):
-            with patch.dict("os.environ", {"OPENAI_API_KEY": "key", "GOOGLE_API_KEY": ""}, clear=False), \
-                 patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("init failed")):
+            with (
+                patch.dict(
+                    "os.environ", {"OPENAI_API_KEY": "key", "GOOGLE_API_KEY": ""}, clear=False
+                ),
+                patch("crew.memory_search._OpenAIEmbedder", side_effect=Exception("init failed")),
+            ):
                 embedder = _create_embedder()
         assert isinstance(embedder, _TfIdfEmbedder)
         assert "OpenAI embedding 不可用" in caplog.text

@@ -11,7 +11,9 @@ if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
 
-async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_query_stats(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """调用 knowlyr-id /api/stats/briefing."""
     import httpx
 
@@ -23,8 +25,9 @@ async def _tool_query_stats(args: dict, *, agent_id: int | None = None, ctx: _Ap
         return resp.text
 
 
-
-async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_send_message(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """调用 knowlyr-id /api/messages/agent-send."""
     import httpx
 
@@ -42,8 +45,9 @@ async def _tool_send_message(args: dict, *, agent_id: int | None = None, ctx: _A
         return resp.text
 
 
-
-async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_list_agents(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """调用 knowlyr-id /api/agents."""
     import httpx
 
@@ -55,8 +59,9 @@ async def _tool_list_agents(args: dict, *, agent_id: int | None = None, ctx: _Ap
         return resp.text
 
 
-
-async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_create_note(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """保存备忘/笔记到 .crew/notes/."""
     import re
     from datetime import datetime
@@ -97,10 +102,12 @@ async def _tool_create_note(args: dict, *, agent_id: int | None = None, ctx: _Ap
     return f"笔记已保存: {filename}"
 
 
-
-async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_lookup_user(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """按昵称查用户详情."""
     import httpx
+
     name = args.get("name", "")
     if not name:
         return "错误：需要 name 参数"
@@ -113,10 +120,12 @@ async def _tool_lookup_user(args: dict, *, agent_id: int | None = None, ctx: _Ap
         return resp.text
 
 
-
-async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_query_agent_work(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """查 AI 同事最近工作记录."""
     import httpx
+
     name = args.get("name", "")
     days = args.get("days", 3)
     if not name:
@@ -130,8 +139,9 @@ async def _tool_query_agent_work(args: dict, *, agent_id: int | None = None, ctx
         return resp.text
 
 
-
-async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_read_notes(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """列出最近笔记，可选按关键词过滤."""
     keyword = args.get("keyword", "")
     limit = min(args.get("limit", 10), 20)
@@ -157,10 +167,12 @@ async def _tool_read_notes(args: dict, *, agent_id: int | None = None, ctx: _App
     return "\n---\n".join(results) if results else "没有匹配的笔记"
 
 
-
-async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_read_messages(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """查 Kai 的未读消息概要."""
     import httpx
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
             f"{_ID_API_BASE}/api/stats/unread",
@@ -170,10 +182,12 @@ async def _tool_read_messages(args: dict, *, agent_id: int | None = None, ctx: _
         return resp.text
 
 
-
-async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_get_system_health(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """查服务器健康状态."""
     import httpx
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
             f"{_ID_API_BASE}/api/stats/system-health",
@@ -182,10 +196,12 @@ async def _tool_get_system_health(args: dict, *, agent_id: int | None = None, ct
         return resp.text
 
 
-
-async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_mark_read(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """标消息已读."""
     import httpx
+
     mark_all = args.get("all", False)
     sender_name = args.get("sender_name", "")
 
@@ -220,10 +236,12 @@ async def _tool_mark_read(args: dict, *, agent_id: int | None = None, ctx: _AppC
         return resp.text
 
 
-
-async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_update_agent(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """管理 AI 同事."""
     import httpx
+
     target_id = args.get("agent_id")
     if not target_id:
         return "需要 agent_id 参数"
@@ -246,7 +264,6 @@ async def _tool_update_agent(args: dict, *, agent_id: int | None = None, ctx: _A
         return resp.text
 
 
-
 # 本地路径（Mac 开发机）和服务器路径
 _PROJECT_STATUS_PATHS = [
     Path.home() / ".claude/projects/-Users-liukai/memory/project-status.md",
@@ -264,7 +281,10 @@ def _find_report() -> Path | None:
 
 
 async def _tool_project_status(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询 knowlyr 项目状态."""
     import asyncio
@@ -279,7 +299,8 @@ async def _tool_project_status(
             return "refresh 仅在本地开发机可用（服务器无项目仓库）。去掉 refresh 可读取缓存报告。"
         try:
             proc = await asyncio.create_subprocess_exec(
-                "bash", str(_PROJECT_STATUS_SCRIPT),
+                "bash",
+                str(_PROJECT_STATUS_SCRIPT),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -295,7 +316,9 @@ async def _tool_project_status(
     if report is None:
         if not refresh and _PROJECT_STATUS_SCRIPT.exists():
             return await _tool_project_status(
-                {"refresh": True}, agent_id=agent_id, ctx=ctx,
+                {"refresh": True},
+                agent_id=agent_id,
+                ctx=ctx,
             )
         return "报告文件不存在。请在本地运行 ~/.claude/scripts/project-status.sh 生成。"
 

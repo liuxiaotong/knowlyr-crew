@@ -130,7 +130,9 @@ class TestCheckTask:
 
         ctx = _make_ctx(tmp_path)
         record = ctx.registry.create(
-            trigger="delegate_async", target_type="employee", target_name="code-reviewer",
+            trigger="delegate_async",
+            target_type="employee",
+            target_name="code-reviewer",
         )
         result = await _tool_check_task({"task_id": record.task_id}, ctx=ctx)
         assert "pending" in result
@@ -142,7 +144,9 @@ class TestCheckTask:
 
         ctx = _make_ctx(tmp_path)
         record = ctx.registry.create(
-            trigger="delegate_async", target_type="employee", target_name="test-engineer",
+            trigger="delegate_async",
+            target_type="employee",
+            target_name="test-engineer",
         )
         ctx.registry.update(record.task_id, "completed", result={"content": "all tests pass"})
         result = await _tool_check_task({"task_id": record.task_id}, ctx=ctx)
@@ -155,10 +159,13 @@ class TestCheckTask:
 
         ctx = _make_ctx(tmp_path)
         record = ctx.registry.create(
-            trigger="organize_meeting", target_type="meeting", target_name="test-meeting",
+            trigger="organize_meeting",
+            target_type="meeting",
+            target_name="test-meeting",
         )
         ctx.registry.update(
-            record.task_id, "completed",
+            record.task_id,
+            "completed",
             result={"synthesis": "决议：采用方案 A", "rounds": []},
         )
         result = await _tool_check_task({"task_id": record.task_id}, ctx=ctx)
@@ -171,7 +178,9 @@ class TestCheckTask:
 
         ctx = _make_ctx(tmp_path)
         record = ctx.registry.create(
-            trigger="delegate_async", target_type="employee", target_name="x",
+            trigger="delegate_async",
+            target_type="employee",
+            target_name="x",
         )
         ctx.registry.update(record.task_id, "failed", error="timeout")
         result = await _tool_check_task({"task_id": record.task_id}, ctx=ctx)
@@ -332,7 +341,9 @@ class TestCheckMeeting:
 
         ctx = _make_ctx(tmp_path)
         record = ctx.registry.create(
-            trigger="organize_meeting", target_type="meeting", target_name="test",
+            trigger="organize_meeting",
+            target_type="meeting",
+            target_name="test",
         )
         result = await _tool_check_meeting({"task_id": record.task_id}, ctx=ctx)
         assert record.task_id in result
@@ -369,10 +380,13 @@ class TestExecuteMeeting:
         with (
             patch("crew.discussion.create_adhoc_discussion") as mock_create,
             patch("crew.discussion.render_discussion_plan", return_value=mock_plan),
-            patch("crew.executor.aexecute_prompt", new_callable=AsyncMock, return_value=mock_result),
+            patch(
+                "crew.executor.aexecute_prompt", new_callable=AsyncMock, return_value=mock_result
+            ),
         ):
             result = await _execute_meeting(
-                ctx, task_id="test-001",
+                ctx,
+                task_id="test-001",
                 employees=["code-reviewer", "test-engineer"],
                 topic="测试策略",
             )
@@ -421,7 +435,8 @@ class TestExecuteMeeting:
             patch("crew.executor.aexecute_prompt", side_effect=_mock_execute),
         ):
             result = await _execute_meeting(
-                ctx, task_id="test-002",
+                ctx,
+                task_id="test-002",
                 employees=["emp-a", "emp-b"],
                 topic="test",
             )
@@ -455,7 +470,11 @@ class TestExecuteTaskMeeting:
         )
 
         mock_meeting_result = {"rounds": [], "synthesis": "done"}
-        with patch("crew.webhook._execute_meeting", new_callable=AsyncMock, return_value=mock_meeting_result):
+        with patch(
+            "crew.webhook._execute_meeting",
+            new_callable=AsyncMock,
+            return_value=mock_meeting_result,
+        ):
             await _execute_task(ctx, record.task_id)
 
         updated = ctx.registry.get(record.task_id)
@@ -472,17 +491,35 @@ class TestToolSchemaRegistration:
     def test_schemas_exist(self):
         from crew.tool_schema import _TOOL_SCHEMAS
 
-        for name in ("delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting"):
+        for name in (
+            "delegate_async",
+            "check_task",
+            "list_tasks",
+            "organize_meeting",
+            "check_meeting",
+        ):
             assert name in _TOOL_SCHEMAS, f"{name} not in _TOOL_SCHEMAS"
 
     def test_in_agent_tools(self):
         from crew.tool_schema import AGENT_TOOLS
 
-        for name in ("delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting"):
+        for name in (
+            "delegate_async",
+            "check_task",
+            "list_tasks",
+            "organize_meeting",
+            "check_meeting",
+        ):
             assert name in AGENT_TOOLS, f"{name} not in AGENT_TOOLS"
 
     def test_handlers_registered(self):
         from crew.webhook import _TOOL_HANDLERS
 
-        for name in ("delegate_async", "check_task", "list_tasks", "organize_meeting", "check_meeting"):
+        for name in (
+            "delegate_async",
+            "check_task",
+            "list_tasks",
+            "organize_meeting",
+            "check_meeting",
+        ):
             assert name in _TOOL_HANDLERS, f"{name} not in _TOOL_HANDLERS"

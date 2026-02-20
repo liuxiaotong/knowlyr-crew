@@ -26,7 +26,9 @@ class WorkLogger:
             log_dir: 日志目录，默认 .crew/logs
             project_dir: 项目根目录，用于计算默认 log_dir
         """
-        self.log_dir = log_dir if log_dir is not None else resolve_project_dir(project_dir) / ".crew" / "logs"
+        self.log_dir = (
+            log_dir if log_dir is not None else resolve_project_dir(project_dir) / ".crew" / "logs"
+        )
 
     def _ensure_dir(self) -> None:
         """确保日志目录存在."""
@@ -149,12 +151,14 @@ class WorkLogger:
                 if employee_name and first_entry.get("employee_name") != employee_name:
                     continue
 
-                sessions.append({
-                    "session_id": f.stem,
-                    "employee_name": first_entry.get("employee_name", ""),
-                    "started_at": first_entry.get("timestamp", ""),
-                    "entries": line_count,
-                })
+                sessions.append(
+                    {
+                        "session_id": f.stem,
+                        "employee_name": first_entry.get("employee_name", ""),
+                        "started_at": first_entry.get("timestamp", ""),
+                        "entries": line_count,
+                    }
+                )
 
                 if len(sessions) >= limit:
                     break

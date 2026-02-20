@@ -35,8 +35,12 @@ class TestMemoryEntry:
 
     def test_new_fields_custom(self):
         entry = MemoryEntry(
-            employee="pm", category="decision", content="test",
-            ttl_days=30, tags=["architecture", "api"], shared=True,
+            employee="pm",
+            category="decision",
+            content="test",
+            ttl_days=30,
+            tags=["architecture", "api"],
+            shared=True,
         )
         assert entry.ttl_days == 30
         assert entry.tags == ["architecture", "api"]
@@ -193,8 +197,12 @@ class TestMemoryStore:
         """add() 接受新参数 ttl_days/tags/shared."""
         store = MemoryStore(memory_dir=tmp_path / "memory")
         entry = store.add(
-            "pm", "decision", "使用 REST API",
-            ttl_days=30, tags=["architecture", "api"], shared=True,
+            "pm",
+            "decision",
+            "使用 REST API",
+            ttl_days=30,
+            tags=["architecture", "api"],
+            shared=True,
         )
         assert entry.ttl_days == 30
         assert entry.tags == ["architecture", "api"]
@@ -234,10 +242,15 @@ class TestMemoryConfig:
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
         config_path = memory_dir / "config.json"
-        config_path.write_text(json.dumps({
-            "default_ttl_days": 30,
-            "max_entries_per_employee": 100,
-        }), encoding="utf-8")
+        config_path.write_text(
+            json.dumps(
+                {
+                    "default_ttl_days": 30,
+                    "max_entries_per_employee": 100,
+                }
+            ),
+            encoding="utf-8",
+        )
 
         store = MemoryStore(memory_dir=memory_dir)
         assert store.config.default_ttl_days == 30
@@ -406,7 +419,9 @@ class TestVisibility:
         assert entry.visibility == "open"
 
     def test_visibility_private(self):
-        entry = MemoryEntry(employee="pm", category="finding", content="secret", visibility="private")
+        entry = MemoryEntry(
+            employee="pm", category="finding", content="secret", visibility="private"
+        )
         assert entry.visibility == "private"
 
     def test_backward_compat_no_visibility(self):

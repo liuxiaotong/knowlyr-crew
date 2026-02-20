@@ -62,6 +62,7 @@ def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
     config.update(updates)
     import os
     import tempfile
+
     content = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
     fd, tmp = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
     fd_closed = False
@@ -141,7 +142,9 @@ def sync_all(
         name = config.get("name", emp_dir.name)
         try:
             if push:
-                _push_employee(emp_dir, config, agent_id, engine, report, dry_run=dry_run, force=force)
+                _push_employee(
+                    emp_dir, config, agent_id, engine, report, dry_run=dry_run, force=force
+                )
             if pull:
                 _pull_employee(emp_dir, config, agent_id, report, dry_run=dry_run)
         except Exception as e:

@@ -125,6 +125,7 @@ class TestWorkLogger:
         session_id = self.logger.create_session("code-reviewer")
         session_file = Path(self.tmpdir) / f"{session_id}.jsonl"
         import json
+
         session_file.write_text(json.dumps({"action": "start"}) + "\n")
         # 应该不崩溃，使用 'unknown' 作为 employee_name
         self.logger.add_entry(session_id, "step1", "detail")

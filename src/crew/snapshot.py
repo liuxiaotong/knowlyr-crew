@@ -42,10 +42,15 @@ class SnapshotManager:
         today = datetime.now().strftime("%Y%m%d")
         prefix = f"v{today}"
 
-        existing = sorted(
-            d.name for d in self.snapshots_dir.iterdir()
-            if d.is_dir() and d.name.startswith(prefix)
-        ) if self.snapshots_dir.exists() else []
+        existing = (
+            sorted(
+                d.name
+                for d in self.snapshots_dir.iterdir()
+                if d.is_dir() and d.name.startswith(prefix)
+            )
+            if self.snapshots_dir.exists()
+            else []
+        )
 
         if not existing:
             return f"{prefix}a"
@@ -167,6 +172,7 @@ class SnapshotManager:
             for f in all_sessions:
                 first_line = f.read_text("utf-8").split("\n")[0]
                 import json as _json
+
                 start = _json.loads(first_line)
                 source = start.get("metadata", {}).get("source", "")
                 if source.startswith("cli."):
@@ -252,14 +258,17 @@ class SnapshotManager:
             hash_b = info_b.get("content_hash", "")
 
             if hash_a != hash_b:
-                prompt_changes.append({
-                    "employee": emp,
-                    "display_name": info_b.get("display_name") or info_a.get("display_name", ""),
-                    "version_a": info_a.get("prompt_version", "—"),
-                    "version_b": info_b.get("prompt_version", "—"),
-                    "hash_a": hash_a,
-                    "hash_b": hash_b,
-                })
+                prompt_changes.append(
+                    {
+                        "employee": emp,
+                        "display_name": info_b.get("display_name")
+                        or info_a.get("display_name", ""),
+                        "version_a": info_a.get("prompt_version", "—"),
+                        "version_b": info_b.get("prompt_version", "—"),
+                        "hash_a": hash_a,
+                        "hash_b": hash_b,
+                    }
+                )
 
         # 数据变化
         data_a = manifest_a.get("data_counts", {})
@@ -317,6 +326,7 @@ class SnapshotManager:
             # 重算该快照的指纹
             snap_emps = snap.get("employees", {})
             import hashlib
+
             hasher = hashlib.sha256()
             for emp_name in sorted(snap_emps.keys()):
                 h = snap_emps[emp_name].get("content_hash", "")

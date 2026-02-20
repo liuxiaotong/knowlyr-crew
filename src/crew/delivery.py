@@ -66,18 +66,23 @@ async def deliver(
         return []
 
     results = await asyncio.gather(
-        *[_deliver_one(t, task_name=task_name, task_result=task_result, task_error=task_error) for t in targets],
+        *[
+            _deliver_one(t, task_name=task_name, task_result=task_result, task_error=task_error)
+            for t in targets
+        ],
         return_exceptions=True,
     )
 
     out: list[DeliveryResult] = []
     for i, r in enumerate(results):
         if isinstance(r, Exception):
-            out.append(DeliveryResult(
-                target_type=targets[i].type,
-                success=False,
-                detail=str(r),
-            ))
+            out.append(
+                DeliveryResult(
+                    target_type=targets[i].type,
+                    success=False,
+                    detail=str(r),
+                )
+            )
         else:
             out.append(r)
     return out
@@ -92,13 +97,21 @@ async def _deliver_one(
 ) -> DeliveryResult:
     """投递到单个目标."""
     if target.type == "webhook":
-        return await _deliver_webhook(target, task_name=task_name, task_result=task_result, task_error=task_error)
+        return await _deliver_webhook(
+            target, task_name=task_name, task_result=task_result, task_error=task_error
+        )
     elif target.type == "email":
-        return await _deliver_email(target, task_name=task_name, task_result=task_result, task_error=task_error)
+        return await _deliver_email(
+            target, task_name=task_name, task_result=task_result, task_error=task_error
+        )
     elif target.type == "feishu":
-        return await _deliver_feishu(target, task_name=task_name, task_result=task_result, task_error=task_error)
+        return await _deliver_feishu(
+            target, task_name=task_name, task_result=task_result, task_error=task_error
+        )
     else:
-        return DeliveryResult(target_type=target.type, success=False, detail=f"未知投递类型: {target.type}")
+        return DeliveryResult(
+            target_type=target.type, success=False, detail=f"未知投递类型: {target.type}"
+        )
 
 
 async def _deliver_webhook(
@@ -133,15 +146,21 @@ async def _deliver_webhook(
         async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
             resp = await client.post(target.url, json=payload, headers=headers)
         if resp.status_code < 400:
-            return DeliveryResult(target_type="webhook", success=True, detail=f"HTTP {resp.status_code}")
+            return DeliveryResult(
+                target_type="webhook", success=True, detail=f"HTTP {resp.status_code}"
+            )
         else:
-            return DeliveryResult(target_type="webhook", success=False, detail=f"HTTP {resp.status_code}")
+            return DeliveryResult(
+                target_type="webhook", success=False, detail=f"HTTP {resp.status_code}"
+            )
     except Exception as e:
         return DeliveryResult(target_type="webhook", success=False, detail=str(e))
 
 
 def _validate_smtp_config(
-    host: str, port_str: str, to: str,
+    host: str,
+    port_str: str,
+    to: str,
 ) -> tuple[bool, str]:
     """校验 SMTP 配置.
 
@@ -206,7 +225,9 @@ async def _deliver_email(
     try:
         # 在线程池中执行阻塞的 SMTP 操作
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _send_smtp, smtp_host, smtp_port, smtp_user, smtp_pass, msg)
+        await loop.run_in_executor(
+            None, _send_smtp, smtp_host, smtp_port, smtp_user, smtp_pass, msg
+        )
         return DeliveryResult(target_type="email", success=True, detail=f"发送至 {target.to}")
     except Exception as e:
         return DeliveryResult(target_type="email", success=False, detail=str(e))
@@ -262,6 +283,7 @@ def _build_feishu_card(
                 content = output
             else:
                 import json
+
                 content = json.dumps(output, ensure_ascii=False, indent=2)[:FEISHU_CARD_CONTENT_MAX]
         else:
             content = "任务已完成。"
@@ -282,10 +304,12 @@ def _build_feishu_card(
             ms = task_result["duration_ms"]
             meta_parts.append(f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms")
         if meta_parts:
-            elements.append({
-                "tag": "note",
-                "elements": [{"tag": "plain_text", "content": " · ".join(meta_parts)}],
-            })
+            elements.append(
+                {
+                    "tag": "note",
+                    "elements": [{"tag": "plain_text", "content": " · ".join(meta_parts)}],
+                }
+            )
 
     return {
         "msg_type": "interactive",

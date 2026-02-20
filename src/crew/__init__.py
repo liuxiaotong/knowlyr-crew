@@ -20,7 +20,9 @@ def _load_local_version() -> str:
     if not pyproject.exists():
         return "0.0.0"
     try:
-        match = re.search(r"^version\s*=\s*\"([^\"]+)\"", pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+        match = re.search(
+            r"^version\s*=\s*\"([^\"]+)\"", pyproject.read_text(encoding="utf-8"), re.MULTILINE
+        )
         if match:
             return match.group(1)
     except Exception:

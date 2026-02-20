@@ -31,6 +31,7 @@ EMPLOYEE_SUBDIR = Path("private") / "employees"
 def _suggest_similar(name: str, candidates: list[str]) -> str:
     """查找相似名称，返回提示文本."""
     import difflib
+
     close = difflib.get_close_matches(name, candidates, n=3, cutoff=0.5)
     if close:
         return f"\n类似的名称: {', '.join(close)}"
@@ -151,13 +152,18 @@ def main(ctx: click.Context, verbose: bool):
 @main.command("list")
 @click.option("--tag", type=str, default=None, help="按标签过滤")
 @click.option(
-    "--layer", type=click.Choice(["builtin", "skill", "private"]),
-    default=None, help="按来源层过滤",
+    "--layer",
+    type=click.Choice(["builtin", "skill", "private"]),
+    default=None,
+    help="按来源层过滤",
 )
 @click.option(
-    "-f", "--format", "output_format",
+    "-f",
+    "--format",
+    "output_format",
     type=click.Choice(["table", "json"]),
-    default="table", help="输出格式",
+    default="table",
+    help="输出格式",
 )
 @click.pass_context
 def list_cmd(ctx: click.Context, tag: str | None, layer: str | None, output_format: str):
@@ -271,7 +277,9 @@ def _lint_file(path: Path, project_dir: Path) -> list[str]:
         except Exception as exc:
             return [f"{path}: 解析失败 ({exc})"]
 
-        errors.extend(f"{path}: {e}" for e in validate_discussion(discussion, project_dir=project_dir))
+        errors.extend(
+            f"{path}: {e}" for e in validate_discussion(discussion, project_dir=project_dir)
+        )
     else:
         errors = [f"{path}: 未识别的 YAML 类型（缺少 steps/participants）"]
 
@@ -397,10 +405,28 @@ def permissions_cmd(name: str):
 @click.option("--no-lint", is_flag=True, default=False, help="跳过 lint 检查")
 @click.option("--no-logs", is_flag=True, default=False, help="跳过日志质量检查")
 @click.option("--json", "json_output", is_flag=True, help="JSON 输出")
-@click.option("--path", "lint_paths", multiple=True, type=click.Path(path_type=Path), help="要 lint 的路径（可多次指定）")
-@click.option("--output-file", type=click.Path(path_type=Path), default=None, help="将 JSON 报告写入文件（默认 .crew/quality-report.json）")
+@click.option(
+    "--path",
+    "lint_paths",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="要 lint 的路径（可多次指定）",
+)
+@click.option(
+    "--output-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="将 JSON 报告写入文件（默认 .crew/quality-report.json）",
+)
 @click.option("--no-file", is_flag=True, help="不写入 JSON 报告")
-def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple[Path, ...], output_file: Path | None, no_file: bool):
+def check_cmd(
+    no_lint: bool,
+    no_logs: bool,
+    json_output: bool,
+    lint_paths: tuple[Path, ...],
+    output_file: Path | None,
+    no_file: bool,
+):
     """执行 lint + 日志质量检查。"""
     report: dict[str, Any] = {}
     exit_code = 0
@@ -408,7 +434,10 @@ def check_cmd(no_lint: bool, no_logs: bool, json_output: bool, lint_paths: tuple
     if not no_lint:
         targets = list(lint_paths)
         if not targets:
-            default_dirs = [Path.cwd() / ".crew" / "pipelines", Path.cwd() / ".crew" / "discussions"]
+            default_dirs = [
+                Path.cwd() / ".crew" / "pipelines",
+                Path.cwd() / ".crew" / "discussions",
+            ]
             targets = [d for d in default_dirs if d.exists()]
         lint_errors = _lint_targets(targets)
         if lint_errors:
@@ -473,18 +502,20 @@ def _catalog_data() -> list[dict[str, Any]]:
     result = discover_employees()
     employees = []
     for emp in result.employees.values():
-        employees.append({
-            "name": emp.name,
-            "display_name": emp.display_name,
-            "character_name": emp.character_name,
-            "description": emp.description,
-            "tags": emp.tags,
-            "triggers": emp.triggers,
-            "tools": emp.tools,
-            "context": emp.context,
-            "agent_id": emp.agent_id,
-            "source_layer": emp.source_layer,
-        })
+        employees.append(
+            {
+                "name": emp.name,
+                "display_name": emp.display_name,
+                "character_name": emp.character_name,
+                "description": emp.description,
+                "tags": emp.tags,
+                "triggers": emp.triggers,
+                "tools": emp.tools,
+                "context": emp.context,
+                "agent_id": emp.agent_id,
+                "source_layer": emp.source_layer,
+            }
+        )
     return employees
 
 
@@ -524,7 +555,9 @@ def catalog_list(output_format: str):
         console.print(table)
     except ImportError:
         for item in data:
-            click.echo(f"{item['name']:<18} {item['display_name']:<12} agent={item['agent_id'] or '-'}")
+            click.echo(
+                f"{item['name']:<18} {item['display_name']:<12} agent={item['agent_id'] or '-'}"
+            )
 
 
 @catalog.command("show")
@@ -611,7 +644,14 @@ def show(name: str):
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 @click.option("--execute", "execute_mode", is_flag=True, help="执行 prompt（调用 LLM API）")
-@click.option("-m", "--message", "user_message", type=str, default=None, help="自定义 user message（--execute 模式）")
+@click.option(
+    "-m",
+    "--message",
+    "user_message",
+    type=str,
+    default=None,
+    help="自定义 user message（--execute 模式）",
+)
 @click.option("--no-stream", "no_stream", is_flag=True, help="禁用流式输出（--execute 模式）")
 @click.option("--debug-context", is_flag=True, help="显示检测到的项目上下文信息")
 def run(
@@ -632,6 +672,7 @@ def run(
     """加载员工并生成 prompt."""
     if debug_context:
         from crew.context_detector import detect_project
+
         info = detect_project()
         click.echo(f"[Context] 项目类型: {info.project_type}")
         click.echo(f"[Context] 框架: {info.framework or '-'}")
@@ -677,26 +718,70 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         new_users = random.randint(15, 60)
         agents = random.randint(30, 40)
         revenue = random.randint(30000, 80000)
-        return json.dumps({"dau": dau, "wau": wau, "messages_today": msgs, "new_users_this_week": new_users, "active_agents": agents, "revenue_mtd": revenue})
+        return json.dumps(
+            {
+                "dau": dau,
+                "wau": wau,
+                "messages_today": msgs,
+                "new_users_this_week": new_users,
+                "active_agents": agents,
+                "revenue_mtd": revenue,
+            }
+        )
     if tool_name == "lookup_user":
         uid = random.randint(1001, 9999)
         msgs = random.randint(50, 500)
-        return json.dumps({"user_id": uid, "name": "示例用户", "email": "user@example.com", "created_at": "2025-12-01", "messages_sent": msgs})
+        return json.dumps(
+            {
+                "user_id": uid,
+                "name": "示例用户",
+                "email": "user@example.com",
+                "created_at": "2025-12-01",
+                "messages_sent": msgs,
+            }
+        )
     if tool_name == "query_agent_work":
         done = random.randint(2, 8)
         prog = random.randint(1, 4)
         mins = random.randint(1, 60)
-        return json.dumps({"agent": "requested", "tasks_completed_today": done, "tasks_in_progress": prog, "last_active": f"{mins} 分钟前"})
+        return json.dumps(
+            {
+                "agent": "requested",
+                "tasks_completed_today": done,
+                "tasks_in_progress": prog,
+                "last_active": f"{mins} 分钟前",
+            }
+        )
     if tool_name == "list_agents":
         return '[{"agent_id": 3073, "name": "ceo-assistant", "status": "active"}, {"agent_id": 3001, "name": "code-reviewer", "status": "active"}, {"agent_id": 3002, "name": "product-manager", "status": "active"}]'
     if tool_name == "read_messages":
         unread = random.randint(0, 5)
-        return json.dumps({"unread": unread, "messages": [{"from": "code-reviewer", "content": "PR #42 审查完成，有两个建议", "time": "14:30"}, {"from": "product-manager", "content": "新需求文档已更新", "time": "15:00"}]})
+        return json.dumps(
+            {
+                "unread": unread,
+                "messages": [
+                    {
+                        "from": "code-reviewer",
+                        "content": "PR #42 审查完成，有两个建议",
+                        "time": "14:30",
+                    },
+                    {"from": "product-manager", "content": "新需求文档已更新", "time": "15:00"},
+                ],
+            }
+        )
     if tool_name == "get_system_health":
         cpu = random.randint(15, 45)
         mem = random.randint(40, 75)
         latency = random.randint(200, 500)
-        return json.dumps({"status": "healthy", "uptime": "72h", "cpu": f"{cpu}%", "memory": f"{mem}%", "api_latency_p99": f"{latency}ms"})
+        return json.dumps(
+            {
+                "status": "healthy",
+                "uptime": "72h",
+                "cpu": f"{cpu}%",
+                "memory": f"{mem}%",
+                "api_latency_p99": f"{latency}ms",
+            }
+        )
     if tool_name == "read_notes":
         return '{"notes": []}'
     if tool_name == "web_search":
@@ -717,7 +802,15 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         return '{"issues": [{"number": 10, "title": "Bug: login failure", "state": "open", "labels": ["bug"], "assignee": "kai"}]}'
     if tool_name == "github_repo_activity":
         commits = random.randint(8, 25)
-        return json.dumps({"commits_7d": commits, "contributors": 3, "recent": [{"sha": "abc1234", "message": "fix: resolve auth issue", "author": "kai"}]})
+        return json.dumps(
+            {
+                "commits_7d": commits,
+                "contributors": 3,
+                "recent": [
+                    {"sha": "abc1234", "message": "fix: resolve auth issue", "author": "kai"}
+                ],
+            }
+        )
     # Notion
     if tool_name == "notion_search":
         return '{"results": [{"title": "产品规划 2026", "url": "https://notion.so/abc123", "type": "page", "last_edited": "2026-02-14"}]}'
@@ -737,21 +830,21 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
         "mark_read": '{"status": "ok", "marked": 3}',
         "update_agent": '{"status": "updated"}',
         "create_feishu_event": '{"status": "created", "event_id": "evt_abc123", "calendar": "primary"}',
-        "read_feishu_calendar": '02-16 10:00-11:00 团队周会 [event_id=evt_001]\n02-16 14:00-15:00 投资人沟通 [event_id=evt_002]\n02-16 16:30-17:00 产品评审 [event_id=evt_003]',
-        "delete_feishu_event": '日程已删除 (event_id=evt_001)。',
-        "create_feishu_task": '待办已创建：准备投资人会议材料，截止 2026-02-20 [task_id=task_abc123]',
-        "list_feishu_tasks": '⬜ 准备投资人会议材料 截止02-20 [task_id=task_001]\n⬜ 整理Q1数据报告 截止02-18 [task_id=task_002]\n⬜ 确认下周出差行程 [task_id=task_003]\n✅ 发送新年祝福 [task_id=task_004]',
-        "complete_feishu_task": '任务已完成 ✅ [task_id=task_abc123]',
-        "delete_feishu_task": '任务已删除 [task_id=task_abc123]',
-        "update_feishu_task": '任务已更新: 截止→2026-03-01 [task_id=task_abc123]',
-        "get_datetime": '2026-02-16 09:30 星期一',
-        "calculate": '1749600.56',
-        "feishu_chat_history": '[02-15 14:30] ou_user1: 下午开会记得带材料\n[02-15 14:25] ou_user2: 好的收到\n[02-15 14:20] ou_user1: Q1 报告写完了吗',
-        "weather": '上海市 当前 6.7℃，湿度 78%，空气优(PM2.5:21)\n2026-02-15(星期日) 多云 7℃~15℃ 东北风2级\n2026-02-16(星期一) 小雨 4℃~8℃ 东北风2级\n2026-02-17(星期二) 晴 3℃~10℃ 北风1级',
-        "exchange_rate": '基准: 1 USD\n= 6.91 CNY',
-        "stock_price": '贵州茅台 (SH600519)\n现价: ¥1485.30  涨跌: -1.30 (-0.09%)\n今开: 1486.60  最高: 1507.80  最低: 1470.58',
-        "send_feishu_dm": '私聊消息已发送给 ou_xxx。',
-        "feishu_group_members": '刘凯 [open_id=ou_de186aad7faf2c2b72b78223577e2bd9]',
+        "read_feishu_calendar": "02-16 10:00-11:00 团队周会 [event_id=evt_001]\n02-16 14:00-15:00 投资人沟通 [event_id=evt_002]\n02-16 16:30-17:00 产品评审 [event_id=evt_003]",
+        "delete_feishu_event": "日程已删除 (event_id=evt_001)。",
+        "create_feishu_task": "待办已创建：准备投资人会议材料，截止 2026-02-20 [task_id=task_abc123]",
+        "list_feishu_tasks": "⬜ 准备投资人会议材料 截止02-20 [task_id=task_001]\n⬜ 整理Q1数据报告 截止02-18 [task_id=task_002]\n⬜ 确认下周出差行程 [task_id=task_003]\n✅ 发送新年祝福 [task_id=task_004]",
+        "complete_feishu_task": "任务已完成 ✅ [task_id=task_abc123]",
+        "delete_feishu_task": "任务已删除 [task_id=task_abc123]",
+        "update_feishu_task": "任务已更新: 截止→2026-03-01 [task_id=task_abc123]",
+        "get_datetime": "2026-02-16 09:30 星期一",
+        "calculate": "1749600.56",
+        "feishu_chat_history": "[02-15 14:30] ou_user1: 下午开会记得带材料\n[02-15 14:25] ou_user2: 好的收到\n[02-15 14:20] ou_user1: Q1 报告写完了吗",
+        "weather": "上海市 当前 6.7℃，湿度 78%，空气优(PM2.5:21)\n2026-02-15(星期日) 多云 7℃~15℃ 东北风2级\n2026-02-16(星期一) 小雨 4℃~8℃ 东北风2级\n2026-02-17(星期二) 晴 3℃~10℃ 北风1级",
+        "exchange_rate": "基准: 1 USD\n= 6.91 CNY",
+        "stock_price": "贵州茅台 (SH600519)\n现价: ¥1485.30  涨跌: -1.30 (-0.09%)\n今开: 1486.60  最高: 1507.80  最低: 1470.58",
+        "send_feishu_dm": "私聊消息已发送给 ou_xxx。",
+        "feishu_group_members": "刘凯 [open_id=ou_de186aad7faf2c2b72b78223577e2bd9]",
         "create_note": '{"status": "saved", "note_id": "note_001"}',
         "translate": "The quarterly financial report shows a 15% increase in revenue.",
         "countdown": "距离「产品发布」还有 12 天 6 小时。",
@@ -873,12 +966,14 @@ def _execute_with_tool_loop(
             if result.content:
                 assistant_content.append({"type": "text", "text": result.content})
             for tc in result.tool_calls:
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": tc.id,
-                    "name": tc.name,
-                    "input": tc.arguments,
-                })
+                assistant_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    }
+                )
             messages.append({"role": "assistant", "content": assistant_content})
 
             tool_results: list[dict[str, Any]] = []
@@ -886,11 +981,13 @@ def _execute_with_tool_loop(
             for tc in result.tool_calls:
                 if is_finish_tool(tc.name):
                     final_content = tc.arguments.get("result", result.content)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": final_content,
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": final_content,
+                        }
+                    )
                     finished = True
                 else:
                     denied_msg = guard.check_soft(tc.name)
@@ -908,11 +1005,13 @@ def _execute_with_tool_loop(
                             input_tokens=result.input_tokens,
                             output_tokens=result.output_tokens,
                         )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": tool_output[:10000],
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": tool_output[:10000],
+                        }
+                    )
             messages.append({"role": "user", "content": tool_results})
             if finished:
                 break
@@ -939,11 +1038,13 @@ def _execute_with_tool_loop(
             for tc in result.tool_calls:
                 if is_finish_tool(tc.name):
                     final_content = tc.arguments.get("result", result.content)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": final_content,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": final_content,
+                        }
+                    )
                     finished = True
                 else:
                     denied_msg = guard.check_soft(tc.name)
@@ -961,11 +1062,13 @@ def _execute_with_tool_loop(
                             input_tokens=result.input_tokens,
                             output_tokens=result.output_tokens,
                         )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": tool_output[:10000],
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": tool_output[:10000],
+                        }
+                    )
             if finished:
                 break
     else:
@@ -1104,14 +1207,17 @@ def _run_employee_job(
         exec_api_key = emp.api_key or (agent_identity.api_key if agent_identity else None)
         if not exec_api_key:
             from crew.providers import detect_provider, resolve_api_key
+
             try:
                 _provider = detect_provider(effective_model)
                 exec_api_key = resolve_api_key(_provider)
             except ValueError as e:
                 click.echo(f"Error: {e}", err=True)
                 _finish_transcript(
-                    transcript_recorder, transcript_id,
-                    status="failed", detail="missing_api_key",
+                    transcript_recorder,
+                    transcript_id,
+                    status="failed",
+                    detail="missing_api_key",
                 )
                 sys.exit(1)
 
@@ -1123,8 +1229,10 @@ def _run_employee_job(
                 err=True,
             )
             _finish_transcript(
-                transcript_recorder, transcript_id,
-                status="failed", detail="missing_sdk",
+                transcript_recorder,
+                transcript_id,
+                status="failed",
+                detail="missing_sdk",
             )
             sys.exit(1)
 
@@ -1132,7 +1240,9 @@ def _run_employee_job(
             effective_message = user_message
         else:
             # 把 task/target/goal 参数放进 user message，让模型明确知道要做什么
-            task_arg = args_dict.get("task") or args_dict.get("target") or args_dict.get("goal") or ""
+            task_arg = (
+                args_dict.get("task") or args_dict.get("target") or args_dict.get("goal") or ""
+            )
             effective_message = task_arg if task_arg else "请开始执行上述任务。"
         stream_enabled = not no_stream and not output and not to_clipboard
 
@@ -1143,9 +1253,16 @@ def _run_employee_job(
         try:
             from crew.trajectory import TrajectoryCollector
 
-            task_desc = args_dict.get("task") or args_dict.get("target") or args_dict.get("goal") or emp.description
+            task_desc = (
+                args_dict.get("task")
+                or args_dict.get("target")
+                or args_dict.get("goal")
+                or emp.description
+            )
             traj_collector = TrajectoryCollector(
-                emp.name, task_desc, model=effective_model,
+                emp.name,
+                task_desc,
+                model=effective_model,
             )
             traj_collector.__enter__()
         except Exception:
@@ -1155,6 +1272,7 @@ def _run_employee_job(
         has_agent_tools = False
         try:
             from crew.tool_schema import AGENT_TOOLS
+
             has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
         except ImportError:
             pass
@@ -1191,8 +1309,10 @@ def _run_employee_job(
                     traj_collector.__exit__(None, None, None)
                 click.echo(f"\nLLM 执行失败: {exc}", err=True)
                 _finish_transcript(
-                    transcript_recorder, transcript_id,
-                    status="error", detail=f"execute_error: {str(exc)[:200]}",
+                    transcript_recorder,
+                    transcript_id,
+                    status="error",
+                    detail=f"execute_error: {str(exc)[:200]}",
                 )
                 sys.exit(1)
 
@@ -1201,8 +1321,10 @@ def _run_employee_job(
                 already_streamed = True
 
         _record_transcript_message(
-            transcript_recorder, transcript_id,
-            "assistant", result.content,
+            transcript_recorder,
+            transcript_id,
+            "assistant",
+            result.content,
             {
                 "model": result.model,
                 "input_tokens": result.input_tokens,
@@ -1232,7 +1354,9 @@ def _run_employee_job(
 
         work_logger = WorkLogger()
         session_id = work_logger.create_session(emp.name, args=args_dict, agent_id=agent_id)
-        detail_msg = f"executed, {len(text)} chars" if execute_mode else f"via CLI, {len(text)} chars"
+        detail_msg = (
+            f"executed, {len(text)} chars" if execute_mode else f"via CLI, {len(text)} chars"
+        )
         work_logger.add_entry(session_id, "prompt_generated", detail_msg)
     except Exception:
         pass
@@ -1401,10 +1525,19 @@ def validate(path: str):
 @click.option("--avatar-prompt", type=str, default=None, help="头像生成描述")
 @click.option("--tags", type=str, default=None, help="标签（逗号分隔）")
 @click.option("--triggers", type=str, default=None, help="触发词（逗号分隔）")
-def init(employee: str | None, dir_format: bool, avatar: bool,
-         display_name: str | None, desc: str | None, character_name: str | None,
-         bio: str | None, summary: str | None,
-         avatar_prompt: str | None, tags: str | None, triggers: str | None):
+def init(
+    employee: str | None,
+    dir_format: bool,
+    avatar: bool,
+    display_name: str | None,
+    desc: str | None,
+    character_name: str | None,
+    bio: str | None,
+    summary: str | None,
+    avatar_prompt: str | None,
+    tags: str | None,
+    triggers: str | None,
+):
     """初始化 private/employees/ 目录或创建员工模板."""
     crew_dir = _employee_root()
     crew_dir.mkdir(parents=True, exist_ok=True)
@@ -1420,14 +1553,36 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
         if avatar:
             display_name = display_name or click.prompt("显示名称", default=employee)
             desc = desc or click.prompt("一句话描述")
-            character_name = character_name if character_name is not None else click.prompt("角色姓名（如 陆明哲）", default="")
+            character_name = (
+                character_name
+                if character_name is not None
+                else click.prompt("角色姓名（如 陆明哲）", default="")
+            )
             bio = bio if bio is not None else click.prompt("个人宣言（一句话）", default="")
-            summary = summary if summary is not None else click.prompt("能力摘要（一段话，留空同 description）", default="")
-            avatar_prompt = avatar_prompt if avatar_prompt is not None else click.prompt("头像描述（留空自动推断）", default="")
+            summary = (
+                summary
+                if summary is not None
+                else click.prompt("能力摘要（一段话，留空同 description）", default="")
+            )
+            avatar_prompt = (
+                avatar_prompt
+                if avatar_prompt is not None
+                else click.prompt("头像描述（留空自动推断）", default="")
+            )
             tags_input = tags if tags is not None else click.prompt("标签（逗号分隔）", default="")
-            tags_list = [t.strip() for t in tags_input.split(",") if t.strip()] if tags_input else []
-            triggers_input = triggers if triggers is not None else click.prompt("触发词（逗号分隔）", default=employee)
-            triggers_list = [t.strip() for t in triggers_input.split(",") if t.strip()] if triggers_input else []
+            tags_list = (
+                [t.strip() for t in tags_input.split(",") if t.strip()] if tags_input else []
+            )
+            triggers_input = (
+                triggers
+                if triggers is not None
+                else click.prompt("触发词（逗号分隔）", default=employee)
+            )
+            triggers_list = (
+                [t.strip() for t in triggers_input.split(",") if t.strip()]
+                if triggers_input
+                else []
+            )
         else:
             display_name = display_name or employee
             desc = desc or "在此填写一句话描述"
@@ -1436,12 +1591,15 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
             summary = summary or ""
             avatar_prompt = avatar_prompt or ""
             tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-            triggers_list = [t.strip() for t in triggers.split(",") if t.strip()] if triggers else []
+            triggers_list = (
+                [t.strip() for t in triggers.split(",") if t.strip()] if triggers else []
+            )
 
         emp_dir.mkdir()
         (emp_dir / "workflows").mkdir()
 
         import yaml as _yaml
+
         config_data: dict = {
             "name": employee,
             "display_name": display_name,
@@ -1456,22 +1614,61 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
         config_data["author"] = "knowlyr"
         config_data["triggers"] = triggers_list
         config_data["tools"] = [
-            "add_memory", "query_stats", "lookup_user", "query_agent_work",
-            "list_agents", "read_messages", "get_system_health", "send_message",
-            "delegate", "mark_read", "update_agent", "create_note", "read_notes",
-            "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
-            "create_feishu_task", "list_feishu_tasks", "complete_feishu_task",
-            "delete_feishu_task", "update_feishu_task", "feishu_chat_history",
-            "weather", "get_datetime", "calculate", "send_feishu_dm",
-            "feishu_group_members", "exchange_rate", "stock_price",
-            "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
-            "send_feishu_group", "list_feishu_groups",
-            "github_prs", "github_issues", "github_repo_activity",
-            "notion_search", "notion_read", "notion_create",
-            "web_search", "read_url", "rss_read", "translate",
-            "countdown", "trending", "read_feishu_sheet", "update_feishu_sheet",
-            "list_feishu_approvals", "unit_convert", "random_pick", "holidays",
-            "timestamp_convert", "create_feishu_spreadsheet", "feishu_contacts",
+            "add_memory",
+            "query_stats",
+            "lookup_user",
+            "query_agent_work",
+            "list_agents",
+            "read_messages",
+            "get_system_health",
+            "send_message",
+            "delegate",
+            "mark_read",
+            "update_agent",
+            "create_note",
+            "read_notes",
+            "read_feishu_calendar",
+            "delete_feishu_event",
+            "create_feishu_event",
+            "create_feishu_task",
+            "list_feishu_tasks",
+            "complete_feishu_task",
+            "delete_feishu_task",
+            "update_feishu_task",
+            "feishu_chat_history",
+            "weather",
+            "get_datetime",
+            "calculate",
+            "send_feishu_dm",
+            "feishu_group_members",
+            "exchange_rate",
+            "stock_price",
+            "search_feishu_docs",
+            "read_feishu_doc",
+            "create_feishu_doc",
+            "send_feishu_group",
+            "list_feishu_groups",
+            "github_prs",
+            "github_issues",
+            "github_repo_activity",
+            "notion_search",
+            "notion_read",
+            "notion_create",
+            "web_search",
+            "read_url",
+            "rss_read",
+            "translate",
+            "countdown",
+            "trending",
+            "read_feishu_sheet",
+            "update_feishu_sheet",
+            "list_feishu_approvals",
+            "unit_convert",
+            "random_pick",
+            "holidays",
+            "timestamp_convert",
+            "create_feishu_spreadsheet",
+            "feishu_contacts",
         ]
         config_data["args"] = [
             {"name": "target", "description": "目标", "required": True},
@@ -1481,8 +1678,7 @@ def init(employee: str | None, dir_format: bool, avatar: bool,
             config_data["avatar_prompt"] = avatar_prompt
 
         (emp_dir / "employee.yaml").write_text(
-            _yaml.dump(config_data, allow_unicode=True, sort_keys=False,
-                       default_flow_style=False),
+            _yaml.dump(config_data, allow_unicode=True, sort_keys=False, default_flow_style=False),
             encoding="utf-8",
         )
 
@@ -1650,12 +1846,20 @@ def template_list():
 @click.option("--employee", type=str, help="要生成的员工名称（会自动设置常用变量）")
 @click.option("--var", "variables", multiple=True, help="额外模板变量，格式 key=value")
 @click.option(
-    "-o", "--output", type=click.Path(), default=None,
+    "-o",
+    "--output",
+    type=click.Path(),
+    default=None,
     help="输出文件路径（默认 private/employees/<employee>.md）",
 )
 @click.option("--force", is_flag=True, help="如目标已存在则覆盖")
-def template_apply(template_name: str, employee: str | None, variables: tuple[str, ...],
-                   output: str | None, force: bool):
+def template_apply(
+    template_name: str,
+    employee: str | None,
+    variables: tuple[str, ...],
+    output: str | None,
+    force: bool,
+):
     """渲染模板并输出到 private/employees/ 目录."""
     parsed_vars = _parse_variables(variables)
 
@@ -1698,8 +1902,12 @@ def template_apply(template_name: str, employee: str | None, variables: tuple[st
 @main.command("export")
 @click.argument("name")
 @click.option(
-    "-d", "--dir", "project_dir", type=click.Path(),
-    default=None, help="项目根目录（默认当前目录）",
+    "-d",
+    "--dir",
+    "project_dir",
+    type=click.Path(),
+    default=None,
+    help="项目根目录（默认当前目录）",
 )
 def export_cmd(name: str, project_dir: str | None):
     """导出单个员工到 .claude/skills/<name>/SKILL.md."""
@@ -1719,8 +1927,12 @@ def export_cmd(name: str, project_dir: str | None):
 
 @main.command("export-all")
 @click.option(
-    "-d", "--dir", "project_dir", type=click.Path(),
-    default=None, help="项目根目录（默认当前目录）",
+    "-d",
+    "--dir",
+    "project_dir",
+    type=click.Path(),
+    default=None,
+    help="项目根目录（默认当前目录）",
 )
 def export_all_cmd(project_dir: str | None):
     """导出所有员工到 .claude/skills/."""
@@ -1743,8 +1955,12 @@ def export_all_cmd(project_dir: str | None):
 @main.command()
 @click.option("--clean", is_flag=True, help="删除不再存在的孤儿技能目录")
 @click.option(
-    "-d", "--dir", "project_dir", type=click.Path(),
-    default=None, help="项目根目录（默认当前目录）",
+    "-d",
+    "--dir",
+    "project_dir",
+    type=click.Path(),
+    default=None,
+    help="项目根目录（默认当前目录）",
 )
 def sync(clean: bool, project_dir: str | None):
     """同步所有员工到 .claude/skills/ 目录.
@@ -1816,7 +2032,9 @@ def log_list(employee: str | None, limit: int):
         console.print(table)
     except ImportError:
         for s in sessions:
-            click.echo(f"{s['session_id']}  {s['employee_name']}  {s['started_at']}  ({s['entries']} 条)")
+            click.echo(
+                f"{s['session_id']}  {s['employee_name']}  {s['started_at']}  ({s['entries']} 条)"
+            )
 
 
 @log.command("show")
@@ -1849,10 +2067,18 @@ def session_group():
 
 
 @session_group.command("list")
-@click.option("--type", "session_type", type=str, default=None, help="按类型过滤 (employee/pipeline/discussion)")
+@click.option(
+    "--type",
+    "session_type",
+    type=str,
+    default=None,
+    help="按类型过滤 (employee/pipeline/discussion)",
+)
 @click.option("--subject", type=str, default=None, help="按 subject 过滤 (员工/流水线名称)")
 @click.option("-n", "--limit", type=int, default=20, help="返回条数")
-@click.option("-f", "--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+@click.option(
+    "-f", "--format", "output_format", type=click.Choice(["table", "json"]), default="table"
+)
 def session_list(session_type: str | None, subject: str | None, limit: int, output_format: str):
     """列出最近的会话记录."""
     recorder = SessionRecorder()
@@ -1889,7 +2115,7 @@ def session_list(session_type: str | None, subject: str | None, limit: int, outp
     except ImportError:
         for item in sessions:
             click.echo(
-                f"{item['session_id']}  {item.get('session_type','')}  {item.get('subject','')}  {item.get('started_at','')}"
+                f"{item['session_id']}  {item.get('session_type', '')}  {item.get('subject', '')}  {item.get('started_at', '')}"
             )
 
 
@@ -1989,10 +2215,14 @@ def pipeline_show(name: str):
             for j, sub in enumerate(item.parallel, 1):
                 id_str = f" id={sub.id}" if sub.id else ""
                 args_str = ", ".join(f"{k}={v}" for k, v in sub.args.items())
-                click.echo(f"     {i}.{j} {sub.employee}{id_str}" + (f" ({args_str})" if args_str else ""))
+                click.echo(
+                    f"     {i}.{j} {sub.employee}{id_str}" + (f" ({args_str})" if args_str else "")
+                )
         elif isinstance(item, ConditionalStep):
             body = item.condition
-            matcher = f"contains '{body.contains}'" if body.contains else f"matches '{body.matches}'"
+            matcher = (
+                f"contains '{body.contains}'" if body.contains else f"matches '{body.matches}'"
+            )
             click.echo(f"  {i}. [条件] check={body.check} {matcher}")
             click.echo("     then:")
             for j, sub in enumerate(body.then, 1):
@@ -2005,7 +2235,11 @@ def pipeline_show(name: str):
                     click.echo(f"       {i}.E{j} {sub.employee}{id_str}")
         elif isinstance(item, LoopStep):
             body = item.loop
-            matcher = f"contains '{body.until.contains}'" if body.until.contains else f"matches '{body.until.matches}'"
+            matcher = (
+                f"contains '{body.until.contains}'"
+                if body.until.contains
+                else f"matches '{body.until.matches}'"
+            )
             click.echo(f"  {i}. [循环] max={body.max_iterations}")
             for j, sub in enumerate(body.steps, 1):
                 id_str = f" id={sub.id}" if sub.id else ""
@@ -2058,10 +2292,7 @@ def checkpoint_list(project_dir):
         return
 
     registry = TaskRegistry(persist_path=persist_path)
-    tasks = [
-        t for t in registry.list_recent(n=100)
-        if t.checkpoint and t.target_type == "pipeline"
-    ]
+    tasks = [t for t in registry.list_recent(n=100) if t.checkpoint and t.target_type == "pipeline"]
     if not tasks:
         click.echo("暂无带断点的 pipeline 任务。")
         return
@@ -2094,7 +2325,9 @@ def checkpoint_list(project_dir):
 @click.option("--retry-failed", is_flag=True, help="从第一个失败步骤重新执行")
 @click.option("--no-fail-fast", is_flag=True, help="步骤失败时继续执行后续步骤")
 @click.option("-d", "--project-dir", type=click.Path(path_type=Path), default=None)
-def checkpoint_resume(task_id: str, model: str | None, retry_failed: bool, no_fail_fast: bool, project_dir):
+def checkpoint_resume(
+    task_id: str, model: str | None, retry_failed: bool, no_fail_fast: bool, project_dir
+):
     """从断点恢复 pipeline 执行."""
     import asyncio
 
@@ -2164,20 +2397,21 @@ def checkpoint_resume(task_id: str, model: str | None, retry_failed: bool, no_fa
     click.echo(f"恢复 pipeline: {pipeline_name} (task={task_id})")
     if restored > 0:
         click.echo(f"  已恢复 {restored} 步，从步骤 {restored + 1} 继续")
-    result = asyncio.run(aresume_pipeline(
-        p,
-        checkpoint=checkpoint,
-        initial_args=record.args,
-        project_dir=base,
-        execute=bool(model),
-        fail_fast=not no_fail_fast,
-        model=model,
-        on_step_complete=_on_step,
-    ))
+    result = asyncio.run(
+        aresume_pipeline(
+            p,
+            checkpoint=checkpoint,
+            initial_args=record.args,
+            project_dir=base,
+            execute=bool(model),
+            fail_fast=not no_fail_fast,
+            model=model,
+            on_step_complete=_on_step,
+        )
+    )
 
     has_errors = any(
-        (r.error if not isinstance(r, list) else any(sub.error for sub in r))
-        for r in result.steps
+        (r.error if not isinstance(r, list) else any(sub.error for sub in r)) for r in result.steps
     )
     if has_errors:
         registry.update(task_id, "failed", result=result.model_dump(mode="json"))
@@ -2197,9 +2431,16 @@ def checkpoint_resume(task_id: str, model: str | None, retry_failed: bool, no_fa
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
 @click.option("--execute", is_flag=True, help="执行模式 — 自动调用 LLM 串联执行")
 @click.option("--model", type=str, default=None, help="LLM 模型标识符（execute 模式）")
-def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                 smart_context: bool, output: str | None, parallel: bool,
-                 execute: bool, model: str | None):
+def pipeline_run(
+    name_or_path: str,
+    named_args: tuple[str, ...],
+    agent_id: int | None,
+    smart_context: bool,
+    output: str | None,
+    parallel: bool,
+    execute: bool,
+    model: str | None,
+):
     """执行流水线.
 
     NAME_OR_PATH 可以是流水线名称或 YAML 文件路径。
@@ -2227,6 +2468,7 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
     api_key = None
     if execute:
         from crew.providers import detect_provider, resolve_api_key
+
         effective_model = model or "claude-sonnet-4-20250514"
         try:
             provider = detect_provider(effective_model)
@@ -2277,9 +2519,13 @@ def pipeline_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int |
 
         try:
             result = run_pipeline(
-                p, initial_args=initial_args,
-                agent_id=agent_id, smart_context=smart_context,
-                execute=execute, api_key=api_key, model=model,
+                p,
+                initial_args=initial_args,
+                agent_id=agent_id,
+                smart_context=smart_context,
+                execute=execute,
+                api_key=api_key,
+                model=model,
                 on_step_complete=_on_step,
             )
         except SystemExit as exc:
@@ -2397,12 +2643,14 @@ def route_list(output_format: str):
         data = []
         for name, tmpl in templates.items():
             human_count = sum(1 for s in tmpl.steps if s.human)
-            data.append({
-                "name": name,
-                "label": tmpl.label,
-                "steps": len(tmpl.steps),
-                "human_steps": human_count,
-            })
+            data.append(
+                {
+                    "name": name,
+                    "label": tmpl.label,
+                    "steps": len(tmpl.steps),
+                    "human_steps": human_count,
+                }
+            )
         click.echo(_json.dumps(data, ensure_ascii=False, indent=2))
         return
 
@@ -2419,7 +2667,9 @@ def route_list(output_format: str):
 
         for name, tmpl in templates.items():
             human_count = sum(1 for s in tmpl.steps if s.human)
-            table.add_row(name, tmpl.label, str(len(tmpl.steps)), str(human_count) if human_count else "—")
+            table.add_row(
+                name, tmpl.label, str(len(tmpl.steps)), str(human_count) if human_count else "—"
+            )
         console.print(table)
     except ImportError:
         for name, tmpl in templates.items():
@@ -2482,9 +2732,17 @@ def route_show(name: str):
 @click.option("--execute", is_flag=True, help="执行模式 — 自动调用 LLM 串联执行")
 @click.option("--model", type=str, default=None, help="LLM 模型标识符（execute 模式）")
 @click.option("--remote", is_flag=True, help="远程执行 — 发到 crew 服务器（支持审批检查点）")
-def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: int | None,
-              smart_context: bool, output: str | None, execute: bool, model: str | None,
-              remote: bool):
+def route_run(
+    name: str,
+    task: str,
+    overrides_raw: tuple[str, ...],
+    agent_id: int | None,
+    smart_context: bool,
+    output: str | None,
+    execute: bool,
+    model: str | None,
+    remote: bool,
+):
     """执行协作流程.
 
     NAME 是路由模板名称（如 code_change）。
@@ -2509,6 +2767,7 @@ def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: in
 
     # 本地执行 — 展开模板为 Pipeline 然后复用 run_pipeline
     from crew.paths import resolve_project_dir
+
     org = load_organization(project_dir=resolve_project_dir())
     tmpl = org.routing_templates.get(name)
     if not tmpl:
@@ -2550,11 +2809,13 @@ def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: in
         if pipeline_steps:
             step_task += "\n\n上一步结果:\n$prev"
 
-        pipeline_steps.append(_PStep(
-            employee=emp_name,
-            id=step.role,
-            args={"task": step_task},
-        ))
+        pipeline_steps.append(
+            _PStep(
+                employee=emp_name,
+                id=step.role,
+                args={"task": step_task},
+            )
+        )
 
     if not pipeline_steps:
         click.echo("模板展开后无可执行步骤。", err=True)
@@ -2608,20 +2869,33 @@ def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: in
             suffix = f" ({r.input_tokens}+{r.output_tokens} tokens, {r.duration_ms}ms)"
         click.echo(f"  {status} {r.employee}{suffix}", err=True)
         _record_transcript_message(
-            transcript_recorder, transcript_id,
-            "step", r.output if execute else r.prompt,
-            {"step_index": r.step_index, "employee": r.employee, "error": r.error, "execute": execute},
+            transcript_recorder,
+            transcript_id,
+            "step",
+            r.output if execute else r.prompt,
+            {
+                "step_index": r.step_index,
+                "employee": r.employee,
+                "error": r.error,
+                "execute": execute,
+            },
         )
 
     try:
         result = run_pipeline(
-            p, initial_args={"task": task},
-            agent_id=agent_id, smart_context=smart_context,
-            execute=execute, api_key=api_key, model=model,
+            p,
+            initial_args={"task": task},
+            agent_id=agent_id,
+            smart_context=smart_context,
+            execute=execute,
+            api_key=api_key,
+            model=model,
             on_step_complete=_on_step,
         )
     except Exception as exc:
-        _finish_transcript(transcript_recorder, transcript_id, status="error", detail=str(exc)[:200])
+        _finish_transcript(
+            transcript_recorder, transcript_id, status="error", detail=str(exc)[:200]
+        )
         raise
 
     all_results = _flatten_results(result.steps)
@@ -2647,7 +2921,8 @@ def route_run(name: str, task: str, overrides_raw: tuple[str, ...], agent_id: in
         click.echo(combined)
 
     _finish_transcript(
-        transcript_recorder, transcript_id,
+        transcript_recorder,
+        transcript_id,
         status="completed",
         detail=f"{len(all_results)} steps, mode={result.mode}",
     )
@@ -2743,8 +3018,11 @@ def discuss_list():
                 source = "内置" if "employees/discussions" in str(path) else "项目"
                 rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
                 table.add_row(
-                    name, d.description, str(len(d.participants)),
-                    str(rounds_count), source,
+                    name,
+                    d.description,
+                    str(len(d.participants)),
+                    str(rounds_count),
+                    source,
                 )
             except Exception:
                 table.add_row(name, "[解析失败]", "-", "-", str(path))
@@ -2788,13 +3066,23 @@ def discuss_show(name: str):
 @click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
-@click.option("--orchestrated", is_flag=True, default=False,
-              help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
+@click.option(
+    "--orchestrated",
+    is_flag=True,
+    default=False,
+    help="编排模式：生成独立 prompt 计划（每个参会者独立推理）",
+)
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
-def discuss_run(name_or_path: str, named_args: tuple[str, ...], agent_id: int | None,
-                smart_context: bool, orchestrated: bool, output: str | None,
-                parallel: bool):
+def discuss_run(
+    name_or_path: str,
+    named_args: tuple[str, ...],
+    agent_id: int | None,
+    smart_context: bool,
+    orchestrated: bool,
+    output: str | None,
+    parallel: bool,
+):
     """生成讨论会 prompt.
 
     NAME_OR_PATH 可以是讨论会名称或 YAML 文件路径。
@@ -3036,20 +3324,41 @@ def _run_discussion_prompt(
 @click.option("-t", "--topic", required=True, help="议题")
 @click.option("-g", "--goal", default="", help="目标")
 @click.option("-r", "--rounds", type=int, default=2, help="轮次数（默认 2）")
-@click.option("--round-template", type=str, default=None,
-              help="轮次模板 (standard, brainstorm-to-decision, adversarial)")
-@click.option("--output-format", type=click.Choice(["decision", "transcript", "summary"]),
-              default="summary", help="输出格式")
+@click.option(
+    "--round-template",
+    type=str,
+    default=None,
+    help="轮次模板 (standard, brainstorm-to-decision, adversarial)",
+)
+@click.option(
+    "--output-format",
+    type=click.Choice(["decision", "transcript", "summary"]),
+    default="summary",
+    help="输出格式",
+)
 @click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
-@click.option("--orchestrated", is_flag=True, default=False,
-              help="编排模式：生成独立 prompt 计划（每个参会者独立推理）")
+@click.option(
+    "--orchestrated",
+    is_flag=True,
+    default=False,
+    help="编排模式：生成独立 prompt 计划（每个参会者独立推理）",
+)
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
-def discuss_adhoc(employees: str, topic: str, goal: str, rounds: int,
-                  round_template: str | None, output_format: str,
-                  agent_id: int | None, smart_context: bool, orchestrated: bool,
-                  output: str | None, parallel: bool):
+def discuss_adhoc(
+    employees: str,
+    topic: str,
+    goal: str,
+    rounds: int,
+    round_template: str | None,
+    output_format: str,
+    agent_id: int | None,
+    smart_context: bool,
+    orchestrated: bool,
+    output: str | None,
+    parallel: bool,
+):
     """发起即席讨论（无需 YAML 定义）.
 
     示例:
@@ -3265,7 +3574,13 @@ def meetings_list(limit: int):
 
 @meetings.command("export")
 @click.option("--meeting-id", required=True, help="要导出的会议 ID")
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None, help="输出文件（默认 .crew/meetings/<id>-summary.md）")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="输出文件（默认 .crew/meetings/<id>-summary.md）",
+)
 @click.option("--with-meta", is_flag=True, help="在导出的 Markdown 中包含元信息")
 def meetings_export(meeting_id: str, output: Path | None, with_meta: bool):
     """将会议记录导出为 Markdown 文件."""
@@ -3283,18 +3598,20 @@ def meetings_export(meeting_id: str, output: Path | None, with_meta: bool):
 
     lines = []
     if with_meta:
-        lines.extend([
-            f"# 会议：{record.name}",
-            "",
-            f"- ID: {record.meeting_id}",
-            f"- 议题: {record.topic}",
-            f"- 参与者: {', '.join(record.participants)}",
-            f"- 模式: {record.mode}",
-            f"- 时间: {record.started_at}",
-            "",
-            "---",
-            "",
-        ])
+        lines.extend(
+            [
+                f"# 会议：{record.name}",
+                "",
+                f"- ID: {record.meeting_id}",
+                f"- 议题: {record.topic}",
+                f"- 参与者: {', '.join(record.participants)}",
+                f"- 模式: {record.mode}",
+                f"- 时间: {record.started_at}",
+                "",
+                "---",
+                "",
+            ]
+        )
     lines.append(content)
     target.write_text("\n".join(lines), encoding="utf-8")
     click.echo(f"已导出: {target}")
@@ -3352,8 +3669,12 @@ def memory_list():
 
 @memory.command("show")
 @click.argument("employee")
-@click.option("--category", type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
-              default=None, help="按类别过滤")
+@click.option(
+    "--category",
+    type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
+    default=None,
+    help="按类别过滤",
+)
 @click.option("-n", "--limit", type=int, default=20, help="返回条数")
 @click.option("--include-expired", is_flag=True, help="包含已过期记忆")
 def memory_show(employee: str, category: str | None, limit: int, include_expired: bool):
@@ -3376,16 +3697,29 @@ def memory_show(employee: str, category: str | None, limit: int, include_expired
 
 @memory.command("add")
 @click.argument("employee")
-@click.option("--category", "-c", required=True,
-              type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
-              help="记忆类别")
+@click.option(
+    "--category",
+    "-c",
+    required=True,
+    type=click.Choice(["decision", "estimate", "finding", "correction", "pattern"]),
+    help="记忆类别",
+)
 @click.option("--content", "-m", required=True, help="记忆内容")
 @click.option("--ttl", type=int, default=0, help="生存期天数 (0=永不过期)")
 @click.option("--tags", type=str, default="", help="逗号分隔的语义标签")
 @click.option("--shared", is_flag=True, help="加入共享记忆池")
 @click.option("--trigger", type=str, default="", help="触发条件（仅 pattern 类型）")
 @click.option("--applicability", type=str, default="", help="适用范围，逗号分隔（仅 pattern 类型）")
-def memory_add(employee: str, category: str, content: str, ttl: int, tags: str, shared: bool, trigger: str, applicability: str):
+def memory_add(
+    employee: str,
+    category: str,
+    content: str,
+    ttl: int,
+    tags: str,
+    shared: bool,
+    trigger: str,
+    applicability: str,
+):
     """手动添加员工记忆."""
     from crew.memory import MemoryStore
 
@@ -3393,9 +3727,14 @@ def memory_add(employee: str, category: str, content: str, ttl: int, tags: str, 
     app_list = [a.strip() for a in applicability.split(",") if a.strip()] if applicability else []
     store = MemoryStore()
     entry = store.add(
-        employee=employee, category=category, content=content,
-        ttl_days=ttl, tags=tag_list, shared=shared,
-        trigger_condition=trigger, applicability=app_list,
+        employee=employee,
+        category=category,
+        content=content,
+        ttl_days=ttl,
+        tags=tag_list,
+        shared=shared,
+        trigger_condition=trigger,
+        applicability=app_list,
     )
     click.echo(f"已添加: [{entry.id}] ({entry.category}) {entry.content}")
 
@@ -3446,20 +3785,18 @@ def memory_index_cmd(repair: bool):
 
     index = MemorySearchIndex()
     stats = index.rebuild()
-    click.echo(
-        f"索引完成: 记忆 {stats.memory_entries} 条, 会话 {stats.session_messages} 条"
-    )
+    click.echo(f"索引完成: 记忆 {stats.memory_entries} 条, 会话 {stats.session_messages} 条")
 
 
 @memory.command("search")
 @click.argument("query")
 @click.option("--employee", type=str, default=None, help="按员工过滤")
-@click.option("--kind", type=click.Choice(["memory", "session"]), default=None,
-              help="数据类型过滤")
+@click.option("--kind", type=click.Choice(["memory", "session"]), default=None, help="数据类型过滤")
 @click.option("-n", "--limit", type=int, default=5, help="返回条数")
 @click.option("--json", "json_output", is_flag=True, help="JSON 输出")
-def memory_search(query: str, employee: str | None, kind: str | None,
-                  limit: int, json_output: bool):
+def memory_search(
+    query: str, employee: str | None, kind: str | None, limit: int, json_output: bool
+):
     """搜索持久记忆 + 会话记录."""
     from crew.memory_index import MemorySearchIndex
 
@@ -3499,7 +3836,7 @@ def memory_search(query: str, employee: str | None, kind: str | None,
         for item in results:
             snippet = item.get("snippet") or item.get("content", "")
             click.echo(
-                f"[{item.get('kind','')}] {item.get('employee','')} - {item.get('title','')}\n  {snippet}"
+                f"[{item.get('kind', '')}] {item.get('employee', '')} - {item.get('title', '')}\n  {snippet}"
             )
 
 
@@ -3520,7 +3857,9 @@ def memory_shared(tags: str | None, limit: int):
     for entry in entries:
         conf = f" [{entry.confidence:.0%}]" if entry.confidence < 1.0 else ""
         tag_str = f" {entry.tags}" if entry.tags else ""
-        click.echo(f"  [{entry.id}] ({entry.employee}/{entry.category}){conf}{tag_str} {entry.content}")
+        click.echo(
+            f"  [{entry.id}] ({entry.employee}/{entry.category}){conf}{tag_str} {entry.content}"
+        )
 
 
 @memory.command("config")
@@ -3567,9 +3906,13 @@ def eval_group():
 
 @eval_group.command("track")
 @click.argument("employee")
-@click.option("--category", "-c", required=True,
-              type=click.Choice(["estimate", "recommendation", "commitment"]),
-              help="决策类别")
+@click.option(
+    "--category",
+    "-c",
+    required=True,
+    type=click.Choice(["estimate", "recommendation", "commitment"]),
+    help="决策类别",
+)
 @click.option("--content", "-m", required=True, help="决策内容")
 @click.option("--expected", "-e", default="", help="预期结果")
 @click.option("--meeting-id", default="", help="来源会议 ID")
@@ -3590,7 +3933,9 @@ def eval_track(employee: str, category: str, content: str, expected: str, meetin
 
 @eval_group.command("list")
 @click.option("--employee", default=None, help="按员工过滤")
-@click.option("--status", type=click.Choice(["pending", "evaluated"]), default=None, help="按状态过滤")
+@click.option(
+    "--status", type=click.Choice(["pending", "evaluated"]), default=None, help="按状态过滤"
+)
 @click.option("-n", "--limit", type=int, default=20, help="返回条数")
 def eval_list(employee: str | None, status: str | None, limit: int):
     """列出决策记录."""
@@ -3664,7 +4009,7 @@ def register(name: str, dry_run: bool):
     domains = emp.tags[:5] if emp.tags else []
     model = emp.model
 
-    click.echo(f"注册员工 \"{emp.name}\" 到 knowlyr-id...", err=True)
+    click.echo(f'注册员工 "{emp.name}" 到 knowlyr-id...', err=True)
     click.echo(f"  nickname:     {nickname}", err=True)
     click.echo(f"  title:        {title}", err=True)
     click.echo(f"  capabilities: {capabilities}", err=True)
@@ -3774,6 +4119,7 @@ def _load_avatar_base64(emp) -> str | None:
     if not avatar_path.exists():
         return None
     import base64
+
     return base64.b64encode(avatar_path.read_bytes()).decode()
 
 
@@ -3792,19 +4138,21 @@ def _write_agent_id(emp, agent_id: int) -> None:
             config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
             config["agent_id"] = agent_id
             config_path.write_text(
-                yaml.dump(config, allow_unicode=True, sort_keys=False,
-                          default_flow_style=False),
+                yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False),
                 encoding="utf-8",
             )
             click.echo(f"✓ agent_id 已写入 {config_path}", err=True)
     elif source.is_file() and source.suffix == ".md":
         # 单文件格式: 在 frontmatter 末尾 --- 之前插入 agent_id
         import re
+
         content = source.read_text(encoding="utf-8")
         # 匹配第二个 ---
         match = re.match(r"(---\n.*?)(---)", content, re.DOTALL)
         if match:
-            new_content = f"{match.group(1)}agent_id: {agent_id}\n{match.group(2)}{content[match.end():]}"
+            new_content = (
+                f"{match.group(1)}agent_id: {agent_id}\n{match.group(2)}{content[match.end() :]}"
+            )
             source.write_text(new_content, encoding="utf-8")
             click.echo(f"✓ agent_id 已写入 {source}", err=True)
 
@@ -3952,8 +4300,9 @@ def agents():
 
 
 @agents.command("list")
-@click.option("-f", "--format", "output_format",
-              type=click.Choice(["table", "json"]), default="table")
+@click.option(
+    "-f", "--format", "output_format", type=click.Choice(["table", "json"]), default="table"
+)
 def agents_list_cmd(output_format: str):
     """列出 knowlyr-id 中的所有 Agent."""
     from crew.id_client import list_agents
@@ -3969,6 +4318,7 @@ def agents_list_cmd(output_format: str):
 
     if output_format == "json":
         import json
+
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
         return
 
@@ -4043,7 +4393,10 @@ def agents_freeze_cmd(names: tuple[str, ...], force: bool):
     for emp in targets:
         identity = fetch_agent_identity(int(emp.agent_id))
         if identity and identity.agent_status == "frozen":
-            click.echo(f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于冻结状态，跳过", err=True)
+            click.echo(
+                f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于冻结状态，跳过",
+                err=True,
+            )
             continue
         ok = update_agent(int(emp.agent_id), agent_status="frozen")
         if ok:
@@ -4084,7 +4437,10 @@ def agents_unfreeze_cmd(names: tuple[str, ...], force: bool):
     for emp in targets:
         identity = fetch_agent_identity(int(emp.agent_id))
         if identity and identity.agent_status == "active":
-            click.echo(f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于活跃状态，跳过", err=True)
+            click.echo(
+                f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于活跃状态，跳过",
+                err=True,
+            )
             continue
         ok = update_agent(int(emp.agent_id), agent_status="active")
         if ok:
@@ -4172,7 +4528,9 @@ def agents_sync_cmd(name: str):
         raise SystemExit(1)
 
     if emp.agent_id is None:
-        click.echo(f"员工 '{emp.name}' 未绑定 Agent（先执行 knowlyr-crew register {name}）", err=True)
+        click.echo(
+            f"员工 '{emp.name}' 未绑定 Agent（先执行 knowlyr-crew register {name}）", err=True
+        )
         raise SystemExit(1)
 
     nickname = emp.character_name or emp.display_name or emp.name
@@ -4191,13 +4549,14 @@ def agents_sync_cmd(name: str):
         config_path = src / "employee.yaml"
         if config_path.exists():
             import yaml
+
             raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 bio = raw.get("bio", "")
 
     avatar_b64 = _load_avatar_base64(emp)
 
-    click.echo(f"同步 \"{emp.name}\" (Agent #{emp.agent_id}) 到 knowlyr-id...", err=True)
+    click.echo(f'同步 "{emp.name}" (Agent #{emp.agent_id}) 到 knowlyr-id...', err=True)
     click.echo(f"  nickname:      {nickname}", err=True)
     click.echo(f"  title:         {title}", err=True)
     if bio:
@@ -4229,7 +4588,8 @@ def agents_sync_cmd(name: str):
 
 @agents.command("sync-all")
 @click.option(
-    "--dir", "employees_dir",
+    "--dir",
+    "employees_dir",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="员工目录（默认 .crew/global/）",
@@ -4244,6 +4604,7 @@ def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
 
     if employees_dir is None:
         from crew.paths import get_global_dir
+
         employees_dir = get_global_dir()
 
     do_push = not pull_only
@@ -4293,7 +4654,10 @@ def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force):
         raise SystemExit(1)
 
     total = len(report.pushed) + len(report.pulled) + len(report.registered) + len(report.disabled)
-    click.echo(f"\n✓ 同步完成 (推送:{len(report.pushed)} 拉取:{len(report.pulled)} 注册:{len(report.registered)} 禁用:{len(report.disabled)})", err=True)
+    click.echo(
+        f"\n✓ 同步完成 (推送:{len(report.pushed)} 拉取:{len(report.pulled)} 注册:{len(report.registered)} 禁用:{len(report.disabled)})",
+        err=True,
+    )
 
 
 # ── cron 命令 ──
@@ -4406,14 +4770,16 @@ def cron_preview(count, project_dir):
     help="Bearer token（未设置则不启用认证）",
 )
 @click.option(
-    "-d", "--project-dir",
+    "-d",
+    "--project-dir",
     type=click.Path(path_type=Path),
     default=None,
     help="项目目录（默认当前目录）",
 )
 @click.option("--no-cron", is_flag=True, help="禁用 cron 调度器")
 @click.option(
-    "--cors-origin", multiple=True,
+    "--cors-origin",
+    multiple=True,
     envvar="CREW_CORS_ORIGINS",
     help="允许的 CORS 来源（可多次指定，如 --cors-origin https://antgather.knowlyr.com）",
 )
@@ -4422,8 +4788,11 @@ def serve(host, port, token, project_dir, no_cron, cors_origin):
     from crew.webhook import serve_webhook
 
     serve_webhook(
-        host=host, port=port, project_dir=project_dir,
-        token=token, enable_cron=not no_cron,
+        host=host,
+        port=port,
+        project_dir=project_dir,
+        token=token,
+        enable_cron=not no_cron,
         cors_origins=list(cors_origin) if cors_origin else None,
     )
 
@@ -4433,7 +4802,8 @@ def serve(host, port, token, project_dir, no_cron, cors_origin):
 
 @main.command()
 @click.option(
-    "-t", "--transport",
+    "-t",
+    "--transport",
     type=click.Choice(["stdio", "sse", "http"]),
     default="stdio",
     help="传输协议: stdio（默认）/ sse / http",
@@ -4441,7 +4811,8 @@ def serve(host, port, token, project_dir, no_cron, cors_origin):
 @click.option("--host", default="127.0.0.1", help="监听地址（sse/http 模式）")
 @click.option("--port", default=8000, type=int, help="监听端口（sse/http 模式）")
 @click.option(
-    "-d", "--project-dir",
+    "-d",
+    "--project-dir",
     type=click.Path(path_type=Path),
     default=None,
     help="项目目录（默认当前目录）",
@@ -4458,12 +4829,15 @@ def mcp(transport, host, port, project_dir, api_token):
 
     if transport == "sse":
         from crew.mcp_server import serve_sse
+
         asyncio.run(serve_sse(project_dir, host, port, api_token))
     elif transport == "http":
         from crew.mcp_server import serve_http
+
         asyncio.run(serve_http(project_dir, host, port, api_token))
     else:
         from crew.mcp_server import serve
+
         asyncio.run(serve(project_dir))
 
 
@@ -4628,8 +5002,9 @@ def trajectory_list(limit: int):
 @click.option("--provider", default="openai", help="LLM judge provider (openai/anthropic)")
 @click.option("--model", "judge_model", default=None, help="LLM judge 模型名")
 @click.option("--base-url", default=None, help="OpenAI 兼容 API base URL")
-def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str | None,
-                     base_url: str | None):
+def trajectory_score(
+    score_all: bool, last: int, provider: str, judge_model: str | None, base_url: str | None
+):
     """对轨迹进行 Reward 打分."""
     import os
     from pathlib import Path
@@ -4681,7 +5056,9 @@ def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str
         traj_dict = traj.model_dump() if hasattr(traj, "model_dump") else traj
         result = engine.score(traj_dict)
         agent = traj.agent.replace("crew/", "")
-        task = traj.task.description[:30] if hasattr(traj.task, "description") else str(traj.task)[:30]
+        task = (
+            traj.task.description[:30] if hasattr(traj.task, "description") else str(traj.task)[:30]
+        )
         click.echo(f"\n{agent} | {task}")
         click.echo(f"  总分: {result.total_score:.2f}")
         click.echo(f"  结果分: {result.outcome_score:.2f}")
@@ -4703,10 +5080,12 @@ def trajectory_score(score_all: bool, last: int, provider: str, judge_model: str
 
 
 @trajectory.command("export")
-@click.option("-f", "--format", "fmt", type=click.Choice(["sft", "dpo"]),
-              default="sft", help="导出格式")
-@click.option("-o", "--output", "output_path", type=click.Path(), required=True,
-              help="输出文件路径")
+@click.option(
+    "-f", "--format", "fmt", type=click.Choice(["sft", "dpo"]), default="sft", help="导出格式"
+)
+@click.option(
+    "-o", "--output", "output_path", type=click.Path(), required=True, help="输出文件路径"
+)
 def trajectory_export(fmt: str, output_path: str):
     """导出轨迹为训练数据."""
     from pathlib import Path
@@ -4732,8 +5111,13 @@ def trajectory_export(fmt: str, output_path: str):
 
 
 @trajectory.command("convert")
-@click.option("-o", "--output", type=click.Path(), default=None,
-              help="输出文件路径 (默认追加到 .crew/trajectories/trajectories.jsonl)")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    default=None,
+    help="输出文件路径 (默认追加到 .crew/trajectories/trajectories.jsonl)",
+)
 def trajectory_convert(output: str | None):
     """将已有 sessions（含 --execute 回复）转为标准轨迹格式."""
     from pathlib import Path
@@ -4807,7 +5191,9 @@ def trajectory_stats():
     click.echo(f"轨迹总数: {len(entries)}")
     click.echo(f"总步数:   {total_steps}")
     click.echo(f"总 Tokens: {total_tokens:,}")
-    click.echo(f"成功率:   {success_count}/{len(entries)} ({100*success_count/len(entries):.0f}%)")
+    click.echo(
+        f"成功率:   {success_count}/{len(entries)} ({100 * success_count / len(entries):.0f}%)"
+    )
     click.echo("\n按员工统计:")
     for emp, count in employee_counter.most_common():
         click.echo(f"  {emp}: {count} 条")

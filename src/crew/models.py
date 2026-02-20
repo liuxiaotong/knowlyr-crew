@@ -36,9 +36,7 @@ class EmployeeArg(BaseModel):
 class EmployeeOutput(BaseModel):
     """员工输出配置."""
 
-    format: Literal["markdown", "json", "text"] = Field(
-        default="markdown", description="输出格式"
-    )
+    format: Literal["markdown", "json", "text"] = Field(default="markdown", description="输出格式")
     filename: str = Field(default="", description="输出文件名模板")
     dir: str = Field(default=".crew/logs", description="输出目录")
 
@@ -67,7 +65,9 @@ class Employee(BaseModel):
     output: EmployeeOutput = Field(default_factory=EmployeeOutput, description="输出配置")
     tools: list[str] = Field(default_factory=list, description="需要的工具声明")
     context: list[str] = Field(default_factory=list, description="需要预读的文件/模式")
-    model_tier: str = Field(default="", description="模型档位（引用 organization.yaml model_defaults）")
+    model_tier: str = Field(
+        default="", description="模型档位（引用 organization.yaml model_defaults）"
+    )
     model: str = Field(default="", description="推荐使用的模型 ID（如 claude-opus-4-6）")
     api_key: str = Field(default="", description="专属 API key（留空则使用环境变量）")
     base_url: str = Field(default="", description="专属 API base URL（留空则按 provider 自动推断）")
@@ -154,9 +154,7 @@ class DiscussionPlan(BaseModel):
     topic: str = Field(description="议题")
     goal: str = Field(default="", description="目标")
     rounds: list[RoundPlan] = Field(default_factory=list, description="各轮计划")
-    synthesis_prompt: str = Field(
-        default="", description="最终汇总 prompt（在所有轮次结束后执行）"
-    )
+    synthesis_prompt: str = Field(default="", description="最终汇总 prompt（在所有轮次结束后执行）")
 
 
 # ── ActionPlan 数据模型（讨论→执行衔接）──
@@ -196,9 +194,7 @@ class DiscoveryResult(BaseModel):
     employees: dict[str, Employee] = Field(
         default_factory=dict, description="name -> Employee 映射"
     )
-    conflicts: list[dict[str, Any]] = Field(
-        default_factory=list, description="同名冲突记录"
-    )
+    conflicts: list[dict[str, Any]] = Field(default_factory=list, description="同名冲突记录")
 
     def get(self, name_or_trigger: str) -> Employee | None:
         """按名称或触发别名查找员工."""
@@ -237,7 +233,9 @@ class Condition(BaseModel):
     @model_validator(mode="after")
     def _exactly_one(self) -> "Condition":
         if bool(self.contains) == bool(self.matches):
-            raise ValueError("Condition 必须设置 contains 或 matches 之一（不可同时设置或同时为空）")
+            raise ValueError(
+                "Condition 必须设置 contains 或 matches 之一（不可同时设置或同时为空）"
+            )
         if self.matches:
             if len(self.matches) > 256:
                 raise ValueError("matches 正则表达式最长 256 字符")
@@ -445,9 +443,7 @@ class Organization(BaseModel):
     """组织架构定义."""
 
     teams: dict[str, TeamDef] = Field(default_factory=dict, description="团队")
-    authority: dict[str, AuthorityLevel] = Field(
-        default_factory=dict, description="权限级别"
-    )
+    authority: dict[str, AuthorityLevel] = Field(default_factory=dict, description="权限级别")
     route_categories: dict[str, RouteCategoryDef] = Field(
         default_factory=dict, description="路由分类"
     )

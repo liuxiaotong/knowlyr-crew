@@ -41,18 +41,26 @@ async def _dispatch_task(
     )
     logger.info(
         "任务开始 [trace=%s] %s → %s/%s (task=%s)",
-        trace_id, trigger, target_type, target_name, record.task_id,
+        trace_id,
+        trigger,
+        target_type,
+        target_name,
+        record.task_id,
     )
 
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
 
     if sync:
-        await _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id)
+        await _wh._execute_task(
+            ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id
+        )
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
-    asyncio.create_task(_wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id))
+    asyncio.create_task(
+        _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id)
+    )
     return JSONResponse(
         {"task_id": record.task_id, "status": "pending"},
         status_code=202,
@@ -81,16 +89,26 @@ async def _execute_task(
         if record.target_type == "pipeline":
             logger.info("执行 pipeline [trace=%s] %s", trace_id, record.target_name)
             result = await _wh._execute_pipeline(
-                ctx, record.target_name, record.args, agent_id=agent_id, task_id=task_id,
+                ctx,
+                record.target_name,
+                record.args,
+                agent_id=agent_id,
+                task_id=task_id,
             )
         elif record.target_type == "employee":
             logger.info("执行 employee [trace=%s] %s", trace_id, record.target_name)
             result = await _wh._execute_employee(
-                ctx, record.target_name, record.args, agent_id=agent_id, model=model,
+                ctx,
+                record.target_name,
+                record.args,
+                agent_id=agent_id,
+                model=model,
             )
         elif record.target_type == "meeting":
             logger.info("执行 meeting [trace=%s] %s", trace_id, record.target_name)
-            employees = [e.strip() for e in record.args.get("employees", "").split(",") if e.strip()]
+            employees = [
+                e.strip() for e in record.args.get("employees", "").split(",") if e.strip()
+            ]
             result = await _wh._execute_meeting(
                 ctx,
                 task_id=task_id,
@@ -113,6 +131,7 @@ async def _execute_task(
         if isinstance(result, dict):
             try:
                 from crew.cost import enrich_result_with_cost
+
                 enrich_result_with_cost(result)
             except Exception as e:
                 logger.debug("成本追踪失败: %s", e)
@@ -155,14 +174,14 @@ async def _execute_task(
                 if auth == "B":
                     result["needs_kai_approval"] = True
                     result["authority_note"] = (
-                        "此员工为 B 类（需 Kai 确认），"
-                        "结果仅供参考，请 Kai 过目后再决定下一步。"
+                        "此员工为 B 类（需 Kai 确认），结果仅供参考，请 Kai 过目后再决定下一步。"
                     )
 
                 # 质量评分解析
                 output_text = result.get("output", "")
                 if output_text:
                     from crew.cost import parse_quality_score
+
                     qscore = parse_quality_score(output_text)
                     if qscore:
                         result["quality_score"] = qscore
@@ -171,6 +190,7 @@ async def _execute_task(
                 if output_text and len(output_text) > 50:
                     try:
                         from crew.discovery import discover_employees
+
                         disc = discover_employees(project_dir=ctx.project_dir)
                         match = disc.get(record.target_name)
                         task_desc = record.args.get("task", "")[:100]
@@ -178,6 +198,7 @@ async def _execute_task(
 
                         if match and getattr(match, "auto_memory", False):
                             from crew.memory import MemoryStore
+
                             _mem_store = MemoryStore(project_dir=ctx.project_dir)
                             summary = output_text[:300].strip()
                             if len(output_text) > 300:
@@ -186,7 +207,9 @@ async def _execute_task(
                                 employee=record.target_name,
                                 category="finding",
                                 content=f"[任务] {task_desc} → {summary}",
-                                source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                source_session=record.task_id
+                                if hasattr(record, "task_id")
+                                else task_id,
                                 confidence=0.6,
                                 ttl_days=30,
                             )
@@ -194,6 +217,7 @@ async def _execute_task(
 
                         # 自检摘要提取 — 独立于 auto_memory，有自检段就提取
                         import re as _re
+
                         check_match = _re.search(
                             r"##\s*完成后自检[^\n]*\n+((?:- \[.\].*\n?)+)",
                             output_text,
@@ -201,6 +225,7 @@ async def _execute_task(
                         if check_match:
                             if _mem_store is None:
                                 from crew.memory import MemoryStore
+
                                 _mem_store = MemoryStore(project_dir=ctx.project_dir)
                             check_lines = check_match.group(1).strip().split("\n")
                             passed = []
@@ -220,7 +245,9 @@ async def _execute_task(
                                 employee=record.target_name,
                                 category="correction",
                                 content=" | ".join(parts),
-                                source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                source_session=record.task_id
+                                if hasattr(record, "task_id")
+                                else task_id,
                                 confidence=0.7,
                                 ttl_days=60,
                                 shared=True,
@@ -235,6 +262,7 @@ async def _execute_task(
                         if pattern_match:
                             if _mem_store is None:
                                 from crew.memory import MemoryStore
+
                                 _mem_store = MemoryStore(project_dir=ctx.project_dir)
                             pattern_block = pattern_match.group(1).strip()
                             # 解析结构化字段
@@ -251,7 +279,11 @@ async def _execute_task(
                                 elif pl.startswith("步骤:"):
                                     p_steps = pl.split(":", 1)[1].strip()
                                 elif pl.startswith("适用角色:"):
-                                    p_roles = [r.strip() for r in pl.split(":", 1)[1].split(",") if r.strip()]
+                                    p_roles = [
+                                        r.strip()
+                                        for r in pl.split(":", 1)[1].split(",")
+                                        if r.strip()
+                                    ]
                             if p_name:
                                 content = f"[模式] {p_name}"
                                 if p_steps:
@@ -260,7 +292,9 @@ async def _execute_task(
                                     employee=record.target_name,
                                     category="pattern",
                                     content=content,
-                                    source_session=record.task_id if hasattr(record, "task_id") else task_id,
+                                    source_session=record.task_id
+                                    if hasattr(record, "task_id")
+                                    else task_id,
                                     confidence=0.7,
                                     trigger_condition=p_trigger,
                                     applicability=p_roles,
@@ -272,7 +306,8 @@ async def _execute_task(
 
                 # 自动降级检查（记录成功）
                 record_task_outcome(
-                    record.target_name, success=True,
+                    record.target_name,
+                    success=True,
                     project_dir=ctx.project_dir,
                 )
             except Exception as e:
@@ -284,8 +319,10 @@ async def _execute_task(
         if record.target_type == "employee":
             try:
                 from crew.organization import record_task_outcome
+
                 record_task_outcome(
-                    record.target_name, success=False,
+                    record.target_name,
+                    success=False,
                     project_dir=ctx.project_dir,
                 )
             except Exception:
@@ -311,6 +348,7 @@ async def _execute_pipeline(
     # 构建 checkpoint 回调
     on_step_complete = None
     if task_id:
+
         def on_step_complete(step_result, checkpoint_data):
             ctx.registry.update_checkpoint(task_id, checkpoint_data)
 
@@ -375,10 +413,16 @@ async def _execute_meeting(
     from crew.executor import aexecute_prompt
 
     discussion = create_adhoc_discussion(
-        employees=employees, topic=topic, goal=goal, rounds=rounds,
+        employees=employees,
+        topic=topic,
+        goal=goal,
+        rounds=rounds,
     )
     plan = render_discussion_plan(
-        discussion, initial_args={}, project_dir=ctx.project_dir, smart_context=True,
+        discussion,
+        initial_args={},
+        project_dir=ctx.project_dir,
+        smart_context=True,
     )
 
     all_rounds: list[dict[str, Any]] = []
@@ -387,7 +431,10 @@ async def _execute_meeting(
     for rp in plan.rounds:
         logger.info(
             "会议 %s 第 %d 轮 '%s' (%d 人)",
-            task_id, rp.round_number, rp.name, len(rp.participant_prompts),
+            task_id,
+            rp.round_number,
+            rp.name,
+            len(rp.participant_prompts),
         )
 
         # 替换 {previous_rounds} 并并行执行
@@ -395,13 +442,15 @@ async def _execute_meeting(
         names = []
         for pp in rp.participant_prompts:
             prompt_text = pp.prompt.replace("{previous_rounds}", previous_rounds_text)
-            coros.append(aexecute_prompt(
-                system_prompt=prompt_text,
-                user_message="请开始。",
-                api_key=None,
-                model="claude-sonnet-4-20250514",
-                stream=False,
-            ))
+            coros.append(
+                aexecute_prompt(
+                    system_prompt=prompt_text,
+                    user_message="请开始。",
+                    api_key=None,
+                    model="claude-sonnet-4-20250514",
+                    stream=False,
+                )
+            )
             names.append(pp.employee_name)
 
         results = await asyncio.gather(*coros, return_exceptions=True)
@@ -411,11 +460,13 @@ async def _execute_meeting(
             content = f"[执行失败: {out}]" if isinstance(out, Exception) else out.content
             round_outputs.append({"employee": names[i], "content": content})
 
-        all_rounds.append({
-            "round_num": rp.round_number,
-            "name": rp.name,
-            "outputs": round_outputs,
-        })
+        all_rounds.append(
+            {
+                "round_num": rp.round_number,
+                "name": rp.name,
+                "outputs": round_outputs,
+            }
+        )
 
         # 积累上下文
         parts = [f"**{o['employee']}**: {o['content']}" for o in round_outputs]
@@ -512,7 +563,10 @@ async def _execute_chain(
 
 
 async def _notify_approval_needed(
-    ctx: _AppContext, task_id: str, step: dict, prev_output: str,
+    ctx: _AppContext,
+    task_id: str,
+    step: dict,
+    prev_output: str,
 ) -> None:
     """通过飞书私聊通知 Kai 有步骤等待审批."""
     if not (ctx.feishu_token_mgr and ctx.feishu_config):
@@ -538,8 +592,12 @@ async def _notify_approval_needed(
 
     try:
         from crew.feishu import send_feishu_message
+
         await send_feishu_message(
-            ctx.feishu_token_mgr, owner_id, {"text": text}, msg_type="text",
+            ctx.feishu_token_mgr,
+            owner_id,
+            {"text": text},
+            msg_type="text",
         )
     except Exception as e:
         logger.warning("审批通知发送失败 (task=%s): %s", task_id, e)
@@ -564,7 +622,9 @@ async def _resume_chain(ctx: _AppContext, task_id: str) -> None:
 
     try:
         result = await _execute_chain(
-            ctx, task_id, steps,
+            ctx,
+            task_id,
+            steps,
             start_index=start_index,
             prev_output=prev_output,
             step_results=step_results,
@@ -610,6 +670,7 @@ async def _execute_employee_with_tools(
     if agent_id:
         try:
             from crew.id_client import afetch_agent_identity
+
             agent_identity = await afetch_agent_identity(agent_id)
         except Exception as e:
             logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
@@ -617,7 +678,9 @@ async def _execute_employee_with_tools(
     engine = CrewEngine(project_dir=ctx.project_dir)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(match, args=args, agent_identity=agent_identity, max_visibility=max_visibility)
+    prompt = engine.prompt(
+        match, args=args, agent_identity=agent_identity, max_visibility=max_visibility
+    )
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
@@ -653,8 +716,7 @@ async def _execute_employee_with_tools(
             prompt += (
                 "\n\n---\n\n## 可委派的同事\n\n"
                 "A=自主执行 B=需Kai确认 C=看场景。"
-                "用 delegate/delegate_async/delegate_chain/route 调用。\n\n"
-                + "\n".join(sections)
+                "用 delegate/delegate_async/delegate_chain/route 调用。\n\n" + "\n".join(sections)
             )
 
     from crew.permission import PermissionGuard
@@ -689,6 +751,7 @@ async def _execute_employee_with_tools(
     effective_agent_id = agent_id or getattr(match, "agent_id", None)
 
     import crew.webhook as _wh
+
     _max_rounds = getattr(_wh, "_MAX_TOOL_ROUNDS", _MAX_TOOL_ROUNDS)
     for rounds in range(_max_rounds):  # noqa: B007
         result = await aexecute_with_tools(
@@ -716,12 +779,14 @@ async def _execute_employee_with_tools(
             if result.content:
                 assistant_content.append({"type": "text", "text": result.content})
             for tc in result.tool_calls:
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": tc.id,
-                    "name": tc.name,
-                    "input": tc.arguments,
-                })
+                assistant_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    }
+                )
             messages.append({"role": "assistant", "content": assistant_content})
 
             tool_results: list[dict[str, Any]] = []
@@ -730,7 +795,10 @@ async def _execute_employee_with_tools(
                 if tc.name == "load_tools":
                     # ── 延迟加载工具（支持技能包名） ──
                     from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
-                    requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+
+                    requested = {
+                        n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()
+                    }
                     # 展开技能包名为工具名
                     expanded: set[str] = set()
                     for rn in requested:
@@ -754,32 +822,47 @@ async def _execute_employee_with_tools(
                         for s in tool_schemas:
                             if s["name"] == "load_tools":
                                 s["description"] = new_load_schema["description"]
-                    load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": load_msg,
-                    })
+                    load_msg = (
+                        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
+                        if newly
+                        else "这些工具已加载。"
+                    )
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": load_msg,
+                        }
+                    )
                     continue
                 tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
+                    ctx,
+                    name,
+                    tc.name,
+                    tc.arguments,
+                    effective_agent_id,
+                    guard=guard,
                     max_visibility=max_visibility,
                 )
                 if tool_output is None:
                     # finish tool
                     final_content = tc.arguments.get("result", result.content)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": final_content,
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": final_content,
+                        }
+                    )
                     finished = True
                 else:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": tool_output[:10000],
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": tool_output[:10000],
+                        }
+                    )
             messages.append({"role": "user", "content": tool_results})
             if finished:
                 break
@@ -793,9 +876,7 @@ async def _execute_employee_with_tools(
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": __import__("json").dumps(
-                                tc.arguments, ensure_ascii=False
-                            ),
+                            "arguments": __import__("json").dumps(tc.arguments, ensure_ascii=False),
                         },
                     }
                     for tc in result.tool_calls
@@ -808,7 +889,10 @@ async def _execute_employee_with_tools(
                 if tc.name == "load_tools":
                     # ── 延迟加载工具（支持技能包名） ──
                     from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
-                    requested = {n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()}
+
+                    requested = {
+                        n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()
+                    }
                     expanded: set[str] = set()
                     for rn in requested:
                         if rn in SKILL_PACKS:
@@ -831,31 +915,46 @@ async def _execute_employee_with_tools(
                         for s in tool_schemas:
                             if s["name"] == "load_tools":
                                 s["description"] = new_load_schema["description"]
-                    load_msg = f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": load_msg,
-                    })
+                    load_msg = (
+                        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
+                        if newly
+                        else "这些工具已加载。"
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": load_msg,
+                        }
+                    )
                     continue
                 tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id, guard=guard,
+                    ctx,
+                    name,
+                    tc.name,
+                    tc.arguments,
+                    effective_agent_id,
+                    guard=guard,
                     max_visibility=max_visibility,
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": final_content,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": final_content,
+                        }
+                    )
                     finished = True
                 else:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": tool_output[:10000],
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": tool_output[:10000],
+                        }
+                    )
             if finished:
                 break
     else:
@@ -897,6 +996,7 @@ async def _handle_tool_call(
 
     if tool_name == "add_memory":
         from crew.memory import MemoryStore
+
         project_dir = ctx.project_dir if ctx else Path(".")
         store = MemoryStore(project_dir=project_dir)
         # 私聊时默认 private，LLM 也可显式指定
@@ -911,12 +1011,15 @@ async def _handle_tool_call(
             applicability=arguments.get("applicability"),
             origin_employee=arguments.get("origin_employee", ""),
         )
-        logger.info("记忆保存: %s → %s (visibility=%s)", employee_name, entry.content[:60], entry.visibility)
+        logger.info(
+            "记忆保存: %s → %s (visibility=%s)", employee_name, entry.content[:60], entry.visibility
+        )
         return "已记住。"
 
     if tool_name == "delegate":
         logger.info("委派: %s → %s", employee_name, arguments.get("employee_name"))
         import crew.webhook as _wh
+
         return await _wh._delegate_employee(
             ctx,
             arguments.get("employee_name", ""),
@@ -965,8 +1068,13 @@ async def _execute_employee(
 
     if any(t in AGENT_TOOLS for t in (match.tools or [])):
         import crew.webhook as _wh
+
         return await _wh._execute_employee_with_tools(
-            ctx, name, args, agent_id=agent_id, model=model,
+            ctx,
+            name,
+            args,
+            agent_id=agent_id,
+            model=model,
             user_message=user_message,
             message_history=message_history,
         )
@@ -976,6 +1084,7 @@ async def _execute_employee(
     if agent_id:
         try:
             from crew.id_client import afetch_agent_identity
+
             agent_identity = await afetch_agent_identity(agent_id)
         except Exception as e:
             logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
@@ -983,7 +1092,9 @@ async def _execute_employee(
     engine = CrewEngine(project_dir=ctx.project_dir)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(match, args=args, agent_identity=agent_identity, max_visibility=max_visibility)
+    prompt = engine.prompt(
+        match, args=args, agent_identity=agent_identity, max_visibility=max_visibility
+    )
 
     # 尝试执行 LLM 调用（executor 自动从环境变量解析 API key）
     try:
@@ -1042,8 +1153,10 @@ async def _stream_employee(
     match = result.get(name)
 
     if match is None:
+
         async def _error():
             yield f"event: error\ndata: {_dumps({'error': f'未找到员工: {name}'})}\n\n"
+
         return StreamingResponse(_error(), media_type="text/event-stream")
 
     # 获取 agent 身份
@@ -1117,7 +1230,9 @@ async def _resume_incomplete_pipelines(ctx: _AppContext) -> None:
 
             pipelines = discover_pipelines(project_dir=ctx.project_dir)
             if pipeline_name not in pipelines:
-                ctx.registry.update(record.task_id, "failed", error=f"恢复失败: 未找到 pipeline {pipeline_name}")
+                ctx.registry.update(
+                    record.task_id, "failed", error=f"恢复失败: 未找到 pipeline {pipeline_name}"
+                )
                 continue
 
             pipeline = load_pipeline(pipelines[pipeline_name])
@@ -1125,6 +1240,7 @@ async def _resume_incomplete_pipelines(ctx: _AppContext) -> None:
             def _make_callback(tid):
                 def cb(step_result, checkpoint_data):
                     ctx.registry.update_checkpoint(tid, checkpoint_data)
+
                 return cb
 
             result = await aresume_pipeline(

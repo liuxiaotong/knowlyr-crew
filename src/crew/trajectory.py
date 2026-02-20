@@ -97,16 +97,18 @@ class TrajectoryCollector:
         self._step_count += 1
         if not self.model:
             self.model = model
-        self._steps.append({
-            "step_id": self._step_count,
-            "thought": content,
-            "tool_name": "respond",
-            "tool_params": {},
-            "tool_output": content,
-            "tool_exit_code": 0,
-            "timestamp": datetime.now().isoformat(),
-            "token_count": input_tokens + output_tokens,
-        })
+        self._steps.append(
+            {
+                "step_id": self._step_count,
+                "thought": content,
+                "tool_name": "respond",
+                "tool_params": {},
+                "tool_output": content,
+                "tool_exit_code": 0,
+                "timestamp": datetime.now().isoformat(),
+                "token_count": input_tokens + output_tokens,
+            }
+        )
 
     # ── 多轮录制（execute_with_tools，分两步） ──
 
@@ -160,16 +162,18 @@ class TrajectoryCollector:
     ) -> None:
         """记录一个已完成的 tool-use 步骤（含工具执行结果）."""
         self._step_count += 1
-        self._steps.append({
-            "step_id": self._step_count,
-            "thought": thought,
-            "tool_name": tool_name,
-            "tool_params": tool_params,
-            "tool_output": tool_output,
-            "tool_exit_code": tool_exit_code,
-            "timestamp": datetime.now().isoformat(),
-            "token_count": input_tokens + output_tokens,
-        })
+        self._steps.append(
+            {
+                "step_id": self._step_count,
+                "thought": thought,
+                "tool_name": tool_name,
+                "tool_params": tool_params,
+                "tool_output": tool_output,
+                "tool_exit_code": tool_exit_code,
+                "timestamp": datetime.now().isoformat(),
+                "token_count": input_tokens + output_tokens,
+            }
+        )
 
     # ── 输出 ──
 

@@ -8,7 +8,9 @@ import yaml
 from crew.sync import sync_all
 
 
-def _make_employee_dir(base: Path, name: str, *, agent_id: int | None = None, bio: str = "") -> Path:
+def _make_employee_dir(
+    base: Path, name: str, *, agent_id: int | None = None, bio: str = ""
+) -> Path:
     """在 base 下创建一个最小化的员工目录."""
     dir_name = f"{name}-{agent_id}" if agent_id else name
     emp_dir = base / dir_name
@@ -57,11 +59,14 @@ class TestSyncPush:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(agent_id=aid, nickname="old")
 
-        with patch("crew.sync.list_agents", mock_list), \
-             patch("crew.sync.update_agent", mock_update), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", mock_list),
+            patch("crew.sync.update_agent", mock_update),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(report.pushed) == 1
@@ -89,9 +94,11 @@ class TestSyncPush:
             update_calls.append((agent_id, kwargs))
             return True
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3051, "status": "active"}]), \
-             patch("crew.sync.update_agent", mock_update), \
-             patch("crew.sync.fetch_agent_identity", return_value=None):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3051, "status": "active"}]),
+            patch("crew.sync.update_agent", mock_update),
+            patch("crew.sync.fetch_agent_identity", return_value=None),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(update_calls) == 1
@@ -104,7 +111,9 @@ class TestSyncPush:
         config_path = emp_dir / "employee.yaml"
         config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config["model"] = "claude-opus-4-6"
-        config_path.write_text(yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        config_path.write_text(
+            yaml.dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
 
         update_calls = []
 
@@ -114,11 +123,14 @@ class TestSyncPush:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(agent_id=aid, nickname="m")
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3052, "status": "active"}]), \
-             patch("crew.sync.update_agent", mock_update), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3052, "status": "active"}]),
+            patch("crew.sync.update_agent", mock_update),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(update_calls) == 1
@@ -134,15 +146,18 @@ class TestSyncPull:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(
                 agent_id=aid,
                 nickname="mem",
                 memory="用户偏好暗色主题\n\n上次讨论了 API 设计",
             )
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3060, "status": "active"}]), \
-             patch("crew.sync.update_agent", return_value=True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3060, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(report.pulled) == 1
@@ -159,6 +174,7 @@ class TestSyncPull:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(
                 agent_id=aid,
                 nickname="model",
@@ -166,9 +182,11 @@ class TestSyncPull:
                 temperature=0.7,
             )
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3061, "status": "active"}]), \
-             patch("crew.sync.update_agent", return_value=True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3061, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(report.pulled) == 1
@@ -184,11 +202,14 @@ class TestSyncPull:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(agent_id=aid, nickname="same")
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3062, "status": "active"}]), \
-             patch("crew.sync.update_agent", return_value=True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3062, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=True, force=True)
 
         assert len(report.pulled) == 0
@@ -207,8 +228,10 @@ class TestSyncRegister:
             register_calls.append(kwargs)
             return 9999
 
-        with patch("crew.sync.list_agents", return_value=[]), \
-             patch("crew.sync.register_agent", mock_register):
+        with (
+            patch("crew.sync.list_agents", return_value=[]),
+            patch("crew.sync.register_agent", mock_register),
+        ):
             report = sync_all(tmp_path, push=True, pull=False)
 
         assert len(report.registered) == 1
@@ -225,8 +248,10 @@ class TestSyncRegister:
         """注册失败记录错误."""
         _make_employee_dir(tmp_path, "fail-worker")
 
-        with patch("crew.sync.list_agents", return_value=[]), \
-             patch("crew.sync.register_agent", return_value=None):
+        with (
+            patch("crew.sync.list_agents", return_value=[]),
+            patch("crew.sync.register_agent", return_value=None),
+        ):
             report = sync_all(tmp_path, push=True, pull=False)
 
         assert len(report.errors) == 1
@@ -245,10 +270,15 @@ class TestSyncDisable:
             update_calls.append((agent_id, kwargs))
             return True
 
-        with patch("crew.sync.list_agents", return_value=[
-            {"id": 3070, "nickname": "ghost", "status": "active"},
-        ]), \
-             patch("crew.sync.update_agent", mock_update):
+        with (
+            patch(
+                "crew.sync.list_agents",
+                return_value=[
+                    {"id": 3070, "nickname": "ghost", "status": "active"},
+                ],
+            ),
+            patch("crew.sync.update_agent", mock_update),
+        ):
             report = sync_all(tmp_path, push=True, pull=False)
 
         assert len(report.disabled) == 1
@@ -258,10 +288,15 @@ class TestSyncDisable:
 
     def test_skip_already_inactive(self, tmp_path):
         """已经 inactive 的不重复禁用."""
-        with patch("crew.sync.list_agents", return_value=[
-            {"id": 3070, "nickname": "ghost", "status": "inactive"},
-        ]), \
-             patch("crew.sync.update_agent", return_value=True) as mock_upd:
+        with (
+            patch(
+                "crew.sync.list_agents",
+                return_value=[
+                    {"id": 3070, "nickname": "ghost", "status": "inactive"},
+                ],
+            ),
+            patch("crew.sync.update_agent", return_value=True) as mock_upd,
+        ):
             report = sync_all(tmp_path, push=True, pull=False)
 
         assert len(report.disabled) == 0
@@ -278,13 +313,21 @@ class TestSyncDryRun:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(
-                agent_id=aid, nickname="dry", memory="some memory", model="gpt-4o",
+                agent_id=aid,
+                nickname="dry",
+                memory="some memory",
+                model="gpt-4o",
             )
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3080, "status": "active"}]), \
-             patch("crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3080, "status": "active"}]),
+            patch(
+                "crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True
+            ),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, dry_run=True, push=True, pull=True, force=True)
 
         # dry-run 标记
@@ -338,11 +381,14 @@ class TestSyncReport:
         def mock_fetch(aid):
             fetch_calls.append(aid)
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(agent_id=aid, nickname="x", memory="data")
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3091, "status": "active"}]), \
-             patch("crew.sync.update_agent", return_value=True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3091, "status": "active"}]),
+            patch("crew.sync.update_agent", return_value=True),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=True, pull=False, force=True)
 
         assert len(report.pushed) == 1
@@ -357,11 +403,16 @@ class TestSyncReport:
 
         def mock_fetch(aid):
             from crew.id_client import AgentIdentity
+
             return AgentIdentity(agent_id=aid, nickname="x", memory="data", model="gpt-4o")
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3092, "status": "active"}]), \
-             patch("crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True), \
-             patch("crew.sync.fetch_agent_identity", mock_fetch):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3092, "status": "active"}]),
+            patch(
+                "crew.sync.update_agent", side_effect=lambda **kw: update_calls.append(kw) or True
+            ),
+            patch("crew.sync.fetch_agent_identity", mock_fetch),
+        ):
             report = sync_all(tmp_path, push=False, pull=True)
 
         assert len(report.pushed) == 0
@@ -382,9 +433,11 @@ class TestSyncForcePromptChanged:
             update_calls.append((agent_id, kwargs))
             return True
 
-        with patch("crew.sync.list_agents", return_value=[{"id": 3095, "status": "active"}]), \
-             patch("crew.sync.update_agent", mock_update), \
-             patch("crew.sync.fetch_agent_identity", return_value=None):
+        with (
+            patch("crew.sync.list_agents", return_value=[{"id": 3095, "status": "active"}]),
+            patch("crew.sync.update_agent", mock_update),
+            patch("crew.sync.fetch_agent_identity", return_value=None),
+        ):
             report = sync_all(tmp_path, push=True, pull=False, force=True)
 
         assert len(report.pushed) == 1

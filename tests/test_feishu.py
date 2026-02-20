@@ -80,11 +80,15 @@ class TestLoadFeishuConfig:
         assert cfg.verification_token == "tok_test"
 
     def test_from_env(self, tmp_path):
-        with patch.dict(os.environ, {
-            "FEISHU_APP_ID": "env_id",
-            "FEISHU_APP_SECRET": "env_secret",
-            "FEISHU_VERIFICATION_TOKEN": "env_tok",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "FEISHU_APP_ID": "env_id",
+                "FEISHU_APP_SECRET": "env_secret",
+                "FEISHU_VERIFICATION_TOKEN": "env_tok",
+            },
+            clear=False,
+        ):
             cfg = load_feishu_config(tmp_path)
         assert cfg.app_id == "env_id"
         assert cfg.app_secret == "env_secret"
@@ -96,10 +100,14 @@ class TestLoadFeishuConfig:
             "app_id: yaml_id\napp_secret: yaml_secret\n",
             encoding="utf-8",
         )
-        with patch.dict(os.environ, {
-            "FEISHU_APP_ID": "env_id",
-            "FEISHU_APP_SECRET": "env_secret",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "FEISHU_APP_ID": "env_id",
+                "FEISHU_APP_SECRET": "env_secret",
+            },
+            clear=False,
+        ):
             cfg = load_feishu_config(tmp_path)
         assert cfg.app_id == "yaml_id"  # YAML 优先
 
@@ -142,11 +150,13 @@ class TestParseMessageEvent:
                     "chat_type": "group",
                     "message_type": "text",
                     "content": json.dumps({"text": "@_user_1 审查 auth.py"}),
-                    "mentions": [{
-                        "key": "@_user_1",
-                        "id": {"open_id": "ou_bot"},
-                        "name": "林锐",
-                    }],
+                    "mentions": [
+                        {
+                            "key": "@_user_1",
+                            "id": {"open_id": "ou_bot"},
+                            "name": "林锐",
+                        }
+                    ],
                 },
                 "sender": {"sender_id": {"open_id": "ou_sender"}},
             }
@@ -304,7 +314,10 @@ class TestResolveEmployee:
         d = self._make_discovery()
         mentions = [{"key": "@_user_1", "id": "ou_1", "name": "Unknown"}]
         name, text = resolve_employee_from_mention(
-            mentions, "do something", d, default_employee="product-manager",
+            mentions,
+            "do something",
+            d,
+            default_employee="product-manager",
         )
         assert name == "product-manager"
         assert text == "do something"
@@ -319,7 +332,9 @@ class TestResolveEmployee:
     def test_text_prefix_match(self):
         d = self._make_discovery()
         name, text = resolve_employee_from_mention(
-            [], "code-reviewer 审查 auth.py", d,
+            [],
+            "code-reviewer 审查 auth.py",
+            d,
         )
         assert name == "code-reviewer"
         assert text == "审查 auth.py"
@@ -337,11 +352,13 @@ class TestFeishuTokenManager:
     """飞书 token 管理器."""
 
     def test_initial_fetch(self):
-        mock_client = _mock_httpx_client(json_data={
-            "code": 0,
-            "tenant_access_token": "t-fresh",
-            "expire": 7200,
-        })
+        mock_client = _mock_httpx_client(
+            json_data={
+                "code": 0,
+                "tenant_access_token": "t-fresh",
+                "expire": 7200,
+            }
+        )
         mgr = FeishuTokenManager("app_id", "app_secret")
 
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -351,11 +368,13 @@ class TestFeishuTokenManager:
         mock_client.post.assert_called_once()
 
     def test_cached_token(self):
-        mock_client = _mock_httpx_client(json_data={
-            "code": 0,
-            "tenant_access_token": "t-cached",
-            "expire": 7200,
-        })
+        mock_client = _mock_httpx_client(
+            json_data={
+                "code": 0,
+                "tenant_access_token": "t-cached",
+                "expire": 7200,
+            }
+        )
         mgr = FeishuTokenManager("app_id", "app_secret")
 
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -366,11 +385,13 @@ class TestFeishuTokenManager:
         assert mock_client.post.call_count == 1  # 只调用一次
 
     def test_token_refresh_on_expiry(self):
-        mock_client = _mock_httpx_client(json_data={
-            "code": 0,
-            "tenant_access_token": "t-new",
-            "expire": 7200,
-        })
+        mock_client = _mock_httpx_client(
+            json_data={
+                "code": 0,
+                "tenant_access_token": "t-new",
+                "expire": 7200,
+            }
+        )
         mgr = FeishuTokenManager("app_id", "app_secret")
         # 手动设置已过期
         mgr._token = "t-old"
@@ -383,10 +404,12 @@ class TestFeishuTokenManager:
         mock_client.post.assert_called_once()
 
     def test_api_error(self):
-        mock_client = _mock_httpx_client(json_data={
-            "code": 10003,
-            "msg": "invalid app_id",
-        })
+        mock_client = _mock_httpx_client(
+            json_data={
+                "code": 10003,
+                "msg": "invalid app_id",
+            }
+        )
         mgr = FeishuTokenManager("bad_id", "bad_secret")
 
         with patch("httpx.AsyncClient", return_value=mock_client):
@@ -419,6 +442,7 @@ class TestEventDeduplicator:
         dedup.is_duplicate("a")
         dedup.is_duplicate("b")
         import time
+
         time.sleep(0.02)
         # 第 3 个触发清理，a 和 b 已过期
         dedup.is_duplicate("c")
@@ -454,12 +478,15 @@ class TestSendFeishuMessage:
         mgr._expire_at = time.time() + 3600
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = _run(send_feishu_card(
-                mgr, "oc_xxx",
-                task_name="daily-review",
-                task_result={"output": "一切正常"},
-                task_error=None,
-            ))
+            result = _run(
+                send_feishu_card(
+                    mgr,
+                    "oc_xxx",
+                    task_name="daily-review",
+                    task_result={"output": "一切正常"},
+                    task_error=None,
+                )
+            )
 
         assert result["code"] == 0
         body = mock_client.post.call_args.kwargs["json"]
@@ -519,37 +546,46 @@ class TestFeishuEventEndpoint:
     def test_url_verification(self):
         """URL 验证 challenge 应原样返回."""
         client = _make_feishu_client()
-        resp = client.post("/feishu/event", json={
-            "type": "url_verification",
-            "challenge": "test-challenge-xxx",
-        })
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "type": "url_verification",
+                "challenge": "test-challenge-xxx",
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["challenge"] == "test-challenge-xxx"
 
     def test_no_auth_required(self):
         """飞书事件端点不需要 Bearer token."""
         client = _make_feishu_client()
-        resp = client.post("/feishu/event", json={
-            "type": "url_verification",
-            "challenge": "abc",
-        })
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "type": "url_verification",
+                "challenge": "abc",
+            },
+        )
         assert resp.status_code == 200
 
     def test_not_configured(self):
         """未配置飞书时返回 501."""
         client = _make_feishu_client(feishu_config=None)
-        resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.message.receive_v1", "token": "t"},
-            "event": {
-                "message": {
-                    "message_id": "msg_x",
-                    "chat_id": "oc_x",
-                    "message_type": "text",
-                    "content": json.dumps({"text": "hello"}),
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {"event_type": "im.message.receive_v1", "token": "t"},
+                "event": {
+                    "message": {
+                        "message_id": "msg_x",
+                        "chat_id": "oc_x",
+                        "message_type": "text",
+                        "content": json.dumps({"text": "hello"}),
+                    },
+                    "sender": {"sender_id": {"open_id": "ou_x"}},
                 },
-                "sender": {"sender_id": {"open_id": "ou_x"}},
             },
-        })
+        )
         assert resp.status_code == 501
 
     def test_invalid_token(self):
@@ -560,23 +596,29 @@ class TestFeishuEventEndpoint:
             verification_token="correct-token",
         )
         client = _make_feishu_client(feishu_config=config)
-        resp = client.post("/feishu/event", json={
-            "header": {
-                "event_type": "im.message.receive_v1",
-                "token": "wrong-token",
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {
+                    "event_type": "im.message.receive_v1",
+                    "token": "wrong-token",
+                },
+                "event": {},
             },
-            "event": {},
-        })
+        )
         assert resp.status_code == 401
 
     def test_no_verification_token_warns_but_allows(self):
         """未配置 verification_token 时应跳过验证但放行."""
         config = FeishuConfig(app_id="id", app_secret="secret")
         client = _make_feishu_client(feishu_config=config)
-        resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.chat.member.bot.added_v1"},
-            "event": {},
-        })
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {"event_type": "im.chat.member.bot.added_v1"},
+                "event": {},
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["message"] == "ignored"
 
@@ -584,10 +626,13 @@ class TestFeishuEventEndpoint:
         """非消息事件应被忽略."""
         config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
-        resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.chat.member.bot.added_v1", "token": "tok"},
-            "event": {},
-        })
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {"event_type": "im.chat.member.bot.added_v1", "token": "tok"},
+                "event": {},
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["message"] == "ignored"
 
@@ -595,18 +640,21 @@ class TestFeishuEventEndpoint:
         """video 等不支持的消息类型应返回 unsupported."""
         config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
-        resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.message.receive_v1", "token": "tok"},
-            "event": {
-                "message": {
-                    "message_id": "msg_vid",
-                    "chat_id": "oc_xxx",
-                    "message_type": "video",
-                    "content": "{}",
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {"event_type": "im.message.receive_v1", "token": "tok"},
+                "event": {
+                    "message": {
+                        "message_id": "msg_vid",
+                        "chat_id": "oc_xxx",
+                        "message_type": "video",
+                        "content": "{}",
+                    },
+                    "sender": {"sender_id": {"open_id": "ou_x"}},
                 },
-                "sender": {"sender_id": {"open_id": "ou_x"}},
             },
-        })
+        )
         assert resp.status_code == 200
         assert resp.json()["message"] == "unsupported message type"
 
@@ -615,24 +663,29 @@ class TestFeishuEventEndpoint:
         """合法消息事件应触发后台处理."""
         config = FeishuConfig(app_id="id", app_secret="secret", verification_token="tok")
         client = _make_feishu_client(feishu_config=config)
-        resp = client.post("/feishu/event", json={
-            "header": {"event_type": "im.message.receive_v1", "token": "tok"},
-            "event": {
-                "message": {
-                    "message_id": "msg_ok",
-                    "chat_id": "oc_xxx",
-                    "chat_type": "group",
-                    "message_type": "text",
-                    "content": json.dumps({"text": "@_user_1 审查代码"}),
-                    "mentions": [{
-                        "key": "@_user_1",
-                        "id": {"open_id": "ou_bot"},
-                        "name": "林锐",
-                    }],
+        resp = client.post(
+            "/feishu/event",
+            json={
+                "header": {"event_type": "im.message.receive_v1", "token": "tok"},
+                "event": {
+                    "message": {
+                        "message_id": "msg_ok",
+                        "chat_id": "oc_xxx",
+                        "chat_type": "group",
+                        "message_type": "text",
+                        "content": json.dumps({"text": "@_user_1 审查代码"}),
+                        "mentions": [
+                            {
+                                "key": "@_user_1",
+                                "id": {"open_id": "ou_bot"},
+                                "name": "林锐",
+                            }
+                        ],
+                    },
+                    "sender": {"sender_id": {"open_id": "ou_user"}},
                 },
-                "sender": {"sender_id": {"open_id": "ou_user"}},
             },
-        })
+        )
         assert resp.status_code == 200
         assert resp.json()["message"] == "ok"
 
@@ -665,11 +718,13 @@ class TestFeishuEventEndpoint:
 
 # ── 闲聊快速路径判断 ──
 
+
 class TestNeedsTools:
     """测试 _needs_tools() 闲聊判断."""
 
     def test_casual_greetings(self):
         from crew.webhook_feishu import _needs_tools
+
         assert not _needs_tools("早")
         assert not _needs_tools("下午好")
         assert not _needs_tools("晚安")
@@ -677,6 +732,7 @@ class TestNeedsTools:
 
     def test_casual_chat(self):
         from crew.webhook_feishu import _needs_tools
+
         assert not _needs_tools("下午有点累，不想开会了")
         assert not _needs_tools("周末有什么好吃的")
         assert not _needs_tools("帮我想个团建活动")
@@ -684,6 +740,7 @@ class TestNeedsTools:
 
     def test_work_keywords_trigger(self):
         from crew.webhook_feishu import _needs_tools
+
         assert _needs_tools("查一下昨天的数据")
         assert _needs_tools("帮我查下今天的日程")
         assert _needs_tools("创建一个飞书文档")
@@ -693,16 +750,19 @@ class TestNeedsTools:
 
     def test_long_text_is_work(self):
         from crew.webhook_feishu import _needs_tools
+
         # 超过 200 字的消息被认为是正式任务
         assert _needs_tools("x" * 201)
 
     def test_empty_is_work(self):
         from crew.webhook_feishu import _needs_tools
+
         assert _needs_tools("")
 
     def test_url_triggers_tools(self):
         """URL 消息应走工具路径."""
         from crew.webhook_feishu import _needs_tools
+
         assert _needs_tools("帮我看看 https://example.com 上的内容")
         assert _needs_tools("http://localhost:8080/status")
         assert _needs_tools("https://github.com/foo/bar/pull/123")
@@ -710,6 +770,7 @@ class TestNeedsTools:
     def test_memory_keywords_trigger(self):
         """记忆相关关键词应走工具路径."""
         from crew.webhook_feishu import _needs_tools
+
         assert _needs_tools("记住这件事")
         assert _needs_tools("帮我做个笔记")
         assert _needs_tools("写入到备忘录")
@@ -723,14 +784,17 @@ class TestSanitizeFeishuText:
 
     def test_normal_text_unchanged(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("你好世界") == "你好世界"
 
     def test_removes_null_bytes(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("hello\x00world") == "helloworld"
 
     def test_removes_control_chars(self):
         from crew.feishu import _sanitize_feishu_text
+
         # \x01-\x08, \x0b, \x0c, \x0e-\x1f 应被移除
         text = "a\x01b\x02c\x0bd\x0ee"
         result = _sanitize_feishu_text(text)
@@ -738,11 +802,13 @@ class TestSanitizeFeishuText:
 
     def test_preserves_newline_tab(self):
         from crew.feishu import _sanitize_feishu_text
+
         text = "line1\nline2\tindented\r\nline3"
         assert _sanitize_feishu_text(text) == text
 
     def test_truncates_long_text(self):
         from crew.feishu import _FEISHU_TEXT_MAX_LEN, _sanitize_feishu_text
+
         long_text = "a" * (_FEISHU_TEXT_MAX_LEN + 500)
         result = _sanitize_feishu_text(long_text)
         assert len(result) == _FEISHU_TEXT_MAX_LEN + 3  # +3 for "..."
@@ -750,31 +816,38 @@ class TestSanitizeFeishuText:
 
     def test_empty_passthrough(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("") == ""
 
     def test_none_like_empty(self):
         from crew.feishu import _sanitize_feishu_text
+
         # 空字符串 falsy 走 early return
         assert _sanitize_feishu_text("") == ""
 
     def test_strips_markdown_headings(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("### 标题\n内容") == "标题\n内容"
 
     def test_strips_markdown_bold(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("这是**重点**内容") == "这是重点内容"
 
     def test_strips_markdown_links(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("点击[这里](https://example.com)查看") == "点击这里查看"
 
     def test_strips_inline_code(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("使用 `print()` 输出") == "使用 print() 输出"
 
     def test_strips_code_blocks(self):
         from crew.feishu import _sanitize_feishu_text
+
         text = "代码如下：\n```python\nprint('hi')\n```\n结束"
         result = _sanitize_feishu_text(text)
         assert "```" not in result
@@ -782,16 +855,19 @@ class TestSanitizeFeishuText:
 
     def test_strips_html_tags(self):
         from crew.feishu import _sanitize_feishu_text
+
         assert _sanitize_feishu_text("你好<br>世界<div>内容</div>") == "你好世界内容"
 
     def test_strips_images(self):
         from crew.feishu import _sanitize_feishu_text
+
         result = _sanitize_feishu_text("看图 ![示意图](https://img.png) 结束")
         assert "![" not in result
         assert "结束" in result
 
     def test_strips_horizontal_rule(self):
         from crew.feishu import _sanitize_feishu_text
+
         result = _sanitize_feishu_text("上面\n---\n下面")
         assert "---" not in result
 
@@ -801,6 +877,7 @@ class TestStripMarkdown:
 
     def test_complex_markdown(self):
         from crew.feishu import _strip_markdown
+
         text = """## 任务清单
 
 **第一项**: 完成[文档](https://doc.com)
@@ -891,5 +968,6 @@ class TestGetUserName:
 
     def test_empty_open_id(self):
         from crew.feishu import get_user_name
+
         mgr = MagicMock()
         assert _run(get_user_name(mgr, "")) == ""

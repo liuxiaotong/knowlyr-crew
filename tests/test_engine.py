@@ -89,6 +89,7 @@ class TestCrewEngine:
     def test_prompt_with_agent_identity(self):
         """带 Agent 身份时 prompt 应包含身份信息."""
         from crew.id_client import AgentIdentity
+
         identity = AgentIdentity(
             agent_id=3050,
             nickname="Alice",
@@ -120,6 +121,7 @@ class TestCrewEngine:
     def test_prompt_with_project_info(self):
         """带项目信息时 prompt 应包含项目类型."""
         from crew.context_detector import ProjectInfo
+
         info = ProjectInfo(
             project_type="python",
             framework="fastapi",
@@ -161,6 +163,7 @@ class TestCrewEngine:
     def test_prompt_with_kpi(self):
         """带 KPI 的员工 prompt 应包含 KPI 段."""
         from crew.models import Employee
+
         emp = Employee(
             name="kpi-test",
             description="测试 KPI 注入",
@@ -175,6 +178,7 @@ class TestCrewEngine:
     def test_prompt_without_kpi(self):
         """无 KPI 的员工 prompt 不应有 KPI 段."""
         from crew.models import Employee
+
         emp = Employee(
             name="no-kpi",
             description="无 KPI",
@@ -279,7 +283,10 @@ class TestCrewEngine:
             parts.append(f"待改进: {'; '.join(failed)}")
         content = " | ".join(parts)
 
-        assert content == "[自检] 审查代码 | 通过: 文件覆盖率检查; 安全关键词扫描 | 待改进: 并发安全; 错误处理"
+        assert (
+            content
+            == "[自检] 审查代码 | 通过: 文件覆盖率检查; 安全关键词扫描 | 待改进: 并发安全; 错误处理"
+        )
 
     def test_prompt_memory_failure_logged(self, caplog):
         """MemoryStore 加载失败时不影响 prompt 生成."""

@@ -86,32 +86,40 @@ class TestMatchRoute:
         return WebhookConfig(routes=[WebhookRoute(**r) for r in routes])
 
     def test_exact_match(self):
-        config = self._config([
-            {"event": "push", "target": {"type": "pipeline", "name": "review"}},
-        ])
+        config = self._config(
+            [
+                {"event": "push", "target": {"type": "pipeline", "name": "review"}},
+            ]
+        )
         route = match_route("push", config)
         assert route is not None
         assert route.target.name == "review"
 
     def test_wildcard_match(self):
-        config = self._config([
-            {"event": "*", "target": {"type": "employee", "name": "code-reviewer"}},
-        ])
+        config = self._config(
+            [
+                {"event": "*", "target": {"type": "employee", "name": "code-reviewer"}},
+            ]
+        )
         route = match_route("anything", config)
         assert route is not None
         assert route.target.name == "code-reviewer"
 
     def test_no_match(self):
-        config = self._config([
-            {"event": "push", "target": {"type": "pipeline", "name": "review"}},
-        ])
+        config = self._config(
+            [
+                {"event": "push", "target": {"type": "pipeline", "name": "review"}},
+            ]
+        )
         assert match_route("pull_request", config) is None
 
     def test_first_match_wins(self):
-        config = self._config([
-            {"event": "push", "target": {"type": "pipeline", "name": "first"}},
-            {"event": "push", "target": {"type": "pipeline", "name": "second"}},
-        ])
+        config = self._config(
+            [
+                {"event": "push", "target": {"type": "pipeline", "name": "first"}},
+                {"event": "push", "target": {"type": "pipeline", "name": "second"}},
+            ]
+        )
         route = match_route("push", config)
         assert route.target.name == "first"
 
@@ -146,7 +154,11 @@ class TestLoadWebhookConfig:
             "routes": [
                 {
                     "event": "push",
-                    "target": {"type": "pipeline", "name": "full-review", "args": {"target": "{{ref}}"}},
+                    "target": {
+                        "type": "pipeline",
+                        "name": "full-review",
+                        "args": {"target": "{{ref}}"},
+                    },
                 },
             ],
         }
@@ -279,6 +291,7 @@ class TestTaskPersistence:
     def test_corrupt_jsonl_logs_warning(self, tmp_path, caplog):
         """损坏的 JSONL 记录应产生 warning 日志."""
         import logging
+
         path = tmp_path / "tasks.jsonl"
         path.write_text("not-valid-json\n")
         with caplog.at_level(logging.WARNING, logger="crew.task_registry"):
@@ -489,7 +502,11 @@ class TestGenericWebhook:
         client = _make_client()
         resp = client.post(
             "/webhook",
-            json={"target_type": "pipeline", "target_name": "full-review", "args": {"target": "main"}},
+            json={
+                "target_type": "pipeline",
+                "target_name": "full-review",
+                "args": {"target": "main"},
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert resp.status_code == 202
@@ -523,7 +540,11 @@ class TestOpenClawWebhook:
         client = _make_client()
         resp = client.post(
             "/webhook/openclaw",
-            json={"target_type": "employee", "target_name": "code-reviewer", "args": {"target": "main"}},
+            json={
+                "target_type": "employee",
+                "target_name": "code-reviewer",
+                "args": {"target": "main"},
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert resp.status_code == 202
@@ -587,8 +608,11 @@ class TestStreamEmployee:
         async def _fake_stream():
             yield "Hello"
             yield " world"
+
         _fake_stream.result = MagicMock(
-            model="gpt-4o", input_tokens=10, output_tokens=5,
+            model="gpt-4o",
+            input_tokens=10,
+            output_tokens=5,
         )
         mock_exec.return_value = _fake_stream()
 
@@ -775,6 +799,7 @@ class TestIdentityPassthrough:
 
         async def _fake_stream():
             yield "Hello"
+
         mock_exec.return_value = _fake_stream()
 
         client = _make_client()
@@ -949,8 +974,11 @@ class TestStreamErrorHandling:
 
         async def _normal_stream():
             yield "Hello"
+
         _normal_stream.result = MagicMock(
-            model="gpt-4o", input_tokens=10, output_tokens=5,
+            model="gpt-4o",
+            input_tokens=10,
+            output_tokens=5,
         )
         mock_exec.return_value = _normal_stream()
 
@@ -980,7 +1008,8 @@ class TestEmployeeUpdatePUT:
             "model": "claude-sonnet-4-20250514",
         }
         (emp_dir / "employee.yaml").write_text(
-            yaml.dump(config, allow_unicode=True), encoding="utf-8",
+            yaml.dump(config, allow_unicode=True),
+            encoding="utf-8",
         )
         emp = Employee(
             name=name,
@@ -1053,8 +1082,11 @@ class TestEmployeeUpdatePUT:
         from crew.models import DiscoveryResult, Employee
 
         emp = Employee(
-            name="emp", description="d", body="b",
-            agent_id=999, source_path=tmp_path,
+            name="emp",
+            description="d",
+            body="b",
+            agent_id=999,
+            source_path=tmp_path,
         )
         mock_discover.return_value = DiscoveryResult(employees={"emp": emp})
 
@@ -1097,7 +1129,9 @@ class TestEmployeeUpdatePUT:
         data = resp.json()
         assert data["synced_to_id"] is True
         mock_aupdate.assert_called_once_with(
-            agent_id=3082, model="gpt-4o", temperature=0.5,
+            agent_id=3082,
+            model="gpt-4o",
+            temperature=0.5,
         )
 
 

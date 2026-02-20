@@ -50,7 +50,16 @@ def _make_tool_result(
     )
 
 
-def _make_emp(*, tools=None, model="test-model", name="test", desc="test", agent_id=None, base_url="", api_key=""):
+def _make_emp(
+    *,
+    tools=None,
+    model="test-model",
+    name="test",
+    desc="test",
+    agent_id=None,
+    base_url="",
+    api_key="",
+):
     emp = MagicMock()
     emp.tools = tools or []
     emp.model = model
@@ -203,9 +212,7 @@ class TestExecuteEmployeeWithTools:
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(
-                _execute_employee_with_tools(_make_ctx(), "test", {"task": "hello"})
-            )
+            result = _run(_execute_employee_with_tools(_make_ctx(), "test", {"task": "hello"}))
             assert result["output"] == "直接回复内容"
             assert result["employee"] == "test"
             mock_exec.assert_called_once()
@@ -237,17 +244,26 @@ class TestExecuteEmployeeWithTools:
                 _make_tool_result(
                     content="我来委派",
                     tool_calls=[
-                        ToolCall(id="call_1", name="delegate", arguments={
-                            "employee_name": "code-reviewer", "task": "审查代码",
-                        })
+                        ToolCall(
+                            id="call_1",
+                            name="delegate",
+                            arguments={
+                                "employee_name": "code-reviewer",
+                                "task": "审查代码",
+                            },
+                        )
                     ],
                 ),
                 _make_tool_result(
                     content="汇总结果",
                     tool_calls=[
-                        ToolCall(id="call_2", name="submit", arguments={
-                            "result": "最终汇总：代码质量良好",
-                        })
+                        ToolCall(
+                            id="call_2",
+                            name="submit",
+                            arguments={
+                                "result": "最终汇总：代码质量良好",
+                            },
+                        )
                     ],
                 ),
             ]
@@ -256,11 +272,7 @@ class TestExecuteEmployeeWithTools:
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(
-                _execute_employee_with_tools(
-                    _make_ctx(), "boss", {"task": "审查代码"}
-                )
-            )
+            result = _run(_execute_employee_with_tools(_make_ctx(), "boss", {"task": "审查代码"}))
             assert result["output"] == "最终汇总：代码质量良好"
             assert mock_delegate.call_count == 1
             call_args = mock_delegate.call_args[0]
@@ -295,9 +307,14 @@ class TestExecuteEmployeeWithTools:
                 _make_tool_result(
                     content="委派中",
                     tool_calls=[
-                        ToolCall(id="tc1", name="delegate", arguments={
-                            "employee_name": "doc-writer", "task": "写文档",
-                        })
+                        ToolCall(
+                            id="tc1",
+                            name="delegate",
+                            arguments={
+                                "employee_name": "doc-writer",
+                                "task": "写文档",
+                            },
+                        )
                     ],
                 ),
                 _make_tool_result(content="文档已完成"),
@@ -306,11 +323,7 @@ class TestExecuteEmployeeWithTools:
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(
-                _execute_employee_with_tools(
-                    _make_ctx(), "boss", {"task": "写文档"}
-                )
-            )
+            result = _run(_execute_employee_with_tools(_make_ctx(), "boss", {"task": "写文档"}))
             assert result["output"] == "文档已完成"
 
             # 验证 Anthropic 格式 messages
@@ -351,19 +364,20 @@ class TestExecuteEmployeeWithTools:
             mock_exec.return_value = _make_tool_result(
                 content="继续委派",
                 tool_calls=[
-                    ToolCall(id="tc", name="delegate", arguments={
-                        "employee_name": "x", "task": "y",
-                    })
+                    ToolCall(
+                        id="tc",
+                        name="delegate",
+                        arguments={
+                            "employee_name": "x",
+                            "task": "y",
+                        },
+                    )
                 ],
             )
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(
-                _execute_employee_with_tools(
-                    _make_ctx(), "boss", {"task": "loop"}
-                )
-            )
+            result = _run(_execute_employee_with_tools(_make_ctx(), "boss", {"task": "loop"}))
             assert mock_exec.call_count == 2
 
     def test_unknown_tool_returns_error(self):
@@ -391,20 +405,14 @@ class TestExecuteEmployeeWithTools:
             mock_exec.side_effect = [
                 _make_tool_result(
                     content="",
-                    tool_calls=[
-                        ToolCall(id="tc1", name="bash", arguments={"command": "ls"})
-                    ],
+                    tool_calls=[ToolCall(id="tc1", name="bash", arguments={"command": "ls"})],
                 ),
                 _make_tool_result(content="好的"),
             ]
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(
-                _execute_employee_with_tools(
-                    _make_ctx(), "test", {"task": "test"}
-                )
-            )
+            result = _run(_execute_employee_with_tools(_make_ctx(), "test", {"task": "test"}))
             # 第二轮返回文本
             assert result["output"] == "好的"
             # 验证 tool result 消息包含错误提示
@@ -446,8 +454,11 @@ class TestExecuteEmployeeRouting:
         mock_engine_cls.return_value = MagicMock()
 
         mock_exec.return_value = ExecutionResult(
-            content="prompt result", model="test-model",
-            input_tokens=10, output_tokens=20, stop_reason="end_turn",
+            content="prompt result",
+            model="test-model",
+            input_tokens=10,
+            output_tokens=20,
+            stop_reason="end_turn",
         )
 
         from crew.webhook import _execute_employee
@@ -469,7 +480,10 @@ class TestExecuteEmployeeRouting:
         mock_engine_cls.return_value = MagicMock()
 
         mock_exec.return_value = ExecutionResult(
-            content="ok", model="m", input_tokens=1, output_tokens=1,
+            content="ok",
+            model="m",
+            input_tokens=1,
+            output_tokens=1,
             stop_reason="end_turn",
         )
 

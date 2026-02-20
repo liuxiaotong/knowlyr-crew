@@ -25,9 +25,7 @@ class Decision(BaseModel):
     created_at: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="创建时间"
     )
-    category: Literal["estimate", "recommendation", "commitment"] = Field(
-        description="决策类别"
-    )
+    category: Literal["estimate", "recommendation", "commitment"] = Field(description="决策类别")
     content: str = Field(description="决策内容")
     expected_outcome: str = Field(default="", description="预期结果")
     status: Literal["pending", "evaluated"] = Field(default="pending", description="状态")
@@ -45,7 +43,11 @@ class EvaluationEngine:
 
     def __init__(self, eval_dir: Path | None = None, *, project_dir: Path | None = None):
         self._project_dir = project_dir
-        self.eval_dir = eval_dir if eval_dir is not None else resolve_project_dir(project_dir) / ".crew" / "evaluations"
+        self.eval_dir = (
+            eval_dir
+            if eval_dir is not None
+            else resolve_project_dir(project_dir) / ".crew" / "evaluations"
+        )
 
     def _ensure_dir(self) -> None:
         self.eval_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +126,9 @@ class EvaluationEngine:
 
                 if decision.id == decision_id:
                     decision.actual_outcome = actual_outcome
-                    decision.evaluation = evaluation or f"预期: {decision.expected_outcome}; 实际: {actual_outcome}"
+                    decision.evaluation = (
+                        evaluation or f"预期: {decision.expected_outcome}; 实际: {actual_outcome}"
+                    )
                     decision.status = "evaluated"
                     found_decision = decision
 
@@ -136,7 +140,8 @@ class EvaluationEngine:
             # 原子重写决策文件
             content = "\n".join(new_lines) + "\n"
             fd, tmp_path = tempfile.mkstemp(
-                dir=path.parent, suffix=".tmp",
+                dir=path.parent,
+                suffix=".tmp",
             )
             fd_closed = False
             try:
@@ -154,6 +159,7 @@ class EvaluationEngine:
         # 将评估结论写入员工记忆（锁外执行，避免死锁）
         try:
             from crew.memory import MemoryStore
+
             store = MemoryStore(project_dir=self._project_dir)
             store.add(
                 employee=found_decision.employee,
@@ -252,38 +258,44 @@ class EvaluationEngine:
         ]
 
         if decision.expected_outcome:
-            parts.extend([
-                "## 预期结果",
-                "",
-                decision.expected_outcome,
-                "",
-            ])
+            parts.extend(
+                [
+                    "## 预期结果",
+                    "",
+                    decision.expected_outcome,
+                    "",
+                ]
+            )
 
         if decision.actual_outcome:
-            parts.extend([
-                "## 实际结果",
-                "",
-                decision.actual_outcome,
-                "",
-            ])
+            parts.extend(
+                [
+                    "## 实际结果",
+                    "",
+                    decision.actual_outcome,
+                    "",
+                ]
+            )
 
-        parts.extend([
-            "## 评估任务",
-            "",
-            "请分析：",
-            "1. 预期与实际的偏差是什么？",
-            "2. 偏差的原因是什么？",
-            "3. 未来遇到类似决策时，应该如何调整？",
-            "",
-            "## 输出格式",
-            "",
-            "```json",
-            "{",
-            '  "deviation": "偏差描述",',
-            '  "root_cause": "原因分析",',
-            '  "lesson": "经验教训（一句话，将写入该员工的持久化记忆）"',
-            "}",
-            "```",
-        ])
+        parts.extend(
+            [
+                "## 评估任务",
+                "",
+                "请分析：",
+                "1. 预期与实际的偏差是什么？",
+                "2. 偏差的原因是什么？",
+                "3. 未来遇到类似决策时，应该如何调整？",
+                "",
+                "## 输出格式",
+                "",
+                "```json",
+                "{",
+                '  "deviation": "偏差描述",',
+                '  "root_cause": "原因分析",',
+                '  "lesson": "经验教训（一句话，将写入该员工的持久化记忆）"',
+                "}",
+                "```",
+            ]
+        )
 
         return "\n".join(parts)

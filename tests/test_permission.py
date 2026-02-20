@@ -308,7 +308,14 @@ class TestToolRolePresets:
     def test_profile_engineer_excludes_life_tools(self):
         """profile-engineer 应排除生活工具."""
         preset = TOOL_ROLE_PRESETS["profile-engineer"]
-        for tool in ("weather", "exchange_rate", "stock_price", "flight_info", "aqi", "express_track"):
+        for tool in (
+            "weather",
+            "exchange_rate",
+            "stock_price",
+            "flight_info",
+            "aqi",
+            "express_track",
+        ):
             assert tool not in preset, f"profile-engineer 不应包含 {tool}"
         assert "github_prs" in preset  # 应保留代码相关
 
@@ -322,7 +329,14 @@ class TestToolRolePresets:
     def test_profile_security_excludes_write_ops(self):
         """profile-security 应排除影响审计独立性的写操作."""
         preset = TOOL_ROLE_PRESETS["profile-security"]
-        for tool in ("update_agent", "delegate", "delegate_async", "delegate_chain", "route", "send_feishu_dm"):
+        for tool in (
+            "update_agent",
+            "delegate",
+            "delegate_async",
+            "delegate_chain",
+            "route",
+            "send_feishu_dm",
+        ):
             assert tool not in preset
 
     def test_all_profiles_subset_of_base(self):

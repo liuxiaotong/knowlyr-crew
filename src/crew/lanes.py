@@ -24,7 +24,9 @@ except ImportError:  # pragma: no cover - non-Windows
 class LaneLock:
     """基于文件锁的 Lane."""
 
-    def __init__(self, lane_name: str, root: Path | None = None, *, project_dir: Path | None = None):
+    def __init__(
+        self, lane_name: str, root: Path | None = None, *, project_dir: Path | None = None
+    ):
         sanitized = lane_name.replace("/", "_").replace(":", "_")
         base = root if root is not None else resolve_project_dir(project_dir) / ".crew" / "lanes"
         self.path = base / f"{sanitized}.lock"
@@ -87,7 +89,9 @@ class LaneLock:
 
 
 @contextmanager
-def lane_lock(lane_name: str, enabled: bool = True, *, project_dir: Path | None = None) -> Iterator[None]:
+def lane_lock(
+    lane_name: str, enabled: bool = True, *, project_dir: Path | None = None
+) -> Iterator[None]:
     """按 lane_name 串行化执行."""
     if not enabled:
         with nullcontext():

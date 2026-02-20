@@ -180,16 +180,18 @@ class TestMeetingLogger:
         index = meetings_dir / "index.jsonl"
 
         # 写入一条有效记录 + 一条损坏记录
-        valid = json.dumps({
-            "meeting_id": "20260214_100000",
-            "name": "valid-meeting",
-            "topic": "有效议题",
-            "participants": ["code-reviewer"],
-            "mode": "discussion",
-            "rounds": 2,
-            "output_format": "summary",
-            "started_at": "2026-02-14T10:00:00",
-        })
+        valid = json.dumps(
+            {
+                "meeting_id": "20260214_100000",
+                "name": "valid-meeting",
+                "topic": "有效议题",
+                "participants": ["code-reviewer"],
+                "mode": "discussion",
+                "rounds": 2,
+                "output_format": "summary",
+                "started_at": "2026-02-14T10:00:00",
+            }
+        )
         index.write_text(f"{{bad json\n{valid}\n", encoding="utf-8")
 
         ml = MeetingLogger(meetings_dir=meetings_dir)
@@ -203,16 +205,18 @@ class TestMeetingLogger:
         meetings_dir.mkdir(parents=True)
         index = meetings_dir / "index.jsonl"
 
-        valid = json.dumps({
-            "meeting_id": "20260214_110000",
-            "name": "target",
-            "topic": "目标",
-            "participants": ["code-reviewer"],
-            "mode": "meeting",
-            "rounds": 1,
-            "output_format": "summary",
-            "started_at": "2026-02-14T11:00:00",
-        })
+        valid = json.dumps(
+            {
+                "meeting_id": "20260214_110000",
+                "name": "target",
+                "topic": "目标",
+                "participants": ["code-reviewer"],
+                "mode": "meeting",
+                "rounds": 1,
+                "output_format": "summary",
+                "started_at": "2026-02-14T11:00:00",
+            }
+        )
         index.write_text(f"not-json\n{valid}\n", encoding="utf-8")
         (meetings_dir / "20260214_110000.md").write_text("# content")
 

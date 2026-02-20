@@ -1,6 +1,5 @@
 """轨迹录制测试 — trajectory.py."""
 
-
 from crew.trajectory import TrajectoryCollector
 
 

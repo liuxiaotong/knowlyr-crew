@@ -40,7 +40,9 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
         if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
             return JSONResponse({"error": "invalid token"}, status_code=401)
     else:
-        logger.warning("飞书 verification_token 未配置，跳过事件验证（建议设置 FEISHU_VERIFICATION_TOKEN）")
+        logger.warning(
+            "飞书 verification_token 未配置，跳过事件验证（建议设置 FEISHU_VERIFICATION_TOKEN）"
+        )
 
     # 4. 只处理消息事件
     event_type = header.get("event_type", "")
@@ -59,7 +61,8 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
 
     logger.warning(
         "飞书消息: type=%s chat=%s text=%s image_key=%s mentions=%d",
-        msg_event.msg_type, msg_event.chat_type,
+        msg_event.msg_type,
+        msg_event.chat_type,
         msg_event.text[:50] if msg_event.text else "(empty)",
         msg_event.image_key or "-",
         len(msg_event.mentions),
@@ -73,6 +76,7 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
     # 7. 后台处理（飞书要求 3s 内响应）
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
+
     asyncio.create_task(_wh._feishu_dispatch(ctx, msg_event))
 
     return JSONResponse({"message": "ok"})
@@ -130,18 +134,61 @@ async def _find_recent_image_in_chat(
 # ── 闲聊快速路径 ──
 
 # 工作关键词 — 命中任一则走完整 agent loop（带工具）
-_WORK_KEYWORDS = frozenset([
-    "数据", "报表", "分析", "查一下", "查下", "帮我查", "统计",
-    "日程", "日历", "会议", "审批", "待办", "任务",
-    "委派", "安排", "创建", "删除", "更新", "发送", "通知", "催", "让他", "让她", "转告", "转发",
-    "项目", "进度", "上线", "部署", "发布",
-    "飞书", "文档", "表格", "知识库",
-    "github", "pr", "issue", "仓库",
-    "邮件", "快递", "航班",
-    "密码", "二维码", "短链",
-    "记忆", "记住", "笔记", "写入",
-    "网站", "网页", "链接",
-])
+_WORK_KEYWORDS = frozenset(
+    [
+        "数据",
+        "报表",
+        "分析",
+        "查一下",
+        "查下",
+        "帮我查",
+        "统计",
+        "日程",
+        "日历",
+        "会议",
+        "审批",
+        "待办",
+        "任务",
+        "委派",
+        "安排",
+        "创建",
+        "删除",
+        "更新",
+        "发送",
+        "通知",
+        "催",
+        "让他",
+        "让她",
+        "转告",
+        "转发",
+        "项目",
+        "进度",
+        "上线",
+        "部署",
+        "发布",
+        "飞书",
+        "文档",
+        "表格",
+        "知识库",
+        "github",
+        "pr",
+        "issue",
+        "仓库",
+        "邮件",
+        "快递",
+        "航班",
+        "密码",
+        "二维码",
+        "短链",
+        "记忆",
+        "记住",
+        "笔记",
+        "写入",
+        "网站",
+        "网页",
+        "链接",
+    ]
+)
 
 
 def _needs_tools(text: str) -> bool:
@@ -187,6 +234,7 @@ async def _feishu_fast_reply(
 
     # 去掉 soul.md 中包含工具调用指令的段落（如"你的内心习惯"提到 read_notes/add_memory）
     import re as _re
+
     soul_text = _re.split(r"(?m)^## 你的内心习惯", soul_text)[0].rstrip()
 
     display = emp.display_name or emp.name
@@ -211,9 +259,12 @@ async def _feishu_fast_reply(
     if max_visibility == "private":
         try:
             from crew.memory import MemoryStore
+
             store = MemoryStore(project_dir=ctx.project_dir)
             memory_text = store.format_for_prompt(
-                emp.name, limit=5, max_visibility="private",
+                emp.name,
+                limit=5,
+                max_visibility="private",
             )
             if memory_text:
                 prompt += "\n\n## 你记得的事\n\n" + memory_text
@@ -223,6 +274,7 @@ async def _feishu_fast_reply(
     # 注入同事花名册（name→角色名映射，让 fast path 也认识所有同事）
     try:
         from crew.discovery import discover_employees
+
         _all = discover_employees(project_dir=ctx.project_dir)
         _roster = []
         for _e in _all.employees.values():
@@ -396,6 +448,7 @@ async def _feishu_route_dispatch(
         args={"steps_json": _json.dumps(steps, ensure_ascii=False)},
     )
     import crew.webhook as _wh
+
     asyncio.create_task(_wh._execute_task(ctx, record.task_id))
 
     # 回复确认
@@ -421,11 +474,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         discovery = discover_employees(project_dir=ctx.project_dir)
 
         # 群聊只响应 @mention，私聊可用 default_employee
-        use_default = (
-            ctx.feishu_config.default_employee
-            if msg_event.chat_type != "group"
-            else ""
-        )
+        use_default = ctx.feishu_config.default_employee if msg_event.chat_type != "group" else ""
         employee_name, task_text = resolve_employee_from_mention(
             msg_event.mentions,
             msg_event.text,
@@ -440,15 +489,22 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         _raw_lower = _raw.lower()
         _approve_action = None
         _approve_task_id = None
-        for _ap, _act in [("approve ", "approve"), ("reject ", "reject"),
-                          ("批准 ", "approve"), ("拒绝 ", "reject")]:
+        for _ap, _act in [
+            ("approve ", "approve"),
+            ("reject ", "reject"),
+            ("批准 ", "approve"),
+            ("拒绝 ", "reject"),
+        ]:
             if _raw_lower.startswith(_ap):
                 _approve_action = _act
-                _approve_task_id = _raw[len(_ap):].strip()
+                _approve_task_id = _raw[len(_ap) :].strip()
                 break
         if _approve_action and _approve_task_id:
             await _feishu_approve_dispatch(
-                ctx, msg_event, _approve_task_id, _approve_action,
+                ctx,
+                msg_event,
+                _approve_task_id,
+                _approve_action,
                 send_feishu_text=send_feishu_text,
                 send_feishu_reply=send_feishu_reply,
             )
@@ -458,14 +514,17 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         _route_match = None
         for _prefix in ("流程 ", "流程:", "route ", "route:"):
             if _raw.lower().startswith(_prefix):
-                _route_match = _raw[len(_prefix):].strip()
+                _route_match = _raw[len(_prefix) :].strip()
                 break
         if _route_match:
             parts = _route_match.split(None, 1)
             _tmpl_name = parts[0] if parts else ""
             _tmpl_task = parts[1] if len(parts) > 1 else ""
             await _feishu_route_dispatch(
-                ctx, msg_event, _tmpl_name, _tmpl_task,
+                ctx,
+                msg_event,
+                _tmpl_name,
+                _tmpl_task,
                 send_feishu_text=send_feishu_text,
                 send_feishu_reply=send_feishu_reply,
             )
@@ -489,6 +548,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if msg_event.chat_type == "group" and msg_event.sender_id:
             try:
                 from crew.feishu import get_user_name
+
                 sender_name = await get_user_name(ctx.feishu_token_mgr, msg_event.sender_id)
             except Exception:
                 pass
@@ -497,11 +557,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         image_key = msg_event.image_key
         image_message_id = msg_event.message_id
 
-        if (
-            not image_key
-            and msg_event.chat_type == "group"
-            and msg_event.msg_type == "text"
-        ):
+        if not image_key and msg_event.chat_type == "group" and msg_event.msg_type == "text":
             try:
                 found = await _find_recent_image_in_chat(
                     ctx.feishu_token_mgr,
@@ -517,7 +573,8 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if image_key:
             try:
                 image_data = await download_feishu_image(
-                    ctx.feishu_token_mgr, image_key,
+                    ctx.feishu_token_mgr,
+                    image_key,
                     message_id=image_message_id,
                 )
             except Exception as exc:
@@ -538,12 +595,10 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 执行员工 — 飞书实时聊天
         from crew.tool_schema import AGENT_TOOLS
 
-        has_tools = any(
-            t in AGENT_TOOLS
-            for t in (emp.tools or [])
-        ) if emp else False
+        has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
 
         from datetime import datetime as _dt
+
         _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         _now = _dt.now()
         _date_header = f"今天是 {_now.strftime('%Y-%m-%d')}（{_WEEKDAY_CN[_now.weekday()]}）。\n"
@@ -554,8 +609,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if has_tools:
             if _is_group:
                 chat_context = (
-                    _date_header
-                    + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
+                    _date_header + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
                     "注意区分群里不同的人，不要把所有人都当成 Kai。\n"
                     "像平时一样自然回复。"
                     "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
@@ -563,8 +617,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 )
             else:
                 chat_context = (
-                    _date_header
-                    + "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
+                    _date_header + "你正在飞书上和 Kai 聊天。像平时一样自然回复。"
                     "需要数据就调工具查，拿到数据用自己的话说，别搬 JSON。"
                     "如果 Kai 在追问上一个话题，直接接着聊，不用重新查。"
                     "只陈述工具返回的事实，没查过的事不要说，不要主动编造任何信息。"
@@ -572,16 +625,14 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if not has_tools:
             if _is_group:
                 chat_context = (
-                    _date_header
-                    + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
+                    _date_header + f"你在飞书群聊里。当前和你说话的人是{_chat_partner}，不是 Kai。"
                     "注意区分群里不同的人，不要把所有人都当成 Kai。\n"
                     "你现在没有任何业务数据。"
                     "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
                 )
             else:
                 chat_context = (
-                    _date_header
-                    + "这是飞书实时聊天。你现在没有任何业务数据。"
+                    _date_header + "这是飞书实时聊天。你现在没有任何业务数据。"
                     "你不知道：今天的会议安排、项目进度、客户状态、合同情况、同事的工作产出、任何具体数字。"
                     "Kai 问这些就说「这个我得看看今天的数据才能说」。"
                     "你可以聊：你的职能介绍、帮他想问题、帮他起草文字。"
@@ -592,23 +643,23 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         message_history = None
         if ctx.feishu_chat_store:
             history_entries = ctx.feishu_chat_store.get_recent(
-                msg_event.chat_id, limit=_history_limit,
+                msg_event.chat_id,
+                limit=_history_limit,
             )
             if history_entries:
                 message_history = [
-                    {"role": e["role"], "content": e["content"]}
-                    for e in history_entries
+                    {"role": e["role"], "content": e["content"]} for e in history_entries
                 ]
 
         if not has_tools and message_history:
             history_text = ctx.feishu_chat_store.format_for_prompt(
-                msg_event.chat_id, limit=_history_limit,
+                msg_event.chat_id,
+                limit=_history_limit,
             )
             if history_text:
                 chat_context += (
                     "\n\n## 最近对话记录\n\n"
-                    "以下是你和 Kai 最近的对话，用来保持上下文连贯。\n\n"
-                    + history_text
+                    "以下是你和 Kai 最近的对话，用来保持上下文连贯。\n\n" + history_text
                 )
             message_history = None
 
@@ -622,6 +673,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         user_msg: str | list[dict[str, Any]] = task_text
         if image_data is not None:
             import base64 as _b64
+
             img_bytes, media_type = image_data
             b64 = _b64.b64encode(img_bytes).decode()
             user_msg = [
@@ -633,6 +685,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
         # 省 ~80K tokens / $0.07 per message
         import time as _time
+
         _t0 = _time.monotonic()
 
         use_fast_path = (
@@ -646,7 +699,10 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if use_fast_path:
             try:
                 result = await _feishu_fast_reply(
-                    ctx, emp, task_text, message_history,
+                    ctx,
+                    emp,
+                    task_text,
+                    message_history,
                     max_visibility=_visibility,
                     sender_name=sender_name or "Kai",
                 )
@@ -656,8 +712,12 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if not use_fast_path:
             # 通过 webhook 模块查找，确保 mock patch 生效
             import crew.webhook as _wh
+
             result = await _wh._execute_employee(
-                ctx, employee_name, args, model=None,
+                ctx,
+                employee_name,
+                args,
+                model=None,
                 user_message=user_msg,
                 message_history=message_history,
             )
@@ -669,14 +729,20 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         _out_tok = result.get("output_tokens", 0) if isinstance(result, dict) else 0
         logger.warning(
             "飞书回复 [%s] %.1fs model=%s in=%d out=%d msg=%s",
-            _path_label, _elapsed, _model_used, _in_tok, _out_tok,
+            _path_label,
+            _elapsed,
+            _model_used,
+            _in_tok,
+            _out_tok,
             task_text[:40],
         )
 
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)
         if ctx.feishu_chat_store:
-            ctx.feishu_chat_store.append(msg_event.chat_id, "user", task_text, sender_name=sender_name)
+            ctx.feishu_chat_store.append(
+                msg_event.chat_id, "user", task_text, sender_name=sender_name
+            )
             ctx.feishu_chat_store.append(msg_event.chat_id, "assistant", output_text)
 
         # 沉淀长期记忆

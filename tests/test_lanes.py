@@ -39,8 +39,7 @@ class TestLanes:
         mock_fh.write.side_effect = OSError("disk full")
         mock_fh.fileno.return_value = 3
 
-        with patch("builtins.open", return_value=mock_fh), \
-             patch("crew.lanes.fcntl", None):
+        with patch("builtins.open", return_value=mock_fh), patch("crew.lanes.fcntl", None):
             try:
                 lane.acquire()
             except OSError:

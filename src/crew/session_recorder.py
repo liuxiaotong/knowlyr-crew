@@ -18,7 +18,11 @@ class SessionRecorder:
     """记录单次 CLI 调用或流水线执行的完整轨迹."""
 
     def __init__(self, session_dir: Path | None = None, *, project_dir: Path | None = None):
-        self.session_dir = session_dir if session_dir is not None else resolve_project_dir(project_dir) / ".crew" / "sessions"
+        self.session_dir = (
+            session_dir
+            if session_dir is not None
+            else resolve_project_dir(project_dir) / ".crew" / "sessions"
+        )
 
     def _ensure_dir(self) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)

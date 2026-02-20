@@ -7,6 +7,7 @@ class CrewError(Exception):
 
 class EmployeeNotFoundError(CrewError):
     """Employee not found by name or trigger."""
+
     def __init__(self, name: str):
         self.name = name
         super().__init__(f"未找到员工: {name}")
@@ -14,6 +15,7 @@ class EmployeeNotFoundError(CrewError):
 
 class EmployeeValidationError(CrewError):
     """Employee definition failed validation."""
+
     def __init__(self, name: str, errors: list[str]):
         self.name = name
         self.errors = errors
@@ -22,6 +24,7 @@ class EmployeeValidationError(CrewError):
 
 class PipelineNotFoundError(CrewError):
     """Pipeline not found."""
+
     def __init__(self, name: str):
         self.name = name
         super().__init__(f"未找到 pipeline: {name}")

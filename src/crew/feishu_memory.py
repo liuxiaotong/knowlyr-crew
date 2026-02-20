@@ -98,7 +98,9 @@ def capture_feishu_memory(
             metadata={"chat_id": chat_id, "employee": employee_name},
         )
         recorder.record_message(sid, "user", user_text, metadata={"employee": employee_name})
-        recorder.record_message(sid, "assistant", assistant_text, metadata={"employee": employee_name})
+        recorder.record_message(
+            sid, "assistant", assistant_text, metadata={"employee": employee_name}
+        )
         recorder.finish(sid)
 
         # 尝试沉淀长期记忆

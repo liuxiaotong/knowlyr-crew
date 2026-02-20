@@ -19,7 +19,9 @@ class TestMemorySearchIndex:
 
     def test_rebuild_and_search(self):
         store = MemoryStore(memory_dir=self.memory_dir)
-        store.add("code-reviewer", category="finding", content="修复登录bug", source_session="sess1")
+        store.add(
+            "code-reviewer", category="finding", content="修复登录bug", source_session="sess1"
+        )
 
         self.session_dir.mkdir(parents=True, exist_ok=True)
         session_file = self.session_dir / "20250101-aaaa.jsonl"
@@ -37,7 +39,9 @@ class TestMemorySearchIndex:
             "content": "请审查认证流程",
             "metadata": {"employee": "code-reviewer"},
         }
-        session_file.write_text(json.dumps(start) + "\n" + json.dumps(message) + "\n", encoding="utf-8")
+        session_file.write_text(
+            json.dumps(start) + "\n" + json.dumps(message) + "\n", encoding="utf-8"
+        )
 
         index = MemorySearchIndex(
             db_path=self.db_path,

@@ -31,13 +31,11 @@ def _load_yaml(emp_dir: Path) -> dict:
 
 # ── 收集员工目录 ──
 
+
 def _collect_employee_dirs(base: Path) -> list[Path]:
     if not base.is_dir():
         return []
-    return sorted([
-        d for d in base.iterdir()
-        if d.is_dir() and (d / "employee.yaml").exists()
-    ])
+    return sorted([d for d in base.iterdir() if d.is_dir() and (d / "employee.yaml").exists()])
 
 
 FIXTURE_DIRS = _collect_employee_dirs(FIXTURES)
@@ -48,6 +46,7 @@ PRIVATE_DIRS = _collect_employee_dirs(PRIVATE_DIR)
 # ====================================================================
 # Part 1: CI 必跑 — 用 fixture 数据验证核心解析逻辑
 # ====================================================================
+
 
 class TestEmployeeValidation:
     """核心验证逻辑 — 始终在 CI 中运行."""
@@ -68,9 +67,7 @@ class TestEmployeeValidation:
 
         emp_dir = tmp_path / "test-worker"
         emp_dir.mkdir()
-        (emp_dir / "employee.yaml").write_text(
-            "name: test-worker\ndescription: 模板去重测试\n"
-        )
+        (emp_dir / "employee.yaml").write_text("name: test-worker\ndescription: 模板去重测试\n")
         (emp_dir / "prompt.md").write_text("# 测试员工\n\n你是测试员工。")
         (emp_dir / "workflows").mkdir()
         (emp_dir / "adaptors").mkdir()
@@ -122,9 +119,7 @@ class TestPrivateTemplateDuplication:
         for tpl_name, tpl_content in self.TEMPLATES.items():
             fingerprint = tpl_content[:100]
             count = emp.body.count(fingerprint)
-            assert count <= 1, (
-                f"{emp.name} 的 body 中模板 {tpl_name} 出现了 {count} 次"
-            )
+            assert count <= 1, f"{emp.name} 的 body 中模板 {tpl_name} 出现了 {count} 次"
 
 
 @_skip_no_private
@@ -150,12 +145,14 @@ class TestPrivateProfileAlignment:
     @classmethod
     def setup_class(cls):
         from crew.organization import invalidate_cache, load_organization
+
         invalidate_cache()
         cls.org = load_organization(project_dir=PROJECT_DIR)
 
     @classmethod
     def teardown_class(cls):
         from crew.organization import invalidate_cache
+
         invalidate_cache()
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
@@ -170,9 +167,7 @@ class TestPrivateProfileAlignment:
         assert expected, f"团队 {team_id} 没有对应的 profile 映射"
         perm = config.get("permissions", {})
         roles = perm.get("roles", [])
-        assert expected in roles, (
-            f"{emp_name} (团队 {team_id}) 期望 {expected}，实际 roles={roles}"
-        )
+        assert expected in roles, f"{emp_name} (团队 {team_id}) 期望 {expected}，实际 roles={roles}"
 
 
 @_skip_no_private
@@ -182,6 +177,7 @@ class TestPrivateOrganization:
     @classmethod
     def setup_class(cls):
         from crew.organization import invalidate_cache, load_organization
+
         invalidate_cache()
         cls.org = load_organization(project_dir=PROJECT_DIR)
         cls.emp_names = set()
@@ -192,16 +188,14 @@ class TestPrivateOrganization:
     @classmethod
     def teardown_class(cls):
         from crew.organization import invalidate_cache
+
         invalidate_cache()
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
     def test_in_exactly_one_team(self, emp_dir):
         config = _load_yaml(emp_dir)
         emp_name = config["name"]
-        teams_found = [
-            tid for tid, team in self.org.teams.items()
-            if emp_name in team.members
-        ]
+        teams_found = [tid for tid, team in self.org.teams.items() if emp_name in team.members]
         assert len(teams_found) == 1, (
             f"{emp_name}: 应属于 1 个团队，实际属于 {len(teams_found)} 个: {teams_found}"
         )
@@ -211,8 +205,7 @@ class TestPrivateOrganization:
         config = _load_yaml(emp_dir)
         emp_name = config["name"]
         auths_found = [
-            level for level, auth in self.org.authority.items()
-            if emp_name in auth.members
+            level for level, auth in self.org.authority.items() if emp_name in auth.members
         ]
         assert len(auths_found) == 1, (
             f"{emp_name}: 应有 1 个权限级别，实际有 {len(auths_found)}: {auths_found}"
@@ -265,9 +258,7 @@ class TestPrivateFileIntegrity:
     def test_required_files_exist(self, emp_dir):
         """每个员工必须有 employee.yaml、prompt.md、soul.md."""
         for fname in self.REQUIRED_FILES:
-            assert (emp_dir / fname).is_file(), (
-                f"{emp_dir.name} 缺少必要文件: {fname}"
-            )
+            assert (emp_dir / fname).is_file(), f"{emp_dir.name} 缺少必要文件: {fname}"
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
     def test_avatar_exists(self, emp_dir):
@@ -279,9 +270,7 @@ class TestPrivateFileIntegrity:
     def test_no_stale_backup_files(self, emp_dir):
         """不应有遗留的 .bak 文件."""
         bak_files = list(emp_dir.glob("*.bak"))
-        assert not bak_files, (
-            f"{emp_dir.name} 有遗留备份文件: {[f.name for f in bak_files]}"
-        )
+        assert not bak_files, f"{emp_dir.name} 有遗留备份文件: {[f.name for f in bak_files]}"
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
     def test_prompt_not_empty(self, emp_dir):
@@ -289,9 +278,7 @@ class TestPrivateFileIntegrity:
         prompt = emp_dir / "prompt.md"
         if prompt.is_file():
             content = prompt.read_text("utf-8").strip()
-            assert len(content) > 50, (
-                f"{emp_dir.name} 的 prompt.md 内容过短 ({len(content)} 字符)"
-            )
+            assert len(content) > 50, f"{emp_dir.name} 的 prompt.md 内容过短 ({len(content)} 字符)"
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
     def test_soul_not_empty(self, emp_dir):
@@ -299,6 +286,4 @@ class TestPrivateFileIntegrity:
         soul = emp_dir / "soul.md"
         if soul.is_file():
             content = soul.read_text("utf-8").strip()
-            assert len(content) > 20, (
-                f"{emp_dir.name} 的 soul.md 内容过短 ({len(content)} 字符)"
-            )
+            assert len(content) > 20, f"{emp_dir.name} 的 soul.md 内容过短 ({len(content)} 字符)"

@@ -58,6 +58,7 @@ def _scan_directory(
             if layer in ("private",):
                 try:
                     from crew.versioning import check_and_bump
+
                     check_and_bump(item)
                 except Exception as e:
                     logger.debug("版本检查失败 %s: %s", item.name, e)
@@ -157,14 +158,18 @@ def _merge_employee(
     """合并单个员工到结果集（高层覆盖低层）."""
     if emp.name in employees:
         existing = employees[emp.name]
-        conflicts.append({
-            "name": emp.name,
-            "winner": f"{layer_name}:{emp.source_path}",
-            "loser": f"{existing.source_layer}:{existing.source_path}",
-        })
+        conflicts.append(
+            {
+                "name": emp.name,
+                "winner": f"{layer_name}:{emp.source_path}",
+                "loser": f"{existing.source_layer}:{existing.source_path}",
+            }
+        )
         logger.info(
             "员工 '%s' 被 %s 层覆盖（原: %s 层）",
-            emp.name, layer_name, existing.source_layer,
+            emp.name,
+            layer_name,
+            existing.source_layer,
         )
 
     employees[emp.name] = emp
@@ -172,12 +177,14 @@ def _merge_employee(
     for trigger in emp.triggers:
         if trigger in trigger_map and trigger_map[trigger] != emp.name:
             existing_name = trigger_map[trigger]
-            conflicts.append({
-                "type": "trigger",
-                "trigger": trigger,
-                "winner": emp.name,
-                "loser": existing_name,
-            })
+            conflicts.append(
+                {
+                    "type": "trigger",
+                    "trigger": trigger,
+                    "winner": emp.name,
+                    "loser": existing_name,
+                }
+            )
         trigger_map[trigger] = emp.name
 
 
@@ -197,6 +204,7 @@ def discover_employees(
     3. private 层: {project_dir}/private/employees/
     """
     from crew.paths import resolve_project_dir
+
     root = resolve_project_dir(project_dir)
 
     ttl = cache_ttl if cache_ttl is not None else _CACHE_TTL

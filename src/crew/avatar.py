@@ -35,6 +35,7 @@ def _get_pillow():
     """延迟导入 Pillow，未安装时返回 None."""
     try:
         from PIL import Image
+
         return Image
     except ImportError:
         return None
@@ -93,17 +94,23 @@ def generate_avatar(
     )
 
     # 提交异步任务
-    payload = json.dumps({
-        "model": DASHSCOPE_MODEL,
-        "input": {"prompt": prompt},
-        "parameters": {"size": DASHSCOPE_SIZE, "n": 1},
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": DASHSCOPE_MODEL,
+            "input": {"prompt": prompt},
+            "parameters": {"size": DASHSCOPE_SIZE, "n": 1},
+        }
+    ).encode()
 
-    req = urllib.request.Request(DASHSCOPE_URL, data=payload, headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "X-DashScope-Async": "enable",
-    })
+    req = urllib.request.Request(
+        DASHSCOPE_URL,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-Async": "enable",
+        },
+    )
 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -157,7 +164,9 @@ def generate_avatar(
                     logger.error("下载的图片文件为空")
                     output_path.unlink(missing_ok=True)
                     return None
-                logger.info("头像已下载: %s (%d KB)", output_path, output_path.stat().st_size // 1024)
+                logger.info(
+                    "头像已下载: %s (%d KB)", output_path, output_path.stat().st_size // 1024
+                )
                 return output_path
             except Exception as e:
                 logger.error("下载图片失败: %s", e)

@@ -83,13 +83,22 @@ def enrich_result_with_cost(result: dict[str, Any]) -> dict[str, Any]:
     base_url = result.get("base_url")
     if input_tokens or output_tokens:
         result["cost_usd"] = round(
-            estimate_cost(model, input_tokens, output_tokens, base_url=base_url), 6,
+            estimate_cost(model, input_tokens, output_tokens, base_url=base_url),
+            6,
         )
     return result
 
 
 # 触发源分类常量
-WORK_TRIGGERS = {"github", "openclaw", "generic", "direct", "cron", "delegate_async", "delegate_chain"}
+WORK_TRIGGERS = {
+    "github",
+    "openclaw",
+    "generic",
+    "direct",
+    "cron",
+    "delegate_async",
+    "delegate_chain",
+}
 CHAT_TRIGGERS = {"feishu"}
 
 
@@ -139,7 +148,10 @@ def query_cost_summary(
         # 按员工汇总
         if emp_name not in by_employee:
             by_employee[emp_name] = {
-                "cost_usd": 0.0, "tasks": 0, "input_tokens": 0, "output_tokens": 0,
+                "cost_usd": 0.0,
+                "tasks": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
                 "cost_by_channel": {"claude": 0.0, "kimi": 0.0, "other": 0.0},
             }
         by_employee[emp_name]["cost_usd"] += cost
@@ -187,8 +199,7 @@ def query_cost_summary(
             for k, v in sorted(by_employee.items(), key=lambda x: -x[1]["cost_usd"])
         },
         "by_model": {
-            k: _round_dict(v)
-            for k, v in sorted(by_model.items(), key=lambda x: -x[1]["cost_usd"])
+            k: _round_dict(v) for k, v in sorted(by_model.items(), key=lambda x: -x[1]["cost_usd"])
         },
         "by_trigger": {
             k: _round_dict(v)
@@ -223,8 +234,12 @@ def calibrate_employee_costs(
         kimi_estimated += cbc.get("kimi", 0)
 
     # 计算校准系数
-    claude_factor = (aiberm_real_usd / claude_estimated) if (aiberm_real_usd and claude_estimated > 0) else None
-    kimi_factor = (moonshot_real_usd / kimi_estimated) if (moonshot_real_usd and kimi_estimated > 0) else None
+    claude_factor = (
+        (aiberm_real_usd / claude_estimated) if (aiberm_real_usd and claude_estimated > 0) else None
+    )
+    kimi_factor = (
+        (moonshot_real_usd / kimi_estimated) if (moonshot_real_usd and kimi_estimated > 0) else None
+    )
 
     calibrated_total = 0.0
     for emp_data in by_employee.values():
@@ -253,7 +268,9 @@ def calibrate_employee_costs(
 
     # 按校准后成本重新排序
     cost_summary["by_employee"] = dict(
-        sorted(by_employee.items(), key=lambda x: -(x[1].get("calibrated_cost_usd", x[1]["cost_usd"])))
+        sorted(
+            by_employee.items(), key=lambda x: -(x[1].get("calibrated_cost_usd", x[1]["cost_usd"]))
+        )
     )
 
     return cost_summary
@@ -285,12 +302,16 @@ async def fetch_aiberm_billing(
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # 7 日消耗
-            resp = await client.get(url, params={"start_date": start_str, "end_date": end_str}, headers=headers)
+            resp = await client.get(
+                url, params={"start_date": start_str, "end_date": end_str}, headers=headers
+            )
             resp.raise_for_status()
             total_cents = resp.json().get("total_usage", 0)
 
             # 累计消耗（从 2024-01-01 至今）
-            resp2 = await client.get(url, params={"start_date": "2024-01-01", "end_date": end_str}, headers=headers)
+            resp2 = await client.get(
+                url, params={"start_date": "2024-01-01", "end_date": end_str}, headers=headers
+            )
             resp2.raise_for_status()
             cumulative_cents = resp2.json().get("total_usage", 0)
 

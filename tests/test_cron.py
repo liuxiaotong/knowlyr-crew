@@ -79,14 +79,16 @@ class TestCronConfig:
         assert config.schedules == []
 
     def test_with_schedules(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="daily",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="daily",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+            ]
+        )
         assert len(config.schedules) == 1
 
 
@@ -159,58 +161,72 @@ class TestValidateCronConfig:
     """校验 cron 配置."""
 
     def test_valid(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="test",
-                cron="0 9 * * *",
-                target_type="employee",
-                target_name="code-reviewer",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="test",
+                    cron="0 9 * * *",
+                    target_type="employee",
+                    target_name="code-reviewer",
+                ),
+            ]
+        )
         errors = validate_cron_config(config)
         assert errors == []
 
     def test_invalid_cron_expression(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="bad-cron",
-                cron="invalid",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="bad-cron",
+                    cron="invalid",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+            ]
+        )
         errors = validate_cron_config(config)
         assert any("无效的 cron 表达式" in e for e in errors)
 
     def test_duplicate_name(self):
-        config = CronConfig(schedules=[
-            CronSchedule(name="dup", cron="0 9 * * *", target_type="pipeline", target_name="full-review"),
-            CronSchedule(name="dup", cron="0 10 * * *", target_type="pipeline", target_name="full-review"),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="dup", cron="0 9 * * *", target_type="pipeline", target_name="full-review"
+                ),
+                CronSchedule(
+                    name="dup", cron="0 10 * * *", target_type="pipeline", target_name="full-review"
+                ),
+            ]
+        )
         errors = validate_cron_config(config)
         assert any("重复" in e for e in errors)
 
     def test_unknown_pipeline(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="test",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="nonexistent-pipeline",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="test",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="nonexistent-pipeline",
+                ),
+            ]
+        )
         errors = validate_cron_config(config)
         assert any("未找到 pipeline" in e for e in errors)
 
     def test_unknown_employee(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="test",
-                cron="0 9 * * *",
-                target_type="employee",
-                target_name="nonexistent-employee",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="test",
+                    cron="0 9 * * *",
+                    target_type="employee",
+                    target_name="nonexistent-employee",
+                ),
+            ]
+        )
         errors = validate_cron_config(config)
         assert any("未找到员工" in e for e in errors)
 
@@ -242,14 +258,16 @@ class TestCronScheduler:
 
     @pytest.mark.asyncio
     async def test_start_stop_with_schedule(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="test",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="test",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+            ]
+        )
         mock_fn = AsyncMock()
         scheduler = CronScheduler(config=config, execute_fn=mock_fn)
         await scheduler.start()
@@ -258,20 +276,22 @@ class TestCronScheduler:
         assert scheduler.running is False
 
     def test_get_next_runs(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="daily",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-            CronSchedule(
-                name="weekly",
-                cron="0 0 * * 0",
-                target_type="employee",
-                target_name="doc-writer",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="daily",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+                CronSchedule(
+                    name="weekly",
+                    cron="0 0 * * 0",
+                    target_type="employee",
+                    target_name="doc-writer",
+                ),
+            ]
+        )
         scheduler = CronScheduler(config=config, execute_fn=AsyncMock())
         runs = scheduler.get_next_runs()
         assert len(runs) == 2
@@ -280,14 +300,16 @@ class TestCronScheduler:
         assert runs[1]["name"] == "weekly"
 
     def test_get_next_runs_invalid_cron(self):
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="bad",
-                cron="invalid",
-                target_type="pipeline",
-                target_name="test",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="bad",
+                    cron="invalid",
+                    target_type="pipeline",
+                    target_name="test",
+                ),
+            ]
+        )
         scheduler = CronScheduler(config=config, execute_fn=AsyncMock())
         runs = scheduler.get_next_runs()
         assert len(runs) == 1
@@ -296,14 +318,16 @@ class TestCronScheduler:
     @pytest.mark.asyncio
     async def test_schedule_triggers_execute(self):
         """验证 cron 到期时调用 execute_fn."""
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="fast",
-                cron="* * * * *",  # 每分钟
-                target_type="pipeline",
-                target_name="test",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="fast",
+                    cron="* * * * *",  # 每分钟
+                    target_type="pipeline",
+                    target_name="test",
+                ),
+            ]
+        )
         call_count = 0
         triggered = asyncio.Event()
 
@@ -350,14 +374,16 @@ class TestCronStatusEndpoint:
         assert data["schedules"] == []
 
     def test_with_cron(self):
-        cron_config = CronConfig(schedules=[
-            CronSchedule(
-                name="daily",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-        ])
+        cron_config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="daily",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+            ]
+        )
         app = create_webhook_app(
             project_dir=Path("/tmp/test"),
             token=TOKEN,
@@ -391,14 +417,17 @@ class TestCronMisfire:
     async def test_misfire_logs_warning(self, caplog):
         """delay < -60 时记录 warning."""
         import logging
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="misfire-test",
-                cron="* * * * *",
-                target_type="pipeline",
-                target_name="test",
-            ),
-        ])
+
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="misfire-test",
+                    cron="* * * * *",
+                    target_type="pipeline",
+                    target_name="test",
+                ),
+            ]
+        )
         mock_fn = AsyncMock()
         scheduler = CronScheduler(config=config, execute_fn=mock_fn)
 
@@ -413,8 +442,10 @@ class TestCronMisfire:
 
         scheduler._execute_fn = _count
 
-        with caplog.at_level(logging.WARNING), \
-             patch("crew.cron_scheduler.time.time", return_value=9999999999.0):
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("crew.cron_scheduler.time.time", return_value=9999999999.0),
+        ):
             await scheduler.start()
             try:
                 await asyncio.wait_for(triggered.wait(), timeout=2.0)
@@ -428,14 +459,16 @@ class TestCronMisfire:
     @pytest.mark.asyncio
     async def test_exception_backoff(self):
         """连续异常后 sleep 时间递增."""
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="error-test",
-                cron="* * * * *",
-                target_type="pipeline",
-                target_name="test",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="error-test",
+                    cron="* * * * *",
+                    target_type="pipeline",
+                    target_name="test",
+                ),
+            ]
+        )
 
         call_count = 0
 
@@ -457,8 +490,10 @@ class TestCronMisfire:
 
         scheduler = CronScheduler(config=config, execute_fn=_fail)
 
-        with patch("crew.cron_scheduler.time.time", return_value=9999999999.0), \
-             patch("crew.cron_scheduler.asyncio.sleep", side_effect=_mock_sleep):
+        with (
+            patch("crew.cron_scheduler.time.time", return_value=9999999999.0),
+            patch("crew.cron_scheduler.asyncio.sleep", side_effect=_mock_sleep),
+        ):
             await scheduler.start()
             try:
                 await asyncio.sleep(1)
@@ -473,14 +508,16 @@ class TestCronMisfire:
 
     def test_missed_count_in_status(self):
         """get_next_runs 包含 missed_count."""
-        config = CronConfig(schedules=[
-            CronSchedule(
-                name="test",
-                cron="0 9 * * *",
-                target_type="pipeline",
-                target_name="full-review",
-            ),
-        ])
+        config = CronConfig(
+            schedules=[
+                CronSchedule(
+                    name="test",
+                    cron="0 9 * * *",
+                    target_type="pipeline",
+                    target_name="full-review",
+                ),
+            ]
+        )
         scheduler = CronScheduler(config=config, execute_fn=AsyncMock())
         scheduler._missed_counts["test"] = 5
         runs = scheduler.get_next_runs()

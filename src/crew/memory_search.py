@@ -130,7 +130,9 @@ class SemanticMemoryIndex:
         conn.commit()
         return cursor.rowcount > 0
 
-    def search(self, employee: str, query: str, limit: int = 10, timeout: float = 10.0) -> list[tuple[str, str, float]]:
+    def search(
+        self, employee: str, query: str, limit: int = 10, timeout: float = 10.0
+    ) -> list[tuple[str, str, float]]:
         """混合搜索：向量相似度 + 关键词匹配，加权合并.
 
         Args:
@@ -299,6 +301,7 @@ class _OpenAIEmbedder(_Embedder):
 
     def __init__(self):
         import openai
+
         self._client = openai.OpenAI()
 
     def embed(self, text: str) -> list[float] | None:
@@ -321,6 +324,7 @@ class _GeminiEmbedder(_Embedder):
 
     def __init__(self):
         import google.generativeai as genai
+
         genai.configure()
 
     def embed(self, text: str) -> list[float] | None:

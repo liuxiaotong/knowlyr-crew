@@ -42,7 +42,9 @@ class MemoryEntry(BaseModel):
     # Enhancement 1: 衰减 + 容量
     ttl_days: int = Field(default=0, description="生存期天数，0=永不过期")
     # 重要性与访问追踪
-    importance: int = Field(default=3, description="重要性 1-5（5=最高，如决策/待办；1=最低，如闲聊背景）")
+    importance: int = Field(
+        default=3, description="重要性 1-5（5=最高，如决策/待办；1=最低，如闲聊背景）"
+    )
     last_accessed: str = Field(default="", description="最后被加载到上下文的时间（ISO 格式）")
     # Enhancement 3: 跨员工共享
     tags: list[str] = Field(default_factory=list, description="语义标签")
@@ -74,7 +76,11 @@ class MemoryStore:
         project_dir: Path | None = None,
         config: MemoryConfig | None = None,
     ):
-        self.memory_dir = memory_dir if memory_dir is not None else resolve_project_dir(project_dir) / ".crew" / "memory"
+        self.memory_dir = (
+            memory_dir
+            if memory_dir is not None
+            else resolve_project_dir(project_dir) / ".crew" / "memory"
+        )
         self.config = config or self._load_config()
         self._semantic_index = None  # lazy
 
@@ -94,6 +100,7 @@ class MemoryStore:
         if self._semantic_index is None:
             try:
                 from crew.memory_search import SemanticMemoryIndex
+
                 self._semantic_index = SemanticMemoryIndex(self.memory_dir)
             except Exception as e:
                 logger.debug("语义索引初始化失败: %s", e)
@@ -522,7 +529,10 @@ class MemoryStore:
 
         # 跨员工共享记忆（标签匹配）
         shared_text = self._get_shared_memories(
-            employee, query=query, employee_tags=employee_tags, limit=max(3, limit // 3),
+            employee,
+            query=query,
+            employee_tags=employee_tags,
+            limit=max(3, limit // 3),
         )
         if shared_text:
             parts.append(f"\n### 团队共享经验\n\n{shared_text}")
@@ -530,15 +540,20 @@ class MemoryStore:
         # 同团队成员的公开记忆（不要求 shared=True）
         if team_members:
             team_entries = self.query_team(
-                team_members, exclude_employee=employee, limit=max(3, limit // 3),
+                team_members,
+                exclude_employee=employee,
+                limit=max(3, limit // 3),
             )
             if team_entries:
                 lines = []
                 for entry in team_entries:
-                    cat = {"decision": "决策", "estimate": "估算",
-                           "finding": "发现", "correction": "纠正",
-                           "pattern": "模式"}.get(
-                        entry.category, entry.category)
+                    cat = {
+                        "decision": "决策",
+                        "estimate": "估算",
+                        "finding": "发现",
+                        "correction": "纠正",
+                        "pattern": "模式",
+                    }.get(entry.category, entry.category)
                     conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
                     lines.append(f"- [{cat}]{conf} ({entry.employee}) {entry.content}")
                 parts.append("\n### 队友近况\n\n" + "\n".join(lines))
@@ -561,7 +576,11 @@ class MemoryStore:
             # proxied 记忆来自代理推理，不是员工本人的真实工作
             proxied = " ⚠️模拟讨论记录，非实际工作" if "proxied" in entry.tags else ""
             # pattern 额外显示触发条件
-            trigger = f" [触发: {entry.trigger_condition}]" if entry.category == "pattern" and entry.trigger_condition else ""
+            trigger = (
+                f" [触发: {entry.trigger_condition}]"
+                if entry.category == "pattern" and entry.trigger_condition
+                else ""
+            )
             lines.append(f"- [{category_label}]{conf}{proxied}{trigger} {entry.content}")
         return "\n".join(lines)
 
@@ -592,8 +611,14 @@ class MemoryStore:
                 "pattern": "模式",
             }.get(entry.category, entry.category)
             conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
-            trigger = f" [触发: {entry.trigger_condition}]" if entry.category == "pattern" and entry.trigger_condition else ""
-            lines.append(f"- [{category_label}]{conf}{tag_str}{trigger} ({entry.employee}) {entry.content}")
+            trigger = (
+                f" [触发: {entry.trigger_condition}]"
+                if entry.category == "pattern" and entry.trigger_condition
+                else ""
+            )
+            lines.append(
+                f"- [{category_label}]{conf}{tag_str}{trigger} ({entry.employee}) {entry.content}"
+            )
         return "\n".join(lines)
 
     def query_shared(
@@ -758,7 +783,8 @@ class MemoryStore:
 
         # 排序：verified_count 降序 → 时间降序
         all_patterns.sort(
-            key=lambda e: (e.verified_count, e.created_at), reverse=True,
+            key=lambda e: (e.verified_count, e.created_at),
+            reverse=True,
         )
         return all_patterns[:limit]
 
@@ -800,6 +826,4 @@ class MemoryStore:
         """列出有记忆的员工."""
         if not self.memory_dir.is_dir():
             return []
-        return sorted(
-            f.stem for f in self.memory_dir.glob("*.jsonl")
-        )
+        return sorted(f.stem for f in self.memory_dir.glob("*.jsonl"))

@@ -82,9 +82,7 @@ class TestGenerateAvatar:
     def test_success(self, mock_key, mock_urlopen, mock_retrieve, tmp_path):
         # Submit task response
         submit_resp = MagicMock()
-        submit_resp.read.return_value = json.dumps(
-            {"output": {"task_id": "task-123"}}
-        ).encode()
+        submit_resp.read.return_value = json.dumps({"output": {"task_id": "task-123"}}).encode()
         submit_resp.__enter__ = MagicMock(return_value=submit_resp)
         submit_resp.__exit__ = MagicMock(return_value=False)
 
@@ -139,9 +137,7 @@ class TestGenerateAvatar:
     @patch("crew.avatar._get_api_key", return_value="sk-test")
     def test_task_failed(self, mock_key, mock_urlopen):
         submit = MagicMock()
-        submit.read.return_value = json.dumps(
-            {"output": {"task_id": "t1"}}
-        ).encode()
+        submit.read.return_value = json.dumps({"output": {"task_id": "t1"}}).encode()
         submit.__enter__ = MagicMock(return_value=submit)
         submit.__exit__ = MagicMock(return_value=False)
 
@@ -163,16 +159,12 @@ class TestGenerateAvatar:
     @patch("crew.avatar._get_api_key", return_value="sk-test")
     def test_timeout(self, mock_key, mock_urlopen):
         submit = MagicMock()
-        submit.read.return_value = json.dumps(
-            {"output": {"task_id": "t1"}}
-        ).encode()
+        submit.read.return_value = json.dumps({"output": {"task_id": "t1"}}).encode()
         submit.__enter__ = MagicMock(return_value=submit)
         submit.__exit__ = MagicMock(return_value=False)
 
         pending = MagicMock()
-        pending.read.return_value = json.dumps(
-            {"output": {"task_status": "RUNNING"}}
-        ).encode()
+        pending.read.return_value = json.dumps({"output": {"task_status": "RUNNING"}}).encode()
         pending.__enter__ = MagicMock(return_value=pending)
         pending.__exit__ = MagicMock(return_value=False)
 

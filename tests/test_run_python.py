@@ -183,10 +183,12 @@ class TestToolRunPythonInToolSchema:
 
     def test_in_agent_tools(self):
         from crew.tool_schema import AGENT_TOOLS
+
         assert "run_python" in AGENT_TOOLS
 
     def test_in_tool_schemas(self):
         from crew.tool_schema import _TOOL_SCHEMAS
+
         assert "run_python" in _TOOL_SCHEMAS
         schema = _TOOL_SCHEMAS["run_python"]
         assert schema["name"] == "run_python"
@@ -194,8 +196,10 @@ class TestToolRunPythonInToolSchema:
 
     def test_in_handlers(self):
         from crew.webhook_tools.engineering import HANDLERS
+
         assert "run_python" in HANDLERS
 
     def test_in_dev_tools_preset(self):
         from crew.tool_schema import TOOL_ROLE_PRESETS
+
         assert "run_python" in TOOL_ROLE_PRESETS["dev-tools"]

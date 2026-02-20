@@ -147,19 +147,25 @@ class TestConstants:
 
 
 class TestGeminiProvider:
-    @pytest.mark.parametrize("model,expected", [
-        ("gemini-2.0-flash", Provider.GEMINI),
-        ("gemini-1.5-pro", Provider.GEMINI),
-    ])
+    @pytest.mark.parametrize(
+        "model,expected",
+        [
+            ("gemini-2.0-flash", Provider.GEMINI),
+            ("gemini-1.5-pro", Provider.GEMINI),
+        ],
+    )
     def test_gemini(self, model, expected):
         assert detect_provider(model) == expected
 
 
 class TestZhipuProvider:
-    @pytest.mark.parametrize("model,expected", [
-        ("glm-4-flash", Provider.ZHIPU),
-        ("glm-4", Provider.ZHIPU),
-    ])
+    @pytest.mark.parametrize(
+        "model,expected",
+        [
+            ("glm-4-flash", Provider.ZHIPU),
+            ("glm-4", Provider.ZHIPU),
+        ],
+    )
     def test_zhipu(self, model, expected):
         assert detect_provider(model) == expected
 
@@ -169,11 +175,14 @@ class TestZhipuProvider:
 
 
 class TestQwenProvider:
-    @pytest.mark.parametrize("model,expected", [
-        ("qwen-turbo", Provider.QWEN),
-        ("qwen-max", Provider.QWEN),
-        ("qwen-plus", Provider.QWEN),
-    ])
+    @pytest.mark.parametrize(
+        "model,expected",
+        [
+            ("qwen-turbo", Provider.QWEN),
+            ("qwen-max", Provider.QWEN),
+            ("qwen-plus", Provider.QWEN),
+        ],
+    )
     def test_qwen(self, model, expected):
         assert detect_provider(model) == expected
 

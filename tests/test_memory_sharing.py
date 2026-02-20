@@ -40,10 +40,8 @@ class TestQueryShared:
     def test_filter_by_tags(self, tmp_path):
         """按标签过滤共享记忆."""
         store = MemoryStore(memory_dir=tmp_path / "memory")
-        store.add("pm", "decision", "API 架构决策",
-                   tags=["architecture", "api"], shared=True)
-        store.add("pm", "decision", "安全策略",
-                   tags=["security"], shared=True)
+        store.add("pm", "decision", "API 架构决策", tags=["architecture", "api"], shared=True)
+        store.add("pm", "decision", "安全策略", tags=["security"], shared=True)
 
         # 按 architecture 标签过滤
         shared = store.query_shared(tags=["architecture"])
@@ -53,12 +51,9 @@ class TestQueryShared:
     def test_tag_any_match(self, tmp_path):
         """标签取交集（任一匹配）."""
         store = MemoryStore(memory_dir=tmp_path / "memory")
-        store.add("pm", "decision", "API 决策",
-                   tags=["api"], shared=True)
-        store.add("pm", "decision", "安全决策",
-                   tags=["security"], shared=True)
-        store.add("pm", "decision", "UI 决策",
-                   tags=["frontend"], shared=True)
+        store.add("pm", "decision", "API 决策", tags=["api"], shared=True)
+        store.add("pm", "decision", "安全决策", tags=["security"], shared=True)
+        store.add("pm", "decision", "UI 决策", tags=["frontend"], shared=True)
 
         shared = store.query_shared(tags=["api", "security"])
         assert len(shared) == 2
@@ -143,8 +138,7 @@ class TestFormatForPromptWithSharing:
     def test_includes_shared_section(self, tmp_path):
         """有共享记忆时，prompt 包含团队共享经验段落."""
         store = MemoryStore(memory_dir=tmp_path / "memory")
-        store.add("pm", "decision", "使用微服务架构",
-                   tags=["architecture"], shared=True)
+        store.add("pm", "decision", "使用微服务架构", tags=["architecture"], shared=True)
         store.add("code-reviewer", "finding", "CR 自己的经验")
 
         text = store.format_for_prompt("code-reviewer", employee_tags=["architecture"])

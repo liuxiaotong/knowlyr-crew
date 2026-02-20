@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
 
-async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None) -> str:
+async def _tool_web_search(
+    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+) -> str:
     """搜索互联网（Bing cn）."""
     import re
 
@@ -41,7 +43,9 @@ async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: _App
             if len(results) >= max_results:
                 break
             title_m = re.search(
-                r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', block.group(), re.DOTALL,
+                r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+                block.group(),
+                re.DOTALL,
             )
             snippet_m = re.search(r"<p[^>]*>(.*?)</p>", block.group(), re.DOTALL)
             if title_m:
@@ -58,9 +62,11 @@ async def _tool_web_search(args: dict, *, agent_id: int | None = None, ctx: _App
         return f"搜索失败: {e}"
 
 
-
 async def _tool_weather(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查天气（国内城市）."""
     import httpx
@@ -112,9 +118,11 @@ async def _tool_weather(
         return f"天气查询失败: {e}"
 
 
-
 async def _tool_exchange_rate(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查汇率."""
     import httpx
@@ -144,9 +152,11 @@ async def _tool_exchange_rate(
         return f"汇率查询失败: {e}"
 
 
-
 async def _tool_stock_price(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查股价（A股/美股）."""
     import re
@@ -202,7 +212,6 @@ async def _tool_stock_price(
         return f"股价查询失败: {e}"
 
 
-
 def _notion_blocks_to_text(blocks: list[dict]) -> str:
     """将 Notion blocks 转为纯文本."""
     parts = []
@@ -223,9 +232,11 @@ def _notion_blocks_to_text(blocks: list[dict]) -> str:
     return "\n".join(parts)
 
 
-
 async def _tool_notion_search(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """搜索 Notion 页面."""
     import httpx
@@ -270,9 +281,11 @@ async def _tool_notion_search(
     return "\n---\n".join(lines)
 
 
-
 async def _tool_notion_read(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取 Notion 页面内容."""
     import httpx
@@ -317,9 +330,11 @@ async def _tool_notion_read(
     return text
 
 
-
 async def _tool_notion_create(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在 Notion 创建新页面."""
     import httpx
@@ -336,11 +351,15 @@ async def _tool_notion_create(
     children = []
     for para in content.split("\n\n")[:100]:
         if para.strip():
-            children.append({
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {"rich_text": [{"type": "text", "text": {"content": para.strip()}}]},
-            })
+            children.append(
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{"type": "text", "text": {"content": para.strip()}}]
+                    },
+                }
+            )
 
     headers = {
         "Authorization": f"Bearer {_NOTION_API_KEY}",
@@ -367,9 +386,11 @@ async def _tool_notion_create(
 # ── 信息采集工具 ──
 
 
-
 async def _tool_read_url(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取网页正文."""
     import ipaddress
@@ -429,9 +450,11 @@ async def _tool_read_url(
     return text
 
 
-
 async def _tool_rss_read(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取 RSS/Atom 订阅源."""
     import re
@@ -464,10 +487,18 @@ async def _tool_rss_read(
     # Atom: <entry>
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
-        title = (entry.findtext("atom:title", "", ns) or entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
+        title = (
+            entry.findtext("atom:title", "", ns)
+            or entry.findtext("{http://www.w3.org/2005/Atom}title")
+            or ""
+        ).strip()
         link_el = entry.find("atom:link", ns) or entry.find("{http://www.w3.org/2005/Atom}link")
         link = link_el.get("href", "") if link_el is not None else ""
-        summary = (entry.findtext("atom:summary", "", ns) or entry.findtext("{http://www.w3.org/2005/Atom}summary") or "")[:200].strip()
+        summary = (
+            entry.findtext("atom:summary", "", ns)
+            or entry.findtext("{http://www.w3.org/2005/Atom}summary")
+            or ""
+        )[:200].strip()
         summary = re.sub(r"<[^>]+>", "", summary)
         if title:
             entries.append(f"{title}\n{summary}\n{link}")
@@ -481,9 +512,11 @@ async def _tool_rss_read(
 # ── 生活助手工具 ──
 
 
-
 async def _tool_translate(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """中英互译（MyMemory API）."""
     import httpx
@@ -506,12 +539,18 @@ async def _tool_translate(
             from_lang, to_lang = "en-GB", to_lang or "zh-CN"
     else:
         _lang_map = {
-            "zh": "zh-CN", "en": "en-GB", "ja": "ja-JP",
-            "ko": "ko-KR", "fr": "fr-FR", "de": "de-DE",
+            "zh": "zh-CN",
+            "en": "en-GB",
+            "ja": "ja-JP",
+            "ko": "ko-KR",
+            "fr": "fr-FR",
+            "de": "de-DE",
         }
         from_lang = _lang_map.get(from_lang, from_lang)
-        to_lang = _lang_map.get(to_lang, to_lang) if to_lang else (
-            "en-GB" if "zh" in from_lang else "zh-CN"
+        to_lang = (
+            _lang_map.get(to_lang, to_lang)
+            if to_lang
+            else ("en-GB" if "zh" in from_lang else "zh-CN")
         )
 
     try:
@@ -529,9 +568,11 @@ async def _tool_translate(
         return f"翻译失败: {e}"
 
 
-
 async def _tool_countdown(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """计算距离目标日期的倒计时."""
     from datetime import datetime, timedelta
@@ -564,9 +605,11 @@ async def _tool_countdown(
     return f"距离 {label} 还有 {days} 天 {hours} 小时。"
 
 
-
 async def _tool_trending(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """热搜聚合（微博 / 知乎）."""
     import httpx
@@ -617,9 +660,11 @@ async def _tool_trending(
 # ── 飞书表格工具 ──
 
 
-
 async def _tool_summarize(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """长文摘要（由模型自身完成）."""
     text = (args.get("text") or "").strip()
@@ -638,9 +683,11 @@ async def _tool_summarize(
     return f"[摘要任务] 请{instruction}以下内容：\n\n{text}"
 
 
-
 async def _tool_sentiment(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """情感分析（由模型自身完成）."""
     text = (args.get("text") or "").strip()
@@ -649,12 +696,16 @@ async def _tool_sentiment(
     if len(text) > 10000:
         text = text[:10000] + "...(已截断)"
 
-    return f"[情感分析任务] 请分析以下文本的情感倾向（正面/负面/中性）、语气和关键情绪词：\n\n{text}"
-
+    return (
+        f"[情感分析任务] 请分析以下文本的情感倾向（正面/负面/中性）、语气和关键情绪词：\n\n{text}"
+    )
 
 
 async def _tool_email_send(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """发送邮件（暂未对接 SMTP）."""
     to = (args.get("to") or "").strip()
@@ -664,9 +715,11 @@ async def _tool_email_send(
     return "邮件功能尚未配置 SMTP，暂时无法发送。请直接通过飞书或其他方式联系。"
 
 
-
 async def _tool_qrcode(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """生成二维码."""
     from urllib.parse import quote
@@ -681,9 +734,11 @@ async def _tool_qrcode(
     return f"二维码已生成：\n{url}\n\n内容: {data}"
 
 
-
 async def _tool_express_track(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """快递物流查询."""
     import httpx
@@ -712,7 +767,15 @@ async def _tool_express_track(
             return f"快递单号 {number} 暂无物流信息。"
 
         com_name = data.get("com", company or "未知")
-        state_map = {"0": "运输中", "1": "揽收", "2": "疑难", "3": "已签收", "4": "退签", "5": "派件中", "6": "退回"}
+        state_map = {
+            "0": "运输中",
+            "1": "揽收",
+            "2": "疑难",
+            "3": "已签收",
+            "4": "退签",
+            "5": "派件中",
+            "6": "退回",
+        }
         state = state_map.get(str(data.get("state", "")), "未知")
 
         lines = [f"📦 {com_name} {number} [{state}]", ""]
@@ -725,9 +788,11 @@ async def _tool_express_track(
         return f"快递查询失败: {e}"
 
 
-
 async def _tool_flight_info(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """航班查询（暂用 web_search 代理）."""
     flight_no = (args.get("flight_no") or "").strip().upper()
@@ -738,9 +803,11 @@ async def _tool_flight_info(
     return f"航班查询功能开发中。请使用 web_search 搜索「{flight_no} {date} 航班动态」获取信息。"
 
 
-
 async def _tool_aqi(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """空气质量查询."""
     import httpx
@@ -751,13 +818,26 @@ async def _tool_aqi(
 
     # 中文城市名映射
     city_map = {
-        "上海": "shanghai", "北京": "beijing", "广州": "guangzhou",
-        "深圳": "shenzhen", "杭州": "hangzhou", "成都": "chengdu",
-        "重庆": "chongqing", "武汉": "wuhan", "南京": "nanjing",
-        "西安": "xian", "苏州": "suzhou", "天津": "tianjin",
-        "长沙": "changsha", "郑州": "zhengzhou", "青岛": "qingdao",
-        "大连": "dalian", "厦门": "xiamen", "昆明": "kunming",
-        "合肥": "hefei", "福州": "fuzhou",
+        "上海": "shanghai",
+        "北京": "beijing",
+        "广州": "guangzhou",
+        "深圳": "shenzhen",
+        "杭州": "hangzhou",
+        "成都": "chengdu",
+        "重庆": "chongqing",
+        "武汉": "wuhan",
+        "南京": "nanjing",
+        "西安": "xian",
+        "苏州": "suzhou",
+        "天津": "tianjin",
+        "长沙": "changsha",
+        "郑州": "zhengzhou",
+        "青岛": "qingdao",
+        "大连": "dalian",
+        "厦门": "xiamen",
+        "昆明": "kunming",
+        "合肥": "hefei",
+        "福州": "fuzhou",
     }
     query = city_map.get(city, city)
 
@@ -811,7 +891,6 @@ async def _tool_aqi(
         return "\n".join(lines)
     except Exception as e:
         return f"空气质量查询失败: {e}"
-
 
 
 HANDLERS: dict[str, object] = {

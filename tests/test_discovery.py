@@ -23,7 +23,13 @@ class TestDiscovery:
     def test_builtin_source_layer(self):
         """内置员工的 source_layer 应为 builtin 或 global（全局层可覆盖）."""
         result = discover_employees(project_dir=Path("/nonexistent"))
-        builtin_names = ["code-reviewer", "test-engineer", "doc-writer", "refactor-guide", "pr-creator"]
+        builtin_names = [
+            "code-reviewer",
+            "test-engineer",
+            "doc-writer",
+            "refactor-guide",
+            "pr-creator",
+        ]
         for name in builtin_names:
             assert result.employees[name].source_layer == "builtin"
 

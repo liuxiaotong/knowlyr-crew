@@ -62,9 +62,7 @@ class TestCreateCrewAgent:
         mock_discovery.get.return_value = mock_emp
         mock_discover.return_value = mock_discovery
 
-        mock_exec.return_value = self._make_tool_result(
-            "file_read", args={"path": "src/main.py"}
-        )
+        mock_exec.return_value = self._make_tool_result("file_read", args={"path": "src/main.py"})
 
         agent = create_crew_agent("code-reviewer", "审查 src/main.py")
         action = agent("沙箱就绪")
@@ -149,9 +147,7 @@ class TestCreateCrewAgent:
         mock_discovery.get.return_value = mock_emp
         mock_discover.return_value = mock_discovery
 
-        mock_exec.return_value = self._make_tool_result(
-            "bash", args={"command": "pytest tests/"}
-        )
+        mock_exec.return_value = self._make_tool_result("bash", args={"command": "pytest tests/"})
 
         agent = create_crew_agent("test", "跑测试")
         action = agent("沙箱就绪")
@@ -177,9 +173,7 @@ class TestCreateCrewAgent:
         mock_discovery.get.return_value = mock_emp
         mock_discover.return_value = mock_discovery
 
-        mock_exec.return_value = self._make_tool_result(
-            "file_read", args={"path": "foo.py"}
-        )
+        mock_exec.return_value = self._make_tool_result("file_read", args={"path": "foo.py"})
 
         steps = []
         agent = create_crew_agent("test", "测试", on_step=lambda n, t, p: steps.append((n, t, p)))

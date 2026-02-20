@@ -54,7 +54,7 @@ class TestWebSearchHandler:
         mock_resp = MagicMock()
         mock_resp.text = (
             '<li class="b_algo"><a href="https://example.com">Example Title</a>'
-            '<p>This is a snippet</p></li>'
+            "<p>This is a snippet</p></li>"
         )
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_resp
@@ -107,10 +107,12 @@ class TestCreateNoteHandler:
 
         from crew.webhook import _tool_create_note
 
-        result = _run(_tool_create_note(
-            {"title": "测试备忘", "content": "明天开会讨论 AI 方向", "tags": "meeting,ai"},
-            ctx=ctx,
-        ))
+        result = _run(
+            _tool_create_note(
+                {"title": "测试备忘", "content": "明天开会讨论 AI 方向", "tags": "meeting,ai"},
+                ctx=ctx,
+            )
+        )
         assert "笔记已保存" in result
 
         notes_dir = tmp_path / ".crew" / "notes"
@@ -134,10 +136,12 @@ class TestCreateNoteHandler:
 
         from crew.webhook import _tool_create_note
 
-        result = _run(_tool_create_note(
-            {"title": "../../etc/passwd", "content": "test"},
-            ctx=ctx,
-        ))
+        result = _run(
+            _tool_create_note(
+                {"title": "../../etc/passwd", "content": "test"},
+                ctx=ctx,
+            )
+        )
         assert "笔记已保存" in result
 
         # 文件应在 notes 目录内，不应路径穿越

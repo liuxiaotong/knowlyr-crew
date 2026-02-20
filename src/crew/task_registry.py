@@ -105,7 +105,7 @@ class TaskRegistry:
             for r in to_remove:
                 del self._tasks[r.task_id]
                 self._events.pop(r.task_id, None)
-            keep = sorted_records[len(to_remove):]
+            keep = sorted_records[len(to_remove) :]
             # 原子写入（锁内执行，避免 TOCTOU 竞态）
             try:
                 lines = [r.model_dump_json() for r in keep]

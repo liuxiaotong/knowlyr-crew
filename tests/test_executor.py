@@ -252,7 +252,10 @@ class TestOpenAIExecute:
         with patch("crew.executor._get_openai", return_value=None):
             with pytest.raises(ImportError, match="openai SDK 未安装"):
                 execute_prompt(
-                    system_prompt="test", api_key="key", model="gpt-4o", stream=False,
+                    system_prompt="test",
+                    api_key="key",
+                    model="gpt-4o",
+                    stream=False,
                 )
 
     @patch("crew.executor._get_openai")
@@ -269,7 +272,10 @@ class TestOpenAIExecute:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="gpt-4o", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="gpt-4o",
+            stream=False,
         )
         assert result.content == ""
         assert result.stop_reason == "unknown"
@@ -328,7 +334,10 @@ class TestDeepSeekExecute:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="deepseek-coder", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="deepseek-coder",
+            stream=False,
         )
         assert result.content == "code result"
 
@@ -356,7 +365,10 @@ class TestProviderDispatch:
         mock_get.return_value = mock_anthropic
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="claude-sonnet-4-20250514", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="claude-sonnet-4-20250514",
+            stream=False,
         )
         # 验证调用的是 Anthropic 的 messages API（非 chat.completions）
         mock_client.messages.create.assert_called_once()
@@ -381,7 +393,10 @@ class TestProviderDispatch:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="gpt-4o", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="gpt-4o",
+            stream=False,
         )
         # 验证调用的是 OpenAI 的 chat.completions API
         mock_client.chat.completions.create.assert_called_once()
@@ -393,7 +408,10 @@ class TestProviderDispatch:
     def test_unknown_model_raises_error(self):
         with pytest.raises(ValueError, match="无法识别模型"):
             execute_prompt(
-                system_prompt="test", api_key="key", model="llama-3", stream=False,
+                system_prompt="test",
+                api_key="key",
+                model="llama-3",
+                stream=False,
             )
 
 
@@ -417,7 +435,9 @@ class TestApiKeyAutoResolve:
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-ant-key"}):
             result = execute_prompt(
-                system_prompt="test", api_key=None, stream=False,
+                system_prompt="test",
+                api_key=None,
+                stream=False,
             )
         assert result.content == "ok"
         # 验证使用了 env 中的 key
@@ -444,7 +464,10 @@ class TestApiKeyAutoResolve:
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "env-oai-key"}):
             result = execute_prompt(
-                system_prompt="test", api_key=None, model="gpt-4o", stream=False,
+                system_prompt="test",
+                api_key=None,
+                model="gpt-4o",
+                stream=False,
             )
         assert result.content == "ok"
         client_call = mock_openai.OpenAI.call_args[1]
@@ -454,7 +477,10 @@ class TestApiKeyAutoResolve:
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="API key 未设置"):
                 execute_prompt(
-                    system_prompt="test", api_key=None, model="gpt-4o", stream=False,
+                    system_prompt="test",
+                    api_key=None,
+                    model="gpt-4o",
+                    stream=False,
                 )
 
 
@@ -479,12 +505,14 @@ class TestAsyncOpenAI:
         mock_openai.AsyncOpenAI.return_value = mock_client
         mock_get.return_value = mock_openai
 
-        result = asyncio.run(aexecute_prompt(
-            system_prompt="test",
-            api_key="key",
-            model="gpt-4o",
-            stream=False,
-        ))
+        result = asyncio.run(
+            aexecute_prompt(
+                system_prompt="test",
+                api_key="key",
+                model="gpt-4o",
+                stream=False,
+            )
+        )
         assert result.content == "async gpt"
         assert result.model == "gpt-4o"
         assert result.input_tokens == 30
@@ -507,12 +535,14 @@ class TestAsyncOpenAI:
         mock_openai.AsyncOpenAI.return_value = mock_client
         mock_get.return_value = mock_openai
 
-        result = asyncio.run(aexecute_prompt(
-            system_prompt="test",
-            api_key="key",
-            model="deepseek-chat",
-            stream=False,
-        ))
+        result = asyncio.run(
+            aexecute_prompt(
+                system_prompt="test",
+                api_key="key",
+                model="deepseek-chat",
+                stream=False,
+            )
+        )
         assert result.content == "async ds"
         client_call = mock_openai.AsyncOpenAI.call_args[1]
         assert "deepseek" in client_call["base_url"]
@@ -605,6 +635,7 @@ class TestRetry:
 
     def test_is_retryable_connection_error(self):
         from crew.executor import _is_retryable
+
         assert _is_retryable(ConnectionError("reset"))
         assert _is_retryable(TimeoutError("timed out"))
 
@@ -633,9 +664,10 @@ class TestRetry:
 
     def test_retry_delay(self):
         from crew.executor import _retry_delay
+
         for attempt in range(3):
             delay = _retry_delay(attempt)
-            base = 2 ** attempt
+            base = 2**attempt
             assert base <= delay <= base + 0.5
 
 
@@ -657,7 +689,10 @@ class TestGeminiExecute:
         mock_get.return_value = mock_genai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="gemini-2.0-flash", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="gemini-2.0-flash",
+            stream=False,
         )
         assert result.content == "Gemini result"
         assert result.input_tokens == 50
@@ -666,7 +701,9 @@ class TestGeminiExecute:
     def test_missing_sdk(self):
         with patch("crew.executor._get_genai", return_value=None):
             with pytest.raises(ImportError, match="google-generativeai"):
-                execute_prompt(system_prompt="test", api_key="key", model="gemini-2.0-flash", stream=False)
+                execute_prompt(
+                    system_prompt="test", api_key="key", model="gemini-2.0-flash", stream=False
+                )
 
 
 class TestZhipuExecute:
@@ -691,7 +728,10 @@ class TestZhipuExecute:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="glm-4-flash", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="glm-4-flash",
+            stream=False,
         )
         assert result.content == "Zhipu result"
         client_call = mock_openai.OpenAI.call_args[1]
@@ -720,7 +760,10 @@ class TestQwenExecute:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="qwen-turbo", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="qwen-turbo",
+            stream=False,
         )
         assert result.content == "Qwen result"
         client_call = mock_openai.OpenAI.call_args[1]
@@ -749,7 +792,10 @@ class TestMoonshotExecute:
         mock_get.return_value = mock_openai
 
         result = execute_prompt(
-            system_prompt="test", api_key="key", model="moonshot-v1-8k", stream=False,
+            system_prompt="test",
+            api_key="key",
+            model="moonshot-v1-8k",
+            stream=False,
         )
         assert result.content == "Moonshot result"
         client_call = mock_openai.OpenAI.call_args[1]
@@ -899,6 +945,7 @@ class TestStreamingMetrics:
             async def _gen():
                 yield "hello"
                 yield " world"
+
             gen = _gen()
             gen.result = MagicMock(
                 content="hello world",
@@ -915,8 +962,11 @@ class TestStreamingMetrics:
         from crew.executor import ExecutionResult, _MetricsStreamWrapper
 
         mock_result = ExecutionResult(
-            content="hello world", model="test", input_tokens=50,
-            output_tokens=10, stop_reason="end_turn",
+            content="hello world",
+            model="test",
+            input_tokens=50,
+            output_tokens=10,
+            stop_reason="end_turn",
         )
 
         inner = _FakeAsyncStream(["hello", " world"], result=mock_result)
@@ -945,8 +995,11 @@ class TestStreamingMetrics:
         from crew.executor import ExecutionResult, _MetricsStreamWrapper
 
         mock_result = ExecutionResult(
-            content="ok", model="test", input_tokens=1,
-            output_tokens=1, stop_reason="stop",
+            content="ok",
+            model="test",
+            input_tokens=1,
+            output_tokens=1,
+            stop_reason="stop",
         )
 
         inner = _FakeAsyncStream(["ok"], result=mock_result)
@@ -961,7 +1014,9 @@ class TestStreamingMetrics:
         from crew.executor import _MetricsStreamWrapper
 
         inner = _FakeAsyncStreamWithError(
-            ["part"], RuntimeError("boom"), result=None,
+            ["part"],
+            RuntimeError("boom"),
+            result=None,
         )
         wrapper = _MetricsStreamWrapper(inner, "test", 0)
 
@@ -1004,7 +1059,9 @@ class TestFallbackModelExtended:
 
         with pytest.raises(Exception, match="primary failure"):
             execute_prompt(
-                system_prompt="test", api_key="key", stream=False,
+                system_prompt="test",
+                api_key="key",
+                stream=False,
                 fallback_model="gpt-4o",
             )
 
@@ -1054,10 +1111,15 @@ class TestFallbackModelExtended:
         mock_oai_get.return_value = mock_openai
 
         from crew.executor import aexecute_prompt
-        result = asyncio.run(aexecute_prompt(
-            system_prompt="test", api_key="key", stream=False,
-            fallback_model="gpt-4o",
-        ))
+
+        result = asyncio.run(
+            aexecute_prompt(
+                system_prompt="test",
+                api_key="key",
+                stream=False,
+                fallback_model="gpt-4o",
+            )
+        )
         assert result.content == "async fallback ok"
 
 
@@ -1071,8 +1133,11 @@ class TestMetricsLogging:
         from crew.executor import ExecutionResult, _record_metrics
 
         result = ExecutionResult(
-            content="test", model="test", input_tokens=10,
-            output_tokens=5, stop_reason="stop",
+            content="test",
+            model="test",
+            input_tokens=10,
+            output_tokens=5,
+            stop_reason="stop",
         )
         with caplog.at_level(logging.DEBUG, logger="crew.executor"):
             with patch("crew.metrics.get_collector", side_effect=Exception("no collector")):

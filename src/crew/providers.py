@@ -89,7 +89,6 @@ def resolve_api_key(provider: Provider, api_key: str | None = None) -> str:
     key = os.environ.get(env_var, "")
     if not key:
         raise ProviderError(
-            f"{provider.value} API key 未设置。"
-            f"请设置环境变量 {env_var} 或通过参数传递 api_key。"
+            f"{provider.value} API key 未设置。请设置环境变量 {env_var} 或通过参数传递 api_key。"
         )
     return key

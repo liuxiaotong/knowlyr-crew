@@ -14,9 +14,7 @@ class TestSessionRecorder:
         self.recorder = SessionRecorder(session_dir=self.tmpdir)
 
     def test_roundtrip(self):
-        session_id = self.recorder.start(
-            "employee", "code-reviewer", {"args": {"target": "main"}}
-        )
+        session_id = self.recorder.start("employee", "code-reviewer", {"args": {"target": "main"}})
         self.recorder.record_message(session_id, "prompt", "hello world")
         self.recorder.record_event(session_id, "stdout", {"chars": 11})
         self.recorder.finish(session_id, status="completed", detail="done")

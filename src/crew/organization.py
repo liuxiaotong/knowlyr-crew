@@ -77,8 +77,12 @@ def set_cache(org: Organization) -> None:
 # ── 模型档位默认值 ──
 
 _MODEL_TIER_FIELDS = (
-    "model", "api_key", "base_url",
-    "fallback_model", "fallback_api_key", "fallback_base_url",
+    "model",
+    "api_key",
+    "base_url",
+    "fallback_model",
+    "fallback_api_key",
+    "fallback_base_url",
 )
 
 
@@ -155,7 +159,9 @@ def _save_overrides(project_dir: Path | None) -> None:
 
 
 def get_effective_authority(
-    org: Organization, employee_name: str, project_dir: Path | None = None,
+    org: Organization,
+    employee_name: str,
+    project_dir: Path | None = None,
 ) -> str | None:
     """获取生效的权限级别（覆盖优先于静态配置）."""
     overrides = _load_overrides(project_dir)

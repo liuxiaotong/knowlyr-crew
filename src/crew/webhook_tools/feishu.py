@@ -13,7 +13,10 @@ if TYPE_CHECKING:
 
 
 async def _tool_create_feishu_event(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在飞书日历创建日程."""
     from datetime import datetime, timedelta
@@ -90,9 +93,11 @@ async def _tool_create_feishu_event(
 # ── 飞书日程查询/删除 ──
 
 
-
 async def _tool_read_feishu_calendar(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书日历日程."""
     import os
@@ -118,7 +123,9 @@ async def _tool_read_feishu_calendar(
 
     end_dt = start_dt + timedelta(days=days)
 
-    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get("FEISHU_CALENDAR_ID", "")
+    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get(
+        "FEISHU_CALENDAR_ID", ""
+    )
     if not cal_id:
         return "未配置日历 ID。"
 
@@ -168,9 +175,11 @@ async def _tool_read_feishu_calendar(
         return f"查询失败: {e}"
 
 
-
 async def _tool_delete_feishu_event(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """删除飞书日历日程."""
     import os
@@ -184,7 +193,9 @@ async def _tool_delete_feishu_event(
     if not event_id:
         return "需要 event_id 参数。先用 read_feishu_calendar 查到 event_id。"
 
-    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get("FEISHU_CALENDAR_ID", "")
+    cal_id = (ctx.feishu_config.calendar_id if ctx.feishu_config else "") or os.environ.get(
+        "FEISHU_CALENDAR_ID", ""
+    )
     if not cal_id:
         return "未配置日历 ID。"
 
@@ -207,9 +218,11 @@ async def _tool_delete_feishu_event(
 # ── 飞书待办任务 ──
 
 
-
 async def _tool_create_feishu_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在飞书创建待办任务."""
     from datetime import datetime, timedelta
@@ -233,7 +246,9 @@ async def _tool_create_feishu_task(
     if due_str:
         tz_cn = _tz(timedelta(hours=8))
         try:
-            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=tz_cn)
+            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(
+                hour=23, minute=59, tzinfo=tz_cn
+            )
             body["due"] = {"timestamp": str(int(due_dt.timestamp())), "is_all_day": True}
         except ValueError:
             return f"截止日期格式不对: {due_str}，需要 YYYY-MM-DD。"
@@ -258,9 +273,11 @@ async def _tool_create_feishu_task(
         return f"创建失败: {e}"
 
 
-
 async def _tool_list_feishu_tasks(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书待办任务列表."""
     from datetime import datetime, timedelta
@@ -309,9 +326,11 @@ async def _tool_list_feishu_tasks(
         return f"查询失败: {e}"
 
 
-
 async def _tool_complete_feishu_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """完成飞书待办任务."""
     import httpx
@@ -339,9 +358,11 @@ async def _tool_complete_feishu_task(
         return f"操作失败: {e}"
 
 
-
 async def _tool_delete_feishu_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """删除飞书待办任务."""
     import httpx
@@ -369,9 +390,11 @@ async def _tool_delete_feishu_task(
         return f"删除失败: {e}"
 
 
-
 async def _tool_update_feishu_task(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """更新飞书待办任务."""
     from datetime import datetime, timedelta
@@ -401,7 +424,9 @@ async def _tool_update_feishu_task(
     if due_str:
         tz_cn = _tz(timedelta(hours=8))
         try:
-            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=tz_cn)
+            due_dt = datetime.strptime(due_str, "%Y-%m-%d").replace(
+                hour=23, minute=59, tzinfo=tz_cn
+            )
             body["due"] = {"timestamp": str(int(due_dt.timestamp())), "is_all_day": True}
             update_fields.append("due")
         except ValueError:
@@ -435,9 +460,11 @@ async def _tool_update_feishu_task(
         return f"更新失败: {e}"
 
 
-
 async def _tool_feishu_chat_history(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书群/会话最近消息."""
     import json as _json
@@ -520,32 +547,74 @@ async def _tool_feishu_chat_history(
 
 # 中国主要城市代码映射（中国气象局编码）
 _CITY_CODES: dict[str, str] = {
-    "北京": "101010100", "上海": "101020100", "广州": "101280101",
-    "深圳": "101280601", "杭州": "101210101", "南京": "101190101",
-    "成都": "101270101", "重庆": "101040100", "武汉": "101200101",
-    "西安": "101110101", "苏州": "101190401", "天津": "101030100",
-    "长沙": "101250101", "郑州": "101180101", "青岛": "101120201",
-    "大连": "101070201", "宁波": "101210401", "厦门": "101230201",
-    "合肥": "101220101", "昆明": "101290101", "哈尔滨": "101050101",
-    "沈阳": "101070101", "济南": "101120101", "福州": "101230101",
-    "南昌": "101240101", "长春": "101060101", "贵阳": "101260101",
-    "石家庄": "101090101", "太原": "101100101", "南宁": "101300101",
-    "海口": "101310101", "兰州": "101160101", "银川": "101170101",
-    "西宁": "101150101", "拉萨": "101140101", "乌鲁木齐": "101130101",
-    "呼和浩特": "101080101", "珠海": "101280701", "无锡": "101190201",
-    "东莞": "101281601", "佛山": "101280800", "温州": "101210701",
-    "常州": "101191101", "泉州": "101230501", "烟台": "101120501",
-    "惠州": "101280301", "嘉兴": "101210301", "中山": "101281701",
-    "台州": "101210601", "绍兴": "101210501", "潍坊": "101120601",
-    "金华": "101210901", "保定": "101090201", "芜湖": "101220301",
-    "三亚": "101310201", "洛阳": "101180901", "桂林": "101300501",
-    "襄阳": "101200201", "徐州": "101190801", "扬州": "101190601",
+    "北京": "101010100",
+    "上海": "101020100",
+    "广州": "101280101",
+    "深圳": "101280601",
+    "杭州": "101210101",
+    "南京": "101190101",
+    "成都": "101270101",
+    "重庆": "101040100",
+    "武汉": "101200101",
+    "西安": "101110101",
+    "苏州": "101190401",
+    "天津": "101030100",
+    "长沙": "101250101",
+    "郑州": "101180101",
+    "青岛": "101120201",
+    "大连": "101070201",
+    "宁波": "101210401",
+    "厦门": "101230201",
+    "合肥": "101220101",
+    "昆明": "101290101",
+    "哈尔滨": "101050101",
+    "沈阳": "101070101",
+    "济南": "101120101",
+    "福州": "101230101",
+    "南昌": "101240101",
+    "长春": "101060101",
+    "贵阳": "101260101",
+    "石家庄": "101090101",
+    "太原": "101100101",
+    "南宁": "101300101",
+    "海口": "101310101",
+    "兰州": "101160101",
+    "银川": "101170101",
+    "西宁": "101150101",
+    "拉萨": "101140101",
+    "乌鲁木齐": "101130101",
+    "呼和浩特": "101080101",
+    "珠海": "101280701",
+    "无锡": "101190201",
+    "东莞": "101281601",
+    "佛山": "101280800",
+    "温州": "101210701",
+    "常州": "101191101",
+    "泉州": "101230501",
+    "烟台": "101120501",
+    "惠州": "101280301",
+    "嘉兴": "101210301",
+    "中山": "101281701",
+    "台州": "101210601",
+    "绍兴": "101210501",
+    "潍坊": "101120601",
+    "金华": "101210901",
+    "保定": "101090201",
+    "芜湖": "101220301",
+    "三亚": "101310201",
+    "洛阳": "101180901",
+    "桂林": "101300501",
+    "襄阳": "101200201",
+    "徐州": "101190801",
+    "扬州": "101190601",
 }
 
 
-
 async def _tool_search_feishu_docs(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """搜索飞书云文档."""
     import httpx
@@ -578,9 +647,11 @@ async def _tool_search_feishu_docs(
     return "\n---\n".join(lines)
 
 
-
 async def _tool_read_feishu_doc(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书文档内容."""
     import httpx
@@ -607,9 +678,11 @@ async def _tool_read_feishu_doc(
     return content
 
 
-
 async def _tool_create_feishu_doc(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在飞书创建新文档."""
     import httpx
@@ -643,17 +716,18 @@ async def _tool_create_feishu_doc(
             await client.post(
                 f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
                 json={
-                    "children": [{
-                        "block_type": 2,
-                        "text": {"elements": [{"text_run": {"content": content}}]},
-                    }],
+                    "children": [
+                        {
+                            "block_type": 2,
+                            "text": {"elements": [{"text_run": {"content": content}}]},
+                        }
+                    ],
                 },
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             )
 
     url = f"https://feishu.cn/docx/{doc_id}"
     return f"文档已创建：{title}\n{url}"
-
 
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -673,12 +747,14 @@ async def _fetch_og_meta(url: str) -> dict[str, str]:
         for prop in ("title", "description", "image"):
             m = re.search(
                 rf'<meta\s[^>]*property=["\']og:{prop}["\'][^>]*content=["\']([^"\']+)["\']',
-                html, re.IGNORECASE,
+                html,
+                re.IGNORECASE,
             )
             if not m:
                 m = re.search(
                     rf'<meta\s[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:{prop}["\']',
-                    html, re.IGNORECASE,
+                    html,
+                    re.IGNORECASE,
                 )
             if m:
                 meta[prop] = m.group(1).strip()
@@ -700,7 +776,11 @@ def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> d
 
     # 标题优先级：消息附带文字 > og:title > 兜底
     user_title = text.replace(url, "").strip().strip("：:—\n")
-    title = user_title or og.get("title") or ("飞书文档" if is_feishu else url.split("//")[-1].split("?")[0])
+    title = (
+        user_title
+        or og.get("title")
+        or ("飞书文档" if is_feishu else url.split("//")[-1].split("?")[0])
+    )
     description = og.get("description", "")
 
     btn_label = "打开文档" if is_feishu else "打开链接"
@@ -708,21 +788,25 @@ def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> d
 
     elements: list[dict] = []
     if description:
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "plain_text", "content": description[:200]},
-        })
-    elements.append({
-        "tag": "action",
-        "actions": [
+        elements.append(
             {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": btn_label},
-                "url": url,
-                "type": "primary",
-            },
-        ],
-    })
+                "tag": "div",
+                "text": {"tag": "plain_text", "content": description[:200]},
+            }
+        )
+    elements.append(
+        {
+            "tag": "action",
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": btn_label},
+                    "url": url,
+                    "type": "primary",
+                },
+            ],
+        }
+    )
 
     return {
         "config": {"wide_screen_mode": True},
@@ -735,7 +819,10 @@ def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> d
 
 
 async def _tool_send_feishu_group(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """发消息到飞书群（含链接时自动发卡片，带页面预览）."""
     if not ctx or not ctx.feishu_token_mgr:
@@ -755,7 +842,10 @@ async def _tool_send_feishu_group(
         og = await _fetch_og_meta(url)
         card = _build_link_card(url, text, og)
         result = await send_feishu_message(
-            ctx.feishu_token_mgr, chat_id, content=card, msg_type="interactive",
+            ctx.feishu_token_mgr,
+            chat_id,
+            content=card,
+            msg_type="interactive",
         )
     else:
         result = await send_feishu_text(ctx.feishu_token_mgr, chat_id, text)
@@ -765,9 +855,11 @@ async def _tool_send_feishu_group(
     return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
 
 
-
 async def _tool_send_feishu_file(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """上传文件并发送到飞书群."""
     import json as _json
@@ -827,7 +919,10 @@ async def _tool_send_feishu_file(
 
 
 async def _tool_list_feishu_groups(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """列出机器人加入的所有飞书群."""
     import httpx
@@ -859,9 +954,11 @@ async def _tool_list_feishu_groups(
         return f"查询失败: {e}"
 
 
-
 async def _tool_send_feishu_dm(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """给飞书用户发私聊消息."""
     import json as _json
@@ -899,9 +996,11 @@ async def _tool_send_feishu_dm(
         return f"发送失败: {e}"
 
 
-
 async def _tool_feishu_group_members(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书群成员列表."""
     import httpx
@@ -943,9 +1042,11 @@ async def _tool_feishu_group_members(
 # ── GitHub 工具 ──
 
 
-
 async def _tool_read_feishu_sheet(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书表格数据."""
     import httpx
@@ -1006,9 +1107,11 @@ async def _tool_read_feishu_sheet(
         return f"读取表格失败: {e}"
 
 
-
 async def _tool_update_feishu_sheet(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """写入飞书表格数据."""
     import json as _json
@@ -1079,9 +1182,11 @@ async def _tool_update_feishu_sheet(
 # ── 飞书审批工具 ──
 
 
-
 async def _tool_list_feishu_approvals(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书审批列表."""
     import httpx
@@ -1144,7 +1249,10 @@ async def _tool_list_feishu_approvals(
                         try:
                             from datetime import datetime, timedelta
                             from datetime import timezone as _tz
-                            ts = int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
+
+                            ts = (
+                                int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
+                            )
                             dt = datetime.fromtimestamp(ts, _tz(timedelta(hours=8)))
                             ts_str = dt.strftime("%m-%d %H:%M")
                         except (ValueError, OSError):
@@ -1152,9 +1260,7 @@ async def _tool_list_feishu_approvals(
                     status_icon = {"PENDING": "⏳", "APPROVED": "✅", "REJECTED": "❌"}.get(
                         inst_status, "📋"
                     )
-                    all_instances.append(
-                        f"{status_icon} [{name}] {ts_str} (instance={inst_code})"
-                    )
+                    all_instances.append(f"{status_icon} [{name}] {ts_str} (instance={inst_code})")
                     if len(all_instances) >= limit:
                         break
                 if len(all_instances) >= limit:
@@ -1176,39 +1282,63 @@ async def _tool_list_feishu_approvals(
 # 单位换算表：(from, to) → multiplier  或  callable
 _UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {
     # 长度
-    ("km", "mi"): 0.621371, ("mi", "km"): 1.60934,
-    ("m", "ft"): 3.28084, ("ft", "m"): 0.3048,
-    ("cm", "in"): 0.393701, ("in", "cm"): 2.54,
-    ("km", "m"): 1000, ("m", "km"): 0.001,
-    ("m", "cm"): 100, ("cm", "m"): 0.01,
-    ("mi", "ft"): 5280, ("ft", "mi"): 1 / 5280,
+    ("km", "mi"): 0.621371,
+    ("mi", "km"): 1.60934,
+    ("m", "ft"): 3.28084,
+    ("ft", "m"): 0.3048,
+    ("cm", "in"): 0.393701,
+    ("in", "cm"): 2.54,
+    ("km", "m"): 1000,
+    ("m", "km"): 0.001,
+    ("m", "cm"): 100,
+    ("cm", "m"): 0.01,
+    ("mi", "ft"): 5280,
+    ("ft", "mi"): 1 / 5280,
     # 重量
-    ("kg", "lb"): 2.20462, ("lb", "kg"): 0.453592,
-    ("kg", "g"): 1000, ("g", "kg"): 0.001,
-    ("kg", "oz"): 35.274, ("oz", "kg"): 0.0283495,
-    ("lb", "oz"): 16, ("oz", "lb"): 0.0625,
-    ("g", "mg"): 1000, ("mg", "g"): 0.001,
+    ("kg", "lb"): 2.20462,
+    ("lb", "kg"): 0.453592,
+    ("kg", "g"): 1000,
+    ("g", "kg"): 0.001,
+    ("kg", "oz"): 35.274,
+    ("oz", "kg"): 0.0283495,
+    ("lb", "oz"): 16,
+    ("oz", "lb"): 0.0625,
+    ("g", "mg"): 1000,
+    ("mg", "g"): 0.001,
     # 面积
-    ("sqm", "sqft"): 10.7639, ("sqft", "sqm"): 0.092903,
-    ("mu", "sqm"): 666.667, ("sqm", "mu"): 0.0015,
-    ("ha", "mu"): 15, ("mu", "ha"): 1 / 15,
-    ("ha", "sqm"): 10000, ("sqm", "ha"): 0.0001,
+    ("sqm", "sqft"): 10.7639,
+    ("sqft", "sqm"): 0.092903,
+    ("mu", "sqm"): 666.667,
+    ("sqm", "mu"): 0.0015,
+    ("ha", "mu"): 15,
+    ("mu", "ha"): 1 / 15,
+    ("ha", "sqm"): 10000,
+    ("sqm", "ha"): 0.0001,
     # 体积
-    ("l", "gal"): 0.264172, ("gal", "l"): 3.78541,
-    ("l", "ml"): 1000, ("ml", "l"): 0.001,
+    ("l", "gal"): 0.264172,
+    ("gal", "l"): 3.78541,
+    ("l", "ml"): 1000,
+    ("ml", "l"): 0.001,
     # 数据
-    ("gb", "mb"): 1024, ("mb", "gb"): 1 / 1024,
-    ("tb", "gb"): 1024, ("gb", "tb"): 1 / 1024,
-    ("mb", "kb"): 1024, ("kb", "mb"): 1 / 1024,
+    ("gb", "mb"): 1024,
+    ("mb", "gb"): 1 / 1024,
+    ("tb", "gb"): 1024,
+    ("gb", "tb"): 1 / 1024,
+    ("mb", "kb"): 1024,
+    ("kb", "mb"): 1 / 1024,
     # 速度
-    ("kmh", "mph"): 0.621371, ("mph", "kmh"): 1.60934,
-    ("ms", "kmh"): 3.6, ("kmh", "ms"): 1 / 3.6,
+    ("kmh", "mph"): 0.621371,
+    ("mph", "kmh"): 1.60934,
+    ("ms", "kmh"): 3.6,
+    ("kmh", "ms"): 1 / 3.6,
 }
 
 
-
 async def _tool_create_feishu_spreadsheet(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在飞书创建新表格."""
     import httpx
@@ -1251,9 +1381,11 @@ async def _tool_create_feishu_spreadsheet(
 # ── 飞书通讯录搜索 ──
 
 
-
 async def _tool_feishu_contacts(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """飞书通讯录搜索."""
     import httpx
@@ -1305,9 +1437,11 @@ async def _tool_feishu_contacts(
 # ── 文本 & 开发工具 ──
 
 
-
 async def _tool_feishu_bitable(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书多维表格."""
     import httpx
@@ -1360,9 +1494,11 @@ async def _tool_feishu_bitable(
         return f"读取多维表格失败: {e}"
 
 
-
 async def _tool_feishu_wiki(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """搜索飞书知识库."""
     import httpx
@@ -1412,9 +1548,11 @@ async def _tool_feishu_wiki(
         return f"搜索知识库失败: {e}"
 
 
-
 async def _tool_approve_feishu(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """操作飞书审批（通过/拒绝）."""
     import httpx
@@ -1483,7 +1621,6 @@ async def _tool_approve_feishu(
         return f"审批操作失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"审批操作失败: {e}"
-
 
 
 HANDLERS: dict[str, object] = {

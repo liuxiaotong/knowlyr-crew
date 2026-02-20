@@ -147,7 +147,7 @@ argument-hint: <target> [focus]
 
     def test_skill_with_metadata_comment(self):
         """应从 HTML 注释提取 Crew 元数据."""
-        content = '''---
+        content = """---
 name: test-skill
 description: 测试技能
 ---
@@ -155,7 +155,7 @@ description: 测试技能
 <!-- knowlyr-crew metadata {"display_name": "测试员", "tags": ["test"], "triggers": ["t"]} -->
 
 正文内容。
-'''
+"""
         emp = parse_skill_string(content)
         assert emp.display_name == "测试员"
         assert emp.tags == ["test"]
@@ -181,6 +181,7 @@ name: bad-skill
 正文。
 """
         import pytest
+
         with pytest.raises(ValueError, match="description"):
             parse_skill_string(content)
 
@@ -207,13 +208,16 @@ class TestParseSkillFile:
             skill_dir = Path(tmpdir) / "my-skill"
             skill_dir.mkdir()
             skill_file = skill_dir / "SKILL.md"
-            skill_file.write_text("""---
+            skill_file.write_text(
+                """---
 description: 从文件解析
 allowed-tools: Read
 ---
 
 文件内容。
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
             emp = parse_skill(skill_file)
             assert emp.name == "my-skill"

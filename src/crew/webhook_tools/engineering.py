@@ -9,7 +9,10 @@ if TYPE_CHECKING:
 
 
 async def _tool_get_datetime(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """获取当前准确日期时间."""
     from datetime import datetime, timedelta
@@ -21,9 +24,11 @@ async def _tool_get_datetime(
     return f"{now.strftime('%Y-%m-%d %H:%M')} {weekday}"
 
 
-
 async def _tool_calculate(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """安全计算数学表达式."""
     import ast
@@ -47,11 +52,21 @@ async def _tool_calculate(
         ast.UAdd: operator.pos,
     }
     _FUNCS = {
-        "abs": abs, "round": round, "int": int, "float": float,
-        "sqrt": math.sqrt, "log": math.log, "log10": math.log10,
-        "sin": math.sin, "cos": math.cos, "tan": math.tan,
-        "pi": math.pi, "e": math.e,
-        "max": max, "min": min, "sum": sum,
+        "abs": abs,
+        "round": round,
+        "int": int,
+        "float": float,
+        "sqrt": math.sqrt,
+        "log": math.log,
+        "log10": math.log10,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "pi": math.pi,
+        "e": math.e,
+        "max": max,
+        "min": min,
+        "sum": sum,
         "pow": pow,
     }
 
@@ -104,9 +119,11 @@ async def _tool_calculate(
 # ── 飞书文档工具 ──
 
 
-
 async def _tool_unit_convert(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """单位换算."""
     value = args.get("value")
@@ -139,9 +156,11 @@ async def _tool_unit_convert(
     return f"{value} {from_u} = {result:,.4g} {to_u}"
 
 
-
 async def _tool_random_pick(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """随机选择 / 掷骰子."""
     import random
@@ -165,9 +184,11 @@ async def _tool_random_pick(
     return f"🎯 选中了：{'、'.join(picks)}"
 
 
-
 async def _tool_holidays(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询中国法定节假日."""
     from datetime import datetime, timedelta
@@ -216,9 +237,11 @@ async def _tool_holidays(
         return f"查询节假日失败: {e}"
 
 
-
 async def _tool_timestamp_convert(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """Unix 时间戳 ↔ 可读时间互转."""
     from datetime import datetime, timedelta
@@ -257,9 +280,11 @@ async def _tool_timestamp_convert(
 # ── 飞书表格创建 ──
 
 
-
 async def _tool_text_extract(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """从文本中提取邮箱、手机号、URL、金额等."""
     import re
@@ -290,7 +315,9 @@ async def _tool_text_extract(
             results["URL"] = list(dict.fromkeys(urls))
 
     if extract_type in ("money", "all"):
-        money = re.findall(r"[¥$￥]\s?[\d,]+\.?\d*|[\d,]+\.?\d*\s?(?:元|万|亿|美元|万元|亿元|USD|CNY|RMB)", text)
+        money = re.findall(
+            r"[¥$￥]\s?[\d,]+\.?\d*|[\d,]+\.?\d*\s?(?:元|万|亿|美元|万元|亿元|USD|CNY|RMB)", text
+        )
         if money:
             results["金额"] = list(dict.fromkeys(money))
 
@@ -305,9 +332,11 @@ async def _tool_text_extract(
     return "\n".join(lines)
 
 
-
 async def _tool_json_format(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """格式化 JSON."""
     import json as _json
@@ -342,9 +371,11 @@ async def _tool_json_format(
     return result
 
 
-
 async def _tool_password_gen(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """生成安全随机密码."""
     import secrets
@@ -369,9 +400,11 @@ async def _tool_password_gen(
     return "\n".join(lines)
 
 
-
 async def _tool_ip_lookup(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查询 IP 地址归属地."""
     import httpx
@@ -407,9 +440,11 @@ async def _tool_ip_lookup(
         return f"查询 IP 失败: {e}"
 
 
-
 async def _tool_short_url(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """生成短链接（cleanuri.com 免费 API）."""
     import httpx
@@ -436,9 +471,11 @@ async def _tool_short_url(
         return f"生成短链接失败: {e}"
 
 
-
 async def _tool_word_count(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """统计文本字数."""
     text = args.get("text") or ""
@@ -453,6 +490,7 @@ async def _tool_word_count(
     cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
     # 英文单词数
     import re
+
     words = len(re.findall(r"[a-zA-Z]+", text))
     # 数字个数
     numbers = len(re.findall(r"\d+", text))
@@ -477,9 +515,11 @@ async def _tool_word_count(
 # ── 编码 & 开发辅助工具 ──
 
 
-
 async def _tool_base64_codec(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """Base64 编解码."""
     import base64
@@ -500,9 +540,11 @@ async def _tool_base64_codec(
         return f"Base64 {'解码' if decode else '编码'}失败: {e}"
 
 
-
 async def _tool_color_convert(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """颜色格式转换."""
     import re
@@ -528,7 +570,7 @@ async def _tool_color_convert(
             short_match = re.match(r"^#?([0-9a-fA-F]{3})$", color)
             if short_match:
                 h = short_match.group(1)
-                r, g, b = int(h[0]*2, 16), int(h[1]*2, 16), int(h[2]*2, 16)
+                r, g, b = int(h[0] * 2, 16), int(h[1] * 2, 16), int(h[2] * 2, 16)
             else:
                 return f"无法解析颜色: {color}。支持 #FF5733、rgb(255,87,51) 格式。"
 
@@ -556,9 +598,11 @@ async def _tool_color_convert(
     return f"HEX: {hex_str}\nRGB: {rgb_str}\nHSL: {hsl_str}"
 
 
-
 async def _tool_cron_explain(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """解释 cron 表达式."""
     expr = (args.get("expression") or "").strip()
@@ -592,7 +636,16 @@ async def _tool_cron_explain(
     if len(parts) == 6:
         fields = ["秒"] + fields
 
-    _WEEKDAYS = {"0": "日", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "日"}
+    _WEEKDAYS = {
+        "0": "日",
+        "1": "一",
+        "2": "二",
+        "3": "三",
+        "4": "四",
+        "5": "五",
+        "6": "六",
+        "7": "日",
+    }
 
     lines = []
     for i, (p, name) in enumerate(zip(parts, fields, strict=False)):
@@ -602,7 +655,9 @@ async def _tool_cron_explain(
             lines.append(f"  {name}: 每 {p[2:]} {name}")
         elif name == "星期" and "-" in p:
             start, end = p.split("-", 1)
-            lines.append(f"  {name}: 周{_WEEKDAYS.get(start, start)} 到 周{_WEEKDAYS.get(end, end)}")
+            lines.append(
+                f"  {name}: 周{_WEEKDAYS.get(start, start)} 到 周{_WEEKDAYS.get(end, end)}"
+            )
         elif name == "星期":
             days = [f"周{_WEEKDAYS.get(d.strip(), d.strip())}" for d in p.split(",")]
             lines.append(f"  {name}: {','.join(days)}")
@@ -612,9 +667,11 @@ async def _tool_cron_explain(
     return f"cron: {expr}\n\n" + "\n".join(lines)
 
 
-
 async def _tool_regex_test(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """测试正则表达式."""
     import re
@@ -651,9 +708,11 @@ async def _tool_regex_test(
     return "\n".join(lines)
 
 
-
 async def _tool_hash_gen(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """计算文本哈希值."""
     import hashlib
@@ -680,9 +739,11 @@ async def _tool_hash_gen(
     return "\n".join(results)
 
 
-
 async def _tool_url_codec(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """URL 编解码."""
     from urllib.parse import quote, unquote
@@ -703,9 +764,11 @@ async def _tool_url_codec(
 # ── 第 5 批工具 handler ──
 
 
-
 async def _tool_diff_text(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """文本对比."""
     import difflib
@@ -724,9 +787,11 @@ async def _tool_diff_text(
     return "\n".join(diff[:200])
 
 
-
 async def _tool_whois(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """WHOIS 域名查询."""
     import httpx
@@ -763,9 +828,11 @@ async def _tool_whois(
         return f"WHOIS 查询失败: {e}"
 
 
-
 async def _tool_dns_lookup(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """DNS 解析."""
     import asyncio
@@ -779,7 +846,8 @@ async def _tool_dns_lookup(
     try:
         loop = asyncio.get_event_loop()
         results = await loop.run_in_executor(
-            None, lambda: socket.getaddrinfo(domain, None, socket.AF_UNSPEC, socket.SOCK_STREAM),
+            None,
+            lambda: socket.getaddrinfo(domain, None, socket.AF_UNSPEC, socket.SOCK_STREAM),
         )
         seen: set[str] = set()
         lines = [f"DNS 解析 {domain}："]
@@ -797,9 +865,11 @@ async def _tool_dns_lookup(
         return f"DNS 查询失败: {e}"
 
 
-
 async def _tool_http_check(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """网站可用性检查."""
     import time
@@ -837,25 +907,63 @@ async def _tool_http_check(
         return f"❌ 检查失败: {e}"
 
 
-
 # ── Python 代码执行沙箱 ──
 
 # 允许导入的模块白名单
 _ALLOWED_MODULES: set[str] = {
-    "json", "re", "math", "datetime", "time", "collections", "itertools",
-    "functools", "string", "textwrap", "decimal", "statistics", "random",
-    "hashlib", "base64", "urllib", "urllib.parse", "html", "html.parser",
-    "csv", "io", "typing", "dataclasses", "enum", "struct", "calendar",
-    "operator", "copy", "pprint", "fractions", "bisect", "heapq",
-    "httpx", "bs4", "lxml",
+    "json",
+    "re",
+    "math",
+    "datetime",
+    "time",
+    "collections",
+    "itertools",
+    "functools",
+    "string",
+    "textwrap",
+    "decimal",
+    "statistics",
+    "random",
+    "hashlib",
+    "base64",
+    "urllib",
+    "urllib.parse",
+    "html",
+    "html.parser",
+    "csv",
+    "io",
+    "typing",
+    "dataclasses",
+    "enum",
+    "struct",
+    "calendar",
+    "operator",
+    "copy",
+    "pprint",
+    "fractions",
+    "bisect",
+    "heapq",
+    "httpx",
+    "bs4",
+    "lxml",
 }
 
 # 禁止调用的内置函数
 _BLOCKED_CALLS: set[str] = {
-    "__import__", "exec", "eval", "compile",
-    "getattr", "setattr", "delattr",
-    "globals", "locals", "vars", "dir",
-    "breakpoint", "exit", "quit",
+    "__import__",
+    "exec",
+    "eval",
+    "compile",
+    "getattr",
+    "setattr",
+    "delattr",
+    "globals",
+    "locals",
+    "vars",
+    "dir",
+    "breakpoint",
+    "exit",
+    "quit",
 }
 
 
@@ -902,7 +1010,10 @@ def _validate_python_code(code: str) -> str | None:
 
 
 async def _tool_run_python(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """在沙箱中执行 Python 代码片段."""
     import asyncio
@@ -937,12 +1048,15 @@ async def _tool_run_python(
     python = sys.executable or "python3"
     try:
         proc = await asyncio.create_subprocess_exec(
-            python, "-c", wrapper,
+            python,
+            "-c",
+            wrapper,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout + 5,
+            proc.communicate(),
+            timeout=timeout + 5,
         )
     except asyncio.TimeoutError:
         try:

@@ -83,6 +83,7 @@ class TestCLI:
 
     def test_validate_builtin(self):
         from crew.employees import builtin_dir
+
         result = self.runner.invoke(main, ["validate", str(builtin_dir())])
         assert result.exit_code == 0
         assert "通过校验" in result.output
@@ -100,12 +101,14 @@ class TestCLI:
 
     def test_init_employee(self):
         import os
+
         with tempfile.TemporaryDirectory() as tmpdir:
             old_cwd = os.getcwd()
             os.chdir(tmpdir)
             try:
                 result = self.runner.invoke(
-                    main, ["init", "--employee", "my-worker"],
+                    main,
+                    ["init", "--employee", "my-worker"],
                     catch_exceptions=False,
                 )
                 assert result.exit_code == 0
@@ -149,7 +152,9 @@ class TestCLI:
                 os.chdir(old_cwd)
 
     def test_lint_pipeline_success(self):
-        pipeline_yaml = """name: lint-demo\ndescription: test\nsteps:\n  - employee: product-manager\n"""
+        pipeline_yaml = (
+            """name: lint-demo\ndescription: test\nsteps:\n  - employee: product-manager\n"""
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "demo.yaml"
             target.write_text(pipeline_yaml, encoding="utf-8")
@@ -158,7 +163,9 @@ class TestCLI:
             assert "Lint 通过" in result.output
 
     def test_lint_pipeline_failure(self):
-        pipeline_yaml = """name: lint-demo\ndescription: test\nsteps:\n  - employee: unknown-emp\n"""
+        pipeline_yaml = (
+            """name: lint-demo\ndescription: test\nsteps:\n  - employee: unknown-emp\n"""
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "demo.yaml"
             target.write_text(pipeline_yaml, encoding="utf-8")
@@ -180,6 +187,7 @@ class TestCLI:
             old_cwd = Path.cwd()
             try:
                 import os
+
                 os.chdir(tmpdir)
                 result = self.runner.invoke(main, ["lint", str(target)])
             finally:
@@ -189,7 +197,8 @@ class TestCLI:
 
     def test_run_smart_context(self):
         result = self.runner.invoke(
-            main, ["run", "code-reviewer", "main", "--smart-context"],
+            main,
+            ["run", "code-reviewer", "main", "--smart-context"],
         )
         assert result.exit_code == 0
         assert "代码审查员" in result.output
@@ -222,9 +231,9 @@ class TestCLI:
         result = self.runner.invoke(main, ["pipeline", "list"])
         assert result.exit_code == 0
 
-
     def test_pipeline_run_parallel(self):
         import tempfile
+
         pipeline_yaml = """name: lane-demo
 description: test
 steps:
@@ -232,7 +241,7 @@ steps:
     args:
       target: main
 """
-        with tempfile.NamedTemporaryFile('w+', suffix='.yaml', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile("w+", suffix=".yaml", delete=False) as tmp:
             tmp.write(pipeline_yaml)
             tmp_path = tmp.name
         result = self.runner.invoke(
@@ -241,11 +250,21 @@ steps:
         )
         assert result.exit_code == 0, result.output
         assert "步骤 1" in result.output
+
     def test_discuss_run_parallel(self):
         result = self.runner.invoke(
             main,
-            ["discuss", "adhoc", "-e", "code-reviewer", "-e", "test-engineer",
-             "-t", "代码质量", "--parallel"],
+            [
+                "discuss",
+                "adhoc",
+                "-e",
+                "code-reviewer",
+                "-e",
+                "test-engineer",
+                "-t",
+                "代码质量",
+                "--parallel",
+            ],
         )
         assert result.exit_code == 0
 
@@ -287,7 +306,6 @@ steps:
         assert result.exit_code == 0
         assert "Heartbeat" in result.output
 
-
     def test_catalog_list_json(self):
         result = self.runner.invoke(main, ["catalog", "list", "--format", "json"])
         assert result.exit_code == 0
@@ -296,7 +314,7 @@ steps:
     def test_catalog_show(self):
         result = self.runner.invoke(main, ["catalog", "show", "product-manager", "--json"])
         assert result.exit_code == 0
-        assert "\"product-manager\"" in result.output
+        assert '"product-manager"' in result.output
 
     def test_check_json_output(self):
         import os
@@ -312,7 +330,7 @@ steps:
                 )
                 result = self.runner.invoke(main, ["check", "--json", "--no-logs", "--no-file"])
                 assert result.exit_code == 0, result.output
-                assert "\"lint\":" in result.output
+                assert '"lint":' in result.output
             finally:
                 os.chdir(old_cwd)
 
@@ -343,6 +361,7 @@ steps:
 
     def test_pipeline_show(self, tmp_path, monkeypatch):
         import yaml
+
         pl_dir = tmp_path / ".crew" / "pipelines"
         pl_dir.mkdir(parents=True)
         data = {"name": "test-pl", "steps": [{"employee": "code-reviewer"}]}
@@ -367,7 +386,8 @@ steps:
         pl_file = tmp_path / "test-run.yaml"
         pl_file.write_text(yaml.dump(data))
         result = self.runner.invoke(
-            main, ["pipeline", "run", str(pl_file), "--arg", "target=main"],
+            main,
+            ["pipeline", "run", str(pl_file), "--arg", "target=main"],
         )
         assert result.exit_code == 0
         assert "code-reviewer" in result.output
@@ -402,10 +422,12 @@ steps:
             "name": "test-par",
             "steps": [
                 {"employee": "code-reviewer"},
-                {"parallel": [
-                    {"employee": "test-engineer"},
-                    {"employee": "refactor-guide"},
-                ]},
+                {
+                    "parallel": [
+                        {"employee": "test-engineer"},
+                        {"employee": "refactor-guide"},
+                    ]
+                },
                 {"employee": "pr-creator"},
             ],
         }
@@ -522,10 +544,13 @@ steps:
             target_name="full-review",
             args={"target": "main"},
         )
-        registry.update_checkpoint(record.task_id, {
-            "pipeline_name": "full-review",
-            "completed_steps": [{"employee": "code-reviewer"}],
-        })
+        registry.update_checkpoint(
+            record.task_id,
+            {
+                "pipeline_name": "full-review",
+                "completed_steps": [{"employee": "code-reviewer"}],
+            },
+        )
         monkeypatch.chdir(tmp_path)
         result = self.runner.invoke(main, ["pipeline", "checkpoint", "list", "-d", str(tmp_path)])
         assert result.exit_code == 0
@@ -535,7 +560,9 @@ steps:
         (tmp_path / ".crew").mkdir(parents=True)
         (tmp_path / ".crew" / "tasks.jsonl").write_text("")
         monkeypatch.chdir(tmp_path)
-        result = self.runner.invoke(main, ["pipeline", "checkpoint", "resume", "nonexist", "-d", str(tmp_path)])
+        result = self.runner.invoke(
+            main, ["pipeline", "checkpoint", "resume", "nonexist", "-d", str(tmp_path)]
+        )
         assert result.exit_code == 1
         assert "未找到" in result.output
 

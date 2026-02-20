@@ -111,10 +111,13 @@ class TestQueryCostSummary:
 
         registry = TaskRegistry()
         record = registry.create(
-            trigger="test", target_type="employee", target_name="code-reviewer",
+            trigger="test",
+            target_type="employee",
+            target_name="code-reviewer",
         )
         registry.update(
-            record.task_id, "completed",
+            record.task_id,
+            "completed",
             result={
                 "employee": "code-reviewer",
                 "model": "kimi-k2.5",
@@ -135,13 +138,18 @@ class TestQueryCostSummary:
         registry = TaskRegistry()
         for emp in ["code-reviewer", "test-engineer"]:
             record = registry.create(
-                trigger="test", target_type="employee", target_name=emp,
+                trigger="test",
+                target_type="employee",
+                target_name=emp,
             )
             registry.update(
-                record.task_id, "completed",
+                record.task_id,
+                "completed",
                 result={
-                    "employee": emp, "model": "kimi-k2.5",
-                    "input_tokens": 1000, "output_tokens": 500,
+                    "employee": emp,
+                    "model": "kimi-k2.5",
+                    "input_tokens": 1000,
+                    "output_tokens": 500,
                 },
             )
         summary = query_cost_summary(registry, employee="code-reviewer")
@@ -154,16 +162,28 @@ class TestQueryCostSummary:
         registry = TaskRegistry()
         # 正式任务
         r1 = registry.create(trigger="direct", target_type="employee", target_name="cr")
-        registry.update(r1.task_id, "completed", result={
-            "employee": "cr", "model": "kimi-k2.5",
-            "input_tokens": 1000, "output_tokens": 500,
-        })
+        registry.update(
+            r1.task_id,
+            "completed",
+            result={
+                "employee": "cr",
+                "model": "kimi-k2.5",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            },
+        )
         # 飞书闲聊
         r2 = registry.create(trigger="feishu", target_type="employee", target_name="cr")
-        registry.update(r2.task_id, "completed", result={
-            "employee": "cr", "model": "kimi-k2.5",
-            "input_tokens": 1000, "output_tokens": 500,
-        })
+        registry.update(
+            r2.task_id,
+            "completed",
+            result={
+                "employee": "cr",
+                "model": "kimi-k2.5",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            },
+        )
         # source=work 应只有 1 条
         summary = query_cost_summary(registry, source="work")
         assert summary["total_tasks"] == 1
@@ -181,10 +201,16 @@ class TestQueryCostSummary:
         registry = TaskRegistry()
         for trigger in ["direct", "feishu", "github"]:
             r = registry.create(trigger=trigger, target_type="employee", target_name="cr")
-            registry.update(r.task_id, "completed", result={
-                "employee": "cr", "model": "kimi-k2.5",
-                "input_tokens": 100, "output_tokens": 50,
-            })
+            registry.update(
+                r.task_id,
+                "completed",
+                result={
+                    "employee": "cr",
+                    "model": "kimi-k2.5",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                },
+            )
         summary = query_cost_summary(registry)
         assert "by_trigger" in summary
         assert "direct" in summary["by_trigger"]

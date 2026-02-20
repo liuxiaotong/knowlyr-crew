@@ -93,6 +93,7 @@ def check_and_bump(dir_path: Path) -> tuple[str, bool]:
     try:
         import os
         import tempfile
+
         content = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
         fd, tmp = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
         fd_closed = False
@@ -132,7 +133,9 @@ def _git_repo_root(path: Path) -> Path | None:
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=path, stderr=subprocess.DEVNULL, text=True,
+            cwd=path,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
         return Path(out.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -158,7 +161,9 @@ def list_employee_versions(dir_path: Path) -> list[VersionEntry]:
     try:
         out = subprocess.check_output(
             ["git", "log", "--format=%H\t%ai\t%s", "--", str(rel_path)],
-            cwd=repo_root, stderr=subprocess.DEVNULL, text=True,
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return []
@@ -175,12 +180,14 @@ def list_employee_versions(dir_path: Path) -> list[VersionEntry]:
 
         # 从该 commit 读取 employee.yaml 的 version 字段
         version = _read_version_at_commit(repo_root, rel_path, commit_hash)
-        versions.append(VersionEntry(
-            version=version,
-            commit_hash=commit_hash,
-            date=date,
-            message=message,
-        ))
+        versions.append(
+            VersionEntry(
+                version=version,
+                commit_hash=commit_hash,
+                date=date,
+                message=message,
+            )
+        )
 
     return versions
 
@@ -191,7 +198,9 @@ def _read_version_at_commit(repo_root: Path, rel_path: Path, commit: str) -> str
     try:
         content = subprocess.check_output(
             ["git", "show", f"{commit}:{yaml_path}"],
-            cwd=repo_root, stderr=subprocess.DEVNULL, text=True,
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
         config = yaml.safe_load(content)
         if isinstance(config, dict):
@@ -223,7 +232,9 @@ def rollback_to(dir_path: Path, commit_hash: str) -> str:
     try:
         out = subprocess.check_output(
             ["git", "ls-tree", "-r", "--name-only", commit_hash, str(rel_path) + "/"],
-            cwd=repo_root, stderr=subprocess.DEVNULL, text=True,
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except subprocess.CalledProcessError:
         raise RuntimeError(f"无法读取 commit {commit_hash[:8]} 的文件列表")
@@ -235,7 +246,8 @@ def rollback_to(dir_path: Path, commit_hash: str) -> str:
         try:
             content = subprocess.check_output(
                 ["git", "show", f"{commit_hash}:{file_path}"],
-                cwd=repo_root, stderr=subprocess.DEVNULL,
+                cwd=repo_root,
+                stderr=subprocess.DEVNULL,
             )
             target = repo_root / file_path
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -63,10 +63,14 @@ class TestMCPTools:
     def test_list_employees(self):
         """list_employees 应返回员工列表."""
         handler = self.server.request_handlers[CallToolRequest]
-        result = _run(handler(CallToolRequest(
-            method="tools/call",
-            params=CallToolRequestParams(name="list_employees", arguments={}),
-        )))
+        result = _run(
+            handler(
+                CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(name="list_employees", arguments={}),
+                )
+            )
+        )
         data = json.loads(result.root.content[0].text)
         assert len(data) >= 5
         names = [e["name"] for e in data]
@@ -75,13 +79,17 @@ class TestMCPTools:
     def test_run_employee(self):
         """run_employee 应返回渲染后的 prompt."""
         handler = self.server.request_handlers[CallToolRequest]
-        result = _run(handler(CallToolRequest(
-            method="tools/call",
-            params=CallToolRequestParams(
-                name="run_employee",
-                arguments={"name": "code-reviewer", "args": {"target": "main"}},
-            ),
-        )))
+        result = _run(
+            handler(
+                CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(
+                        name="run_employee",
+                        arguments={"name": "code-reviewer", "args": {"target": "main"}},
+                    ),
+                )
+            )
+        )
         text = result.root.content[0].text
         assert "代码审查员" in text
         assert "main" in text
@@ -115,13 +123,17 @@ class TestMCPPrompts:
     def test_get_prompt(self):
         """get_prompt 应返回渲染后的 prompt 消息."""
         handler = self.server.request_handlers[GetPromptRequest]
-        result = _run(handler(GetPromptRequest(
-            method="prompts/get",
-            params=GetPromptRequestParams(
-                name="code-reviewer",
-                arguments={"target": "main"},
-            ),
-        )))
+        result = _run(
+            handler(
+                GetPromptRequest(
+                    method="prompts/get",
+                    params=GetPromptRequestParams(
+                        name="code-reviewer",
+                        arguments={"target": "main"},
+                    ),
+                )
+            )
+        )
         prompt_result = result.root
         assert prompt_result.description
         assert len(prompt_result.messages) == 1
@@ -131,10 +143,14 @@ class TestMCPPrompts:
         """不存在的 prompt 应报错."""
         handler = self.server.request_handlers[GetPromptRequest]
         with pytest.raises(EmployeeNotFoundError, match="未找到"):
-            _run(handler(GetPromptRequest(
-                method="prompts/get",
-                params=GetPromptRequestParams(name="nonexistent"),
-            )))
+            _run(
+                handler(
+                    GetPromptRequest(
+                        method="prompts/get",
+                        params=GetPromptRequestParams(name="nonexistent"),
+                    )
+                )
+            )
 
 
 class TestMCPResources:
@@ -155,10 +171,14 @@ class TestMCPResources:
     def test_read_resource(self):
         """read_resource 应返回 Markdown 内容."""
         handler = self.server.request_handlers[ReadResourceRequest]
-        result = _run(handler(ReadResourceRequest(
-            method="resources/read",
-            params=ReadResourceRequestParams(uri="crew://employee/code-reviewer"),
-        )))
+        result = _run(
+            handler(
+                ReadResourceRequest(
+                    method="resources/read",
+                    params=ReadResourceRequestParams(uri="crew://employee/code-reviewer"),
+                )
+            )
+        )
         contents = result.root.contents
         assert len(contents) == 1
         assert "审查" in contents[0].text
@@ -168,7 +188,11 @@ class TestMCPResources:
         """不存在的资源应报错."""
         handler = self.server.request_handlers[ReadResourceRequest]
         with pytest.raises(EmployeeNotFoundError, match="未找到"):
-            _run(handler(ReadResourceRequest(
-                method="resources/read",
-                params=ReadResourceRequestParams(uri="crew://employee/nonexistent"),
-            )))
+            _run(
+                handler(
+                    ReadResourceRequest(
+                        method="resources/read",
+                        params=ReadResourceRequestParams(uri="crew://employee/nonexistent"),
+                    )
+                )
+            )

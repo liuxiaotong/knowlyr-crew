@@ -10,9 +10,11 @@ def _is_valid_github_repo(repo: str) -> bool:
     return bool(_GITHUB_REPO_RE.match(repo))
 
 
-
 async def _tool_github_prs(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库 PR 列表."""
     import httpx
@@ -46,13 +48,17 @@ async def _tool_github_prs(
     for pr in prs[:limit]:
         labels = ", ".join(l["name"] for l in pr.get("labels", []))
         label_str = f" [{labels}]" if labels else ""
-        lines.append(f"#{pr['number']} {pr['title']}{label_str} — {pr['user']['login']} ({pr['state']})\n{pr['html_url']}")
+        lines.append(
+            f"#{pr['number']} {pr['title']}{label_str} — {pr['user']['login']} ({pr['state']})\n{pr['html_url']}"
+        )
     return "\n---\n".join(lines)
 
 
-
 async def _tool_github_issues(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库 Issue 列表."""
     import httpx
@@ -94,13 +100,17 @@ async def _tool_github_issues(
         label_part = f" [{labels_str}]" if labels_str else ""
         assignee = issue.get("assignee", {})
         assignee_str = f" → {assignee['login']}" if assignee else ""
-        lines.append(f"#{issue['number']} {issue['title']}{label_part}{assignee_str}\n{issue['html_url']}")
+        lines.append(
+            f"#{issue['number']} {issue['title']}{label_part}{assignee_str}\n{issue['html_url']}"
+        )
     return "\n---\n".join(lines)
 
 
-
 async def _tool_github_repo_activity(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None,
+    args: dict,
+    *,
+    agent_id: int | None = None,
+    ctx: _AppContext | None = None,
 ) -> str:
     """查看 GitHub 仓库最近活动."""
     from datetime import datetime, timedelta, timezone
@@ -144,12 +154,13 @@ async def _tool_github_repo_activity(
         lines.append(f"{sha} {msg} — {author} ({date})")
 
     summary = f"最近 {days} 天：{len(commits)} 次提交，{len(authors)} 位贡献者"
-    top_authors = ", ".join(f"{k}({v})" for k, v in sorted(authors.items(), key=lambda x: -x[1])[:5])
+    top_authors = ", ".join(
+        f"{k}({v})" for k, v in sorted(authors.items(), key=lambda x: -x[1])[:5]
+    )
     return f"{summary}\n贡献者: {top_authors}\n\n" + "\n".join(lines)
 
 
 # ── Notion 工具 ──
-
 
 
 HANDLERS: dict[str, object] = {

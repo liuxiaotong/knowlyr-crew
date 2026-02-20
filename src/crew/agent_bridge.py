@@ -62,6 +62,7 @@ def create_crew_agent(
     if smart_context:
         try:
             from crew.context_detector import detect_project
+
             project_info = detect_project(project_dir)
         except Exception:
             pass
@@ -70,6 +71,7 @@ def create_crew_agent(
 
     # 3. 权限守卫
     from crew.permission import PermissionGuard
+
     guard = PermissionGuard(employee)
 
     # 4. 生成 tool schemas
@@ -110,22 +112,26 @@ def create_crew_agent(
                 # 构建 assistant message (tool_use blocks)
                 assistant_content: list[dict[str, Any]] = []
                 for tc in last_tool_calls:
-                    assistant_content.append({
-                        "type": "tool_use",
-                        "id": tc.id,
-                        "name": tc.name,
-                        "input": tc.arguments,
-                    })
+                    assistant_content.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.id,
+                            "name": tc.name,
+                            "input": tc.arguments,
+                        }
+                    )
                 messages.append({"role": "assistant", "content": assistant_content})
 
                 # 构建 tool result message（每个 tool_use 都需要对应的 tool_result）
                 tool_results = []
                 for tc in last_tool_calls:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": observation[:10000] if tc is last_tool_calls[0] else "",
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": observation[:10000] if tc is last_tool_calls[0] else "",
+                        }
+                    )
                 messages.append({"role": "user", "content": tool_results})
             else:
                 messages.append({"role": "user", "content": observation[:10000]})

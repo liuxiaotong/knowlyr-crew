@@ -1,6 +1,5 @@
 """数据模型测试 — models.py 核心类与映射."""
 
-
 import pytest
 
 from crew.models import (

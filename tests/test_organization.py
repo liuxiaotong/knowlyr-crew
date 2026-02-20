@@ -152,13 +152,15 @@ class TestLoadOrganization:
             crew_dir.mkdir()
             crew_data = {"teams": {"only_one": {"label": "唯一", "members": ["a"]}}}
             (crew_dir / "organization.yaml").write_text(
-                yaml.dump(crew_data, allow_unicode=True), encoding="utf-8",
+                yaml.dump(crew_data, allow_unicode=True),
+                encoding="utf-8",
             )
             # private 版本有 2 个团队
             priv_dir = Path(tmpdir) / "private"
             priv_dir.mkdir()
             (priv_dir / "organization.yaml").write_text(
-                yaml.dump(_make_org_yaml(), allow_unicode=True), encoding="utf-8",
+                yaml.dump(_make_org_yaml(), allow_unicode=True),
+                encoding="utf-8",
             )
             org = load_organization(project_dir=Path(tmpdir))
             assert len(org.teams) == 2  # 用的是 private 的
@@ -181,7 +183,8 @@ class TestLoadOrganization:
             priv_dir = Path(tmpdir) / "private"
             priv_dir.mkdir()
             (priv_dir / "organization.yaml").write_text(
-                yaml.dump(_make_org_yaml(), allow_unicode=True), encoding="utf-8",
+                yaml.dump(_make_org_yaml(), allow_unicode=True),
+                encoding="utf-8",
             )
             org1 = load_organization(project_dir=Path(tmpdir))
             org2 = load_organization(project_dir=Path(tmpdir))
@@ -285,9 +288,7 @@ class TestRealOrganization:
         seen: dict[str, str] = {}
         for tid, team in org.teams.items():
             for member in team.members:
-                assert member not in seen, (
-                    f"{member} 同时在 {seen[member]} 和 {tid}"
-                )
+                assert member not in seen, f"{member} 同时在 {seen[member]} 和 {tid}"
                 seen[member] = tid
 
     def test_no_duplicate_authority(self):
@@ -298,9 +299,7 @@ class TestRealOrganization:
         seen: dict[str, str] = {}
         for level, auth in org.authority.items():
             for member in auth.members:
-                assert member not in seen, (
-                    f"{member} 同时在 {seen[member]} 和 {level}"
-                )
+                assert member not in seen, f"{member} 同时在 {seen[member]} 和 {level}"
                 seen[member] = level
 
 
@@ -377,7 +376,8 @@ class TestAuthorityDowngrade:
             priv.mkdir()
             org_data = _make_org_yaml()
             (priv / "organization.yaml").write_text(
-                yaml.dump(org_data, allow_unicode=True), encoding="utf-8",
+                yaml.dump(org_data, allow_unicode=True),
+                encoding="utf-8",
             )
 
             invalidate_cache()
@@ -393,6 +393,7 @@ class TestAuthorityDowngrade:
 
             # 读取并验证
             import json
+
             data = json.loads(override_file.read_text(encoding="utf-8"))
             assert "code-reviewer" in data
             assert data["code-reviewer"]["level"] == "C"
