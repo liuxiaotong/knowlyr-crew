@@ -1216,9 +1216,7 @@ class TestProjectStatusEndpoint:
             agent_status="frozen",
             source_path=tmp_path,
         )
-        mock_discover.return_value = DiscoveryResult(
-            employees={"emp-a": emp_a, "emp-b": emp_b}
-        )
+        mock_discover.return_value = DiscoveryResult(employees={"emp-a": emp_a, "emp-b": emp_b})
         mock_org.return_value = Organization()
 
         client = _make_client()
