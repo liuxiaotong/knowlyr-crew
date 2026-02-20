@@ -850,6 +850,7 @@ avatar = [
     { name = "pillow" },
 ]
 dev = [
+    { name = "croniter" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -886,6 +887,7 @@ webhook = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'execute'", specifier = ">=0.40" },
     { name = "click", specifier = ">=8.0" },
+    { name = "croniter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "croniter", marker = "extra == 'webhook'", specifier = ">=2.0" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.5" },
     { name = "httpx", marker = "extra == 'id'", specifier = ">=0.25" },

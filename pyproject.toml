@@ -53,7 +53,7 @@ trajectory = [
     "knowlyr-reward>=0.1.0",
     "knowlyr-hub>=0.1.0",
 ]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = ["pytest", "pytest-asyncio", "ruff", "croniter>=2.0"]
 all = ["knowlyr-crew[mcp,id,execute,openai,dev,avatar,webhook,trajectory]"]
 
 [project.scripts]

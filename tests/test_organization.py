@@ -3,6 +3,7 @@
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 from crew.models import Organization, RoutingStep
@@ -222,6 +223,11 @@ class TestRoutingTemplate:
         assert step.employees == ["test-engineer", "e2e-tester"]
 
 
+_PROJECT_DIR = Path(__file__).parent.parent
+_HAS_PRIVATE_ORG = (_PROJECT_DIR / "private" / "organization.yaml").is_file()
+
+
+@pytest.mark.skipif(not _HAS_PRIVATE_ORG, reason="private/organization.yaml 不存在（CI 环境）")
 class TestRealOrganization:
     """测试真实项目的 organization.yaml."""
 

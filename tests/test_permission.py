@@ -275,7 +275,7 @@ permissions:
   roles: [readonly]
   allow: [bash]
 """)
-        (emp_dir / "PROMPT.md").write_text("目录格式正文")
+        (emp_dir / "prompt.md").write_text("目录格式正文")
 
         emp = parse_employee_dir(emp_dir)
         assert emp.permissions is not None

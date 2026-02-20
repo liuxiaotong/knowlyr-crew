@@ -1,5 +1,6 @@
 """测试 knowlyr-id 客户端."""
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 from crew.id_client import (
@@ -12,6 +13,16 @@ from crew.id_client import (
     send_heartbeat,
     update_agent,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker():
+    """每个测试前重置断路器，避免测试间状态污染."""
+    from crew.id_client import _breaker
+
+    _breaker.record_success()  # 重置失败计数
+    yield
+    _breaker.record_success()  # 测试后也重置
 
 
 class TestAgentIdentityModel:
