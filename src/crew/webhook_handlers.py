@@ -1094,9 +1094,34 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                         "optional": step.optional,
                         "approval": step.approval,
                         "human": step.human,
+                        "icon": step.icon,
+                        "ci": step.ci,
                     }
                     for step in tmpl.steps
                 ],
+                "extra_flows": [
+                    [
+                        {
+                            "role": s.role,
+                            "description": s.description,
+                            "icon": s.icon,
+                            "ci": s.ci,
+                            "employee": s.employee,
+                            "employees": s.employees or [],
+                            "team": s.team,
+                            "optional": s.optional,
+                            "approval": s.approval,
+                            "human": s.human,
+                        }
+                        for s in flow
+                    ]
+                    for flow in tmpl.extra_flows
+                ],
+                "tags": tmpl.tags,
+                "tag_style": tmpl.tag_style,
+                "repo": tmpl.repo,
+                "notes": tmpl.notes,
+                "warnings": tmpl.warnings,
             }
             for name, tmpl in org.routing_templates.items()
         },

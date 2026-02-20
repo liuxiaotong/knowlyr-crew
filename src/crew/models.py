@@ -413,14 +413,24 @@ class RoutingStep(BaseModel):
     optional: bool = Field(default=False, description="是否可选步骤")
     approval: bool = Field(default=False, description="执行前需人工审批")
     human: bool = Field(default=False, description="人类判断节点（非 AI 执行）")
+    icon: str = Field(default="", description="Lucide 图标名（部署步骤用）")
+    ci: bool = Field(default=False, description="CI 自动执行步骤（高亮显示）")
 
 
 class RoutingTemplate(BaseModel):
     """协作路由模板."""
 
     label: str = Field(description="模板显示名")
-    category: str = Field(default="", description="分类 ID（engineering/data/business）")
-    steps: list[RoutingStep] = Field(description="步骤列表")
+    category: str = Field(default="", description="分类 ID")
+    steps: list[RoutingStep] = Field(description="步骤列表（主流程）")
+    extra_flows: list[list[RoutingStep]] = Field(
+        default_factory=list, description="额外流程行（如多条部署路径）"
+    )
+    tags: list[str] = Field(default_factory=list, description="标签（如 静态站、FastAPI）")
+    tag_style: str = Field(default="", description="标签颜色主题 static/app/lib")
+    repo: str = Field(default="", description="仓库地址")
+    notes: list[str] = Field(default_factory=list, description="备注")
+    warnings: list[str] = Field(default_factory=list, description="警告备注")
 
 
 class RouteCategoryDef(BaseModel):
