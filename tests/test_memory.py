@@ -475,3 +475,96 @@ class TestVisibility:
         memories = store.query("ceo-assistant", limit=10, max_visibility="open")
         assert len(memories) == 1
         assert "wifi 密码" not in memories[0].content
+
+
+class TestImportanceAndAccess:
+    """测试 importance 重要性字段和 last_accessed 访问追踪."""
+
+    def test_importance_default(self):
+        """默认 importance 为 3."""
+        entry = MemoryEntry(employee="pm", category="finding", content="test")
+        assert entry.importance == 3
+
+    def test_importance_custom(self):
+        entry = MemoryEntry(employee="pm", category="decision", content="关键决策", importance=5)
+        assert entry.importance == 5
+
+    def test_last_accessed_default_empty(self):
+        """默认 last_accessed 为空."""
+        entry = MemoryEntry(employee="pm", category="finding", content="test")
+        assert entry.last_accessed == ""
+
+    def test_backward_compat_no_importance(self):
+        """旧格式 JSON（无 importance/last_accessed）可正常解析."""
+        old_json = '{"id":"abc","employee":"pm","category":"finding","content":"old"}'
+        entry = MemoryEntry(**json.loads(old_json))
+        assert entry.importance == 3
+        assert entry.last_accessed == ""
+
+    def test_query_sort_by_importance(self, tmp_path):
+        """按 importance 排序：高重要性在前."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        # 手动写入不同 importance 的记忆
+        for imp, content in [(1, "闲聊"), (5, "关键决策"), (3, "普通发现"), (4, "重要待办")]:
+            entry = MemoryEntry(employee="pm", category="finding", content=content, importance=imp)
+            (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+            with (tmp_path / "memory" / "pm.jsonl").open("a", encoding="utf-8") as f:
+                f.write(entry.model_dump_json() + "\n")
+
+        entries = store.query("pm", sort_by="importance")
+        assert len(entries) == 4
+        assert entries[0].importance == 5
+        assert entries[0].content == "关键决策"
+        assert entries[1].importance == 4
+        assert entries[-1].importance == 1
+
+    def test_query_min_importance(self, tmp_path):
+        """min_importance 过滤低重要性记忆."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+        for imp, content in [(1, "闲聊"), (3, "普通"), (5, "关键")]:
+            entry = MemoryEntry(employee="pm", category="finding", content=content, importance=imp)
+            with (tmp_path / "memory" / "pm.jsonl").open("a", encoding="utf-8") as f:
+                f.write(entry.model_dump_json() + "\n")
+
+        entries = store.query("pm", min_importance=3)
+        assert len(entries) == 2
+        assert all(e.importance >= 3 for e in entries)
+
+    def test_query_sort_by_confidence(self, tmp_path):
+        """按 confidence 排序."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+        for conf, content in [(0.5, "低置信"), (1.0, "高置信"), (0.8, "中置信")]:
+            entry = MemoryEntry(employee="pm", category="finding", content=content, confidence=conf)
+            with (tmp_path / "memory" / "pm.jsonl").open("a", encoding="utf-8") as f:
+                f.write(entry.model_dump_json() + "\n")
+
+        entries = store.query("pm", sort_by="confidence")
+        assert entries[0].content == "高置信"
+        assert entries[-1].content == "低置信"
+
+    def test_update_last_accessed(self, tmp_path):
+        """update_access=True 更新 last_accessed 时间戳."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        added = store.add("pm", "finding", "测试记忆")
+        assert added.last_accessed == ""
+
+        # 查询并更新访问时间
+        entries = store.query("pm", update_access=True)
+        assert len(entries) == 1
+
+        # 重新读取，确认 last_accessed 已更新
+        raw = (tmp_path / "memory" / "pm.jsonl").read_text(encoding="utf-8")
+        reloaded = MemoryEntry(**json.loads(raw.strip()))
+        assert reloaded.last_accessed != ""
+
+    def test_sort_default_created_at(self, tmp_path):
+        """默认按 created_at 排序（最新在前）."""
+        store = MemoryStore(memory_dir=tmp_path / "memory")
+        store.add("pm", "finding", "第一条")
+        store.add("pm", "finding", "第二条")
+
+        entries = store.query("pm")
+        assert entries[0].content == "第二条"
+        assert entries[1].content == "第一条"

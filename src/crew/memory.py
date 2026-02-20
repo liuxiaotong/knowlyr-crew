@@ -41,6 +41,9 @@ class MemoryEntry(BaseModel):
     superseded_by: str = Field(default="", description="被哪条记忆覆盖")
     # Enhancement 1: 衰减 + 容量
     ttl_days: int = Field(default=0, description="生存期天数，0=永不过期")
+    # 重要性与访问追踪
+    importance: int = Field(default=3, description="重要性 1-5（5=最高，如决策/待办；1=最低，如闲聊背景）")
+    last_accessed: str = Field(default="", description="最后被加载到上下文的时间（ISO 格式）")
     # Enhancement 3: 跨员工共享
     tags: list[str] = Field(default_factory=list, description="语义标签")
     shared: bool = Field(default=False, description="是否加入共享记忆池")
@@ -282,6 +285,9 @@ class MemoryStore:
         min_confidence: float = 0.0,
         include_expired: bool = False,
         max_visibility: str = "private",
+        sort_by: str = "created_at",
+        min_importance: int = 0,
+        update_access: bool = False,
     ) -> list[MemoryEntry]:
         """查询员工记忆.
 
@@ -292,9 +298,12 @@ class MemoryStore:
             min_confidence: 最低置信度（对比衰减后的有效值）
             include_expired: 是否包含已过期条目
             max_visibility: 可见性上限 — "private" 返回全部, "open" 只返回公开记忆
+            sort_by: 排序方式 — "created_at"(默认,最新在前) | "importance"(重要性优先) | "confidence"(置信度优先)
+            min_importance: 最低重要性 (0=不过滤, 1-5)
+            update_access: 是否更新 last_accessed 时间戳（API 调用时设为 True）
 
         Returns:
-            记忆列表（最新在前，置信度为衰减后的有效值）
+            记忆列表（按 sort_by 排序，置信度为衰减后的有效值）
         """
         path = self._employee_file(employee)
         if not path.exists():
@@ -322,6 +331,10 @@ class MemoryStore:
             if category and entry.category != category:
                 continue
 
+            # 重要性过滤
+            if min_importance > 0 and entry.importance < min_importance:
+                continue
+
             # 可见性过滤: max_visibility="open" 时跳过 private 记忆
             if max_visibility != "private" and entry.visibility == "private":
                 continue
@@ -333,8 +346,49 @@ class MemoryStore:
 
             entries.append(decayed)
 
-        entries.reverse()
-        return entries[:limit]
+        # 排序
+        if sort_by == "importance":
+            entries.sort(key=lambda e: (e.importance, e.created_at), reverse=True)
+        elif sort_by == "confidence":
+            entries.sort(key=lambda e: (e.confidence, e.created_at), reverse=True)
+        else:
+            entries.reverse()  # JSONL 按时间正序追加，reverse 即最新在前
+
+        result = entries[:limit]
+
+        # 更新 last_accessed（best-effort，不阻塞查询）
+        if update_access and result:
+            self._update_last_accessed(employee, [e.id for e in result])
+
+        return result
+
+    def _update_last_accessed(self, employee: str, entry_ids: list[str]) -> None:
+        """批量更新记忆的 last_accessed 时间戳（best-effort）."""
+        path = self._employee_file(employee)
+        if not path.exists():
+            return
+        now = datetime.now().isoformat()
+        id_set = set(entry_ids)
+        try:
+            with file_lock(path):
+                lines = path.read_text(encoding="utf-8").splitlines()
+                new_lines: list[str] = []
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        entry = MemoryEntry(**json.loads(stripped))
+                        if entry.id in id_set:
+                            entry.last_accessed = now
+                            new_lines.append(entry.model_dump_json())
+                        else:
+                            new_lines.append(stripped)
+                    except (json.JSONDecodeError, ValueError):
+                        new_lines.append(stripped)
+                path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        except Exception as e:
+            logger.debug("更新 last_accessed 失败（不影响查询）: %s", e)
 
     def correct(
         self,

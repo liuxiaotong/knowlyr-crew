@@ -143,6 +143,9 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
     limit = int(request.query_params.get("memory_limit", "10"))
+    sort_by = request.query_params.get("sort_by", "created_at")
+    min_importance = int(request.query_params.get("min_importance", "0"))
+    max_tokens = int(request.query_params.get("max_tokens", "0"))  # 0=不限
 
     # 读取 soul.md
     soul = ""
@@ -153,7 +156,14 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
 
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
     store = MemoryStore(project_dir=ctx.project_dir)
-    memories = store.query(employee.name, limit=limit, max_visibility="open")
+    memories = store.query(
+        employee.name,
+        limit=limit,
+        max_visibility="open",
+        sort_by=sort_by,
+        min_importance=min_importance,
+        update_access=True,
+    )
     memory_list = [
         {"category": m.category, "content": m.content, "created_at": m.created_at, "tags": m.tags}
         for m in memories
@@ -172,14 +182,53 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             if employee.character_name in text or employee.name in text:
                 recent_notes.append({"filename": nf.name, "content": text[:500]})
 
-    return JSONResponse({
+    response_data = {
         "name": employee.name,
         "character_name": employee.character_name,
         "display_name": employee.display_name,
         "soul": soul,
         "memories": memory_list,
         "notes": recent_notes,
-    })
+    }
+
+    # Token 预算截断：粗估 1 token ≈ 3 中文字符 / 4 英文字符
+    if max_tokens > 0:
+        import json as _json
+        budget_chars = max_tokens * 3  # 保守估计
+        # soul 优先保留，记忆按顺序截断
+        soul_chars = len(soul)
+        remaining = budget_chars - soul_chars
+        if remaining < 200:
+            # soul 已经超预算，截断 soul
+            response_data["soul"] = soul[:budget_chars] + "\n...(truncated)"
+            response_data["memories"] = []
+            response_data["notes"] = []
+        else:
+            # 从后往前裁记忆，保留高优先级的
+            truncated_memories = []
+            used = 0
+            for m in memory_list:
+                m_size = len(_json.dumps(m, ensure_ascii=False))
+                if used + m_size > remaining:
+                    break
+                truncated_memories.append(m)
+                used += m_size
+            response_data["memories"] = truncated_memories
+            # 剩余空间给 notes
+            remaining -= used
+            if remaining < 100:
+                response_data["notes"] = []
+            else:
+                truncated_notes = []
+                for n in recent_notes:
+                    n_size = len(_json.dumps(n, ensure_ascii=False))
+                    if remaining - n_size < 0:
+                        break
+                    truncated_notes.append(n)
+                    remaining -= n_size
+                response_data["notes"] = truncated_notes
+
+    return JSONResponse(response_data)
 
 
 async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
@@ -877,6 +926,55 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
         "authority": restored,
         "previous_override": override,
         "message": f"权限已恢复: {override['level']} → {restored}",
+    })
+
+
+async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
+    """全组织记忆聚合 — GET /api/memory/org?days=7&category=pattern&limit=50."""
+    from starlette.responses import JSONResponse
+    from crew.discovery import discover_employees
+    from crew.memory import MemoryStore
+    from datetime import datetime, timedelta
+
+    days = int(request.query_params.get("days", "7"))
+    category = request.query_params.get("category") or None
+    limit = int(request.query_params.get("limit", "50"))
+
+    result = discover_employees(ctx.project_dir)
+    store = MemoryStore(project_dir=ctx.project_dir)
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat() if days > 0 else ""
+
+    all_memories: list[dict] = []
+    stats: dict[str, int] = {
+        "decision": 0, "estimate": 0, "finding": 0,
+        "correction": 0, "pattern": 0,
+    }
+
+    for emp_name in result.employees:
+        entries = store.query(emp_name, category=category, limit=200, max_visibility="open")
+        for m in entries:
+            stats[m.category] = stats.get(m.category, 0) + 1
+            if not cutoff or m.created_at >= cutoff:
+                all_memories.append({
+                    "employee": m.employee,
+                    "category": m.category,
+                    "content": m.content,
+                    "created_at": m.created_at,
+                    "confidence": m.confidence,
+                    "tags": m.tags,
+                    "shared": m.shared,
+                    "trigger_condition": getattr(m, "trigger_condition", ""),
+                    "applicability": getattr(m, "applicability", []),
+                    "origin_employee": getattr(m, "origin_employee", ""),
+                    "verified_count": getattr(m, "verified_count", 0),
+                })
+
+    all_memories.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return JSONResponse({
+        "memories": all_memories[:limit],
+        "stats": stats,
+        "total": sum(stats.values()),
     })
 
 
