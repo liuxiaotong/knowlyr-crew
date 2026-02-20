@@ -4,11 +4,12 @@
 加载不同员工，按预设流程自动完成工作。
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 try:
-    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
 except ImportError:  # pragma: no cover
     PackageNotFoundError = Exception  # type: ignore
 
@@ -32,7 +33,9 @@ try:
 except PackageNotFoundError:  # pragma: no cover - editable install
     __version__ = _load_local_version()
 
-from crew.models import (
+from crew.models import (  # noqa: E402
+    SKILL_TO_TOOL,
+    TOOL_TO_SKILL,
     Condition,
     ConditionalBody,
     ConditionalStep,
@@ -48,9 +51,7 @@ from crew.models import (
     PipelineResult,
     PipelineStep,
     RoundPlan,
-    SKILL_TO_TOOL,
     StepResult,
-    TOOL_TO_SKILL,
     WorkLogEntry,
 )
 
