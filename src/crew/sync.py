@@ -11,6 +11,7 @@ import yaml
 
 from crew.engine import CrewEngine
 from crew.id_client import (
+    AgentIdentity,
     fetch_agent_identity,
     list_agents,
     register_agent,
@@ -154,7 +155,10 @@ def sync_all(
                     emp_dir, config, agent_id, engine, report, dry_run=dry_run, force=force
                 )
             if pull:
-                _pull_employee(emp_dir, config, agent_id, report, dry_run=dry_run)
+                remote_agent = remote_map.get(agent_id)
+                _pull_employee(
+                    emp_dir, config, agent_id, report, dry_run=dry_run, remote_data=remote_agent
+                )
         except Exception as e:
             report.errors.append((name, str(e)))
             logger.warning("同步 %s 失败: %s", name, e)
@@ -279,18 +283,35 @@ def _pull_employee(
     report: SyncReport,
     *,
     dry_run: bool = False,
+    remote_data: dict | None = None,
 ) -> None:
-    """从 knowlyr-id 拉取运行时数据到本地."""
+    """从 knowlyr-id 拉取运行时数据到本地.
+
+    优先使用 remote_data（来自 list_agents 批量接口），
+    仅在 remote_data 为 None 时才调 fetch_agent_identity（逐个接口，可能 404）。
+    """
     name = config.get("name", emp_dir.name)
 
-    identity = fetch_agent_identity(agent_id)
-    if identity is None:
-        report.errors.append((name, f"无法获取 Agent #{agent_id} 身份"))
-        return
+    if remote_data is not None:
+        # 从 list_agents 批量数据构造（不含 memory/temperature，仅状态同步）
+        identity = AgentIdentity(
+            agent_id=agent_id,
+            nickname=remote_data.get("nickname", ""),
+            title=remote_data.get("title", ""),
+            bio=remote_data.get("bio", ""),
+            domains=remote_data.get("domains", []),
+            model=remote_data.get("model", ""),
+            agent_status=remote_data.get("status", "active"),
+        )
+    else:
+        identity = fetch_agent_identity(agent_id)
+        if identity is None:
+            report.errors.append((name, f"无法获取 Agent #{agent_id} 身份"))
+            return
 
     pulled = False
 
-    # 拉取 memory → memory-id.md
+    # 拉取 memory → memory-id.md（仅 fetch_agent_identity 路径有数据）
     if identity.memory and identity.memory.strip():
         memory_path = emp_dir / "memory-id.md"
         existing = memory_path.read_text(encoding="utf-8").strip() if memory_path.exists() else ""
@@ -309,7 +330,7 @@ def _pull_employee(
     ):
         yaml_updates["agent_status"] = identity.agent_status
 
-    # 拉取 temperature → employee.yaml（model 不从 id 拉取 — crew 是唯一真相源）
+    # 拉取 temperature → employee.yaml（仅 fetch_agent_identity 路径有数据）
     if identity.temperature is not None and identity.temperature != config.get("temperature"):
         yaml_updates["temperature"] = identity.temperature
 
