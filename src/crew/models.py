@@ -200,11 +200,13 @@ class DiscoveryResult(BaseModel):
     conflicts: list[dict[str, Any]] = Field(default_factory=list, description="同名冲突记录")
 
     def get(self, name_or_trigger: str) -> Employee | None:
-        """按名称或触发别名查找员工."""
+        """按名称、触发别名或角色姓名查找员工."""
         if name_or_trigger in self.employees:
             return self.employees[name_or_trigger]
         for emp in self.employees.values():
             if name_or_trigger in emp.triggers:
+                return emp
+            if emp.character_name and emp.character_name == name_or_trigger:
                 return emp
         return None
 
