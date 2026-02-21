@@ -21,6 +21,9 @@ _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
+_ANTGATHER_API_URL = os.environ.get("ANTGATHER_API_URL", "")
+_ANTGATHER_API_TOKEN = os.environ.get("ANTGATHER_API_TOKEN", "")
+
 _NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "")
 _NOTION_API_BASE = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"

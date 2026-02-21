@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from crew.webhook_context import _ID_API_BASE, _ID_API_TOKEN
+from crew.webhook_context import (
+    _ANTGATHER_API_TOKEN,
+    _ANTGATHER_API_URL,
+    _ID_API_BASE,
+    _ID_API_TOKEN,
+)
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
+
+logger = logging.getLogger(__name__)
 
 
 async def _tool_query_stats(
@@ -28,21 +36,63 @@ async def _tool_query_stats(
 async def _tool_send_message(
     args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
 ) -> str:
-    """调用 knowlyr-id /api/messages/agent-send."""
+    """发私信 — 优先走蚁聚 internal API，未配置则 fallback 到旧 id 接口."""
     import httpx
 
     sender = agent_id or args.get("sender_id", 0)
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{_ID_API_BASE}/api/messages/agent-send",
-            json={
-                "sender_id": sender,
-                "recipient_id": args.get("recipient_id"),
-                "content": args.get("content", ""),
-            },
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
+    recipient = args.get("recipient_id")
+    content = args.get("content", "")
+
+    # 优先: 蚁聚 internal API
+    if _ANTGATHER_API_URL and _ANTGATHER_API_TOKEN:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{_ANTGATHER_API_URL}/api/internal/messages",
+                    json={
+                        "sender_id": sender,
+                        "recipient_id": recipient,
+                        "content": content,
+                        "msg_type": "private",
+                    },
+                    headers={"Authorization": f"Bearer {_ANTGATHER_API_TOKEN}"},
+                )
+                if resp.is_success:
+                    logger.info("send_message via antgather OK (sender=%s)", sender)
+                    return resp.text
+                # 4xx 客户端错误: 参数/token 有问题，fallback 也没用
+                if resp.status_code < 500:
+                    logger.error(
+                        "send_message via antgather client error (%s): %s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    return f"发送失败（客户端错误 {resp.status_code}）: {resp.text[:200]}"
+                # 5xx 服务端错误: fallback 到 id
+                logger.warning(
+                    "send_message via antgather server error (%s), fallback to id",
+                    resp.status_code,
+                )
+        except Exception as e:
+            logger.warning("send_message via antgather error: %s, fallback to id", e)
+
+    # Fallback: 旧 knowlyr-id 接口（过渡期）
+    logger.info("send_message via knowlyr-id (sender=%s)", sender)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{_ID_API_BASE}/api/messages/agent-send",
+                json={
+                    "sender_id": sender,
+                    "recipient_id": recipient,
+                    "content": content,
+                },
+                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+            )
+            return resp.text
+    except Exception as e:
+        logger.error("send_message via knowlyr-id also failed: %s", e)
+        return f"发送失败: 蚁聚和 knowlyr-id 均不可用 ({e})"
 
 
 async def _tool_list_agents(
