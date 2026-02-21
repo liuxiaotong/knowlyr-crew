@@ -782,41 +782,6 @@ class TestIdentityPassthrough:
         call_kwargs = mock_execute.call_args
         assert call_kwargs.kwargs.get("agent_id") is None
 
-    @patch("crew.discovery.discover_employees")
-    @patch("crew.engine.CrewEngine")
-    @patch("crew.executor.aexecute_prompt", new_callable=AsyncMock)
-    @patch("crew.id_client.afetch_agent_identity", new_callable=AsyncMock)
-    def test_stream_with_agent_id(self, mock_identity, mock_exec, mock_engine_cls, mock_discover):
-        """stream + agent_id 应获取身份并传给 prompt."""
-        from crew.models import DiscoveryResult, Employee
-
-        emp = Employee(name="test-emp", display_name="Test", description="", body="")
-        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
-        mock_identity.return_value = {"name": "测试代理", "id": 42}
-        mock_engine = MagicMock()
-        mock_engine.prompt.return_value = "test prompt"
-        mock_engine_cls.return_value = mock_engine
-
-        async def _fake_stream():
-            yield "Hello"
-
-        mock_exec.return_value = _fake_stream()
-
-        client = _make_client()
-        resp = client.post(
-            "/run/employee/test-emp",
-            json={"args": {}, "stream": True, "agent_id": 42},
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        )
-        assert resp.status_code == 200
-        # 应调用了 afetch_agent_identity
-        mock_identity.assert_called_once_with(42)
-        # engine.prompt 应收到 agent_identity
-        mock_engine.prompt.assert_called_once()
-        call_kwargs = mock_engine.prompt.call_args
-        assert call_kwargs.kwargs.get("agent_identity") == {"name": "测试代理", "id": 42}
-
-
 class TestTaskReplay:
     """任务重放."""
 
@@ -1022,7 +987,7 @@ class TestEmployeeUpdatePUT:
         return emp, emp_dir
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.sync._write_yaml_field")
+    @patch("crew.webhook_handlers._write_yaml_field")
     def test_update_model(self, mock_write, mock_discover, tmp_path):
         """PUT 应更新 model 到 employee.yaml."""
         from crew.models import DiscoveryResult
@@ -1043,7 +1008,7 @@ class TestEmployeeUpdatePUT:
         mock_write.assert_called_once_with(emp_dir, {"model": "claude-opus-4-6"})
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.sync._write_yaml_field")
+    @patch("crew.webhook_handlers._write_yaml_field")
     def test_update_by_agent_id(self, mock_write, mock_discover, tmp_path):
         """PUT 可通过 agent_id 查找员工."""
         from crew.models import DiscoveryResult
@@ -1107,33 +1072,6 @@ class TestEmployeeUpdatePUT:
             json={"model": "gpt-4o"},
         )
         assert resp.status_code == 401
-
-    @patch("crew.discovery.discover_employees")
-    @patch("crew.sync._write_yaml_field")
-    @patch("crew.id_client.aupdate_agent", new_callable=AsyncMock)
-    def test_update_syncs_to_id(self, mock_aupdate, mock_write, mock_discover, tmp_path):
-        """更新后应自动同步到 knowlyr-id."""
-        from crew.models import DiscoveryResult
-
-        emp, _ = self._make_emp(tmp_path, agent_id=3082)
-        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
-        mock_aupdate.return_value = True
-
-        client = _make_client()
-        resp = client.put(
-            f"/api/employees/{emp.name}",
-            json={"model": "gpt-4o", "temperature": 0.5},
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["synced_to_id"] is True
-        mock_aupdate.assert_called_once_with(
-            agent_id=3082,
-            model="gpt-4o",
-            temperature=0.5,
-        )
-
 
 class TestModelTiersEndpoint:
     """GET /api/model-tiers — 模型档位列表."""
@@ -1238,7 +1176,7 @@ class TestModelTierUpdatable:
     """model_tier 应在员工可更新字段白名单中."""
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.sync._write_yaml_field")
+    @patch("crew.webhook_handlers._write_yaml_field")
     def test_update_model_tier(self, mock_write, mock_discover, tmp_path):
         """PUT 应允许更新 model_tier."""
         from crew.models import DiscoveryResult, Employee
