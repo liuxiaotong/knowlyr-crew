@@ -788,7 +788,9 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         send_code = send_data.get("code", -1) if isinstance(send_data, dict) else -1
         send_ok = send_code == 0
         if not send_ok:
-            send_msg = send_data.get("msg", "unknown") if isinstance(send_data, dict) else "no response"
+            send_msg = (
+                send_data.get("msg", "unknown") if isinstance(send_data, dict) else "no response"
+            )
             logger.error(
                 "飞书消息投递失败: code=%s msg=%s chat_id=%s employee=%s",
                 send_code,
@@ -811,7 +813,9 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             task_result["delivered"] = False
             task_result["feishu_error"] = {
                 "code": send_code,
-                "msg": send_data.get("msg", "unknown") if isinstance(send_data, dict) else "no response",
+                "msg": send_data.get("msg", "unknown")
+                if isinstance(send_data, dict)
+                else "no response",
             }
         ctx.registry.update(record.task_id, "completed", result=task_result)
 
