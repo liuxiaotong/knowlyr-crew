@@ -3,6 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
+
 import yaml
 from click.testing import CliRunner
 
