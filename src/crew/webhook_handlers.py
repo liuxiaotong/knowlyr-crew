@@ -59,7 +59,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
                 employee = emp
                 break
     except ValueError:
-        employee = result.employees.get(identifier)
+        employee = result.get(identifier)
 
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -165,7 +165,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
                 employee = emp
                 break
     except ValueError:
-        employee = result.employees.get(identifier)
+        employee = result.get(identifier)
 
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -278,7 +278,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
                 employee = emp
                 break
     except ValueError:
-        employee = result.employees.get(identifier)
+        employee = result.get(identifier)
 
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -361,7 +361,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
                 employee = emp
                 break
     except ValueError:
-        employee = result.employees.get(identifier)
+        employee = result.get(identifier)
 
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -975,7 +975,7 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
                 employee = emp
                 break
     except ValueError:
-        employee = result.employees.get(identifier)
+        employee = result.get(identifier)
 
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
