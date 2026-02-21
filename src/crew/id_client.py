@@ -444,6 +444,7 @@ def _parse_identity(agent_id: int, data: dict) -> AgentIdentity:
         system_prompt=data.get("system_prompt", ""),
         memory=data.get("memory", ""),
         crew_name=data.get("crew_name", ""),
+        agent_status=data.get("agent_status", "active"),
     )
 
 
