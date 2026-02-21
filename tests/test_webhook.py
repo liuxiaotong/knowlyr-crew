@@ -782,6 +782,7 @@ class TestIdentityPassthrough:
         call_kwargs = mock_execute.call_args
         assert call_kwargs.kwargs.get("agent_id") is None
 
+
 class TestTaskReplay:
     """任务重放."""
 
@@ -1072,6 +1073,7 @@ class TestEmployeeUpdatePUT:
             json={"model": "gpt-4o"},
         )
         assert resp.status_code == 401
+
 
 class TestModelTiersEndpoint:
     """GET /api/model-tiers — 模型档位列表."""

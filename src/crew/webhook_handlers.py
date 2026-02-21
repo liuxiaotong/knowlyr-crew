@@ -412,7 +412,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
         logger.exception("删除员工文件失败: %s", identifier)
         return JSONResponse({"error": f"Delete failed: {e}"}, status_code=500)
 
-
     return JSONResponse(
         {
             "ok": True,
