@@ -2,6 +2,7 @@ SERVER := knowlyr-web-1
 REMOTE_DIR := /opt/knowlyr-crew/project
 LOCAL_CREW := .crew
 LOCAL_EMPLOYEES := private/employees
+PRIVATE_REPO := /opt/knowlyr-crew/private-repo
 
 # ============================================================
 # 训练循环: pull → 本地分析/改进 → push → test
@@ -20,28 +21,7 @@ pull:
 	@echo ""
 	@wc -l $(LOCAL_CREW)/trajectories/*.jsonl 2>/dev/null || true
 	@ls $(LOCAL_CREW)/sessions/*.jsonl 2>/dev/null | wc -l | xargs -I{} echo "Sessions: {} 个"
-	@echo "拉取完成。用 Claude Code 分析后修改 prompt，然后 make push"
-
-## 第2步: 一键部署员工（推送 + 同步 project-dir + 重启 + 同步到 knowlyr-id）
-push:
-	@echo "=== 推送 private/ 到服务器 ==="
-	rsync -avz private/organization.yaml $(SERVER):/opt/knowlyr-crew/private/organization.yaml
-	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
-	@echo ""
-	@echo "=== 同步 private/ → project-dir ==="
-	ssh $(SERVER) "mkdir -p $(REMOTE_DIR)/$(LOCAL_EMPLOYEES) && \
-		cp /opt/knowlyr-crew/private/organization.yaml $(REMOTE_DIR)/private/organization.yaml && \
-		rsync -a /opt/knowlyr-crew/private/employees/ $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/"
-	@echo ""
-	@echo "=== 重启 crew 服务 ==="
-	ssh $(SERVER) "sudo systemctl restart knowlyr-crew"
-	@sleep 2
-	@echo "=== 同步到 knowlyr-id ==="
-	ssh $(SERVER) "set -a && source /opt/knowlyr-crew/.env && set +a && \
-		/opt/knowlyr-crew/venv/bin/knowlyr-crew agents sync-all \
-		--dir $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/ --force"
-	@echo ""
-	@echo "=== 部署完成 ==="
+	@echo "拉取完成。用 Claude Code 分析后修改 prompt，然后 git push private 仓库部署"
 
 ## 注册新员工到 knowlyr-id（需指定 NAME）
 register:
@@ -50,11 +30,6 @@ ifndef NAME
 endif
 	ssh $(SERVER) "set -a && source /opt/knowlyr-crew/.env && set +a && \
 		/opt/knowlyr-crew/venv/bin/knowlyr-crew register $(NAME)"
-
-## 只推送文件，不重启不同步
-push-only:
-	rsync -avz $(LOCAL_EMPLOYEES)/ $(SERVER):/opt/knowlyr-crew/private/employees/
-	@echo "文件已推送到 private/（未同步 project-dir、未重启、未同步 knowlyr-id）"
 
 ## 第3步: 在服务器上测试某个员工（走真实 webhook，调真实工具）
 test-employee:
@@ -75,16 +50,6 @@ endif
 # ============================================================
 # 快捷命令
 # ============================================================
-
-## 推送单个员工
-push-employee:
-ifndef NAME
-	$(error 用法: make push-employee NAME=姜墨言-3073)
-endif
-	rsync -avz $(LOCAL_EMPLOYEES)/$(NAME)/ $(SERVER):/opt/knowlyr-crew/private/employees/$(NAME)/
-	ssh $(SERVER) "mkdir -p $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/$(NAME) && \
-		rsync -a /opt/knowlyr-crew/private/employees/$(NAME)/ $(REMOTE_DIR)/$(LOCAL_EMPLOYEES)/$(NAME)/"
-	@echo "已推送 $(NAME)（private/ + project-dir）"
 
 ## 清理服务器上的脏数据
 clean-memory:
@@ -152,12 +117,12 @@ train-cycle:
 	@echo ""
 	@echo "=== 4/4 完成 ==="
 	@echo "数据已就绪。现在用 Claude Code 分析 .crew/trajectories/ 和 .crew/sessions/"
-	@echo "改进 prompt 后运行: make push && make test-employee NAME=ceo-assistant TASK='你的测试任务'"
+	@echo "改进 prompt 后运行: make test-employee NAME=ceo-assistant TASK='你的测试任务'"
 
 ## 安装 git hooks（拦截 private/ 误提交）
 install-hooks:
 	git config core.hooksPath hooks
 	@echo "已配置 git hooks 目录: hooks/"
 
-.PHONY: pull push register test-employee push-employee clean-memory clean-trajectories \
+.PHONY: pull register test-employee clean-memory clean-trajectories \
         batch score trajectories deploy-engine upgrade-agent train-cycle install-hooks
