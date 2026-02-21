@@ -264,6 +264,7 @@ def parse_employee_dir(
         fallback_api_key=str(config.get("fallback_api_key", "")),
         fallback_base_url=str(config.get("fallback_base_url", "")),
         agent_id=config.get("agent_id"),
+        agent_status=config.get("agent_status", "active"),
         avatar_prompt=config.get("avatar_prompt", ""),
         auto_memory=bool(config.get("auto_memory", False)),
         kpi=config.get("kpi", []),
