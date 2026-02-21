@@ -387,14 +387,21 @@ def append_agent_memory(agent_id: int, summary: str) -> bool:
     return update_agent(agent_id, memory=combined)
 
 
+def _get_antgather_config() -> tuple[str, str]:
+    """读取蚁聚 API 配置."""
+    base_url = os.environ.get("ANTGATHER_API_URL", "")
+    token = os.environ.get("ANTGATHER_API_TOKEN", "")
+    return base_url, token
+
+
 def list_agents() -> list[dict] | None:
-    """列出 knowlyr-id 中所有活跃 Agent.
+    """列出所有 AI 员工（优先从蚁聚获取，兼容 knowlyr-id）.
 
     Returns:
         Agent 列表（成功）或 None（失败，不抛异常）
     """
     if _breaker.is_open():
-        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        logger.debug("断路器打开，跳过请求")
         return None
 
     httpx = _get_httpx()
@@ -402,6 +409,19 @@ def list_agents() -> list[dict] | None:
         logger.warning("httpx 未安装，无法列出 Agent")
         return None
 
+    # 优先使用蚁聚 API
+    ag_url, ag_token = _get_antgather_config()
+    if ag_url and ag_token:
+        url = f"{ag_url}/api/internal/agents"
+        try:
+            resp = httpx.get(url, headers=_headers(ag_token), timeout=10.0)
+            resp.raise_for_status()
+            _breaker.record_success()
+            return resp.json()
+        except Exception as e:
+            logger.warning("蚁聚 Agent 列表获取失败: %s（回退到 id）", e)
+
+    # 回退：knowlyr-id
     base_url, token = _get_config()
     if not token:
         logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 列表")
@@ -409,11 +429,7 @@ def list_agents() -> list[dict] | None:
 
     url = f"{base_url}/api/agents"
     try:
-        resp = httpx.get(
-            url,
-            headers=_headers(token),
-            timeout=5.0,
-        )
+        resp = httpx.get(url, headers=_headers(token), timeout=5.0)
         resp.raise_for_status()
         _breaker.record_success()
         return resp.json()
@@ -663,12 +679,30 @@ async def aappend_agent_memory(agent_id: int, summary: str) -> bool:
 async def alist_agents() -> list[dict] | None:
     """list_agents 的异步版本."""
     if _breaker.is_open():
-        logger.debug("knowlyr-id 断路器打开，跳过请求")
+        logger.debug("断路器打开，跳过请求")
         return None
     httpx = _get_httpx()
     if httpx is None:
         logger.warning("httpx 未安装，无法列出 Agent")
         return None
+
+    # 优先使用蚁聚 API
+    ag_url, ag_token = _get_antgather_config()
+    if ag_url and ag_token:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{ag_url}/api/internal/agents",
+                    headers=_headers(ag_token),
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+                _breaker.record_success()
+                return resp.json()
+        except Exception as e:
+            logger.warning("蚁聚 Agent 列表获取失败: %s（回退到 id）", e)
+
+    # 回退：knowlyr-id
     base_url, token = _get_config()
     if not token:
         logger.warning("AGENT_API_TOKEN 未设置，跳过 Agent 列表")
