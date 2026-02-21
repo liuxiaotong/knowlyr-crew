@@ -70,6 +70,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_generic,
     _handle_github,
     _handle_memory_ingest,
+    _handle_model_tiers,
     _handle_openclaw,
     _handle_org_memories,
     _handle_project_status,
@@ -290,6 +291,11 @@ def create_webhook_app(
         Route(
             "/api/project/status",
             endpoint=_make_handler(ctx, _handle_project_status),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/model-tiers",
+            endpoint=_make_handler(ctx, _handle_model_tiers),
             methods=["GET"],
         ),
     ]

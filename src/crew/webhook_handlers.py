@@ -130,6 +130,23 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_model_tiers(request: Any, ctx: _AppContext) -> Any:
+    """返回可用的模型档位列表（不含密钥和内部 URL）."""
+    from starlette.responses import JSONResponse
+
+    from crew.organization import load_organization
+
+    org = load_organization(project_dir=ctx.project_dir)
+    tiers: dict[str, dict[str, str]] = {}
+    for tier_name, tier_config in org.model_defaults.items():
+        tiers[tier_name] = {
+            "model": tier_config.model,
+            "fallback_model": tier_config.fallback_model,
+        }
+
+    return JSONResponse({"tiers": tiers})
+
+
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
     from starlette.responses import JSONResponse

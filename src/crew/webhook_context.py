@@ -25,7 +25,7 @@ _NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "")
 _NOTION_API_BASE = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
 
-_EMPLOYEE_UPDATABLE_FIELDS = {"model", "temperature", "max_tokens"}
+_EMPLOYEE_UPDATABLE_FIELDS = {"model", "model_tier", "temperature", "max_tokens"}
 
 
 class _AppContext:

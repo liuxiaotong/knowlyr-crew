@@ -1135,6 +1135,155 @@ class TestEmployeeUpdatePUT:
         )
 
 
+class TestModelTiersEndpoint:
+    """GET /api/model-tiers — 模型档位列表."""
+
+    @patch("crew.organization.load_organization")
+    def test_returns_tiers(self, mock_load_org):
+        """应返回所有 tier 的 model 和 fallback_model."""
+        from crew.models import ModelTierConfig, Organization
+
+        org = Organization(
+            model_defaults={
+                "claude": ModelTierConfig(
+                    model="claude-sonnet-4-5-20250929",
+                    api_key="sk-secret",
+                    base_url="https://aiberm.com/v1",
+                    fallback_model="claude-sonnet-4-20250514",
+                    fallback_api_key="sk-fallback-secret",
+                ),
+                "kimi": ModelTierConfig(
+                    model="kimi-k2.5",
+                    api_key="km-secret",
+                    base_url="https://api.moonshot.cn/v1",
+                    fallback_model="kimi-k2.5",
+                    fallback_api_key="km-fallback-secret",
+                ),
+            }
+        )
+        mock_load_org.return_value = org
+
+        client = _make_client()
+        resp = client.get(
+            "/api/model-tiers",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tiers" in data
+        assert "claude" in data["tiers"]
+        assert "kimi" in data["tiers"]
+        assert data["tiers"]["claude"]["model"] == "claude-sonnet-4-5-20250929"
+        assert data["tiers"]["claude"]["fallback_model"] == "claude-sonnet-4-20250514"
+        assert data["tiers"]["kimi"]["model"] == "kimi-k2.5"
+        assert data["tiers"]["kimi"]["fallback_model"] == "kimi-k2.5"
+
+    @patch("crew.organization.load_organization")
+    def test_no_sensitive_fields(self, mock_load_org):
+        """不应返回 api_key、base_url 等敏感字段."""
+        from crew.models import ModelTierConfig, Organization
+
+        org = Organization(
+            model_defaults={
+                "claude": ModelTierConfig(
+                    model="claude-sonnet-4-5-20250929",
+                    api_key="sk-super-secret-key",
+                    base_url="https://aiberm.com/v1",
+                    fallback_model="claude-sonnet-4-20250514",
+                    fallback_api_key="sk-fallback-secret",
+                    fallback_base_url="https://fallback.aiberm.com/v1",
+                ),
+            }
+        )
+        mock_load_org.return_value = org
+
+        client = _make_client()
+        resp = client.get(
+            "/api/model-tiers",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        tier = data["tiers"]["claude"]
+        # 只有 model 和 fallback_model，不应有其他字段
+        assert set(tier.keys()) == {"model", "fallback_model"}
+        assert "sk-super-secret-key" not in json.dumps(data)
+        assert "aiberm.com" not in json.dumps(data)
+        assert "sk-fallback-secret" not in json.dumps(data)
+        assert "fallback.aiberm.com" not in json.dumps(data)
+
+    @patch("crew.organization.load_organization")
+    def test_empty_model_defaults(self, mock_load_org):
+        """没有 model_defaults 时应返回空 tiers."""
+        from crew.models import Organization
+
+        mock_load_org.return_value = Organization()
+
+        client = _make_client()
+        resp = client.get(
+            "/api/model-tiers",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"tiers": {}}
+
+    def test_no_auth_rejected(self):
+        """无认证应返回 401."""
+        client = _make_client()
+        resp = client.get("/api/model-tiers")
+        assert resp.status_code == 401
+
+
+class TestModelTierUpdatable:
+    """model_tier 应在员工可更新字段白名单中."""
+
+    @patch("crew.discovery.discover_employees")
+    @patch("crew.sync._write_yaml_field")
+    def test_update_model_tier(self, mock_write, mock_discover, tmp_path):
+        """PUT 应允许更新 model_tier."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp_dir = tmp_path / "test-emp-9000"
+        emp_dir.mkdir(parents=True, exist_ok=True)
+        config = {
+            "name": "test-emp",
+            "description": "test desc",
+            "agent_id": 9000,
+            "model_tier": "claude",
+        }
+        (emp_dir / "employee.yaml").write_text(
+            yaml.dump(config, allow_unicode=True),
+            encoding="utf-8",
+        )
+        emp = Employee(
+            name="test-emp",
+            description="test desc",
+            body="test body",
+            agent_id=9000,
+            model_tier="claude",
+            source_path=emp_dir,
+        )
+        mock_discover.return_value = DiscoveryResult(employees={"test-emp": emp})
+
+        client = _make_client()
+        resp = client.put(
+            "/api/employees/test-emp",
+            json={"model_tier": "kimi"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["updated"]["model_tier"] == "kimi"
+        mock_write.assert_called_once_with(emp_dir, {"model_tier": "kimi"})
+
+    def test_model_tier_in_whitelist(self):
+        """model_tier 应在 _EMPLOYEE_UPDATABLE_FIELDS 白名单中."""
+        from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS
+
+        assert "model_tier" in _EMPLOYEE_UPDATABLE_FIELDS
+
+
 class TestCostSummaryEndpoint:
     """GET /api/cost/summary — 成本汇总."""
 
