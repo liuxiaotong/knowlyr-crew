@@ -39,4 +39,6 @@ Thumbs.db
 .crew/
 
 # Private (proprietary employee definitions)
+private
 private/
+private.bak/

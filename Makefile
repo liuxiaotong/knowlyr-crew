@@ -154,5 +154,10 @@ train-cycle:
 	@echo "数据已就绪。现在用 Claude Code 分析 .crew/trajectories/ 和 .crew/sessions/"
 	@echo "改进 prompt 后运行: make push && make test-employee NAME=ceo-assistant TASK='你的测试任务'"
 
+## 安装 git hooks（拦截 private/ 误提交）
+install-hooks:
+	git config core.hooksPath hooks
+	@echo "已配置 git hooks 目录: hooks/"
+
 .PHONY: pull push register test-employee push-employee clean-memory clean-trajectories \
-        batch score trajectories deploy-engine upgrade-agent train-cycle
+        batch score trajectories deploy-engine upgrade-agent train-cycle install-hooks
