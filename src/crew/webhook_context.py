@@ -44,7 +44,6 @@ class _AppContext:
         self.config = config
         self.registry = registry
         self.scheduler = None  # CronScheduler, set by create_webhook_app
-        self.heartbeat_mgr = None  # HeartbeatManager, set by create_webhook_app
         self.feishu_config = None  # FeishuConfig, set by create_webhook_app
         self.feishu_token_mgr = None  # FeishuTokenManager, set by create_webhook_app
         self.feishu_dedup = None  # EventDeduplicator, set by create_webhook_app

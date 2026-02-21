@@ -35,7 +35,6 @@ from crew.models import (
 
 if TYPE_CHECKING:
     from crew.context_detector import ProjectInfo
-    from crew.id_client import AgentIdentity
     from crew.models import DiscoveryResult, DiscussionActionPlan
 
 
@@ -327,43 +326,6 @@ def _evaluate_check(
 # ── 单步执行 ──
 
 
-def _resolve_agent_identity(agent_id: int | None) -> AgentIdentity | None:
-    """获取 agent 身份信息（可选）."""
-    if agent_id is None:
-        return None
-    try:
-        from crew.id_client import fetch_agent_identity
-
-        return fetch_agent_identity(agent_id)
-    except ImportError:
-        return None
-
-
-class AgentDisabledError(RuntimeError):
-    """Agent 已停用，拒绝执行."""
-
-
-def _check_agent_active(agent_identity: AgentIdentity | None, agent_id: int | None) -> None:
-    """如果 agent 已停用则抛出异常."""
-    if agent_identity is None:
-        return
-    status = agent_identity.agent_status
-    if status and status != "active":
-        raise AgentDisabledError(f"Agent {agent_id} 状态为 '{status}'，拒绝执行")
-
-
-def _resolve_exemplars(agent_id: int | None, employee_name: str) -> str:
-    """获取 agent 的 few-shot 范例提示文本（可选）."""
-    if agent_id is None:
-        return ""
-    try:
-        from crew.id_client import fetch_exemplars
-
-        return fetch_exemplars(agent_id, employee_name)
-    except Exception:
-        return ""
-
-
 def _execute_single_step(
     step: PipelineStep,
     index: int,
@@ -373,12 +335,10 @@ def _execute_single_step(
     outputs_by_id: dict[str, str],
     outputs_by_index: dict[int, str],
     prev_output: str,
-    agent_identity: AgentIdentity | None,
     project_info: ProjectInfo | None,
     execute: bool,
     api_key: str | None,
     model: str | None,
-    exemplar_prompt: str = "",
 ) -> StepResult:
     """执行单个步骤：解析参数 → 生成 prompt → 可选 LLM 调用."""
     emp = employees.get(step.employee)
@@ -404,9 +364,7 @@ def _execute_single_step(
     prompt = engine.prompt(
         emp,
         args=resolved_args,
-        agent_identity=agent_identity,
         project_info=project_info,
-        exemplar_prompt=exemplar_prompt,
     )
 
     # 3. 可选 LLM 执行
@@ -491,8 +449,6 @@ def run_pipeline(
     employees = discover_employees(project_dir=project_dir)
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
-    agent_identity = _resolve_agent_identity(agent_id)
-    _check_agent_active(agent_identity, agent_id)
 
     # 启用轨迹录制（仅 execute 模式）
     _traj_collector = None
@@ -530,7 +486,6 @@ def run_pipeline(
                     futures = {}
                     for sub in item.parallel:
                         idx = flat_index
-                        ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                         future = pool.submit(
                             _execute_single_step,
                             sub,
@@ -541,12 +496,10 @@ def run_pipeline(
                             outputs_by_id,
                             outputs_by_index,
                             prev_output,
-                            agent_identity,
                             project_info,
                             execute,
                             api_key,
                             model,
-                            ex_prompt,
                         )
                         futures[future] = (sub, idx)
                         flat_index += 1
@@ -567,7 +520,6 @@ def run_pipeline(
             else:
                 # prompt-only 模式顺序生成
                 for sub in item.parallel:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     r = _execute_single_step(
                         sub,
                         flat_index,
@@ -577,12 +529,10 @@ def run_pipeline(
                         outputs_by_id,
                         outputs_by_index,
                         prev_output,
-                        agent_identity,
                         project_info,
                         execute,
                         api_key,
                         model,
-                        ex_prompt,
                     )
                     if r.error:
                         logger.warning(
@@ -627,7 +577,6 @@ def run_pipeline(
 
             branch_results: list[StepResult] = []
             for sub in branch_steps:
-                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                 r = _execute_single_step(
                     sub,
                     flat_index,
@@ -637,12 +586,10 @@ def run_pipeline(
                     outputs_by_id,
                     outputs_by_index,
                     prev_output,
-                    agent_identity,
                     project_info,
                     execute,
                     api_key,
                     model,
-                    ex_prompt,
                 )
                 r.branch = branch_label
                 if r.step_id:
@@ -674,7 +621,6 @@ def run_pipeline(
 
             for iteration in range(body.max_iterations):
                 for sub in body.steps:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     r = _execute_single_step(
                         sub,
                         flat_index,
@@ -684,12 +630,10 @@ def run_pipeline(
                         outputs_by_id,
                         outputs_by_index,
                         prev_output,
-                        agent_identity,
                         project_info,
                         execute,
                         api_key,
                         model,
-                        ex_prompt,
                     )
                     r.branch = f"loop-{iteration}"
                     if r.step_id:
@@ -733,7 +677,6 @@ def run_pipeline(
                     loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
                 )
         else:
-            ex_prompt = _resolve_exemplars(agent_id, item.employee)
             r = _execute_single_step(
                 item,
                 flat_index,
@@ -743,12 +686,10 @@ def run_pipeline(
                 outputs_by_id,
                 outputs_by_index,
                 prev_output,
-                agent_identity,
                 project_info,
                 execute,
                 api_key,
                 model,
-                ex_prompt,
             )
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
@@ -821,8 +762,6 @@ async def arun_pipeline(
     employees = discover_employees(project_dir=project_dir)
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
-    agent_identity = _resolve_agent_identity(agent_id)
-    _check_agent_active(agent_identity, agent_id)
 
     outputs_by_id: dict[str, str] = {}
     outputs_by_index: dict[int, str] = {}
@@ -842,7 +781,6 @@ async def arun_pipeline(
                 for sub in item.parallel:
                     idx = flat_index
                     indices.append(idx)
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     tasks.append(
                         _aexecute_single_step(
                             sub,
@@ -853,11 +791,9 @@ async def arun_pipeline(
                             outputs_by_id,
                             outputs_by_index,
                             prev_output,
-                            agent_identity,
                             project_info,
                             api_key,
                             model,
-                            ex_prompt,
                         )
                     )
                     flat_index += 1
@@ -878,7 +814,6 @@ async def arun_pipeline(
             else:
                 group_results = []
                 for sub in item.parallel:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     r = _execute_single_step(
                         sub,
                         flat_index,
@@ -888,12 +823,10 @@ async def arun_pipeline(
                         outputs_by_id,
                         outputs_by_index,
                         prev_output,
-                        agent_identity,
                         project_info,
                         False,
                         None,
                         None,
-                        ex_prompt,
                     )
                     group_results.append(r)
                     flat_index += 1
@@ -932,7 +865,6 @@ async def arun_pipeline(
 
             branch_results: list[StepResult] = []
             for sub in branch_steps:
-                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                 if execute:
                     r = await _aexecute_single_step(
                         sub,
@@ -943,11 +875,9 @@ async def arun_pipeline(
                         outputs_by_id,
                         outputs_by_index,
                         prev_output,
-                        agent_identity,
                         project_info,
                         api_key,
                         model,
-                        ex_prompt,
                     )
                 else:
                     r = _execute_single_step(
@@ -959,12 +889,10 @@ async def arun_pipeline(
                         outputs_by_id,
                         outputs_by_index,
                         prev_output,
-                        agent_identity,
                         project_info,
                         False,
                         None,
                         None,
-                        ex_prompt,
                     )
                 r.branch = branch_label
                 if r.step_id:
@@ -996,7 +924,6 @@ async def arun_pipeline(
 
             for iteration in range(body.max_iterations):
                 for sub in body.steps:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
                     if execute:
                         r = await _aexecute_single_step(
                             sub,
@@ -1007,11 +934,9 @@ async def arun_pipeline(
                             outputs_by_id,
                             outputs_by_index,
                             prev_output,
-                            agent_identity,
                             project_info,
                             api_key,
                             model,
-                            ex_prompt,
                         )
                     else:
                         r = _execute_single_step(
@@ -1023,12 +948,10 @@ async def arun_pipeline(
                             outputs_by_id,
                             outputs_by_index,
                             prev_output,
-                            agent_identity,
                             project_info,
                             False,
                             None,
                             None,
-                            ex_prompt,
                         )
                     r.branch = f"loop-{iteration}"
                     if r.step_id:
@@ -1071,7 +994,6 @@ async def arun_pipeline(
                     loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
                 )
         else:
-            ex_prompt = _resolve_exemplars(agent_id, item.employee)
             if execute:
                 r = await _aexecute_single_step(
                     item,
@@ -1082,11 +1004,9 @@ async def arun_pipeline(
                     outputs_by_id,
                     outputs_by_index,
                     prev_output,
-                    agent_identity,
                     project_info,
                     api_key,
                     model,
-                    ex_prompt,
                 )
             else:
                 r = _execute_single_step(
@@ -1098,12 +1018,10 @@ async def arun_pipeline(
                     outputs_by_id,
                     outputs_by_index,
                     prev_output,
-                    agent_identity,
                     project_info,
                     False,
                     None,
                     None,
-                    ex_prompt,
                 )
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
@@ -1165,8 +1083,6 @@ async def aresume_pipeline(
     employees = discover_employees(project_dir=project_dir)
     engine = CrewEngine(project_dir=project_dir)
     project_info = detect_project(project_dir) if smart_context else None
-    agent_identity = _resolve_agent_identity(agent_id)
-    _check_agent_active(agent_identity, agent_id)
 
     # 检测 pipeline 定义是否变更
     saved_hash = checkpoint.get("steps_hash", "")
@@ -1202,7 +1118,7 @@ async def aresume_pipeline(
     _aborted = False
 
     # 辅助：根据 execute 选择同步/异步执行
-    async def _run_step(sub, idx, ex_prompt):
+    async def _run_step(sub, idx):
         if execute:
             return await _aexecute_single_step(
                 sub,
@@ -1213,11 +1129,9 @@ async def aresume_pipeline(
                 outputs_by_id,
                 outputs_by_index,
                 prev_output,
-                agent_identity,
                 project_info,
                 api_key,
                 model,
-                ex_prompt,
             )
         return _execute_single_step(
             sub,
@@ -1228,12 +1142,10 @@ async def aresume_pipeline(
             outputs_by_id,
             outputs_by_index,
             prev_output,
-            agent_identity,
             project_info,
             False,
             None,
             None,
-            ex_prompt,
         )
 
     # 从 next_step_i 开始继续执行
@@ -1245,8 +1157,7 @@ async def aresume_pipeline(
                 tasks = []
                 for sub in item.parallel:
                     idx = flat_index
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    tasks.append(_run_step(sub, idx, ex_prompt))
+                    tasks.append(_run_step(sub, idx))
                     flat_index += 1
                 group_results = list(
                     await asyncio.wait_for(
@@ -1257,8 +1168,7 @@ async def aresume_pipeline(
             else:
                 group_results = []
                 for sub in item.parallel:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    r = await _run_step(sub, flat_index, ex_prompt)
+                    r = await _run_step(sub, flat_index)
                     group_results.append(r)
                     flat_index += 1
             group_results.sort(key=lambda r: r.step_index)
@@ -1296,8 +1206,7 @@ async def aresume_pipeline(
 
             branch_results: list[StepResult] = []
             for sub in branch_steps:
-                ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                r = await _run_step(sub, flat_index, ex_prompt)
+                r = await _run_step(sub, flat_index)
                 r.branch = branch_label
                 if r.step_id:
                     outputs_by_id[r.step_id] = r.output
@@ -1328,8 +1237,7 @@ async def aresume_pipeline(
 
             for iteration in range(body.max_iterations):
                 for sub in body.steps:
-                    ex_prompt = _resolve_exemplars(agent_id, sub.employee)
-                    r = await _run_step(sub, flat_index, ex_prompt)
+                    r = await _run_step(sub, flat_index)
                     r.branch = f"loop-{iteration}"
                     if r.step_id:
                         outputs_by_id[r.step_id] = r.output
@@ -1371,8 +1279,7 @@ async def aresume_pipeline(
                     loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
                 )
         else:
-            ex_prompt = _resolve_exemplars(agent_id, item.employee)
-            r = await _run_step(item, flat_index, ex_prompt)
+            r = await _run_step(item, flat_index)
             if r.step_id:
                 outputs_by_id[r.step_id] = r.output
             outputs_by_index[flat_index] = r.output
@@ -1415,11 +1322,9 @@ async def _aexecute_single_step(
     outputs_by_id: dict[str, str],
     outputs_by_index: dict[int, str],
     prev_output: str,
-    agent_identity: AgentIdentity | None,
     project_info: ProjectInfo | None,
     api_key: str | None,
     model: str | None,
-    exemplar_prompt: str = "",
 ) -> StepResult:
     """异步执行单个步骤."""
     emp = employees.get(step.employee)
@@ -1443,9 +1348,7 @@ async def _aexecute_single_step(
     prompt = engine.prompt(
         emp,
         args=resolved_args,
-        agent_identity=agent_identity,
         project_info=project_info,
-        exemplar_prompt=exemplar_prompt,
     )
 
     try:

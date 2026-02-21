@@ -64,6 +64,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_cost_summary,
     _handle_cron_status,
     _handle_employee_delete,
+    _handle_employee_list,
     _handle_employee_prompt,
     _handle_employee_state,
     _handle_employee_update,
@@ -253,6 +254,11 @@ def create_webhook_app(
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
         Route(
+            "/api/employees",
+            endpoint=_make_handler(ctx, _handle_employee_list),
+            methods=["GET"],
+        ),
+        Route(
             "/api/employees/{identifier}/prompt",
             endpoint=_make_handler(ctx, _handle_employee_prompt),
             methods=["GET"],
@@ -315,20 +321,11 @@ def create_webhook_app(
 
         if scheduler:
             await scheduler.start()
-        try:
-            from crew.id_client import HeartbeatManager
-
-            ctx.heartbeat_mgr = HeartbeatManager(interval=60.0)
-            await ctx.heartbeat_mgr.start()
-        except ImportError:
-            pass
         asyncio.create_task(_resume_incomplete_pipelines(ctx))
 
     async def on_shutdown():
         if scheduler:
             await scheduler.stop()
-        if ctx.heartbeat_mgr:
-            await ctx.heartbeat_mgr.stop()
 
     app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 

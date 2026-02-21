@@ -115,24 +115,14 @@ def _record_session_summary(
     *,
     employee: str,
     session_id: str | None,
-    agent_id: int | None = None,
 ) -> None:
     try:
-        summary = SessionMemoryWriter().capture(
+        SessionMemoryWriter().capture(
             employee=employee,
             session_id=session_id,
         )
     except Exception as e:
         logger.debug("采集 session 摘要失败: %s", e)
-        summary = None
-
-    if summary and agent_id:
-        try:
-            from crew.id_client import append_agent_memory
-
-            append_agent_memory(agent_id, summary)
-        except Exception as e:
-            logger.debug("写入 agent 记忆失败: %s", e)
 
 
 @click.group()
@@ -1120,20 +1110,6 @@ def _run_employee_job(
     if agent_id is None and emp.agent_id is not None:
         agent_id = emp.agent_id
 
-    agent_identity = None
-    if agent_id is not None:
-        try:
-            from crew.id_client import fetch_agent_identity
-
-            agent_identity = fetch_agent_identity(agent_id)
-            if agent_identity is None:
-                click.echo(
-                    f"Warning: 无法获取 Agent {agent_id} 身份，继续生成 prompt",
-                    err=True,
-                )
-        except ImportError:
-            click.echo("Warning: httpx 未安装，无法连接 knowlyr-id", err=True)
-
     project_info = None
     if smart_context:
         from crew.context_detector import detect_project
@@ -1165,7 +1141,6 @@ def _run_employee_job(
             args=args_dict,
             positional=list(positional_args),
             raw=raw,
-            agent_identity=agent_identity,
             project_info=project_info,
         )
     except SystemExit as exc:
@@ -1197,14 +1172,10 @@ def _run_employee_job(
     already_streamed = False
     traj_collector = None
     if execute_mode:
-        effective_model = (
-            emp.model
-            or (agent_identity.model if agent_identity else None)
-            or "claude-sonnet-4-20250514"
-        )
+        effective_model = emp.model or "claude-sonnet-4-20250514"
 
-        # 解析 API key: employee.api_key > agent_identity > 环境变量
-        exec_api_key = emp.api_key or (agent_identity.api_key if agent_identity else None)
+        # 解析 API key: employee.api_key > 环境变量
+        exec_api_key = emp.api_key
         if not exec_api_key:
             from crew.providers import detect_provider, resolve_api_key
 
@@ -1284,7 +1255,7 @@ def _run_employee_job(
                 emp=emp,
                 api_key=exec_api_key,
                 model=effective_model,
-                max_tokens=agent_identity.max_tokens if agent_identity else None,
+                max_tokens=None,
                 traj_collector=traj_collector,
             )
             already_streamed = True  # _execute_with_tool_loop 已输出
@@ -1295,8 +1266,8 @@ def _run_employee_job(
                     user_message=effective_message,
                     api_key=exec_api_key,
                     model=effective_model,
-                    temperature=agent_identity.temperature,
-                    max_tokens=agent_identity.max_tokens,
+                    temperature=None,
+                    max_tokens=None,
                     stream=stream_enabled,
                     on_chunk=_on_chunk if stream_enabled else None,
                     base_url=emp.base_url or None,
@@ -1360,14 +1331,6 @@ def _run_employee_job(
         work_logger.add_entry(session_id, "prompt_generated", detail_msg)
     except Exception:
         pass
-
-    if agent_id is not None:
-        try:
-            from crew.id_client import send_heartbeat
-
-            send_heartbeat(agent_id, detail=f"employee={emp.name}")
-        except Exception:
-            pass
 
     try:
         if output:
@@ -1438,7 +1401,6 @@ def _run_employee_job(
         _record_session_summary(
             employee=emp.name,
             session_id=transcript_id,
-            agent_id=agent_id,
         )
 
 
@@ -2607,7 +2569,6 @@ def pipeline_run(
             _record_session_summary(
                 employee=f"pipeline:{p.name}",
                 session_id=transcript_id,
-                agent_id=agent_id,
             )
     finally:
         if lane:
@@ -2929,7 +2890,6 @@ def route_run(
     _record_session_summary(
         employee=f"route:{name}",
         session_id=transcript_id,
-        agent_id=agent_id,
     )
 
 
@@ -3240,7 +3200,6 @@ def _run_discussion_plan(
             _record_session_summary(
                 employee=memory_key,
                 session_id=transcript_id,
-                agent_id=agent_id,
             )
 
 
@@ -3315,7 +3274,6 @@ def _run_discussion_prompt(
             _record_session_summary(
                 employee=memory_key,
                 session_id=transcript_id,
-                agent_id=agent_id,
             )
 
 
@@ -3983,79 +3941,11 @@ def eval_prompt(decision_id: str):
     click.echo(prompt)
 
 
-# ── register 命令 ──
-
-
-@main.command()
-@click.argument("name")
-@click.option("--dry-run", is_flag=True, help="预览操作但不执行")
-def register(name: str, dry_run: bool):
-    """将员工注册为 knowlyr-id Agent 并保存 agent_id."""
-    from crew.discovery import discover_employees
-
-    result = discover_employees()
-    emp = result.get(name)
-    if not emp:
-        click.echo(f"未找到员工: {name}", err=True)
-        raise SystemExit(1)
-
-    if emp.agent_id is not None:
-        click.echo(f"员工 '{emp.name}' 已绑定 Agent #{emp.agent_id}", err=True)
-        raise SystemExit(1)
-
-    nickname = emp.character_name or emp.display_name or emp.name
-    title = emp.display_name or emp.name
-    capabilities = emp.description
-    domains = emp.tags[:5] if emp.tags else []
-    model = emp.model
-
-    click.echo(f'注册员工 "{emp.name}" 到 knowlyr-id...', err=True)
-    click.echo(f"  nickname:     {nickname}", err=True)
-    click.echo(f"  title:        {title}", err=True)
-    click.echo(f"  capabilities: {capabilities}", err=True)
-    if domains:
-        click.echo(f"  domains:      {', '.join(domains)}", err=True)
-    if model:
-        click.echo(f"  model:        {model}", err=True)
-
-    # 检查头像
-    avatar_b64 = _load_avatar_base64(emp)
-    if avatar_b64:
-        click.echo("  avatar:       ✓ (avatar.webp)", err=True)
-
-    if dry_run:
-        click.echo("\n(dry-run 模式，未执行注册)", err=True)
-        return
-
-    from crew.id_client import register_agent
-
-    agent_id = register_agent(
-        nickname=nickname,
-        title=title,
-        capabilities=capabilities,
-        domains=domains,
-        model=model,
-        avatar_base64=avatar_b64,
-    )
-    if agent_id is None:
-        click.echo("注册失败（检查 KNOWLYR_ID_URL 和 AGENT_API_TOKEN 环境变量）", err=True)
-        raise SystemExit(1)
-
-    click.echo(f"✓ 已注册为 Agent #{agent_id}", err=True)
-
-    # 回写 agent_id 到源文件
-    if emp.source_path and emp.source_layer in ("global", "project"):
-        _write_agent_id(emp, agent_id)
-    else:
-        click.echo(f"  提示: 请手动在员工定义中添加 agent_id: {agent_id}", err=True)
-
-
 @main.command()
 @click.argument("name")
 @click.option("--force", is_flag=True, help="跳过确认")
-@click.option("--keep-remote", is_flag=True, help="保留 knowlyr-id 中的 Agent（仅删本地）")
-def delete(name: str, force: bool, keep_remote: bool):
-    """删除员工（本地文件 + 远端标记为 inactive）."""
+def delete(name: str, force: bool):
+    """删除员工（本地文件）."""
     from crew.discovery import discover_employees
 
     result = discover_employees(cache_ttl=0)
@@ -4074,12 +3964,6 @@ def delete(name: str, force: bool, keep_remote: bool):
     click.echo(f"  名称:   {emp.name}", err=True)
     click.echo(f"  显示名: {emp.effective_display_name}", err=True)
     click.echo(f"  路径:   {emp.source_path}", err=True)
-    if emp.agent_id:
-        click.echo(f"  Agent:  #{emp.agent_id}", err=True)
-        if keep_remote:
-            click.echo("  远端:   保留（--keep-remote）", err=True)
-        else:
-            click.echo("  远端:   将标记为 inactive", err=True)
 
     if not force:
         if not click.confirm("确认删除？"):
@@ -4095,66 +3979,6 @@ def delete(name: str, force: bool, keep_remote: bool):
     elif source.is_file():
         source.unlink()
     click.echo(f"✓ 本地文件已删除: {source}", err=True)
-
-    # 远端标 inactive
-    if emp.agent_id and not keep_remote:
-        try:
-            from crew.id_client import update_agent
-
-            ok = update_agent(emp.agent_id, agent_status="inactive")
-            if ok:
-                click.echo(f"✓ Agent #{emp.agent_id} 已标记为 inactive", err=True)
-            else:
-                click.echo(f"⚠ 远端禁用失败（请手动处理 Agent #{emp.agent_id}）", err=True)
-        except Exception as e:
-            click.echo(f"⚠ 远端禁用异常: {e}", err=True)
-
-
-def _load_avatar_base64(emp) -> str | None:
-    """从员工目录加载 avatar.webp 并 base64 编码."""
-    if not emp.source_path:
-        return None
-    avatar_dir = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
-    avatar_path = avatar_dir / "avatar.webp"
-    if not avatar_path.exists():
-        return None
-    import base64
-
-    return base64.b64encode(avatar_path.read_bytes()).decode()
-
-
-def _write_agent_id(emp, agent_id: int) -> None:
-    """将 agent_id 回写到员工定义文件."""
-    import yaml
-
-    source = emp.source_path
-    if source is None:
-        return
-
-    if source.is_dir():
-        # 目录格式: 更新 employee.yaml
-        config_path = source / "employee.yaml"
-        if config_path.exists():
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-            config["agent_id"] = agent_id
-            config_path.write_text(
-                yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False),
-                encoding="utf-8",
-            )
-            click.echo(f"✓ agent_id 已写入 {config_path}", err=True)
-    elif source.is_file() and source.suffix == ".md":
-        # 单文件格式: 在 frontmatter 末尾 --- 之前插入 agent_id
-        import re
-
-        content = source.read_text(encoding="utf-8")
-        # 匹配第二个 ---
-        match = re.match(r"(---\n.*?)(---)", content, re.DOTALL)
-        if match:
-            new_content = (
-                f"{match.group(1)}agent_id: {agent_id}\n{match.group(2)}{content[match.end() :]}"
-            )
-            source.write_text(new_content, encoding="utf-8")
-            click.echo(f"✓ agent_id 已写入 {source}", err=True)
 
 
 # ── avatar 命令 ──
@@ -4296,7 +4120,7 @@ def rollback(name: str, list_versions: bool, steps: int, to_version: str | None,
 
 @main.group()
 def agents():
-    """Agent 管理（与 knowlyr-id 交互）."""
+    """Agent 管理."""
 
 
 @agents.command("list")
@@ -4304,46 +4128,55 @@ def agents():
     "-f", "--format", "output_format", type=click.Choice(["table", "json"]), default="table"
 )
 def agents_list_cmd(output_format: str):
-    """列出 knowlyr-id 中的所有 Agent."""
-    from crew.id_client import list_agents
+    """列出所有本地员工（含 agent_id 绑定信息）."""
+    from crew.discovery import discover_employees
 
-    data = list_agents()
-    if data is None:
-        click.echo("获取失败（检查 KNOWLYR_ID_URL 和 AGENT_API_TOKEN 环境变量）", err=True)
-        raise SystemExit(1)
+    result = discover_employees()
+    employees = list(result.employees.values())
 
-    if not data:
-        click.echo("暂无 Agent", err=True)
+    if not employees:
+        click.echo("暂无员工", err=True)
         return
 
     if output_format == "json":
         import json
 
+        data = [
+            {
+                "name": emp.name,
+                "display_name": emp.effective_display_name,
+                "agent_id": emp.agent_id,
+                "agent_status": emp.agent_status,
+                "model": emp.model,
+                "tags": emp.tags,
+            }
+            for emp in employees
+        ]
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
         return
 
     from rich.console import Console
     from rich.table import Table
 
-    table = Table(title="Agents")
-    table.add_column("ID", style="cyan")
-    table.add_column("Nickname", style="bold")
-    table.add_column("Title")
-    table.add_column("Domains")
+    table = Table(title="Employees")
+    table.add_column("Name", style="cyan")
+    table.add_column("Display", style="bold")
+    table.add_column("Agent ID")
     table.add_column("Status")
-    table.add_column("Heartbeat")
+    table.add_column("Model")
+    table.add_column("Tags")
 
     _status_styles = {"active": "green", "frozen": "yellow", "inactive": "red"}
-    for agent in data:
-        status = agent.get("status", "")
+    for emp in employees:
+        status = emp.agent_status or "active"
         style = _status_styles.get(status, "dim")
         table.add_row(
-            str(agent.get("id", "")),
-            agent.get("nickname", ""),
-            agent.get("title", ""),
-            ", ".join(agent.get("domains", [])),
+            emp.name,
+            emp.effective_display_name,
+            str(emp.agent_id) if emp.agent_id else "-",
             f"[{style}]{status}[/{style}]",
-            str(agent.get("heartbeat_count", 0)),
+            emp.model or "-",
+            ", ".join(emp.tags) if emp.tags else "-",
         )
 
     Console(stderr=True).print(table)
@@ -4361,13 +4194,33 @@ def _find_employee(result, name: str):
     return None
 
 
+def _update_employee_status(emp, new_status: str) -> bool:
+    """更新员工 employee.yaml 中的 agent_status 字段."""
+    if not emp.source_path:
+        return False
+    src = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
+    config_path = src / "employee.yaml"
+    if not config_path.exists():
+        return False
+    import yaml
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        return False
+    config["agent_status"] = new_status
+    config_path.write_text(
+        yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    return True
+
+
 @agents.command("freeze")
 @click.argument("names", nargs=-1, required=True)
 @click.option("--force", is_flag=True, help="跳过确认")
 def agents_freeze_cmd(names: tuple[str, ...], force: bool):
-    """冻结员工（保留数据但禁止执行）."""
+    """冻结员工（修改本地 agent_status 为 frozen）."""
     from crew.discovery import discover_employees
-    from crew.id_client import fetch_agent_identity, update_agent
 
     result = discover_employees(cache_ttl=0)
     targets = []
@@ -4376,42 +4229,37 @@ def agents_freeze_cmd(names: tuple[str, ...], force: bool):
         if not emp:
             candidates = list(result.employees.keys())
             click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
-            raise SystemExit(1)
-        if not getattr(emp, "agent_id", None):
-            click.echo(f"员工 '{emp.name}' 未绑定 Agent，无法冻结", err=True)
             raise SystemExit(1)
         targets.append(emp)
 
     if not force:
         click.echo("即将冻结以下员工:", err=True)
         for emp in targets:
-            click.echo(f"  {emp.character_name or emp.name} (#{emp.agent_id})", err=True)
+            click.echo(f"  {emp.character_name or emp.name}", err=True)
         if not click.confirm("确认冻结？"):
             click.echo("已取消", err=True)
             return
 
     for emp in targets:
-        identity = fetch_agent_identity(int(emp.agent_id))
-        if identity and identity.agent_status == "frozen":
+        if emp.agent_status == "frozen":
             click.echo(
-                f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于冻结状态，跳过",
+                f"- {emp.character_name or emp.name} 已处于冻结状态，跳过",
                 err=True,
             )
             continue
-        ok = update_agent(int(emp.agent_id), agent_status="frozen")
+        ok = _update_employee_status(emp, "frozen")
         if ok:
-            click.echo(f"✓ {emp.character_name or emp.name} (#{emp.agent_id}) 已冻结", err=True)
+            click.echo(f"✓ {emp.character_name or emp.name} 已冻结", err=True)
         else:
-            click.echo(f"⚠ {emp.character_name or emp.name} (#{emp.agent_id}) 冻结失败", err=True)
+            click.echo(f"⚠ {emp.character_name or emp.name} 冻结失败（无 employee.yaml）", err=True)
 
 
 @agents.command("unfreeze")
 @click.argument("names", nargs=-1, required=True)
 @click.option("--force", is_flag=True, help="跳过确认")
 def agents_unfreeze_cmd(names: tuple[str, ...], force: bool):
-    """解冻员工（恢复为 active 状态）."""
+    """解冻员工（修改本地 agent_status 为 active）."""
     from crew.discovery import discover_employees
-    from crew.id_client import fetch_agent_identity, update_agent
 
     result = discover_employees(cache_ttl=0)
     targets = []
@@ -4421,245 +4269,57 @@ def agents_unfreeze_cmd(names: tuple[str, ...], force: bool):
             candidates = list(result.employees.keys())
             click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
             raise SystemExit(1)
-        if not getattr(emp, "agent_id", None):
-            click.echo(f"员工 '{emp.name}' 未绑定 Agent，无法解冻", err=True)
-            raise SystemExit(1)
         targets.append(emp)
 
     if not force:
         click.echo("即将解冻以下员工:", err=True)
         for emp in targets:
-            click.echo(f"  {emp.character_name or emp.name} (#{emp.agent_id})", err=True)
+            click.echo(f"  {emp.character_name or emp.name}", err=True)
         if not click.confirm("确认解冻？"):
             click.echo("已取消", err=True)
             return
 
     for emp in targets:
-        identity = fetch_agent_identity(int(emp.agent_id))
-        if identity and identity.agent_status == "active":
+        if emp.agent_status == "active":
             click.echo(
-                f"- {emp.character_name or emp.name} (#{emp.agent_id}) 已处于活跃状态，跳过",
+                f"- {emp.character_name or emp.name} 已处于活跃状态，跳过",
                 err=True,
             )
             continue
-        ok = update_agent(int(emp.agent_id), agent_status="active")
+        ok = _update_employee_status(emp, "active")
         if ok:
-            click.echo(f"✓ {emp.character_name or emp.name} (#{emp.agent_id}) 已解冻", err=True)
+            click.echo(f"✓ {emp.character_name or emp.name} 已解冻", err=True)
         else:
-            click.echo(f"⚠ {emp.character_name or emp.name} (#{emp.agent_id}) 解冻失败", err=True)
+            click.echo(f"⚠ {emp.character_name or emp.name} 解冻失败（无 employee.yaml）", err=True)
 
 
 @agents.command("status")
-@click.argument("target")
-@click.option("--employee", "by_employee", is_flag=True, help="target 为员工名称而非 agent_id")
-@click.option("--heartbeat", is_flag=True, help="额外发送一次心跳用于连通性检测")
-def agents_status_cmd(target: str, by_employee: bool, heartbeat: bool):
-    """检查 knowlyr-id Agent 状态."""
-    from crew.id_client import fetch_agent_identity, send_heartbeat
-
-    agent_id: int
-    employee_name: str | None = None
-
-    if by_employee:
-        result = discover_employees()
-        emp = result.get(target)
-        if not emp:
-            click.echo(f"未找到员工: {target}", err=True)
-            raise SystemExit(1)
-        if getattr(emp, "agent_id", None) is None:
-            click.echo(f"员工 '{emp.name}' 未绑定 Agent", err=True)
-            raise SystemExit(1)
-        agent_id = int(emp.agent_id)
-        employee_name = emp.name
-    else:
-        try:
-            agent_id = int(target)
-        except ValueError:
-            click.echo("请提供有效的 Agent ID（整数）", err=True)
-            raise SystemExit(1)
-
-    identity = fetch_agent_identity(agent_id)
-    if identity is None:
-        click.echo(
-            f"无法获取 Agent #{agent_id} 状态（检查 KNOWLYR_ID_URL / AGENT_API_TOKEN）",
-            err=True,
-        )
-        raise SystemExit(1)
-
-    click.echo(f"Agent #{agent_id} 状态:")
-    if employee_name:
-        click.echo(f"  Employee:    {employee_name}")
-    click.echo(f"  Nickname:    {identity.nickname or '-'}")
-    click.echo(f"  Title:       {identity.title or '-'}")
-    click.echo(f"  Status:      {identity.agent_status or '-'}")
-    click.echo(f"  Model:       {identity.model or '-'}")
-    domains = ", ".join(identity.domains) if identity.domains else "-"
-    click.echo(f"  Domains:     {domains}")
-    mem = (identity.memory or "").strip()
-    click.echo(f"  Memory Size: {len(mem)} chars")
-    if mem:
-        preview = mem.splitlines()[0]
-        truncated = preview[:80]
-        suffix = "…" if len(preview) > len(truncated) or len(mem) > len(preview) else ""
-        click.echo(f"  Memory Peek: {truncated}{suffix}")
-
-    if heartbeat:
-        ok = send_heartbeat(agent_id, detail="cli.agents.status")
-        status = "OK" if ok else "FAILED"
-        line = f"  Heartbeat:  {status}"
-        if ok:
-            click.echo(line)
-        else:
-            click.echo(line, err=True)
-
-
-@agents.command("sync")
 @click.argument("name")
-def agents_sync_cmd(name: str):
-    """同步单个员工元数据到 knowlyr-id Agent."""
+def agents_status_cmd(name: str):
+    """查看员工状态（本地数据）."""
     from crew.discovery import discover_employees
-    from crew.engine import CrewEngine
-    from crew.id_client import update_agent
 
     result = discover_employees()
-    emp = result.get(name)
+    emp = _find_employee(result, name)
     if not emp:
-        click.echo(f"未找到员工: {name}", err=True)
+        candidates = list(result.employees.keys())
+        click.echo(f"未找到员工: {name}{_suggest_similar(name, candidates)}", err=True)
         raise SystemExit(1)
 
-    if emp.agent_id is None:
-        click.echo(
-            f"员工 '{emp.name}' 未绑定 Agent（先执行 knowlyr-crew register {name}）", err=True
-        )
-        raise SystemExit(1)
-
-    nickname = emp.character_name or emp.display_name or emp.name
-    title = emp.display_name or emp.name
-    capabilities = emp.description
-    domains = emp.tags[:5] if emp.tags else []
-
-    # 渲染完整 prompt（而非原始 body）
-    engine = CrewEngine()
-    system_prompt = engine.prompt(emp)
-
-    # 从 yaml 读取 bio（Employee 模型未包含此字段）
-    bio = ""
-    if emp.source_path:
-        src = emp.source_path if emp.source_path.is_dir() else emp.source_path.parent
-        config_path = src / "employee.yaml"
-        if config_path.exists():
-            import yaml
-
-            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                bio = raw.get("bio", "")
-
-    avatar_b64 = _load_avatar_base64(emp)
-
-    click.echo(f'同步 "{emp.name}" (Agent #{emp.agent_id}) 到 knowlyr-id...', err=True)
-    click.echo(f"  nickname:      {nickname}", err=True)
-    click.echo(f"  title:         {title}", err=True)
-    if bio:
-        click.echo(f"  bio:           {bio}", err=True)
-    click.echo(f"  capabilities:  {capabilities}", err=True)
-    if domains:
-        click.echo(f"  domains:       {', '.join(domains)}", err=True)
-    if system_prompt:
-        click.echo(f"  system_prompt: {len(system_prompt)} 字符", err=True)
-    if avatar_b64:
-        click.echo("  avatar:        ✓", err=True)
-
-    ok = update_agent(
-        agent_id=emp.agent_id,
-        nickname=nickname,
-        title=title,
-        capabilities=capabilities,
-        domains=domains,
-        model=emp.model or None,
-        system_prompt=system_prompt,
-        avatar_base64=avatar_b64,
-    )
-    if not ok:
-        click.echo("同步失败", err=True)
-        raise SystemExit(1)
-
-    click.echo("✓ 同步完成", err=True)
-
-
-@agents.command("sync-all")
-@click.option(
-    "--dir",
-    "employees_dir",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="员工目录（默认 .crew/global/）",
-)
-@click.option("--dry-run", is_flag=True, help="预览操作但不执行")
-@click.option("--push-only", is_flag=True, help="仅推送，不拉取")
-@click.option("--pull-only", is_flag=True, help="仅拉取，不推送")
-@click.option("--force", is_flag=True, help="忽略 content_hash，强制推送")
-@click.option("--register", is_flag=True, help="注册新员工（默认只报告不注册）")
-def agents_sync_all_cmd(employees_dir, dry_run, push_only, pull_only, force, register):
-    """批量同步所有员工到 knowlyr-id（双向）."""
-    from crew.sync import sync_all
-
-    if employees_dir is None:
-        from crew.paths import get_global_dir
-
-        employees_dir = get_global_dir()
-
-    do_push = not pull_only
-    do_pull = not push_only
-
-    click.echo(f"同步目录: {employees_dir}", err=True)
-    if dry_run:
-        click.echo("(dry-run 模式)", err=True)
-
-    report = sync_all(
-        employees_dir,
-        dry_run=dry_run,
-        push=do_push,
-        pull=do_pull,
-        force=force,
-        register=register,
-    )
-
-    if report.registered:
-        click.echo(f"\n新注册 ({len(report.registered)}):", err=True)
-        for item in report.registered:
-            click.echo(f"  + {item}", err=True)
-
-    if report.pushed:
-        click.echo(f"\n已推送 ({len(report.pushed)}):", err=True)
-        for item in report.pushed:
-            click.echo(f"  → {item}", err=True)
-
-    if report.pulled:
-        click.echo(f"\n已拉取 ({len(report.pulled)}):", err=True)
-        for item in report.pulled:
-            click.echo(f"  ← {item}", err=True)
-
-    if report.disabled:
-        click.echo(f"\n已禁用 ({len(report.disabled)}):", err=True)
-        for item in report.disabled:
-            click.echo(f"  ✗ {item}", err=True)
-
-    if report.skipped:
-        click.echo(f"\n跳过 ({len(report.skipped)}):", err=True)
-        for item in report.skipped:
-            click.echo(f"  - {item}", err=True)
-
-    if report.errors:
-        click.echo(f"\n错误 ({len(report.errors)}):", err=True)
-        for name, msg in report.errors:
-            click.echo(f"  ! {name}: {msg}", err=True)
-        raise SystemExit(1)
-
-    total = len(report.pushed) + len(report.pulled) + len(report.registered) + len(report.disabled)
-    click.echo(
-        f"\n✓ 同步完成 (推送:{len(report.pushed)} 拉取:{len(report.pulled)} 注册:{len(report.registered)} 禁用:{len(report.disabled)})",
-        err=True,
-    )
+    click.echo(f"员工 '{emp.name}' 状态:")
+    click.echo(f"  Name:         {emp.name}")
+    click.echo(f"  Display:      {emp.effective_display_name}")
+    if emp.character_name:
+        click.echo(f"  Character:    {emp.character_name}")
+    click.echo(f"  Status:       {emp.agent_status or 'active'}")
+    if emp.agent_id is not None:
+        click.echo(f"  Agent ID:     {emp.agent_id}")
+    click.echo(f"  Model:        {emp.model or '-'}")
+    click.echo(f"  Description:  {emp.description or '-'}")
+    tags = ", ".join(emp.tags) if emp.tags else "-"
+    click.echo(f"  Tags:         {tags}")
+    click.echo(f"  Source:       {emp.source_path or '-'}")
+    click.echo(f"  Layer:        {emp.source_layer or '-'}")
 
 
 # ── cron 命令 ──

@@ -414,49 +414,6 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="crew_feedback",
-                description="向 knowlyr-id 提交员工工作反馈（人工评分+评语），用于 RLHF 闭环",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "agent_id": {
-                            "type": "integer",
-                            "description": "Agent ID（knowlyr-id 用户 ID）",
-                        },
-                        "task_type": {
-                            "type": "string",
-                            "description": "任务类型（如 daily_check, code_review）",
-                        },
-                        "task_output": {
-                            "type": "string",
-                            "description": "员工的输出内容",
-                        },
-                        "human_score": {
-                            "type": "number",
-                            "description": "人工评分（0-100）",
-                        },
-                        "human_feedback": {
-                            "type": "string",
-                            "description": "人工评语（可选）",
-                        },
-                    },
-                    "required": ["agent_id", "task_type", "task_output", "human_score"],
-                },
-            ),
-            Tool(
-                name="crew_status",
-                description="查询 AI 员工在 knowlyr-id 的在线状态和基本信息",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "agent_id": {
-                            "type": "integer",
-                            "description": "查询指定 Agent（可选，不传则列出所有）",
-                        },
-                    },
-                },
-            ),
-            Tool(
                 name="list_tool_schemas",
                 description="列出所有可用的工具定义（名称和描述）",
                 inputSchema={
@@ -571,22 +528,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if errors:
                 return [TextContent(type="text", text=f"参数错误: {'; '.join(errors)}")]
 
-            # 获取 Agent 身份（可选）
-            agent_identity = None
-            if agent_id is not None:
-                try:
-                    from crew.id_client import afetch_agent_identity
-
-                    agent_identity = await afetch_agent_identity(agent_id)
-                except Exception:
-                    pass
-
             # 智能上下文检测
             project_info = detect_project(_project_dir)
 
-            prompt = engine.prompt(
-                emp, args=emp_args, agent_identity=agent_identity, project_info=project_info
-            )
+            prompt = engine.prompt(emp, args=emp_args, project_info=project_info)
 
             # 记录工作日志
             try:
@@ -595,15 +540,6 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 log.add_entry(sid, "prompt_generated", f"{len(prompt)} chars")
             except Exception:
                 pass  # 日志失败不影响主流程
-
-            # 发送心跳（可选）
-            if agent_id is not None:
-                try:
-                    from crew.id_client import asend_heartbeat
-
-                    await asend_heartbeat(agent_id, detail=f"employee={emp.name}")
-                except Exception:
-                    pass
 
             return [TextContent(type="text", text=prompt)]
 
@@ -896,54 +832,6 @@ def create_server(project_dir: Path | None = None) -> "Server":
             data = {**record.model_dump(), "content": content}
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
-        elif name == "crew_feedback":
-            from crew.id_client import alog_work
-
-            result = await alog_work(
-                agent_id=arguments["agent_id"],
-                task_type=arguments["task_type"],
-                task_output=arguments["task_output"],
-                human_score=arguments["human_score"],
-                human_feedback=arguments.get("human_feedback", ""),
-            )
-            if result:
-                return [
-                    TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))
-                ]
-            return [
-                TextContent(
-                    type="text", text="提交失败 — 请检查 knowlyr-id 连接和 AGENT_API_TOKEN 配置"
-                )
-            ]
-
-        elif name == "crew_status":
-            agent_id = arguments.get("agent_id")
-            if agent_id is not None:
-                from crew.id_client import afetch_agent_identity
-
-                identity = await afetch_agent_identity(agent_id)
-                if identity is None:
-                    return [TextContent(type="text", text=f"未找到 Agent: {agent_id}")]
-                data = {
-                    "agent_id": identity.agent_id,
-                    "display_name": identity.display_name,
-                    "status": identity.status,
-                    "model": identity.model,
-                    "memory_length": len(identity.memory) if identity.memory else 0,
-                }
-                return [
-                    TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))
-                ]
-            else:
-                from crew.id_client import alist_agents
-
-                agents = await alist_agents()
-                if agents is None:
-                    return [TextContent(type="text", text="查询失败 — 请检查 knowlyr-id 连接")]
-                return [
-                    TextContent(type="text", text=json.dumps(agents, ensure_ascii=False, indent=2))
-                ]
-
         elif name == "list_tool_schemas":
             from crew.tool_schema import _TOOL_SCHEMAS, TOOL_ROLE_PRESETS
 
@@ -1202,20 +1090,8 @@ async def serve_sse(
 
         return JSONResponse(get_collector().snapshot())
 
-    _heartbeat_mgr = None
-
     async def sse_lifespan(app):
-        nonlocal _heartbeat_mgr
-        try:
-            from crew.id_client import HeartbeatManager
-
-            _heartbeat_mgr = HeartbeatManager(interval=60.0)
-            await _heartbeat_mgr.start()
-        except ImportError:
-            pass
         yield
-        if _heartbeat_mgr:
-            await _heartbeat_mgr.stop()
 
     app = Starlette(
         routes=[
@@ -1275,18 +1151,8 @@ async def serve_http(
         return JSONResponse(get_collector().snapshot())
 
     async def lifespan(app):
-        _hb_mgr = None
-        try:
-            from crew.id_client import HeartbeatManager
-
-            _hb_mgr = HeartbeatManager(interval=60.0)
-            await _hb_mgr.start()
-        except ImportError:
-            pass
         async with session_manager.run():
             yield
-        if _hb_mgr:
-            await _hb_mgr.stop()
 
     app = Starlette(
         routes=[

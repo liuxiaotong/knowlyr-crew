@@ -139,31 +139,6 @@ async def _execute_task(
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
 
-        # 工作日志记录
-        if record.target_type == "employee" and isinstance(result, dict):
-            try:
-                from crew.discovery import discover_employees
-                from crew.id_client import alog_work
-
-                _disc = discover_employees(project_dir=ctx.project_dir)
-                _emp = _disc.get(record.target_name)
-                _aid = agent_id or (_emp.agent_id if _emp else None)
-
-                if _aid:
-                    _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
-                    await alog_work(
-                        agent_id=_aid,
-                        task_type=record.target_name,
-                        task_input=record.args.get("task", "")[:500],
-                        task_output=result.get("output", "")[:2000],
-                        model_used=result.get("model", ""),
-                        tokens_used=result.get("input_tokens", 0) + result.get("output_tokens", 0),
-                        execution_ms=_elapsed_ms,
-                        crew_task_id=task_id,
-                    )
-            except Exception:
-                logger.debug("工作日志记录失败: %s", record.target_name)
-
         # B 类权限标记 + 质量评分 + 自动降级检查
         if record.target_type == "employee" and isinstance(result, dict):
             try:
@@ -673,22 +648,10 @@ async def _execute_employee_with_tools(
             "skipped": True,
         }
 
-    # agent 身份
-    agent_identity = None
-    if agent_id:
-        try:
-            from crew.id_client import afetch_agent_identity
-
-            agent_identity = await afetch_agent_identity(agent_id)
-        except Exception as e:
-            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
-
     engine = CrewEngine(project_dir=ctx.project_dir)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(
-        match, args=args, agent_identity=agent_identity, max_visibility=max_visibility
-    )
+    prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
@@ -1095,22 +1058,10 @@ async def _execute_employee(
             message_history=message_history,
         )
 
-    # 获取 agent 身份
-    agent_identity = None
-    if agent_id:
-        try:
-            from crew.id_client import afetch_agent_identity
-
-            agent_identity = await afetch_agent_identity(agent_id)
-        except Exception as e:
-            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
-
     engine = CrewEngine(project_dir=ctx.project_dir)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(
-        match, args=args, agent_identity=agent_identity, max_visibility=max_visibility
-    )
+    prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
 
     # 尝试执行 LLM 调用（executor 自动从环境变量解析 API key）
     try:
@@ -1175,18 +1126,8 @@ async def _stream_employee(
 
         return StreamingResponse(_error(), media_type="text/event-stream")
 
-    # 获取 agent 身份
-    agent_identity = None
-    if agent_id:
-        try:
-            from crew.id_client import afetch_agent_identity
-
-            agent_identity = await afetch_agent_identity(agent_id)
-        except Exception as e:
-            logger.debug("agent 身份获取失败 (agent_id=%s): %s", agent_id, e)
-
     engine = CrewEngine(project_dir=ctx.project_dir)
-    prompt = engine.prompt(match, args=args, agent_identity=agent_identity)
+    prompt = engine.prompt(match, args=args)
 
     async def _generate():
         done_sent = False

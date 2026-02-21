@@ -14,11 +14,6 @@ from crew.engine import CrewEngine
 from crew.exceptions import EmployeeNotFoundError
 from crew.models import Employee
 
-try:  # pragma: no cover - optional dependency
-    from crew.id_client import fetch_agent_identity
-except ImportError:  # pragma: no cover - optional
-    fetch_agent_identity = None  # type: ignore
-
 
 def list_employees(project_dir: Path | None = None) -> list[Employee]:
     """Return all employees discovered in the current project."""
@@ -38,7 +33,6 @@ def generate_prompt(
     args: dict[str, str] | None = None,
     positional: Sequence[str] | None = None,
     raw: bool = False,
-    agent_identity=None,
     project_info=None,
     project_dir: Path | None = None,
 ) -> str:
@@ -50,7 +44,6 @@ def generate_prompt(
         employee,
         args=args,
         positional=list(positional or []),
-        agent_identity=agent_identity,
         project_info=project_info,
     )
 
@@ -70,14 +63,6 @@ def generate_prompt_by_name(
     if employee is None:
         raise EmployeeNotFoundError(name_or_trigger)
 
-    agent_identity = None
-    if agent_id is not None and fetch_agent_identity:
-        try:
-            agent_identity = fetch_agent_identity(agent_id)
-        except Exception as e:  # pragma: no cover
-            logger.debug("获取 Agent %s 身份失败: %s", agent_id, e)
-            agent_identity = None
-
     project_info = detect_project(project_dir) if smart_context else None
 
     return generate_prompt(
@@ -85,7 +70,6 @@ def generate_prompt_by_name(
         args=args,
         positional=positional,
         raw=raw,
-        agent_identity=agent_identity,
         project_info=project_info,
         project_dir=project_dir,
     )
@@ -106,19 +90,11 @@ def run_pipeline_steps(
         if employee is None:
             raise EmployeeNotFoundError(name)
 
-        agent_identity = None
-        if agent_id is not None and fetch_agent_identity:
-            try:
-                agent_identity = fetch_agent_identity(agent_id)
-            except Exception:  # pragma: no cover
-                agent_identity = None
-
         prompts.append(
             generate_prompt(
                 employee,
                 args=step_args,
                 raw=False,
-                agent_identity=agent_identity,
                 project_info=project_info,
                 project_dir=project_dir,
             )

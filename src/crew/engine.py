@@ -114,9 +114,7 @@ class CrewEngine:
         employee: Employee,
         args: dict[str, str] | None = None,
         positional: list[str] | None = None,
-        agent_identity: "AgentIdentity | None" = None,
         project_info: "ProjectInfo | None" = None,
-        exemplar_prompt: str = "",
         max_visibility: str = "open",
     ) -> str:
         """生成完整的 system prompt.
@@ -124,7 +122,6 @@ class CrewEngine:
         包含角色前言 + 渲染后正文 + 输出约束。
 
         Args:
-            agent_identity: 可选的 knowlyr-id Agent 身份（注入 prompt header）
             project_info: 可选的项目类型检测结果（注入 prompt header + 环境变量）
         """
         rendered = self.render(employee, args=args, positional=positional)
@@ -146,15 +143,6 @@ class CrewEngine:
         if employee.character_name:
             parts.append(f"**姓名**: {employee.character_name}")
         parts.append(f"**描述**: {employee.description}")
-
-        # 注入 Agent 身份信息
-        if agent_identity:
-            if agent_identity.nickname:
-                parts.append(f"**Agent**: {agent_identity.nickname}")
-            if agent_identity.title:
-                parts.append(f"**职称**: {agent_identity.title}")
-            if agent_identity.domains:
-                parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
 
         if employee.model:
             parts.append(f"**模型**: {employee.model}")
@@ -184,14 +172,6 @@ class CrewEngine:
                 parts.append(f"**Lint**: {', '.join(project_info.lint_tools)}")
             if project_info.package_manager:
                 parts.append(f"**包管理**: {project_info.package_manager}")
-
-        # Agent memory（持久记忆/上下文）
-        if agent_identity and agent_identity.memory:
-            parts.extend(["", "---", "", "## Agent 记忆", "", agent_identity.memory])
-
-        # Few-shot 范例（来自 knowlyr-id 的高分输出）
-        if exemplar_prompt:
-            parts.extend(["", "---", "", exemplar_prompt])
 
         # 本地持久化记忆（有 rendered body 时使用语义搜索 + 团队记忆）
         try:

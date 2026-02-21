@@ -819,26 +819,6 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             }
         ctx.registry.update(record.task_id, "completed", result=task_result)
 
-        # 工作日志记录
-        if isinstance(result, dict):
-            try:
-                from crew.id_client import alog_work
-
-                _aid = emp.agent_id if emp else None
-                if _aid:
-                    await alog_work(
-                        agent_id=_aid,
-                        task_type=employee_name,
-                        task_input=(task_text or "")[:500],
-                        task_output=output_text[:2000],
-                        model_used=result.get("model", ""),
-                        tokens_used=_in_tok + _out_tok,
-                        execution_ms=int(_elapsed * 1000),
-                        crew_task_id=record.task_id,
-                    )
-            except Exception:
-                logger.debug("飞书工作日志记录失败: %s", employee_name)
-
     except Exception as e:
         logger.exception("飞书消息处理失败: %s", e)
         try:

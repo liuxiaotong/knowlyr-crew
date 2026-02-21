@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -14,9 +14,6 @@ from crew.discovery import discover_employees
 from crew.engine import CrewEngine
 from crew.models import DiscussionPlan, Employee, EmployeeOutput, ParticipantPrompt, RoundPlan
 from crew.paths import get_global_discussions_dir
-
-if TYPE_CHECKING:
-    from crew.id_client import AgentIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -351,7 +348,6 @@ def _render_header(
     topic: str,
     goal: str,
     project_info: ProjectInfo | None,
-    agent_identity: AgentIdentity | None,
 ) -> list[str]:
     """渲染头部：标题、议题、目标、项目类型."""
     parts = [
@@ -364,19 +360,6 @@ def _render_header(
     if project_info and project_info.project_type != "unknown":
         parts.append(f"**项目类型**: {project_info.display_label}")
     parts.append("")
-
-    if agent_identity:
-        if agent_identity.nickname:
-            parts.append(f"**Agent**: {agent_identity.nickname}")
-        if agent_identity.title:
-            parts.append(f"**职称**: {agent_identity.title}")
-        if agent_identity.domains:
-            parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
-        if agent_identity.model:
-            parts.append(f"**Agent 模型**: {agent_identity.model}")
-        if agent_identity.memory:
-            parts.extend(["", "## Agent 记忆", "", agent_identity.memory])
-        parts.append("")
 
     return parts
 
@@ -533,7 +516,6 @@ def _render_1v1_meeting(
     engine: CrewEngine,
     initial_args: dict[str, str],
     project_info: ProjectInfo | None,
-    agent_identity: AgentIdentity | None,
 ) -> str:
     """渲染 1v1 会议 prompt — 会话式而非多轮结构."""
     info = participants_info[0]
@@ -550,19 +532,6 @@ def _render_1v1_meeting(
     if project_info and project_info.project_type != "unknown":
         parts.append(f"**项目类型**: {project_info.display_label}")
     parts.append("")
-
-    if agent_identity:
-        if agent_identity.nickname:
-            parts.append(f"**Agent**: {agent_identity.nickname}")
-        if agent_identity.title:
-            parts.append(f"**职称**: {agent_identity.title}")
-        if agent_identity.domains:
-            parts.append(f"**领域**: {', '.join(agent_identity.domains)}")
-        if agent_identity.model:
-            parts.append(f"**Agent 模型**: {agent_identity.model}")
-        if agent_identity.memory:
-            parts.extend(["", "## Agent 记忆", "", agent_identity.memory])
-        parts.append("")
 
     # 员工信息
     parts.extend(["---", "", "## 参会者", ""])
@@ -636,16 +605,6 @@ def render_discussion(
 
     project_info = detect_project(project_dir) if smart_context else None
 
-    # 获取 agent 身份（可选）
-    agent_identity: AgentIdentity | None = None
-    if agent_id is not None:
-        try:
-            from crew.id_client import fetch_agent_identity
-
-            agent_identity = fetch_agent_identity(agent_id)
-        except ImportError:
-            agent_identity = None
-
     # 变量替换（topic, goal）
     topic = discussion.topic
     goal = discussion.goal
@@ -669,7 +628,6 @@ def render_discussion(
             engine,
             initial_args,
             project_info,
-            agent_identity,
         )
         _log_meeting(discussion, prompt, initial_args, project_dir=project_dir)
         return prompt
@@ -678,7 +636,7 @@ def render_discussion(
 
     # 组装各段
     parts: list[str] = []
-    parts.extend(_render_header(discussion, topic, goal, project_info, agent_identity))
+    parts.extend(_render_header(discussion, topic, goal, project_info))
     parts.extend(
         _render_participants(participants_info, engine, initial_args, bg_mode, project_info)
     )

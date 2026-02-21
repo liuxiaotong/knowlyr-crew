@@ -15,6 +15,34 @@ import re as _re
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
 
 
+def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
+    """更新 employee.yaml 中的指定字段."""
+    import tempfile
+
+    import yaml
+
+    config_path = emp_dir / "employee.yaml"
+    if not config_path.exists():
+        return
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        return
+    config.update(updates)
+    content = yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    fd, tmp = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    fd_closed = False
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        fd_closed = True
+        os.replace(tmp, config_path)
+    except Exception:
+        if not fd_closed:
+            os.close(fd)
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def _parse_sender_name(extra_context: str | None) -> str | None:
     """从 extra_context 解析发送者名（knowlyr-id 格式: '当前对话用户: XXX'）."""
     if not extra_context:
@@ -64,7 +92,6 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    # 渲染 prompt（不传 agent_identity → 不含 DB 记忆）
     engine = CrewEngine(ctx.project_dir)
     system_prompt = engine.prompt(employee)
     tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
@@ -145,6 +172,32 @@ async def _handle_model_tiers(request: Any, ctx: _AppContext) -> Any:
         }
 
     return JSONResponse({"tiers": tiers})
+
+
+async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
+    """返回所有员工基本信息列表（供外部服务获取员工花名册）."""
+    from starlette.responses import JSONResponse
+
+    from crew.discovery import discover_employees
+
+    result = discover_employees(ctx.project_dir)
+    items = []
+    for emp in result.employees.values():
+        items.append(
+            {
+                "name": emp.name,
+                "character_name": emp.character_name,
+                "display_name": emp.display_name,
+                "description": emp.description,
+                "agent_id": emp.agent_id,
+                "agent_status": emp.agent_status,
+                "model": emp.model,
+                "model_tier": emp.model_tier,
+                "tags": emp.tags,
+            }
+        )
+
+    return JSONResponse({"items": items})
 
 
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
@@ -306,37 +359,16 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     # 写回 employee.yaml
-    from crew.sync import _write_yaml_field
-
     try:
         _write_yaml_field(employee.source_path, updates)
     except Exception as e:
         logger.exception("更新 employee.yaml 失败: %s", identifier)
         return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
 
-    # 同步到 knowlyr-id
-    synced = False
-    if employee.agent_id:
-        try:
-            from crew.id_client import aupdate_agent
-
-            sync_kwargs: dict = {}
-            if "model" in updates:
-                sync_kwargs["model"] = updates["model"]
-            if "temperature" in updates:
-                sync_kwargs["temperature"] = updates["temperature"]
-            if "max_tokens" in updates:
-                sync_kwargs["max_tokens"] = updates["max_tokens"]
-            if sync_kwargs:
-                synced = await aupdate_agent(agent_id=employee.agent_id, **sync_kwargs)
-        except Exception:
-            logger.warning("同步到 knowlyr-id 失败（更新已写入本地）: %s", identifier)
-
     return JSONResponse(
         {
             "ok": True,
             "updated": updates,
-            "synced_to_id": synced,
             "employee": employee.name,
         }
     )
@@ -380,19 +412,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
         logger.exception("删除员工文件失败: %s", identifier)
         return JSONResponse({"error": f"Delete failed: {e}"}, status_code=500)
 
-    # 远端标 inactive
-    remote_disabled = False
-    also_remote = request.query_params.get("also_remote", "true").lower() != "false"
-    if employee.agent_id and also_remote:
-        try:
-            from crew.id_client import aupdate_agent
-
-            remote_disabled = await aupdate_agent(
-                agent_id=employee.agent_id,
-                agent_status="inactive",
-            )
-        except Exception:
-            logger.warning("远端禁用失败: Agent #%s", employee.agent_id)
 
     return JSONResponse(
         {
@@ -645,26 +664,6 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             args=args,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
-
-        # 工作日志记录
-        if isinstance(result, dict):
-            try:
-                from crew.id_client import alog_work
-
-                _aid = agent_id or (emp.agent_id if emp else None)
-                if _aid:
-                    await alog_work(
-                        agent_id=_aid,
-                        task_type=name,
-                        task_input=(user_message if isinstance(user_message, str) else "")[:500],
-                        task_output=result.get("output", "")[:2000],
-                        model_used=result.get("model", ""),
-                        tokens_used=_in + _out,
-                        execution_ms=int(_elapsed * 1000),
-                        crew_task_id=record.task_id,
-                    )
-            except Exception:
-                logger.debug("站内消息工作日志记录失败: %s", name)
 
         return JSONResponse(result)
 
