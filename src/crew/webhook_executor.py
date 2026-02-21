@@ -668,7 +668,10 @@ async def _execute_employee_with_tools(
     # 冻结检查
     if match.agent_status == "frozen":
         logger.info("员工 %s 已冻结，跳过执行", name)
-        return {"output": f"员工 {match.character_name or name} 已冻结，无法执行任务", "skipped": True}
+        return {
+            "output": f"员工 {match.character_name or name} 已冻结，无法执行任务",
+            "skipped": True,
+        }
 
     # agent 身份
     agent_identity = None
@@ -1071,7 +1074,10 @@ async def _execute_employee(
     # 冻结检查：冻结的员工不执行任务
     if match.agent_status == "frozen":
         logger.info("员工 %s 已冻结，跳过执行", name)
-        return {"output": f"员工 {match.character_name or name} 已冻结，无法执行任务", "skipped": True}
+        return {
+            "output": f"员工 {match.character_name or name} 已冻结，无法执行任务",
+            "skipped": True,
+        }
 
     # 如果员工有 agent tools，使用带工具的 agent loop
     from crew.tool_schema import AGENT_TOOLS
