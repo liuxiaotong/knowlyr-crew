@@ -36,7 +36,7 @@ knowlyr-id (员工注册信息)
 - 主机: `knowlyr-web-1` (8.159.150.234)
 - 路径: `/opt/knowlyr-crew/`
 - Private 仓库 clone: `/opt/knowlyr-crew/private-repo/`
-- Project 目录: `/opt/knowlyr-crew/project/`
+- Project 目录: `/opt/knowlyr-crew/project/` (Makefile 中 `REMOTE_DIR`)
 - venv: `/opt/knowlyr-crew/venv/`
 - 端口: `8765`
 - 服务: `knowlyr-crew.service`
