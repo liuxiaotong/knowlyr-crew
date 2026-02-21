@@ -39,21 +39,6 @@ jobs:
             && curl -sf http://localhost:8765/health
           '
 
-      - name: Sync private config to project-dir
-        run: |
-          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
-            if [ -d /opt/knowlyr-crew/private/employees ]; then
-              mkdir -p /opt/knowlyr-crew/project/private/employees
-              cp /opt/knowlyr-crew/private/organization.yaml \
-                 /opt/knowlyr-crew/project/private/organization.yaml
-              rsync -a /opt/knowlyr-crew/private/employees/ \
-                       /opt/knowlyr-crew/project/private/employees/
-              echo "private config synced to project-dir"
-            else
-              echo "WARN: /opt/knowlyr-crew/private/employees not found, skipping config sync"
-            fi
-          '
-
       - uses: actions/checkout@v4
         with:
           sparse-checkout: scripts
