@@ -34,33 +34,33 @@ sync_data() {
         echo "  跳过员工（目录不存在: $LOCAL_EMPLOYEES）"
     fi
 
-    # 讨论会
-    if [ -d "$LOCAL_CREW/discussions" ]; then
-        echo "  同步讨论会..."
-        rsync -av --delete \
-            --include="*.yaml" --exclude="*" \
-            "$LOCAL_CREW/discussions/" \
-            "$SERVER:$PROJECT/.crew/discussions/"
-    else
-        echo "  跳过讨论会（目录不存在）"
-    fi
+    # [废弃] 讨论会 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
+    # if [ -d "$LOCAL_CREW/discussions" ]; then
+    #     echo "  同步讨论会..."
+    #     rsync -av --delete \
+    #         --include="*.yaml" --exclude="*" \
+    #         "$LOCAL_CREW/discussions/" \
+    #         "$SERVER:$PROJECT/.crew/discussions/"
+    # else
+    #     echo "  跳过讨论会（目录不存在）"
+    # fi
 
-    # 流水线
-    if [ -d "$LOCAL_CREW/pipelines" ]; then
-        echo "  同步流水线..."
-        rsync -av --delete \
-            --include="*.yaml" --exclude="*" \
-            "$LOCAL_CREW/pipelines/" \
-            "$SERVER:$PROJECT/.crew/pipelines/"
-    else
-        echo "  跳过流水线（目录不存在）"
-    fi
+    # [废弃] 流水线 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
+    # if [ -d "$LOCAL_CREW/pipelines" ]; then
+    #     echo "  同步流水线..."
+    #     rsync -av --delete \
+    #         --include="*.yaml" --exclude="*" \
+    #         "$LOCAL_CREW/pipelines/" \
+    #         "$SERVER:$PROJECT/.crew/pipelines/"
+    # else
+    #     echo "  跳过流水线（目录不存在）"
+    # fi
 
-    # 定时任务
-    if [ -f ".crew/cron.yaml" ]; then
-        echo "  同步定时任务..."
-        rsync -av .crew/cron.yaml "$SERVER:$PROJECT/.crew/cron.yaml"
-    fi
+    # [废弃] 定时任务 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
+    # if [ -f ".crew/cron.yaml" ]; then
+    #     echo "  同步定时任务..."
+    #     rsync -av .crew/cron.yaml "$SERVER:$PROJECT/.crew/cron.yaml"
+    # fi
 
     # 服务器端 git 提交
     echo "  记录版本..."
