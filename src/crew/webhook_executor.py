@@ -81,6 +81,21 @@ async def _execute_task(
 
     ctx.registry.update(task_id, "running")
 
+    # ── 轨迹录制 ──
+    _traj_collector = None
+    try:
+        from crew.trajectory import TrajectoryCollector
+
+        _task_desc = record.args.get("task", "") or record.target_name
+        _traj_collector = TrajectoryCollector(
+            record.target_name,
+            _task_desc[:200],
+            channel="delegate",
+        )
+        _traj_collector.__enter__()
+    except Exception:
+        _traj_collector = None
+
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
 
@@ -135,6 +150,16 @@ async def _execute_task(
                 enrich_result_with_cost(result)
             except Exception as e:
                 logger.debug("成本追踪失败: %s", e)
+
+        # 完成轨迹录制（成功）
+        if _traj_collector is not None:
+            try:
+                _traj_collector.finish(success=True)
+            except Exception as _te:
+                logger.debug("delegate 轨迹录制失败: %s", _te)
+            finally:
+                _traj_collector.__exit__(None, None, None)
+                _traj_collector = None
 
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
@@ -288,6 +313,16 @@ async def _execute_task(
             except Exception as e:
                 logger.warning("任务后处理失败 (employee=%s): %s", record.target_name, e)
     except Exception as e:
+        # 完成轨迹录制（失败）
+        if _traj_collector is not None:
+            try:
+                _traj_collector.finish(success=False)
+            except Exception:
+                pass
+            finally:
+                _traj_collector.__exit__(None, None, None)
+                _traj_collector = None
+
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
         # 自动降级检查（记录失败）
@@ -930,6 +965,24 @@ async def _execute_employee_with_tools(
                 break
     else:
         final_content = result.content or "达到最大工具调用轮次限制。"
+
+    # ── 轨迹录制: 工具循环汇总步骤 ──
+    try:
+        from crew.trajectory import TrajectoryCollector
+
+        _tc = TrajectoryCollector.current()
+        if _tc is not None:
+            _tc.add_tool_step(
+                thought=f"[tool-loop] {rounds + 1} rounds",
+                tool_name="agent_loop",
+                tool_params={"employee": name, "rounds": rounds + 1},
+                tool_output=final_content[:2000],
+                tool_exit_code=0,
+                input_tokens=total_input,
+                output_tokens=total_output,
+            )
+    except Exception:
+        pass
 
     return {
         "employee": name,

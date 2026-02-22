@@ -595,6 +595,20 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             task = args.get("task", "")
             args["task"] = (extra_context + "\n\n" + task) if task else extra_context
 
+        # ── 轨迹录制 ──
+        _traj_collector = None
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            _traj_collector = TrajectoryCollector(
+                name,
+                (user_message if isinstance(user_message, str) else str(user_message))[:200],
+                channel=channel,
+            )
+            _traj_collector.__enter__()
+        except Exception:
+            _traj_collector = None
+
         # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
         import time as _time
 
@@ -654,6 +668,15 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             name,
             user_message[:40],
         )
+
+        # 完成轨迹录制
+        if _traj_collector is not None:
+            try:
+                _traj_collector.finish(success=True)
+            except Exception as _te:
+                logger.debug("站内轨迹录制失败: %s", _te)
+            finally:
+                _traj_collector.__exit__(None, None, None)
 
         # 记录任务用于成本追踪
         record = ctx.registry.create(

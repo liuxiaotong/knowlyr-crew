@@ -467,6 +467,7 @@ async def arun_pipeline(
                 f"pipeline/{pipeline.name}",
                 pipeline.description or pipeline.name,
                 model=model or "",
+                channel="pipeline",
             )
             _traj_collector.__enter__()
         except ImportError:

@@ -59,11 +59,13 @@ class TrajectoryCollector:
         task_description: str,
         model: str = "",
         *,
+        channel: str = "cli",
         output_dir: Path | None = None,
     ):
         self.employee_name = employee_name
         self.task_description = task_description
         self.model = model
+        self.channel = channel
         self.output_dir = output_dir or Path(".crew/trajectories")
         self._steps: list[dict[str, Any]] = []
         self._step_count = 0
@@ -231,7 +233,7 @@ class TrajectoryCollector:
                     total_steps=len(steps),
                     total_tokens=total_tokens,
                 ),
-                metadata={"employee": self.employee_name},
+                metadata={"employee": self.employee_name, "channel": self.channel},
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
             output_path = self.output_dir / "trajectories.jsonl"
@@ -243,6 +245,7 @@ class TrajectoryCollector:
         data = {
             "task_id": f"crew-{uuid.uuid4().hex[:8]}",
             "employee": self.employee_name,
+            "channel": self.channel,
             "task": self.task_description,
             "model": self.model,
             "steps": self._steps,

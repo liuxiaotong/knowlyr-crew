@@ -182,3 +182,67 @@ class TestFinish:
         tc.add_prompt_step("x", "m", 10, 5)
         tc.finish()
         assert (nested / "trajectories.jsonl").exists()
+
+
+class TestChannelMetadata:
+    """channel 字段测试."""
+
+    def test_default_channel_is_cli(self):
+        tc = TrajectoryCollector("emp", "task")
+        assert tc.channel == "cli"
+
+    def test_custom_channel(self):
+        tc = TrajectoryCollector("emp", "task", channel="feishu")
+        assert tc.channel == "feishu"
+
+    def test_channel_in_finish_output(self, tmp_path):
+        tc = TrajectoryCollector("emp", "task", channel="delegate", output_dir=tmp_path)
+        tc.add_prompt_step("hello", "model", 100, 50)
+        result = tc.finish()
+        if isinstance(result, dict):
+            assert result["channel"] == "delegate"
+        else:
+            assert result.metadata["channel"] == "delegate"
+
+    def test_all_channel_values(self):
+        """所有预期通道值都能正常创建."""
+        for ch in ("cli", "pipeline", "feishu", "delegate", "api", "site_message"):
+            tc = TrajectoryCollector("emp", "task", channel=ch)
+            assert tc.channel == ch
+
+
+class TestToolLoopSummary:
+    """工具循环汇总步骤测试（对应 _execute_employee_with_tools 的录制）."""
+
+    def test_agent_loop_step(self):
+        tc = TrajectoryCollector("code-reviewer", "审查代码", channel="feishu")
+        tc.add_tool_step(
+            thought="[tool-loop] 3 rounds",
+            tool_name="agent_loop",
+            tool_params={"employee": "code-reviewer", "rounds": 3},
+            tool_output="审查完成，发现 2 个问题",
+            tool_exit_code=0,
+            input_tokens=5000,
+            output_tokens=1000,
+        )
+        assert len(tc._steps) == 1
+        assert tc._steps[0]["tool_name"] == "agent_loop"
+        assert tc._steps[0]["token_count"] == 6000
+
+    def test_mixed_prompt_and_tool_loop(self, tmp_path):
+        """单轮回复 + 工具循环汇总可以共存."""
+        tc = TrajectoryCollector("emp", "task", channel="delegate", output_dir=tmp_path)
+        tc.add_prompt_step("先想一想", "claude", 100, 50)
+        tc.add_tool_step(
+            thought="[tool-loop] 2 rounds",
+            tool_name="agent_loop",
+            tool_params={"employee": "emp", "rounds": 2},
+            tool_output="完成",
+            input_tokens=3000,
+            output_tokens=500,
+        )
+        result = tc.finish()
+        assert result is not None
+        if isinstance(result, dict):
+            assert result["total_steps"] == 2
+            assert result["total_tokens"] == 3650  # 150 + 3500

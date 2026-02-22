@@ -766,6 +766,20 @@ async def _feishu_dispatch(
                 {"type": "text", "text": task_text},
             ]
 
+        # ── 轨迹录制 ──
+        _traj_collector = None
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            _traj_collector = TrajectoryCollector(
+                employee_name,
+                task_text[:200],
+                channel="feishu",
+            )
+            _traj_collector.__enter__()
+        except Exception:
+            _traj_collector = None
+
         # ── 闲聊快速路径 ──
         # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
         # 省 ~80K tokens / $0.07 per message
@@ -822,6 +836,15 @@ async def _feishu_dispatch(
             _out_tok,
             task_text[:40],
         )
+
+        # 完成轨迹录制
+        if _traj_collector is not None:
+            try:
+                _traj_collector.finish(success=True)
+            except Exception as _te:
+                logger.debug("飞书轨迹录制失败: %s", _te)
+            finally:
+                _traj_collector.__exit__(None, None, None)
 
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)

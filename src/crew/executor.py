@@ -752,6 +752,7 @@ async def aexecute_prompt(
                 )
             if not stream and isinstance(result, ExecutionResult):
                 _record_metrics(provider.value, result, time.monotonic() - t0)
+                _record_trajectory(result)
             elif stream:
                 result = _MetricsStreamWrapper(result, provider.value, t0)
             return result
