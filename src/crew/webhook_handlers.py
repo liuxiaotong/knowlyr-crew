@@ -1234,6 +1234,8 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
             emp_runtime[rname] = {
                 "last_active_at": None,
                 "recent_task_count": 0,
+                "success_count": 0,
+                "fail_count": 0,
                 "last_error": None,
                 "_last_fail_at": None,
             }
@@ -1242,9 +1244,13 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
         if rec.status == "completed" and rec.completed_at:
             if rt["last_active_at"] is None or rec.completed_at > rt["last_active_at"]:
                 rt["last_active_at"] = rec.completed_at
-        # 近期任务计数
+        # 近期任务计数（拆分 success/fail）
         if rec.created_at >= cutoff and rec.status in ("completed", "failed"):
             rt["recent_task_count"] += 1
+            if rec.status == "completed":
+                rt["success_count"] += 1
+            elif rec.status == "failed":
+                rt["fail_count"] += 1
         # 最近一次错误
         if rec.status == "failed" and rec.error and rec.completed_at:
             if rt["_last_fail_at"] is None or rec.completed_at > rt["_last_fail_at"]:
@@ -1269,6 +1275,8 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 "memory_count": memory_counts.get(name, 0),
                 "last_active_at": emp_runtime[name]["last_active_at"].isoformat() if emp_runtime.get(name, {}).get("last_active_at") else None,
                 "recent_task_count": emp_runtime.get(name, {}).get("recent_task_count", 0),
+                "success_count": emp_runtime.get(name, {}).get("success_count", 0),
+                "fail_count": emp_runtime.get(name, {}).get("fail_count", 0),
                 "last_error": emp_runtime.get(name, {}).get("last_error"),
             }
         )
@@ -1345,3 +1353,72 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
             },
         }
     )
+
+
+async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
+    """审计趋势 — GET /api/audit/trends?days=7."""
+    from collections import defaultdict
+    from datetime import datetime, timedelta
+
+    from starlette.responses import JSONResponse
+
+    days = int(request.query_params.get("days", "7"))
+    cutoff = datetime.now() - timedelta(days=days)
+    cutoff_str = cutoff.isoformat()
+
+    # 按日期聚合任务
+    daily: dict[str, dict] = defaultdict(lambda: {"tasks": 0, "success": 0, "failed": 0, "cost_usd": 0.0})
+    total_tasks = 0
+    total_success = 0
+    total_failed = 0
+    total_cost = 0.0
+
+    for t in ctx.registry._tasks.values():
+        if not t.created_at or t.created_at.isoformat() < cutoff_str:
+            continue
+        if t.status not in ("completed", "failed"):
+            continue
+
+        date_key = t.created_at.strftime("%Y-%m-%d")
+        daily[date_key]["tasks"] += 1
+        total_tasks += 1
+
+        if t.status == "completed":
+            daily[date_key]["success"] += 1
+            total_success += 1
+        else:
+            daily[date_key]["failed"] += 1
+            total_failed += 1
+
+        cost = 0.0
+        if t.result and isinstance(t.result, dict):
+            cost = t.result.get("cost_usd", 0.0) or 0.0
+        daily[date_key]["cost_usd"] += cost
+        total_cost += cost
+
+    # 补齐没有数据的日期
+    daily_list = []
+    for i in range(days):
+        d = (datetime.now() - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
+        entry = daily.get(d, {"tasks": 0, "success": 0, "failed": 0, "cost_usd": 0.0})
+        daily_list.append({"date": d, **entry})
+        # round cost
+        daily_list[-1]["cost_usd"] = round(daily_list[-1]["cost_usd"], 4)
+
+    # 轨迹总数
+    traj_count = 0
+    if ctx.project_dir:
+        traj_file = ctx.project_dir / ".crew" / "trajectories" / "trajectories.jsonl"
+        if traj_file.exists():
+            traj_count = sum(1 for _ in open(traj_file, "r", encoding="utf-8"))
+
+    return JSONResponse({
+        "daily": daily_list,
+        "totals": {
+            "trajectories": traj_count,
+            "tasks": total_tasks,
+            "success": total_success,
+            "failed": total_failed,
+            "total_cost_usd": round(total_cost, 4),
+        },
+    })

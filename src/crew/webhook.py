@@ -60,6 +60,7 @@ from crew.webhook_feishu import (  # noqa: F401
 # ── re-export: HTTP handler ──
 from crew.webhook_handlers import (  # noqa: F401
     _handle_agent_run,
+    _handle_audit_trends,
     _handle_authority_restore,
     _handle_cost_summary,
     _handle_cron_status,
@@ -334,6 +335,11 @@ def create_webhook_app(
             "/api/trajectory/report",
             endpoint=_make_handler(ctx, _handle_trajectory_report),
             methods=["POST"],
+        ),
+        Route(
+            "/api/audit/trends",
+            endpoint=_make_handler(ctx, _handle_audit_trends),
+            methods=["GET"],
         ),
     ]
 
