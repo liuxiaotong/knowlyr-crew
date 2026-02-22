@@ -799,14 +799,36 @@ async def _feishu_dispatch(
             # 通过 webhook 模块查找，确保 mock patch 生效
             import crew.webhook as _wh
 
-            result = await _wh._execute_employee(
-                ctx,
-                employee_name,
-                args,
-                model=None,
-                user_message=user_msg,
-                message_history=message_history,
-            )
+            try:
+                result = await _wh._execute_employee(
+                    ctx,
+                    employee_name,
+                    args,
+                    model=None,
+                    user_message=user_msg,
+                    message_history=message_history,
+                )
+            except Exception as full_exc:
+                # "Input is too long" 等上下文超限错误 → 降级到 fast path
+                _exc_msg = str(full_exc).lower()
+                if "input is too long" in _exc_msg or "context_length" in _exc_msg:
+                    logger.warning(
+                        "Full path 上下文超限，降级 fast path: %s", full_exc
+                    )
+                    if emp is not None and isinstance(user_msg, str):
+                        result = await _feishu_fast_reply(
+                            ctx,
+                            emp,
+                            task_text or "（对方 @了你，没说别的）",
+                            message_history,
+                            max_visibility=_visibility,
+                            sender_name=sender_name or "Kai",
+                        )
+                        use_fast_path = True  # 标记为 fast path
+                    else:
+                        raise
+                else:
+                    raise
 
         _elapsed = _time.monotonic() - _t0
         _path_label = "fast" if use_fast_path else "full"
