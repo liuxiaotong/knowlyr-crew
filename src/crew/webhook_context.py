@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 _MAX_TOOL_ROUNDS = 10
 
+# 过渡期：人类用户数据仍在 knowlyr-id（id 管人类，crew 管 AI）
 _ID_API_BASE = os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
 _ID_API_TOKEN = os.environ.get("AGENT_API_TOKEN", "")
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")

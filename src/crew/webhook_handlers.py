@@ -44,7 +44,7 @@ def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
 
 
 def _parse_sender_name(extra_context: str | None) -> str | None:
-    """从 extra_context 解析发送者名（knowlyr-id 格式: '当前对话用户: XXX'）."""
+    """从 extra_context 解析发送者名（格式: '当前对话用户: XXX'）."""
     if not extra_context:
         return None
     m = _re.search(r"当前对话用户[:：]\s*(\S+?)(?:（|$|\n)", extra_context)
@@ -68,7 +68,7 @@ async def _metrics(request: Any) -> Any:
 
 
 async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
-    """返回员工配置和渲染后的 system_prompt（供 knowlyr-id 调用）."""
+    """返回员工配置和渲染后的 system_prompt."""
     from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees

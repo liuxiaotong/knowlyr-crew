@@ -74,9 +74,9 @@ class Employee(BaseModel):
     fallback_model: str = Field(default="", description="备用模型（主模型失败时自动切换）")
     fallback_api_key: str = Field(default="", description="备用模型的 API key")
     fallback_base_url: str = Field(default="", description="备用模型的 base URL")
-    agent_id: int | None = Field(default=None, description="绑定的 knowlyr-id Agent ID")
+    agent_id: int | None = Field(default=None, description="绑定的平台 Agent ID")
     agent_status: Literal["active", "frozen", "inactive"] = Field(
-        default="active", description="Agent 状态，从 knowlyr-id 同步"
+        default="active", description="Agent 状态"
     )
     avatar_prompt: str = Field(default="", description="头像生成 prompt（留空则自动推断）")
     research_instructions: str = Field(
@@ -116,7 +116,7 @@ class WorkLogEntry(BaseModel):
     action: str = Field(description="动作描述")
     detail: str = Field(default="", description="详细信息")
     args: dict[str, str] = Field(default_factory=dict, description="调用参数")
-    agent_id: int | None = Field(default=None, description="关联的 knowlyr-id Agent ID")
+    agent_id: int | None = Field(default=None, description="关联的平台 Agent ID")
     severity: str = Field(default="info", description="info / warning / critical")
     metrics: dict[str, float] = Field(default_factory=dict, description="可选指标（数值类型）")
     links: list[str] = Field(default_factory=list, description="关联链接或引用")

@@ -424,49 +424,7 @@ class TestAgentFileGrep:
         assert "错误" in result
 
 
-# ── 5. query_data ──
-
-
-class TestQueryData:
-    """_tool_query_data."""
-
-    @pytest.mark.asyncio
-    async def test_success(self):
-        from crew.webhook import _tool_query_data
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.text = '{"users": 100}'
-
-        with patch("httpx.AsyncClient") as MockClient:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
-
-            result = await _tool_query_data(
-                {"metric": "users", "period": "week"},
-            )
-        assert "100" in result
-
-    @pytest.mark.asyncio
-    async def test_api_error(self):
-        from crew.webhook import _tool_query_data
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
-
-        with patch("httpx.AsyncClient") as MockClient:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
-
-            result = await _tool_query_data({"metric": "users"})
-        assert "失败" in result
+# ── 5. query_data — 已移除（knowlyr-id 依赖清理） ──
 
 
 # ── 6. find_free_time ──
@@ -693,7 +651,6 @@ class TestSchemaRegistration:
             "cancel_schedule",
             "agent_file_read",
             "agent_file_grep",
-            "query_data",
             "find_free_time",
         ]
         for tool in new_tools:
@@ -710,7 +667,6 @@ class TestSchemaRegistration:
             "cancel_schedule",
             "agent_file_read",
             "agent_file_grep",
-            "query_data",
             "find_free_time",
         ]
         for tool in new_tools:
@@ -731,7 +687,6 @@ class TestSchemaRegistration:
             "cancel_schedule",
             "agent_file_read",
             "agent_file_grep",
-            "query_data",
             "find_free_time",
         ]
         for tool in new_tools:

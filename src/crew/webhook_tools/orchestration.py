@@ -7,8 +7,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from crew.webhook_context import _ID_API_BASE, _ID_API_TOKEN
-
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
@@ -483,37 +481,6 @@ async def _tool_agent_file_grep(
         return f"搜索失败: {e}"
 
 
-async def _tool_query_data(
-    args: dict,
-    *,
-    agent_id: int | None = None,
-    ctx: _AppContext | None = None,
-) -> str:
-    """查询细粒度业务数据."""
-    metric = args.get("metric", "")
-    period = args.get("period", "week")
-    group_by = args.get("group_by", "")
-
-    import httpx
-
-    params = {"metric": metric, "period": period}
-    if group_by:
-        params["group_by"] = group_by
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{_ID_API_BASE}/api/stats/query",
-                params=params,
-                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-            )
-            if resp.status_code == 200:
-                return resp.text
-            return f"查询失败 (HTTP {resp.status_code}): {resp.text[:200]}"
-    except Exception as e:
-        return f"查询失败: {e}"
-
-
 async def _tool_find_free_time(
     args: dict,
     *,
@@ -599,9 +566,6 @@ async def _tool_find_free_time(
 
 
 # _MAX_TOOL_ROUNDS and other constants moved to crew.webhook_context
-
-
-# ── Tool handlers（调用 knowlyr-id API）──
 
 
 async def _tool_query_cost(
@@ -724,7 +688,6 @@ HANDLERS: dict[str, object] = {
     "cancel_schedule": _tool_cancel_schedule,
     "agent_file_read": _tool_agent_file_read,
     "agent_file_grep": _tool_agent_file_grep,
-    "query_data": _tool_query_data,
     "find_free_time": _tool_find_free_time,
     "route": _tool_route,
     "query_cost": _tool_query_cost,

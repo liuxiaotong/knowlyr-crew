@@ -1,4 +1,4 @@
-"""数据查询工具函数 — 统计、消息、笔记、用户、系统健康等."""
+"""数据查询工具函数 — 消息、笔记、用户、项目状态等."""
 
 from __future__ import annotations
 
@@ -19,94 +19,69 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _tool_query_stats(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """调用 knowlyr-id /api/stats/briefing."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/stats/briefing",
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
-
-
 async def _tool_send_message(
     args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
 ) -> str:
-    """发私信 — 优先走蚁聚 internal API，未配置则 fallback 到旧 id 接口."""
+    """发私信 — 通过蚁聚 internal API."""
     import httpx
 
     sender = agent_id or args.get("sender_id", 0)
     recipient = args.get("recipient_id")
     content = args.get("content", "")
 
-    # 优先: 蚁聚 internal API
-    if _ANTGATHER_API_URL and _ANTGATHER_API_TOKEN:
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{_ANTGATHER_API_URL}/api/internal/messages",
-                    json={
-                        "sender_id": sender,
-                        "recipient_id": recipient,
-                        "content": content,
-                        "msg_type": "private",
-                    },
-                    headers={"Authorization": f"Bearer {_ANTGATHER_API_TOKEN}"},
-                )
-                if resp.is_success:
-                    logger.info("send_message via antgather OK (sender=%s)", sender)
-                    return resp.text
-                # 4xx 客户端错误: 参数/token 有问题，fallback 也没用
-                if resp.status_code < 500:
-                    logger.error(
-                        "send_message via antgather client error (%s): %s",
-                        resp.status_code,
-                        resp.text[:200],
-                    )
-                    return f"发送失败（客户端错误 {resp.status_code}）: {resp.text[:200]}"
-                # 5xx 服务端错误: fallback 到 id
-                logger.warning(
-                    "send_message via antgather server error (%s), fallback to id",
-                    resp.status_code,
-                )
-        except Exception as e:
-            logger.warning("send_message via antgather error: %s, fallback to id", e)
+    if not _ANTGATHER_API_URL or not _ANTGATHER_API_TOKEN:
+        return "发送失败: 蚁聚 API 未配置（需要 ANTGATHER_API_URL 和 ANTGATHER_API_TOKEN）"
 
-    # Fallback: 旧 knowlyr-id 接口（过渡期）
-    logger.info("send_message via knowlyr-id (sender=%s)", sender)
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"{_ID_API_BASE}/api/messages/agent-send",
+                f"{_ANTGATHER_API_URL}/api/internal/messages",
                 json={
                     "sender_id": sender,
                     "recipient_id": recipient,
                     "content": content,
+                    "msg_type": "private",
                 },
-                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+                headers={"Authorization": f"Bearer {_ANTGATHER_API_TOKEN}"},
             )
-            return resp.text
-    except Exception as e:
-        logger.error("send_message via knowlyr-id also failed: %s", e)
-        return f"发送失败: 蚁聚和 knowlyr-id 均不可用 ({e})"
+            if resp.is_success:
+                logger.info("send_message via antgather OK (sender=%s)", sender)
+                return resp.text
+            logger.error(
+                "send_message via antgather error (%s): %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            return f"发送失败（HTTP {resp.status_code}）: {resp.text[:200]}"
+    except httpx.HTTPError as e:
+        logger.error("send_message via antgather failed: %s", e)
+        return f"发送失败: {e}"
 
 
 async def _tool_list_agents(
     args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
 ) -> str:
-    """调用 knowlyr-id /api/agents."""
-    import httpx
+    """查看所有 AI 同事的列表和当前状态（本地数据）."""
+    import json
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/agents",
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
+    from crew.discovery import discover_employees
+
+    project_dir = ctx.project_dir if ctx and ctx.project_dir else None
+    discovery = discover_employees(project_dir=project_dir)
+
+    agents = []
+    for name, emp in sorted(discovery.employees.items()):
+        info = {
+            "name": name,
+            "display_name": emp.display_name or name,
+            "title": emp.title or "",
+            "status": emp.agent_status or "active",
+            "model": emp.model or "",
+            "tags": emp.tags or [],
+        }
+        agents.append(info)
+
+    return json.dumps(agents, ensure_ascii=False, indent=2)
 
 
 async def _tool_create_note(
@@ -152,41 +127,28 @@ async def _tool_create_note(
     return f"笔记已保存: {filename}"
 
 
+# ── 过渡期：人类数据仍在 knowlyr-id（id 管人类） ──
+
+
 async def _tool_lookup_user(
     args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
 ) -> str:
-    """按昵称查用户详情."""
+    """按昵称查用户详情（过渡期走 knowlyr-id）."""
     import httpx
 
     name = args.get("name", "")
     if not name:
         return "错误：需要 name 参数"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/stats/user",
-            params={"q": name},
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
-
-
-async def _tool_query_agent_work(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """查 AI 同事最近工作记录."""
-    import httpx
-
-    name = args.get("name", "")
-    days = args.get("days", 3)
-    if not name:
-        return "错误：需要 name 参数"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/stats/agent-work",
-            params={"name": name, "days": days},
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{_ID_API_BASE}/api/stats/user",
+                params={"q": name},
+                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
+            )
+            return resp.text
+    except httpx.HTTPError as e:
+        return f"查询失败: {e}"
 
 
 async def _tool_read_notes(
@@ -215,103 +177,6 @@ async def _tool_read_notes(
         results.append(f"【{f.stem}】\n{content[:200]}")
 
     return "\n---\n".join(results) if results else "没有匹配的笔记"
-
-
-async def _tool_read_messages(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """查 Kai 的未读消息概要."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/stats/unread",
-            params={"user_id": 1},
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
-
-
-async def _tool_get_system_health(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """查服务器健康状态."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{_ID_API_BASE}/api/stats/system-health",
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
-
-
-async def _tool_mark_read(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """标消息已读."""
-    import httpx
-
-    mark_all = args.get("all", False)
-    sender_name = args.get("sender_name", "")
-
-    payload: dict[str, Any] = {"user_id": 1}
-
-    if mark_all:
-        payload["all"] = True
-    elif sender_name:
-        # 先查 sender_id
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{_ID_API_BASE}/api/stats/user",
-                params={"q": sender_name},
-                headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-            )
-            try:
-                users = resp.json()
-                if not users:
-                    return f"找不到用户「{sender_name}」"
-                payload["sender_id"] = users[0]["id"]
-            except Exception:
-                return f"查询用户失败: {resp.text[:200]}"
-    else:
-        return "需要指定 sender_name 或 all=true"
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{_ID_API_BASE}/api/messages/mark-read-batch",
-            json=payload,
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
-
-
-async def _tool_update_agent(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
-) -> str:
-    """管理 AI 同事."""
-    import httpx
-
-    target_id = args.get("agent_id")
-    if not target_id:
-        return "需要 agent_id 参数"
-
-    update_data: dict[str, Any] = {}
-    if args.get("status"):
-        update_data["agent_status"] = args["status"]
-    if args.get("memory"):
-        update_data["memory"] = args["memory"]
-
-    if not update_data:
-        return "没有要更新的内容（需要 status 或 memory）"
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.put(
-            f"{_ID_API_BASE}/api/agents/{target_id}",
-            json=update_data,
-            headers={"Authorization": f"Bearer {_ID_API_TOKEN}"},
-        )
-        return resp.text
 
 
 # 本地路径（Mac 开发机）和服务器路径
@@ -385,16 +250,10 @@ async def _tool_project_status(
 
 
 HANDLERS: dict[str, object] = {
-    "query_stats": _tool_query_stats,
     "send_message": _tool_send_message,
     "list_agents": _tool_list_agents,
     "create_note": _tool_create_note,
     "lookup_user": _tool_lookup_user,
-    "query_agent_work": _tool_query_agent_work,
     "read_notes": _tool_read_notes,
-    "read_messages": _tool_read_messages,
-    "get_system_health": _tool_get_system_health,
     "project_status": _tool_project_status,
-    "mark_read": _tool_mark_read,
-    "update_agent": _tool_update_agent,
 }

@@ -322,7 +322,7 @@ class TestToolRolePresets:
     def test_profile_researcher_excludes_admin_tools(self):
         """profile-researcher 应排除管理写操作."""
         preset = TOOL_ROLE_PRESETS["profile-researcher"]
-        for tool in ("update_agent", "delegate_async", "delegate_chain", "route"):
+        for tool in ("delegate_async", "delegate_chain", "route"):
             assert tool not in preset
         assert "web_search" in preset  # 应保留搜索
 
@@ -330,7 +330,6 @@ class TestToolRolePresets:
         """profile-security 应排除影响审计独立性的写操作."""
         preset = TOOL_ROLE_PRESETS["profile-security"]
         for tool in (
-            "update_agent",
             "delegate",
             "delegate_async",
             "delegate_chain",

@@ -430,32 +430,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["pattern"],
         },
     },
-    "query_data": {
-        "name": "query_data",
-        "description": "查询业务数据。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "metric": {
-                    "type": "string",
-                    "enum": ["users", "messages", "agents", "revenue", "tasks"],
-                    "description": "查询指标",
-                },
-                "period": {
-                    "type": "string",
-                    "enum": ["today", "week", "month", "quarter"],
-                    "description": "时间段",
-                    "default": "week",
-                },
-                "group_by": {
-                    "type": "string",
-                    "enum": ["day", "week", "agent"],
-                    "description": "分组",
-                },
-            },
-            "required": ["metric"],
-        },
-    },
     "find_free_time": {
         "name": "find_free_time",
         "description": "查共同空闲时间。",
@@ -479,15 +453,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["user_ids"],
-        },
-    },
-    "query_stats": {
-        "name": "query_stats",
-        "description": "查询业务概览数据。",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
         },
     },
     "send_message": {
@@ -579,25 +544,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["name"],
         },
     },
-    "query_agent_work": {
-        "name": "query_agent_work",
-        "description": "查AI同事工作记录。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "AI同事昵称",
-                },
-                "days": {
-                    "type": "integer",
-                    "description": "查最近几天，默认3",
-                    "default": 3,
-                },
-            },
-            "required": ["name"],
-        },
-    },
     "read_notes": {
         "name": "read_notes",
         "description": "查看笔记。",
@@ -618,24 +564,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
-    "read_messages": {
-        "name": "read_messages",
-        "description": "查看 Kai 的未读消息。",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    "get_system_health": {
-        "name": "get_system_health",
-        "description": "查看服务器健康状态。",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
     "project_status": {
         "name": "project_status",
         "description": "查询项目开发状态。refresh=true 实时刷新。",
@@ -649,47 +577,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": [],
-        },
-    },
-    "mark_read": {
-        "name": "mark_read",
-        "description": "标记消息已读。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "sender_name": {
-                    "type": "string",
-                    "description": "发件人姓名（标该人的消息已读）",
-                },
-                "all": {
-                    "type": "boolean",
-                    "description": "true=全部标已读",
-                    "default": False,
-                },
-            },
-            "required": [],
-        },
-    },
-    "update_agent": {
-        "name": "update_agent",
-        "description": "管理AI同事：暂停/恢复/更新记忆。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "integer",
-                    "description": "AI同事的用户ID",
-                },
-                "status": {
-                    "type": "string",
-                    "description": "active=运行 / paused=暂停 / disabled=禁用",
-                },
-                "memory": {
-                    "type": "string",
-                    "description": "更新AI同事的记忆内容",
-                },
-            },
-            "required": ["agent_id"],
         },
     },
     "read_feishu_calendar": {
@@ -1798,7 +1685,6 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 
 # 需要 agent loop 的工具（区别于 sandbox 工具）
 AGENT_TOOLS = {
-    "query_stats",
     "send_message",
     "list_agents",
     "delegate",
@@ -1816,18 +1702,12 @@ AGENT_TOOLS = {
     "cancel_schedule",
     "agent_file_read",
     "agent_file_grep",
-    "query_data",
     "find_free_time",
     "web_search",
     "create_note",
     "lookup_user",
-    "query_agent_work",
     "read_notes",
-    "read_messages",
-    "get_system_health",
     "project_status",
-    "mark_read",
-    "update_agent",
     "read_feishu_calendar",
     "delete_feishu_event",
     "create_feishu_event",
@@ -1963,16 +1843,10 @@ TOOL_ROLE_PRESETS: dict[str, set[str]] = {
     "web": {"web_search", "read_url", "rss_read"},
     "memory": {"add_memory", "create_note", "read_notes"},
     "knowlyr-admin": {
-        "query_stats",
         "send_message",
         "list_agents",
         "lookup_user",
-        "query_agent_work",
-        "read_messages",
-        "get_system_health",
         "project_status",
-        "mark_read",
-        "update_agent",
     },
     "utilities": {
         "get_datetime",
@@ -2067,7 +1941,7 @@ SKILL_PACKS: dict[str, dict[str, Any]] = {
         "label": "开发工具",
         "description": "编码/JSON/正则/IP查询/文本处理/摘要",
         "tools": TOOL_ROLE_PRESETS["dev-tools"]
-        | {"agent_file_read", "agent_file_grep", "query_data"},
+        | {"agent_file_read", "agent_file_grep"},
     },
     "life": {
         "label": "生活服务",
@@ -2093,14 +1967,13 @@ TOOL_ROLE_PRESETS["profile-base"] = AGENT_TOOLS.copy()
 DENY_ENGINEER = {"weather", "exchange_rate", "stock_price", "flight_info", "aqi", "express_track"}
 
 # 研究员: 去掉管理后台写操作和委派
-DENY_RESEARCHER = {"update_agent", "delegate_async", "delegate_chain", "route"}
+DENY_RESEARCHER = {"delegate_async", "delegate_chain", "route"}
 
 # 商务: 去掉 GitHub 和代码相关
 DENY_BUSINESS = {"github_prs", "github_issues", "github_repo_activity"}
 
 # 安全审计: 去掉可能影响审计独立性的写操作
 DENY_SECURITY = {
-    "update_agent",
     "delegate",
     "delegate_async",
     "delegate_chain",
@@ -2209,7 +2082,7 @@ def _make_load_tools_schema(available: set[str]) -> dict[str, Any]:
             "properties": {
                 "names": {
                     "type": "string",
-                    "description": "技能包名或工具名，逗号分隔。如 'feishu,admin' 或 'query_stats'",
+                    "description": "技能包名或工具名，逗号分隔。如 'feishu,admin' 或 'list_agents'",
                 },
             },
             "required": ["names"],

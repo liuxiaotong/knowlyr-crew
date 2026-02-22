@@ -86,16 +86,10 @@ from crew.webhook_handlers import (  # noqa: F401
 )
 from crew.webhook_tools.data_query import (  # noqa: F401
     _tool_create_note,
-    _tool_get_system_health,
     _tool_list_agents,
     _tool_lookup_user,
-    _tool_mark_read,
-    _tool_query_agent_work,
-    _tool_query_stats,
-    _tool_read_messages,
     _tool_read_notes,
     _tool_send_message,
-    _tool_update_agent,
 )
 from crew.webhook_tools.external import (  # noqa: F401
     _tool_web_search,
@@ -117,7 +111,6 @@ from crew.webhook_tools.orchestration import (  # noqa: F401
     _tool_list_schedules,
     _tool_list_tasks,
     _tool_organize_meeting,
-    _tool_query_data,
     _tool_run_pipeline,
     _tool_schedule_task,
 )

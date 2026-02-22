@@ -51,7 +51,7 @@ class WorkLogger:
         Args:
             employee_name: 员工名称
             args: 调用参数
-            agent_id: 关联的 knowlyr-id Agent ID
+            agent_id: 关联的平台 Agent ID
 
         Returns:
             session_id

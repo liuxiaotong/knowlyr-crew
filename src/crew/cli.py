@@ -627,7 +627,7 @@ def show(name: str):
 @click.argument("name")
 @click.argument("positional_args", nargs=-1)
 @click.option("--arg", "named_args", multiple=True, help="命名参数 (key=value)")
-@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--agent-id", type=int, default=None, help="绑定平台 Agent ID")
 @click.option("--smart-context", is_flag=True, help="自动检测项目类型并注入上下文")
 @click.option("--raw", is_flag=True, help="输出原始渲染结果（不包裹 prompt 格式）")
 @click.option("--copy", "to_clipboard", is_flag=True, help="复制到剪贴板")
@@ -2387,7 +2387,7 @@ def checkpoint_resume(
 @pipeline.command("run")
 @click.argument("name_or_path")
 @click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
-@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--agent-id", type=int, default=None, help="绑定平台 Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--parallel", is_flag=True, help="跳过 Lane 串行调度")
@@ -2687,7 +2687,7 @@ def route_show(name: str):
 @click.argument("name")
 @click.argument("task")
 @click.option("--override", "overrides_raw", multiple=True, help="覆盖执行人 (role=employee)")
-@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--agent-id", type=int, default=None, help="绑定平台 Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option("-o", "--output", type=click.Path(), help="输出到文件")
 @click.option("--execute", is_flag=True, help="执行模式 — 自动调用 LLM 串联执行")
@@ -3024,7 +3024,7 @@ def discuss_show(name: str):
 @discuss.command("run")
 @click.argument("name_or_path")
 @click.option("--arg", "named_args", multiple=True, help="参数 (key=value)")
-@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--agent-id", type=int, default=None, help="绑定平台 Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option(
     "--orchestrated",
@@ -3294,7 +3294,7 @@ def _run_discussion_prompt(
     default="summary",
     help="输出格式",
 )
-@click.option("--agent-id", type=int, default=None, help="绑定 knowlyr-id Agent ID")
+@click.option("--agent-id", type=int, default=None, help="绑定平台 Agent ID")
 @click.option("--smart-context/--no-smart-context", default=True, help="自动检测项目类型")
 @click.option(
     "--orchestrated",

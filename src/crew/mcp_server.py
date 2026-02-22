@@ -106,7 +106,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "agent_id": {
                             "type": "integer",
-                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                            "description": "绑定的平台 Agent ID（可选）",
                         },
                     },
                     "required": ["name"],
@@ -168,7 +168,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "agent_id": {
                             "type": "integer",
-                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                            "description": "绑定的平台 Agent ID（可选）",
                         },
                         "smart_context": {
                             "type": "boolean",
@@ -234,7 +234,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                         "agent_id": {
                             "type": "integer",
-                            "description": "绑定的 knowlyr-id Agent ID（可选）",
+                            "description": "绑定的平台 Agent ID（可选）",
                         },
                         "smart_context": {
                             "type": "boolean",
