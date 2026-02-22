@@ -32,7 +32,7 @@ def create_crew_agent(
 ) -> Callable[[str], dict[str, Any]]:
     """创建基于 crew 员工的 agent 函数.
 
-    返回兼容 knowlyr-agent collect() 签名的 agent:
+    返回兼容 knowlyr-gym collect() 签名的 agent:
         agent(observation: str) -> {"tool": "...", "params": {...}}
 
     Args:

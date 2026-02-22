@@ -40,7 +40,7 @@ argument-hint: <task> [scope]
 | 产品 | 定位 | 用户 |
 |------|------|------|
 | **Crew** | AI Skill Loader，通过 MCP 给 AI IDE 加载技能 | 开发者 |
-| **knowlyr-agent** | Agent 轨迹数据工程（Gym-Style API） | ML 工程师 |
+| **knowlyr-gym** | Agent 轨迹数据工程（Gym-Style API） | ML 工程师 |
 | **knowlyr-id** | 用户身份与个人资料系统 | 终端用户 |
 | **knowlyr-website** | 官网，SEO + 品牌 | 访客/客户 |
 | **DataRecipe / Radar / Synth / Label / Check** | 数据管线工具链 | 数据工程师 |

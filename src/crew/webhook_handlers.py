@@ -784,7 +784,7 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
         from knowlyrcore.wrappers import MaxStepsWrapper, RecorderWrapper  # noqa: F401
     except ImportError:
         return JSONResponse(
-            {"error": "knowlyr-agent 未安装。请运行: pip install knowlyr-crew[agent]"},
+            {"error": "knowlyr-gym 未安装。请运行: pip install knowlyr-crew[agent]"},
             status_code=501,
         )
 

@@ -96,8 +96,8 @@ deploy-engine:
 upgrade-agent:
 	ssh $(SERVER) 'source /opt/knowlyr-crew/venv/bin/activate && \
 		pip install --force-reinstall --no-deps \
-		"knowlyr-core @ git+https://github.com/liuxiaotong/knowlyr-agent.git@main#subdirectory=packages/core" \
-		"knowlyr-reward @ git+https://github.com/liuxiaotong/knowlyr-agent.git@main#subdirectory=packages/reward"'
+		"knowlyr-core @ git+https://github.com/liuxiaotong/knowlyr-gym.git@main#subdirectory=packages/core" \
+		"knowlyr-reward @ git+https://github.com/liuxiaotong/knowlyr-gym.git@main#subdirectory=packages/reward"'
 	@echo "agent 包已升级"
 
 # ============================================================

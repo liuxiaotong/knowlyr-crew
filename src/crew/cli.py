@@ -4536,7 +4536,7 @@ def agent_run(employee_name, task, model, max_steps, repo, base_commit, image, p
         from agentsandbox import SandboxEnv
         from agentsandbox.config import SandboxConfig, TaskConfig
     except ImportError:
-        console.print("[red]knowlyr-agent 未安装。请运行: pip install knowlyr-crew[agent][/red]")
+        console.print("[red]knowlyr-gym 未安装。请运行: pip install knowlyr-crew[agent][/red]")
         raise SystemExit(1)
 
     from crew.agent_bridge import create_crew_agent

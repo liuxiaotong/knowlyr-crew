@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   repository_dispatch:
-    types: [knowlyr-agent-released]
+    types: [knowlyr-gym-released]
 
 jobs:
   deploy:

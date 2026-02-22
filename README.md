@@ -523,10 +523,10 @@ curl /api/cost/summary?days=7
 通过 `contextvars.ContextVar` 实现**零侵入轨迹录制**——无需修改任何业务代码，自动捕获 Agent 的思考、工具调用、执行结果、token 消耗：
 
 ```
-Crew 产出轨迹 → agentrecorder 标准格式 → knowlyr-agent PRM 评分 → SFT / DPO / GRPO 训练
+Crew 产出轨迹 → agentrecorder 标准格式 → knowlyr-gym PRM 评分 → SFT / DPO / GRPO 训练
 ```
 
-这是连接 **Crew**（协作层）和 **knowlyr-agent**（训练层）的数据桥梁——Crew 运行时产生的真实交互轨迹，可直接用于 Agent 的强化学习训练。
+这是连接 **Crew**（协作层）和 **knowlyr-gym**（训练层）的数据桥梁——Crew 运行时产生的真实交互轨迹，可直接用于 Agent 的强化学习训练。
 
 ---
 
@@ -875,7 +875,7 @@ graph LR
 | Audit | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | Identity | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
 | Deliberation | **Crew** | 对抗式多智能体协商 · 持久记忆进化 · MCP 原生 | You are here |
-| Agent Training | **knowlyr-agent** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-agent) |
+| Agent Training | **knowlyr-gym** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
 ---
 
