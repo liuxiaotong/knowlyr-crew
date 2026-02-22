@@ -1144,3 +1144,150 @@ class TestResolveBotContext:
         req = MagicMock()
         req.url.path = "/feishu/event"
         assert _resolve_bot_context(req, ctx) is None
+
+
+class TestGroupChatBotOwnership:
+    """群聊多 Bot 所有权过滤 — 避免两个 bot 同时响应同一条消息."""
+
+    def _make_multi_bot_ctx(self):
+        """构建包含 moyan (primary) + xinlei 两个 bot 的 ctx."""
+        from crew.webhook_context import FeishuBotContext, _AppContext
+
+        ctx = MagicMock(spec=_AppContext)
+        ctx.project_dir = Path("/tmp/test")
+        ctx.feishu_chat_store = None
+
+        bot_moyan_cfg = FeishuBotConfig(
+            bot_id="moyan",
+            app_id="cli_aaa",
+            app_secret="s_aaa",
+            default_employee="ceo-assistant",
+            primary=True,
+        )
+        bot_xinlei_cfg = FeishuBotConfig(
+            bot_id="xinlei",
+            app_id="cli_bbb",
+            app_secret="s_bbb",
+            default_employee="hr-manager",
+        )
+        bot_moyan = FeishuBotContext(
+            config=bot_moyan_cfg,
+            token_mgr=MagicMock(),
+            dedup=MagicMock(),
+        )
+        bot_xinlei = FeishuBotContext(
+            config=bot_xinlei_cfg,
+            token_mgr=MagicMock(),
+            dedup=MagicMock(),
+        )
+        ctx.feishu_bots = {"moyan": bot_moyan, "xinlei": bot_xinlei}
+        ctx.feishu_config = bot_moyan_cfg
+        ctx.feishu_token_mgr = bot_moyan.token_mgr
+        return ctx, bot_moyan, bot_xinlei
+
+    @patch("crew.webhook._feishu_dispatch", new_callable=AsyncMock)
+    def test_primary_bot_skips_other_bots_employee(self, mock_dispatch):
+        """primary bot 应跳过属于 xinlei 的 hr-manager."""
+        from crew.webhook_feishu import _feishu_dispatch
+
+        ctx, bot_moyan, bot_xinlei = self._make_multi_bot_ctx()
+
+        msg_event = MagicMock()
+        msg_event.chat_type = "group"
+        msg_event.text = "你好"
+        msg_event.mentions = [{"name": "叶心蕾"}]
+        msg_event.message_id = "msg_001"
+        msg_event.chat_id = "oc_group"
+        msg_event.sender_id = "ou_kai"
+
+        # Mock resolve_employee_from_mention 返回 hr-manager
+        with patch("crew.discovery.discover_employees") as mock_disc:
+            mock_emp = MagicMock()
+            mock_emp.name = "hr-manager"
+            mock_emp.character_name = "叶心蕾"
+            mock_disc.return_value.employees = {"hr-manager": mock_emp}
+            mock_disc.return_value.get.return_value = mock_emp
+
+            with patch(
+                "crew.feishu.resolve_employee_from_mention",
+                return_value=("hr-manager", "你好"),
+            ):
+                _run(_feishu_dispatch(ctx, msg_event, bot_ctx=bot_moyan))
+
+        # primary bot 应该不调用 _execute_employee（直接 return）
+        mock_dispatch.assert_not_called()
+
+    @patch("crew.webhook._execute_employee", new_callable=AsyncMock)
+    def test_non_primary_bot_skips_other_bots_employee(self, mock_exec):
+        """xinlei bot 应跳过 @墨言 → ceo-assistant 的消息."""
+        from crew.webhook_feishu import _feishu_dispatch
+
+        ctx, bot_moyan, bot_xinlei = self._make_multi_bot_ctx()
+
+        msg_event = MagicMock()
+        msg_event.chat_type = "group"
+        msg_event.text = "你好"
+        msg_event.mentions = [{"name": "姜墨言"}]
+        msg_event.message_id = "msg_002"
+        msg_event.chat_id = "oc_group"
+        msg_event.sender_id = "ou_kai"
+
+        with patch("crew.discovery.discover_employees") as mock_disc:
+            mock_emp = MagicMock()
+            mock_emp.name = "ceo-assistant"
+            mock_emp.character_name = "姜墨言"
+            mock_disc.return_value.employees = {"ceo-assistant": mock_emp}
+            mock_disc.return_value.get.return_value = mock_emp
+
+            with patch(
+                "crew.feishu.resolve_employee_from_mention",
+                return_value=("ceo-assistant", "你好"),
+            ):
+                _run(_feishu_dispatch(ctx, msg_event, bot_ctx=bot_xinlei))
+
+        # xinlei bot 应该不调用 _execute_employee
+        mock_exec.assert_not_called()
+
+    @patch("crew.webhook._execute_employee", new_callable=AsyncMock)
+    def test_correct_bot_processes_its_employee(self, mock_exec):
+        """xinlei bot 应正常处理 @叶心蕾 → hr-manager 的消息."""
+        from crew.webhook_feishu import _feishu_dispatch
+
+        ctx, bot_moyan, bot_xinlei = self._make_multi_bot_ctx()
+        mock_exec.return_value = {"output": "收到", "model": "test", "input_tokens": 0, "output_tokens": 0}
+
+        msg_event = MagicMock()
+        msg_event.chat_type = "group"
+        msg_event.text = "你好"
+        msg_event.mentions = [{"name": "叶心蕾"}]
+        msg_event.message_id = "msg_003"
+        msg_event.chat_id = "oc_group"
+        msg_event.sender_id = "ou_kai"
+        msg_event.msg_type = "text"
+        msg_event.image_key = None
+
+        with patch("crew.discovery.discover_employees") as mock_disc:
+            mock_emp = MagicMock()
+            mock_emp.name = "hr-manager"
+            mock_emp.character_name = "叶心蕾"
+            mock_emp.display_name = "HR Manager"
+            mock_emp.tools = []
+            mock_emp.args = []
+            mock_emp.fallback_model = None
+            mock_emp.model = None
+            mock_emp.api_key = None
+            mock_emp.base_url = None
+            mock_emp.source_path = None
+            mock_disc.return_value.employees = {"hr-manager": mock_emp}
+            mock_disc.return_value.get.return_value = mock_emp
+
+            with patch(
+                "crew.feishu.resolve_employee_from_mention",
+                return_value=("hr-manager", "你好"),
+            ):
+                with patch("crew.feishu.get_user_name", new_callable=AsyncMock, return_value="Kai"):
+                    with patch("crew.feishu.send_feishu_reply", new_callable=AsyncMock, return_value={"code": 0}):
+                        _run(_feishu_dispatch(ctx, msg_event, bot_ctx=bot_xinlei))
+
+        # xinlei bot 应该处理了此消息
+        mock_exec.assert_called_once()

@@ -526,6 +526,38 @@ async def _feishu_dispatch(
             default_employee=use_default,
         )
 
+        # ── 群聊多 Bot 所有权过滤 ──
+        # 同一群里有多个 bot 时，每条消息所有 bot 都会收到。
+        # 规则：非 primary bot 只处理属于自己 default_employee 的消息，
+        # primary bot 跳过已被其他 bot 认领的员工。
+        if (
+            msg_event.chat_type == "group"
+            and bot_ctx is not None
+            and len(ctx.feishu_bots) > 1
+            and employee_name is not None
+        ):
+            _other_bot_employees = {
+                bc.config.default_employee
+                for bc in ctx.feishu_bots.values()
+                if bc is not bot_ctx and bc.config.default_employee
+            }
+            if _config.primary:
+                # primary bot 让出已被其他 bot 认领的员工
+                if employee_name in _other_bot_employees:
+                    logger.info(
+                        "群聊跳过: primary bot 让出 %s（属于其他 bot）", employee_name
+                    )
+                    return
+            else:
+                # 非 primary bot 只接自己的 default_employee
+                if employee_name != _config.default_employee:
+                    logger.info(
+                        "群聊跳过: bot=%s 不处理 %s（非本 bot 员工）",
+                        getattr(_config, "bot_id", "?"),
+                        employee_name,
+                    )
+                    return
+
         # ── 命令拦截 ──
         _raw = (task_text or msg_event.text or "").strip()
 
