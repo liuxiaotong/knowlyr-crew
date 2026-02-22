@@ -230,7 +230,7 @@ def _lint_file(path: Path, project_dir: Path) -> list[str]:
         import yaml
 
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # pragma: no cover - YAML parse error surfaced below
+    except (yaml.YAMLError, OSError) as exc:  # YAML 解析或文件读取失败
         return [f"{path}: 无法解析 YAML ({exc})"]
 
     if not isinstance(data, dict):
@@ -249,7 +249,7 @@ def _lint_file(path: Path, project_dir: Path) -> list[str]:
 
         try:
             pipeline = load_pipeline(path)
-        except Exception as exc:
+        except (ValueError, yaml.YAMLError, OSError) as exc:
             return [f"{path}: 解析失败 ({exc})"]
 
         errors.extend(f"{path}: {e}" for e in validate_pipeline(pipeline, project_dir=project_dir))
@@ -264,7 +264,7 @@ def _lint_file(path: Path, project_dir: Path) -> list[str]:
 
         try:
             discussion = load_discussion(path)
-        except Exception as exc:
+        except (ValueError, yaml.YAMLError, OSError) as exc:
             return [f"{path}: 解析失败 ({exc})"]
 
         errors.extend(

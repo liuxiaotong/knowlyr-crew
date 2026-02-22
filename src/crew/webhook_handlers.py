@@ -36,7 +36,7 @@ def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
         os.close(fd)
         fd_closed = True
         os.replace(tmp, config_path)
-    except Exception:
+    except OSError:
         if not fd_closed:
             os.close(fd)
         Path(tmp).unlink(missing_ok=True)
@@ -341,7 +341,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
 
     try:
         payload = await request.json()
-    except Exception:
+    except (ValueError, TypeError):
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     # 只允许白名单字段
@@ -361,7 +361,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     # 写回 employee.yaml
     try:
         _write_yaml_field(employee.source_path, updates)
-    except Exception as e:
+    except OSError as e:
         logger.exception("更新 employee.yaml 失败: %s", identifier)
         return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
 
@@ -408,7 +408,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
             shutil.rmtree(source)
         elif source.is_file():
             source.unlink()
-    except Exception as e:
+    except OSError as e:
         logger.exception("删除员工文件失败: %s", identifier)
         return JSONResponse({"error": f"Delete failed: {e}"}, status_code=500)
 
@@ -427,7 +427,7 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
 
     try:
         payload = await request.json()
-    except Exception:
+    except (ValueError, TypeError):
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     try:
@@ -445,7 +445,7 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
                 "participants": results["participants"],
             }
         )
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         logger.exception("记忆导入失败")
         return JSONResponse({"error": str(e)}, status_code=500)
 

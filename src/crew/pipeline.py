@@ -9,7 +9,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -340,7 +340,11 @@ def _execute_single_step(
     api_key: str | None,
     model: str | None,
 ) -> StepResult:
-    """执行单个步骤：解析参数 → 生成 prompt → 可选 LLM 调用."""
+    """生成单个步骤的 prompt（prompt-only 模式）.
+
+    注意：LLM 调用已统一由 _aexecute_single_step 处理，
+    此函数仅用于 prompt-only 路径（execute=False）。
+    """
     emp = employees.get(step.employee)
     if emp is None:
         return StepResult(
@@ -353,49 +357,17 @@ def _execute_single_step(
             error_message=f"未找到员工: {step.employee}",
         )
 
-    # 1. 解析 $variable + 输出引用
     resolved_args: dict[str, str] = {}
     for k, v in step.args.items():
         v = _resolve_initial_args(v, initial_args)
         v = _resolve_output_refs(v, outputs_by_id, outputs_by_index, prev_output, execute)
         resolved_args[k] = v
 
-    # 2. 生成 prompt
     prompt = engine.prompt(
         emp,
         args=resolved_args,
         project_info=project_info,
     )
-
-    # 3. 可选 LLM 执行
-    output = ""
-    result_model = ""
-    input_tokens = 0
-    output_tokens = 0
-    duration_ms = 0
-    error = False
-    error_message = ""
-
-    if execute:
-        try:
-            from crew.executor import execute_prompt
-
-            use_model = emp.model or model or "claude-sonnet-4-20250514"
-            t0 = time.monotonic()
-            exec_result = execute_prompt(
-                system_prompt=prompt,
-                api_key=api_key,
-                model=use_model,
-                stream=False,
-            )
-            duration_ms = int((time.monotonic() - t0) * 1000)
-            output = exec_result.content
-            result_model = exec_result.model
-            input_tokens = exec_result.input_tokens
-            output_tokens = exec_result.output_tokens
-        except Exception as exc:
-            error = True
-            error_message = str(exc)[:500]
 
     return StepResult(
         employee=step.employee,
@@ -403,13 +375,6 @@ def _execute_single_step(
         step_index=index,
         args=resolved_args,
         prompt=prompt,
-        output=output,
-        error=error,
-        error_message=error_message,
-        model=result_model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        duration_ms=duration_ms,
     )
 
 
@@ -429,7 +394,7 @@ def run_pipeline(
     model: str | None = None,
     on_step_complete: Callable[[StepResult, dict], None] | None = None,
 ) -> PipelineResult:
-    """执行流水线.
+    """同步执行流水线 — 委派给 arun_pipeline.
 
     Args:
         pipeline: 流水线定义.
@@ -445,298 +410,23 @@ def run_pipeline(
     Returns:
         PipelineResult.
     """
-    initial_args = initial_args or {}
-    employees = discover_employees(project_dir=project_dir)
-    engine = CrewEngine(project_dir=project_dir)
-    project_info = detect_project(project_dir) if smart_context else None
-
-    # 启用轨迹录制（仅 execute 模式）
-    _traj_collector = None
-    if execute:
-        try:
-            from crew.trajectory import TrajectoryCollector
-
-            _traj_collector = TrajectoryCollector(
-                f"pipeline/{pipeline.name}",
-                pipeline.description or pipeline.name,
-                model=model or "",
-            )
-            _traj_collector.__enter__()
-        except Exception:
-            _traj_collector = None
-
-    # 输出注册表
-    outputs_by_id: dict[str, str] = {}
-    outputs_by_index: dict[int, str] = {}
-    prev_output: str = ""
-
-    step_results: list[StepResult | list[StepResult]] = []
-    flat_index = 0
-    t0 = time.monotonic()
-    _steps_hash = _compute_steps_hash(pipeline)
-    _aborted = False
-
-    for step_i, item in enumerate(pipeline.steps):
-        if isinstance(item, ParallelGroup):
-            group_results: list[StepResult] = []
-
-            if execute:
-                # 并行 LLM 调用
-                with ThreadPoolExecutor(max_workers=len(item.parallel)) as pool:
-                    futures = {}
-                    for sub in item.parallel:
-                        idx = flat_index
-                        future = pool.submit(
-                            _execute_single_step,
-                            sub,
-                            idx,
-                            engine,
-                            employees,
-                            initial_args,
-                            outputs_by_id,
-                            outputs_by_index,
-                            prev_output,
-                            project_info,
-                            execute,
-                            api_key,
-                            model,
-                        )
-                        futures[future] = (sub, idx)
-                        flat_index += 1
-
-                    for future in as_completed(futures):
-                        r = future.result()
-                        if r.error:
-                            logger.warning(
-                                "并行步骤 %s (#%d) 失败: %s",
-                                r.employee,
-                                r.step_index,
-                                r.error_message,
-                            )
-                        group_results.append(r)
-                        if r.step_id:
-                            outputs_by_id[r.step_id] = r.output
-                        outputs_by_index[r.step_index] = r.output
-            else:
-                # prompt-only 模式顺序生成
-                for sub in item.parallel:
-                    r = _execute_single_step(
-                        sub,
-                        flat_index,
-                        engine,
-                        employees,
-                        initial_args,
-                        outputs_by_id,
-                        outputs_by_index,
-                        prev_output,
-                        project_info,
-                        execute,
-                        api_key,
-                        model,
-                    )
-                    if r.error:
-                        logger.warning(
-                            "并行步骤 %s (#%d) 失败: %s",
-                            r.employee,
-                            r.step_index,
-                            r.error_message,
-                        )
-                    group_results.append(r)
-                    if r.step_id:
-                        outputs_by_id[r.step_id] = r.output
-                    outputs_by_index[flat_index] = r.output
-                    flat_index += 1
-
-            # 按 step_index 排序确保结果顺序稳定
-            group_results.sort(key=lambda r: r.step_index)
-            step_results.append(group_results)
-            prev_output = "\n\n---\n\n".join(r.output for r in group_results)
-            cp = _build_checkpoint(
-                pipeline.name,
-                step_results,
-                outputs_by_id,
-                outputs_by_index,
-                flat_index,
-                step_i + 1,
-                _steps_hash,
-            )
-            _aborted = _notify_and_check_abort(group_results, fail_fast, on_step_complete, cp)
-        elif isinstance(item, ConditionalStep):
-            body = item.condition
-            took_then = _evaluate_check(
-                body.check,
-                body.contains,
-                body.matches,
-                outputs_by_id,
-                outputs_by_index,
-                prev_output,
-                execute,
-            )
-            branch_steps = body.then if took_then else body.else_
-            branch_label = "then" if took_then else "else"
-
-            branch_results: list[StepResult] = []
-            for sub in branch_steps:
-                r = _execute_single_step(
-                    sub,
-                    flat_index,
-                    engine,
-                    employees,
-                    initial_args,
-                    outputs_by_id,
-                    outputs_by_index,
-                    prev_output,
-                    project_info,
-                    execute,
-                    api_key,
-                    model,
-                )
-                r.branch = branch_label
-                if r.step_id:
-                    outputs_by_id[r.step_id] = r.output
-                outputs_by_index[flat_index] = r.output
-                flat_index += 1
-                branch_results.append(r)
-                prev_output = r.output
-                cp = _build_checkpoint(
-                    pipeline.name,
-                    step_results,
-                    outputs_by_id,
-                    outputs_by_index,
-                    flat_index,
-                    step_i + 1,
-                    _steps_hash,
-                )
-                if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
-                    _aborted = True
-                    break
-
-            if branch_results:
-                step_results.append(
-                    branch_results if len(branch_results) > 1 else branch_results[0],
-                )
-        elif isinstance(item, LoopStep):
-            body = item.loop
-            loop_all_results: list[StepResult] = []
-
-            for iteration in range(body.max_iterations):
-                for sub in body.steps:
-                    r = _execute_single_step(
-                        sub,
-                        flat_index,
-                        engine,
-                        employees,
-                        initial_args,
-                        outputs_by_id,
-                        outputs_by_index,
-                        prev_output,
-                        project_info,
-                        execute,
-                        api_key,
-                        model,
-                    )
-                    r.branch = f"loop-{iteration}"
-                    if r.step_id:
-                        outputs_by_id[r.step_id] = r.output
-                    outputs_by_index[flat_index] = r.output
-                    flat_index += 1
-                    loop_all_results.append(r)
-                    prev_output = r.output
-                    cp = _build_checkpoint(
-                        pipeline.name,
-                        step_results,
-                        outputs_by_id,
-                        outputs_by_index,
-                        flat_index,
-                        step_i + 1,
-                        _steps_hash,
-                    )
-                    if _notify_and_check_abort(r, fail_fast, on_step_complete, cp):
-                        _aborted = True
-                        break
-
-                if _aborted:
-                    break
-                # 检查终止条件
-                should_stop = _evaluate_check(
-                    body.until.check,
-                    body.until.contains,
-                    body.until.matches,
-                    outputs_by_id,
-                    outputs_by_index,
-                    prev_output,
-                    execute,
-                )
-                if should_stop:
-                    break
-                if not execute:
-                    break  # prompt-only 只执行一次
-
-            if loop_all_results:
-                step_results.append(
-                    loop_all_results if len(loop_all_results) > 1 else loop_all_results[0],
-                )
-        else:
-            r = _execute_single_step(
-                item,
-                flat_index,
-                engine,
-                employees,
-                initial_args,
-                outputs_by_id,
-                outputs_by_index,
-                prev_output,
-                project_info,
-                execute,
-                api_key,
-                model,
-            )
-            if r.step_id:
-                outputs_by_id[r.step_id] = r.output
-            outputs_by_index[flat_index] = r.output
-            flat_index += 1
-            step_results.append(r)
-            prev_output = r.output
-            cp = _build_checkpoint(
-                pipeline.name,
-                step_results,
-                outputs_by_id,
-                outputs_by_index,
-                flat_index,
-                step_i + 1,
-                _steps_hash,
-            )
-            _aborted = _notify_and_check_abort(r, fail_fast, on_step_complete, cp)
-
-        if _aborted:
-            break
-
-    total_ms = int((time.monotonic() - t0) * 1000)
-
-    # 汇总 token 统计
-    all_results = _flatten_results(step_results)
-
-    # 完成轨迹录制
-    if _traj_collector is not None:
-        try:
-            has_error = any(r.error for r in all_results)
-            _traj_collector.finish(success=not has_error)
-        except Exception as e:
-            logger.debug("流水线轨迹录制失败: %s", e)
-        finally:
-            _traj_collector.__exit__(None, None, None)
-
-    return PipelineResult(
-        pipeline_name=pipeline.name,
-        mode="execute" if execute else "prompt",
-        steps=step_results,
-        total_duration_ms=total_ms,
-        total_input_tokens=sum(r.input_tokens for r in all_results),
-        total_output_tokens=sum(r.output_tokens for r in all_results),
+    return asyncio.run(
+        arun_pipeline(
+            pipeline,
+            initial_args=initial_args,
+            project_dir=project_dir,
+            agent_id=agent_id,
+            smart_context=smart_context,
+            execute=execute,
+            fail_fast=fail_fast,
+            api_key=api_key,
+            model=model,
+            on_step_complete=on_step_complete,
+        )
     )
 
 
-# ── 异步版本（供 MCP Server 使用）──
+# ── 异步版本（唯一实现）──
 
 
 async def arun_pipeline(
@@ -766,6 +456,21 @@ async def arun_pipeline(
     outputs_by_id: dict[str, str] = {}
     outputs_by_index: dict[int, str] = {}
     prev_output: str = ""
+
+    # 启用轨迹录制（仅 execute 模式）
+    _traj_collector = None
+    if execute:
+        try:
+            from crew.trajectory import TrajectoryCollector
+
+            _traj_collector = TrajectoryCollector(
+                f"pipeline/{pipeline.name}",
+                pipeline.description or pipeline.name,
+                model=model or "",
+            )
+            _traj_collector.__enter__()
+        except ImportError:
+            _traj_collector = None
 
     step_results: list[StepResult | list[StepResult]] = []
     flat_index = 0
@@ -803,14 +508,6 @@ async def arun_pipeline(
                         timeout=_ASYNC_STEP_TIMEOUT,
                     )
                 )
-                for r in group_results:
-                    if r.error:
-                        logger.warning(
-                            "并行步骤 %s (#%d) 失败: %s",
-                            r.employee,
-                            r.step_index,
-                            r.error_message,
-                        )
             else:
                 group_results = []
                 for sub in item.parallel:
@@ -833,6 +530,13 @@ async def arun_pipeline(
 
             group_results.sort(key=lambda r: r.step_index)
             for r in group_results:
+                if r.error:
+                    logger.warning(
+                        "并行步骤 %s (#%d) 失败: %s",
+                        r.employee,
+                        r.step_index,
+                        r.error_message,
+                    )
                 if r.step_id:
                     outputs_by_id[r.step_id] = r.output
                 outputs_by_index[r.step_index] = r.output
@@ -1046,6 +750,17 @@ async def arun_pipeline(
 
     total_ms = int((time.monotonic() - t0) * 1000)
     all_results = _flatten_results(step_results)
+
+    # 轨迹录制收尾
+    if _traj_collector is not None:
+        try:
+            has_error = any(r.error for r in all_results)
+            _traj_collector.finish(success=not has_error)
+        except Exception as e:
+            logger.debug("流水线轨迹录制失败: %s", e)
+        finally:
+            _traj_collector.__exit__(None, None, None)
+
     return PipelineResult(
         pipeline_name=pipeline.name,
         mode="execute" if execute else "prompt",
