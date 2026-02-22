@@ -76,6 +76,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_org_memories,
     _handle_project_status,
     _handle_run_employee,
+    _handle_trajectory_report,
     _handle_run_pipeline,
     _handle_run_route,
     _handle_task_approve,
@@ -328,6 +329,11 @@ def create_webhook_app(
             "/api/model-tiers",
             endpoint=_make_handler(ctx, _handle_model_tiers),
             methods=["GET"],
+        ),
+        Route(
+            "/api/trajectory/report",
+            endpoint=_make_handler(ctx, _handle_trajectory_report),
+            methods=["POST"],
         ),
     ]
 

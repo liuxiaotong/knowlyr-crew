@@ -1088,6 +1088,59 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
+    """接收外部 agent 的轨迹数据 — POST /api/trajectory/report."""
+    from starlette.responses import JSONResponse
+
+    # payload 大小限制 512KB
+    body = await request.body()
+    if len(body) > 512 * 1024:
+        return JSONResponse({"error": "payload too large (max 512KB)"}, status_code=413)
+
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    employee_name = payload.get("employee_name", "")
+    steps = payload.get("steps")
+    if not employee_name or not steps:
+        return JSONResponse(
+            {"error": "missing required fields: employee_name, steps"}, status_code=400
+        )
+
+    task_description = payload.get("task_description", "")
+    model = payload.get("model", "")
+    channel = payload.get("channel", "pull")
+    success = payload.get("success", True)
+
+    try:
+        from crew.trajectory import TrajectoryCollector
+
+        output_dir = (ctx.project_dir / ".crew" / "trajectories") if ctx.project_dir else Path(".")
+        tc = TrajectoryCollector(
+            employee_name,
+            task_description,
+            model=model,
+            channel=channel,
+            output_dir=output_dir,
+        )
+        for s in steps:
+            tc.add_tool_step(
+                thought=str(s.get("thought", ""))[:2000],
+                tool_name=s.get("tool_name", "unknown"),
+                tool_params=s.get("tool_params", {}),
+                tool_output=str(s.get("tool_output", ""))[:2000],
+                tool_exit_code=s.get("tool_exit_code", 0),
+            )
+        result = tc.finish(success=success)
+        total_steps = result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
+        return JSONResponse({"ok": True, "steps_recorded": total_steps})
+    except Exception as e:
+        logger.exception("轨迹上报处理失败")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     """项目状态概览 — 组织架构 + 成本 + 员工列表."""
     from starlette.responses import JSONResponse
