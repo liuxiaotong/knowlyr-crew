@@ -1221,6 +1221,36 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
         memories = store.query(name, limit=1000)
         memory_counts[name] = len(memories)
 
+    # 聚合员工运行时数据
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.now() - timedelta(days=days)
+    emp_runtime: dict[str, dict] = {}
+    for rec in ctx.registry._tasks.values():
+        if rec.target_type != "employee":
+            continue
+        rname = rec.target_name
+        if rname not in emp_runtime:
+            emp_runtime[rname] = {
+                "last_active_at": None,
+                "recent_task_count": 0,
+                "last_error": None,
+                "_last_fail_at": None,
+            }
+        rt = emp_runtime[rname]
+        # 最近活跃时间
+        if rec.status == "completed" and rec.completed_at:
+            if rt["last_active_at"] is None or rec.completed_at > rt["last_active_at"]:
+                rt["last_active_at"] = rec.completed_at
+        # 近期任务计数
+        if rec.created_at >= cutoff and rec.status in ("completed", "failed"):
+            rt["recent_task_count"] += 1
+        # 最近一次错误
+        if rec.status == "failed" and rec.error and rec.completed_at:
+            if rt["_last_fail_at"] is None or rec.completed_at > rt["_last_fail_at"]:
+                rt["last_error"] = rec.error
+                rt["_last_fail_at"] = rec.completed_at
+
     employees_info = []
     for name, emp in sorted(result.employees.items()):
         team = org.get_team(name)
@@ -1237,6 +1267,9 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 "team": team,
                 "authority": authority,
                 "memory_count": memory_counts.get(name, 0),
+                "last_active_at": emp_runtime[name]["last_active_at"].isoformat() if emp_runtime.get(name, {}).get("last_active_at") else None,
+                "recent_task_count": emp_runtime.get(name, {}).get("recent_task_count", 0),
+                "last_error": emp_runtime.get(name, {}).get("last_error"),
             }
         )
 
