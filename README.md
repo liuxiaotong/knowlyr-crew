@@ -852,8 +852,12 @@ graph LR
     ID -.->|身份 + 记忆| Crew
     Crew -.->|轨迹 + 奖励| Agent
     Agent -.->|优化策略| Crew
+    Ledger["Ledger<br/>Accounting"]
+    Crew -.->|AI 员工账户| Ledger
+    Ledger -.->|光粒结算| Crew
 
     style Crew fill:#0969da,color:#fff,stroke:#0969da
+    style Ledger fill:#d29922,color:#fff,stroke:#d29922
     style ID fill:#2da44e,color:#fff,stroke:#2da44e
     style Agent fill:#8b5cf6,color:#fff,stroke:#8b5cf6
     style Radar fill:#1a1a2e,color:#e0e0e0,stroke:#444
@@ -874,6 +878,7 @@ graph LR
 | Quality | **DataCheck** | 规则验证、重复检测、分布分析 | [GitHub](https://github.com/liuxiaotong/data-check) |
 | Audit | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | Identity | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
+| Accounting | **knowlyr-ledger** | 统一账本 · 复式记账 · 行锁安全 · 幂等交易 | [GitHub](https://github.com/liuxiaotong/knowlyr-ledger) |
 | Deliberation | **Crew** | 对抗式多智能体协商 · 持久记忆进化 · MCP 原生 | You are here |
 | Agent Training | **knowlyr-gym** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
