@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from crew.task_registry import TaskRegistry
@@ -32,6 +32,17 @@ _NOTION_VERSION = "2022-06-28"
 _EMPLOYEE_UPDATABLE_FIELDS = {"model", "model_tier", "temperature", "max_tokens"}
 
 
+class FeishuBotContext:
+    """单个飞书 Bot 的运行时上下文."""
+
+    __slots__ = ("config", "token_mgr", "dedup")
+
+    def __init__(self, config: Any, token_mgr: Any, dedup: Any):
+        self.config = config  # FeishuBotConfig
+        self.token_mgr = token_mgr  # FeishuTokenManager
+        self.dedup = dedup  # EventDeduplicator
+
+
 class _AppContext:
     """应用上下文，共享于所有 handler."""
 
@@ -45,7 +56,10 @@ class _AppContext:
         self.config = config
         self.registry = registry
         self.scheduler = None  # CronScheduler, set by create_webhook_app
+        # 飞书 — primary bot（工具调用用这个，向后兼容）
         self.feishu_config = None  # FeishuConfig, set by create_webhook_app
         self.feishu_token_mgr = None  # FeishuTokenManager, set by create_webhook_app
         self.feishu_dedup = None  # EventDeduplicator, set by create_webhook_app
         self.feishu_chat_store = None  # FeishuChatStore, set by create_webhook_app
+        # 飞书 — 多 bot
+        self.feishu_bots: dict[str, FeishuBotContext] = {}  # bot_id -> context

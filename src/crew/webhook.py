@@ -132,6 +132,7 @@ def create_webhook_app(
     cron_config: CronConfig | None = None,
     cors_origins: list[str] | None = None,
     feishu_config: FeishuConfig | None = None,
+    feishu_bots: list | None = None,
 ) -> Starlette:
     """创建 webhook Starlette 应用."""
     if not HAS_STARLETTE:
@@ -153,22 +154,44 @@ def create_webhook_app(
         registry=registry,
     )
 
-    # 初始化飞书 Bot
-    if feishu_config and feishu_config.app_id and feishu_config.app_secret:
-        from crew.feishu import EventDeduplicator, FeishuTokenManager
+    # 初始化飞书 Bot（支持多 Bot）
+    from crew.feishu import EventDeduplicator, FeishuBotConfig, FeishuTokenManager
+    from crew.webhook_context import FeishuBotContext
 
-        ctx.feishu_config = feishu_config
-        ctx.feishu_token_mgr = FeishuTokenManager(
-            feishu_config.app_id,
-            feishu_config.app_secret,
+    _bot_configs: list[FeishuBotConfig] = list(feishu_bots or [])
+
+    # 兼容旧的单 feishu_config 参数
+    if not _bot_configs and feishu_config and feishu_config.app_id and feishu_config.app_secret:
+        _bot_configs = [
+            FeishuBotConfig(bot_id="default", primary=True, **feishu_config.model_dump())
+        ]
+
+    for bot_cfg in _bot_configs:
+        if not (bot_cfg.app_id and bot_cfg.app_secret):
+            continue
+        bot_ctx = FeishuBotContext(
+            config=bot_cfg,
+            token_mgr=FeishuTokenManager(bot_cfg.app_id, bot_cfg.app_secret),
+            dedup=EventDeduplicator(),
         )
-        ctx.feishu_dedup = EventDeduplicator()
+        ctx.feishu_bots[bot_cfg.bot_id] = bot_ctx
+        # primary bot 同步到旧字段（工具调用向后兼容）
+        if bot_cfg.primary:
+            ctx.feishu_config = bot_cfg
+            ctx.feishu_token_mgr = bot_ctx.token_mgr
+            ctx.feishu_dedup = bot_ctx.dedup
+        logger.info(
+            "飞书 Bot 已启用: bot_id=%s app_id=%s default=%s",
+            bot_cfg.bot_id,
+            bot_cfg.app_id,
+            bot_cfg.default_employee,
+        )
 
+    if ctx.feishu_bots:
         from crew.feishu_memory import FeishuChatStore
 
         chat_store_dir = (project_dir or Path(".")) / ".crew" / "feishu-chats"
         ctx.feishu_chat_store = FeishuChatStore(chat_store_dir)
-        logger.info("飞书 Bot 已启用 (app_id=%s)", feishu_config.app_id)
 
     # 初始化 cron 调度器
     scheduler = None
@@ -245,7 +268,16 @@ def create_webhook_app(
             methods=["POST"],
         ),
         Route("/cron/status", endpoint=_make_handler(ctx, _handle_cron_status), methods=["GET"]),
+        # 飞书: 每个 bot 独立端点 + 旧路由兼容
         Route("/feishu/event", endpoint=_make_handler(ctx, _handle_feishu_event), methods=["POST"]),
+        *[
+            Route(
+                f"/feishu/event/{bot_id}",
+                endpoint=_make_handler(ctx, _handle_feishu_event),
+                methods=["POST"],
+            )
+            for bot_id in ctx.feishu_bots
+        ],
         Route(
             "/api/employees",
             endpoint=_make_handler(ctx, _handle_employee_list),
@@ -308,7 +340,7 @@ def create_webhook_app(
                 "⚠ ANTHROPIC_API_KEY 未设置 — Agent 调用和定时任务将无法使用 Claude 模型"
             )
         if not _os.environ.get("FEISHU_CALENDAR_ID") and not (
-            feishu_config and feishu_config.calendar_id
+            ctx.feishu_config and ctx.feishu_config.calendar_id
         ):
             logger.info("FEISHU_CALENDAR_ID 未设置且 feishu.yaml 无 calendar_id — 日历功能将不可用")
 
@@ -329,7 +361,9 @@ def create_webhook_app(
     if token:
         from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
-        skip_paths = ["/health", "/webhook/github", "/feishu/event"]
+        skip_paths = ["/health", "/webhook/github", "/feishu/event"] + [
+            f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots
+        ]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
@@ -374,13 +408,11 @@ def serve_webhook(
 
         cron_config = load_cron_config(project_dir)
 
-    feishu_cfg = None
+    feishu_bots = None
     try:
-        from crew.feishu import load_feishu_config
+        from crew.feishu import load_feishu_configs
 
-        feishu_cfg = load_feishu_config(project_dir)
-        if not (feishu_cfg.app_id and feishu_cfg.app_secret):
-            feishu_cfg = None
+        feishu_bots = load_feishu_configs(project_dir) or None
     except Exception:
         pass
 
@@ -390,7 +422,7 @@ def serve_webhook(
         config=config,
         cron_config=cron_config,
         cors_origins=cors_origins,
-        feishu_config=feishu_cfg,
+        feishu_bots=feishu_bots,
     )
 
     logger.info("启动 Webhook 服务器: %s:%d", host, port)

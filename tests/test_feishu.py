@@ -11,9 +11,11 @@ import pytest
 
 from crew.feishu import (
     EventDeduplicator,
+    FeishuBotConfig,
     FeishuConfig,
     FeishuTokenManager,
     load_feishu_config,
+    load_feishu_configs,
     parse_message_event,
     resolve_employee_from_mention,
     send_feishu_card,
@@ -971,3 +973,174 @@ class TestGetUserName:
 
         mgr = MagicMock()
         assert _run(get_user_name(mgr, "")) == ""
+
+
+# ── 多 Bot 配置 ──
+
+
+class TestFeishuBotConfig:
+    """FeishuBotConfig — FeishuConfig 的子类."""
+
+    def test_inherits_feishu_config(self):
+        cfg = FeishuBotConfig(
+            bot_id="moyan",
+            app_id="cli_aaa",
+            app_secret="secret_aaa",
+            default_employee="ceo-assistant",
+            primary=True,
+        )
+        assert cfg.bot_id == "moyan"
+        assert cfg.app_id == "cli_aaa"
+        assert cfg.default_employee == "ceo-assistant"
+        assert cfg.primary is True
+        # 继承 FeishuConfig 的字段
+        assert cfg.calendar_id == ""
+        assert isinstance(cfg, FeishuConfig)
+
+    def test_defaults(self):
+        cfg = FeishuBotConfig()
+        assert cfg.bot_id == "default"
+        assert cfg.primary is False
+        assert cfg.app_id == ""
+
+
+class TestLoadFeishuConfigs:
+    """多 Bot 配置加载."""
+
+    def test_new_format_bots_list(self, tmp_path):
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        (crew_dir / "feishu.yaml").write_text(
+            "bots:\n"
+            "  - bot_id: moyan\n"
+            "    app_id: cli_aaa\n"
+            "    app_secret: secret_aaa\n"
+            "    verification_token: tok_aaa\n"
+            "    default_employee: ceo-assistant\n"
+            "    primary: true\n"
+            "  - bot_id: xinlei\n"
+            "    app_id: cli_bbb\n"
+            "    app_secret: secret_bbb\n"
+            "    verification_token: tok_bbb\n"
+            "    default_employee: hr-manager\n",
+            encoding="utf-8",
+        )
+        bots = load_feishu_configs(tmp_path)
+        assert len(bots) == 2
+        assert bots[0].bot_id == "moyan"
+        assert bots[0].primary is True
+        assert bots[0].default_employee == "ceo-assistant"
+        assert bots[1].bot_id == "xinlei"
+        assert bots[1].default_employee == "hr-manager"
+        assert bots[1].primary is False
+
+    def test_old_format_backward_compat(self, tmp_path):
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        (crew_dir / "feishu.yaml").write_text(
+            "app_id: cli_old\napp_secret: secret_old\ndefault_employee: ceo-assistant\n",
+            encoding="utf-8",
+        )
+        bots = load_feishu_configs(tmp_path)
+        assert len(bots) == 1
+        assert bots[0].bot_id == "default"
+        assert bots[0].primary is True
+        assert bots[0].app_id == "cli_old"
+        assert bots[0].default_employee == "ceo-assistant"
+
+    def test_no_config_returns_empty(self, tmp_path):
+        bots = load_feishu_configs(tmp_path)
+        assert bots == []
+
+    def test_auto_primary_first_bot(self, tmp_path):
+        """没有显式 primary 时，第一个 bot 自动成为 primary."""
+        crew_dir = tmp_path / ".crew"
+        crew_dir.mkdir()
+        (crew_dir / "feishu.yaml").write_text(
+            "bots:\n"
+            "  - bot_id: a\n"
+            "    app_id: id_a\n"
+            "    app_secret: s_a\n"
+            "  - bot_id: b\n"
+            "    app_id: id_b\n"
+            "    app_secret: s_b\n",
+            encoding="utf-8",
+        )
+        bots = load_feishu_configs(tmp_path)
+        assert bots[0].primary is True
+        assert bots[1].primary is False
+
+    def test_env_fallback(self, tmp_path):
+        """无 YAML 文件时从环境变量加载."""
+        with patch.dict(
+            os.environ,
+            {"FEISHU_APP_ID": "env_id", "FEISHU_APP_SECRET": "env_secret"},
+            clear=False,
+        ):
+            bots = load_feishu_configs(tmp_path)
+        assert len(bots) == 1
+        assert bots[0].bot_id == "default"
+        assert bots[0].app_id == "env_id"
+
+
+class TestResolveBotContext:
+    """从 URL 路径解析 bot context."""
+
+    def test_bot_id_from_path(self):
+        from crew.webhook_context import FeishuBotContext, _AppContext
+        from crew.webhook_feishu import _resolve_bot_context
+
+        ctx = MagicMock(spec=_AppContext)
+        bot_moyan = MagicMock(spec=FeishuBotContext)
+        bot_moyan.config = FeishuBotConfig(bot_id="moyan", primary=True)
+        bot_xinlei = MagicMock(spec=FeishuBotContext)
+        bot_xinlei.config = FeishuBotConfig(bot_id="xinlei")
+        ctx.feishu_bots = {"moyan": bot_moyan, "xinlei": bot_xinlei}
+
+        # /feishu/event/xinlei → xinlei bot
+        req = MagicMock()
+        req.url.path = "/feishu/event/xinlei"
+        assert _resolve_bot_context(req, ctx) is bot_xinlei
+
+        # /feishu/event/moyan → moyan bot
+        req.url.path = "/feishu/event/moyan"
+        assert _resolve_bot_context(req, ctx) is bot_moyan
+
+    def test_old_path_returns_primary(self):
+        from crew.webhook_context import FeishuBotContext, _AppContext
+        from crew.webhook_feishu import _resolve_bot_context
+
+        ctx = MagicMock(spec=_AppContext)
+        bot_moyan = MagicMock(spec=FeishuBotContext)
+        bot_moyan.config = FeishuBotConfig(bot_id="moyan", primary=True)
+        bot_xinlei = MagicMock(spec=FeishuBotContext)
+        bot_xinlei.config = FeishuBotConfig(bot_id="xinlei", primary=False)
+        ctx.feishu_bots = {"moyan": bot_moyan, "xinlei": bot_xinlei}
+
+        req = MagicMock()
+        req.url.path = "/feishu/event"
+        assert _resolve_bot_context(req, ctx) is bot_moyan
+
+    def test_unknown_bot_id_returns_primary(self):
+        from crew.webhook_context import FeishuBotContext, _AppContext
+        from crew.webhook_feishu import _resolve_bot_context
+
+        ctx = MagicMock(spec=_AppContext)
+        bot = MagicMock(spec=FeishuBotContext)
+        bot.config = FeishuBotConfig(bot_id="default", primary=True)
+        ctx.feishu_bots = {"default": bot}
+
+        req = MagicMock()
+        req.url.path = "/feishu/event/nonexistent"
+        assert _resolve_bot_context(req, ctx) is bot  # fallback to primary
+
+    def test_no_bots_returns_none(self):
+        from crew.webhook_context import _AppContext
+        from crew.webhook_feishu import _resolve_bot_context
+
+        ctx = MagicMock(spec=_AppContext)
+        ctx.feishu_bots = {}
+
+        req = MagicMock()
+        req.url.path = "/feishu/event"
+        assert _resolve_bot_context(req, ctx) is None

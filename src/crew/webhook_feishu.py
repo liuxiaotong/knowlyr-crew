@@ -8,7 +8,33 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from crew.webhook_context import _AppContext
+from crew.webhook_context import FeishuBotContext, _AppContext
+
+
+def _resolve_bot_context(request: Any, ctx: _AppContext) -> FeishuBotContext | None:
+    """从请求 URL 路径解析对应的 bot context.
+
+    /feishu/event/{bot_id} → ctx.feishu_bots[bot_id]
+    /feishu/event           → primary bot
+    """
+    path = request.url.path
+    bot_id: str | None = None
+    if path.startswith("/feishu/event/"):
+        bot_id = path.split("/feishu/event/", 1)[1].strip("/")
+
+    if bot_id and bot_id in ctx.feishu_bots:
+        return ctx.feishu_bots[bot_id]
+
+    # 旧路径或未指定 → 找 primary bot
+    for bc in ctx.feishu_bots.values():
+        if bc.config.primary:
+            return bc
+
+    # 兜底：只有一个 bot 时直接用
+    if len(ctx.feishu_bots) == 1:
+        return next(iter(ctx.feishu_bots.values()))
+
+    return None
 
 
 async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
@@ -27,21 +53,23 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
         challenge = payload.get("challenge", "")
         return JSONResponse({"challenge": challenge})
 
-    # 2. 检查飞书是否配置
-    if ctx.feishu_config is None or ctx.feishu_token_mgr is None:
+    # 2. 解析 bot context
+    bot_ctx = _resolve_bot_context(request, ctx)
+    if bot_ctx is None:
         return JSONResponse({"error": "飞书 Bot 未配置"}, status_code=501)
 
-    # 3. 验证 event token（未配置时跳过但记录警告）
+    # 3. 验证 event token（用这个 bot 自己的 verification_token）
     header = payload.get("header", {})
     event_token = header.get("token", payload.get("token", ""))
-    if ctx.feishu_config.verification_token:
+    if bot_ctx.config.verification_token:
         from crew.feishu import verify_feishu_event
 
-        if not verify_feishu_event(ctx.feishu_config.verification_token, event_token):
+        if not verify_feishu_event(bot_ctx.config.verification_token, event_token):
             return JSONResponse({"error": "invalid token"}, status_code=401)
     else:
         logger.warning(
-            "飞书 verification_token 未配置，跳过事件验证（建议设置 FEISHU_VERIFICATION_TOKEN）"
+            "飞书 verification_token 未配置 (bot=%s)，跳过事件验证",
+            bot_ctx.config.bot_id if hasattr(bot_ctx.config, "bot_id") else "?",
         )
 
     # 4. 只处理消息事件
@@ -60,7 +88,8 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"message": "unsupported message type"})
 
     logger.warning(
-        "飞书消息: type=%s chat=%s text=%s image_key=%s mentions=%d",
+        "飞书消息 [%s]: type=%s chat=%s text=%s image_key=%s mentions=%d",
+        getattr(bot_ctx.config, "bot_id", "?"),
         msg_event.msg_type,
         msg_event.chat_type,
         msg_event.text[:50] if msg_event.text else "(empty)",
@@ -68,8 +97,8 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
         len(msg_event.mentions),
     )
 
-    # 6. 去重
-    if ctx.feishu_dedup and ctx.feishu_dedup.is_duplicate(msg_event.message_id):
+    # 6. 去重（用这个 bot 自己的 dedup）
+    if bot_ctx.dedup.is_duplicate(msg_event.message_id):
         logger.warning("飞书消息去重: %s", msg_event.message_id)
         return JSONResponse({"message": "duplicate"})
 
@@ -77,7 +106,7 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
 
-    asyncio.create_task(_wh._feishu_dispatch(ctx, msg_event))
+    asyncio.create_task(_wh._feishu_dispatch(ctx, msg_event, bot_ctx=bot_ctx))
 
     return JSONResponse({"message": "ok"})
 
@@ -342,14 +371,16 @@ async def _feishu_approve_dispatch(
     *,
     send_feishu_text: Any,
     send_feishu_reply: Any,
+    token_mgr: Any = None,
 ) -> None:
     """飞书审批命令 — approve/reject 等待中的任务."""
+    _tmgr = token_mgr or ctx.feishu_token_mgr
 
     async def _reply_text(text: str) -> None:
         if msg_event.chat_type == "group":
-            await send_feishu_reply(ctx.feishu_token_mgr, msg_event.message_id, text)
+            await send_feishu_reply(_tmgr, msg_event.message_id, text)
         else:
-            await send_feishu_text(ctx.feishu_token_mgr, msg_event.chat_id, text)
+            await send_feishu_text(_tmgr, msg_event.chat_id, text)
 
     record = ctx.registry.get(task_id)
     if record is None:
@@ -379,21 +410,21 @@ async def _feishu_route_dispatch(
     *,
     send_feishu_text: Any,
     send_feishu_reply: Any,
+    token_mgr: Any = None,
 ) -> None:
     """飞书触发路由模板 — 展开为 chain 异步执行."""
     import json as _json
 
     from crew.organization import load_organization
 
-    _reply = send_feishu_reply if msg_event.chat_type == "group" else send_feishu_text
-
+    _tmgr = token_mgr or ctx.feishu_token_mgr
     org = load_organization(project_dir=ctx.project_dir)
 
     async def _reply_text(text: str) -> None:
         if msg_event.chat_type == "group":
-            await send_feishu_reply(ctx.feishu_token_mgr, msg_event.message_id, text)
+            await send_feishu_reply(_tmgr, msg_event.message_id, text)
         else:
-            await send_feishu_text(ctx.feishu_token_mgr, msg_event.chat_id, text)
+            await send_feishu_text(_tmgr, msg_event.chat_id, text)
 
     if not template_name:
         names = list(org.routing_templates.keys())
@@ -457,7 +488,12 @@ async def _feishu_route_dispatch(
     )
 
 
-async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
+async def _feishu_dispatch(
+    ctx: _AppContext,
+    msg_event: Any,
+    *,
+    bot_ctx: FeishuBotContext | None = None,
+) -> None:
     """后台处理飞书消息：路由到员工 → 执行 → 回复卡片."""
     from crew.discovery import discover_employees
     from crew.feishu import (
@@ -467,14 +503,22 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         send_feishu_text,
     )
 
-    assert ctx.feishu_config is not None
-    assert ctx.feishu_token_mgr is not None
+    # 确定使用哪个 bot 的 config / token_mgr
+    if bot_ctx is not None:
+        _config = bot_ctx.config
+        _token_mgr = bot_ctx.token_mgr
+    else:
+        # 兼容旧调用路径
+        assert ctx.feishu_config is not None
+        assert ctx.feishu_token_mgr is not None
+        _config = ctx.feishu_config
+        _token_mgr = ctx.feishu_token_mgr
 
     try:
         discovery = discover_employees(project_dir=ctx.project_dir)
 
         # 群聊只响应 @mention，私聊可用 default_employee
-        use_default = ctx.feishu_config.default_employee if msg_event.chat_type != "group" else ""
+        use_default = _config.default_employee if msg_event.chat_type != "group" else ""
         employee_name, task_text = resolve_employee_from_mention(
             msg_event.mentions,
             msg_event.text,
@@ -507,6 +551,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 _approve_action,
                 send_feishu_text=send_feishu_text,
                 send_feishu_reply=send_feishu_reply,
+                token_mgr=_token_mgr,
             )
             return
 
@@ -527,6 +572,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 _tmpl_task,
                 send_feishu_text=send_feishu_text,
                 send_feishu_reply=send_feishu_reply,
+                token_mgr=_token_mgr,
             )
             return
 
@@ -535,7 +581,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
                 # 群聊没 @人，静默忽略
                 return
             await send_feishu_text(
-                ctx.feishu_token_mgr,
+                _token_mgr,
                 msg_event.chat_id,
                 "未能识别目标员工，请 @员工名 + 任务描述。",
             )
@@ -549,7 +595,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             try:
                 from crew.feishu import get_user_name
 
-                sender_name = await get_user_name(ctx.feishu_token_mgr, msg_event.sender_id)
+                sender_name = await get_user_name(_token_mgr, msg_event.sender_id)
             except Exception:
                 pass
 
@@ -560,7 +606,7 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if not image_key and msg_event.chat_type == "group" and msg_event.msg_type == "text":
             try:
                 found = await _find_recent_image_in_chat(
-                    ctx.feishu_token_mgr,
+                    _token_mgr,
                     msg_event.chat_id,
                     msg_event.sender_id,
                 )
@@ -573,14 +619,14 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         if image_key:
             try:
                 image_data = await download_feishu_image(
-                    ctx.feishu_token_mgr,
+                    _token_mgr,
                     image_key,
                     message_id=image_message_id,
                 )
             except Exception as exc:
                 logger.warning("飞书图片下载失败: %s", exc)
                 await send_feishu_text(
-                    ctx.feishu_token_mgr,
+                    _token_mgr,
                     msg_event.chat_id,
                     "图片没下载下来，你描述一下？",
                 )
@@ -773,13 +819,13 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
         # 发送回复
         if msg_event.chat_type == "group":
             send_data = await send_feishu_reply(
-                ctx.feishu_token_mgr,
+                _token_mgr,
                 msg_event.message_id,
                 output_text,
             )
         else:
             send_data = await send_feishu_text(
-                ctx.feishu_token_mgr,
+                _token_mgr,
                 msg_event.chat_id,
                 output_text,
             )
@@ -825,13 +871,13 @@ async def _feishu_dispatch(ctx: _AppContext, msg_event: Any) -> None:
             error_text = "处理时出了点问题，请稍后再试。"
             if msg_event.chat_type == "group":
                 await send_feishu_reply(
-                    ctx.feishu_token_mgr,
+                    _token_mgr,
                     msg_event.message_id,
                     error_text,
                 )
             else:
                 await send_feishu_text(
-                    ctx.feishu_token_mgr,
+                    _token_mgr,
                     msg_event.chat_id,
                     error_text,
                 )

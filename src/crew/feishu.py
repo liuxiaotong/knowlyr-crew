@@ -39,6 +39,13 @@ class FeishuConfig(BaseModel):
     owner_open_id: str = Field(default="", description="日历所有者 open_id（创建日程后自动邀请）")
 
 
+class FeishuBotConfig(FeishuConfig):
+    """多 Bot 模式下的单个飞书 Bot 配置."""
+
+    bot_id: str = Field(default="default", description="Bot 短标识，用于 webhook URL 路由")
+    primary: bool = Field(default=False, description="是否为主 Bot（工具调用使用此 Bot 的 token）")
+
+
 def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
     """从 .crew/feishu.yaml 或环境变量加载配置.
 
@@ -66,6 +73,49 @@ def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
         data["calendar_id"] = os.environ.get("FEISHU_CALENDAR_ID", "")
 
     return FeishuConfig(**data)
+
+
+def load_feishu_configs(project_dir: Path | None = None) -> list[FeishuBotConfig]:
+    """从 .crew/feishu.yaml 加载飞书 Bot 配置列表.
+
+    支持两种格式:
+    1. 新格式: bots: [{bot_id: ..., app_id: ...}, ...]
+    2. 旧格式（flat）: 直接是单 bot 字段 → 转为 bot_id="default" 的单元素列表
+
+    Returns:
+        FeishuBotConfig 列表（空列表表示未配置）.
+    """
+    base = resolve_project_dir(project_dir)
+    config_path = base / ".crew" / "feishu.yaml"
+
+    if not config_path.exists():
+        # 环境变量兜底 → 单 bot
+        cfg = load_feishu_config(project_dir)
+        if cfg.app_id and cfg.app_secret:
+            return [FeishuBotConfig(bot_id="default", primary=True, **cfg.model_dump())]
+        return []
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return []
+
+    # 新格式: 有 "bots" key
+    if "bots" in raw and isinstance(raw["bots"], list):
+        bots: list[FeishuBotConfig] = []
+        for item in raw["bots"]:
+            if isinstance(item, dict):
+                bots.append(FeishuBotConfig(**item))
+        # 确保有且只有一个 primary
+        if bots and not any(b.primary for b in bots):
+            bots[0].primary = True
+        return bots
+
+    # 旧格式: flat → 单 bot
+    # 过滤掉 FeishuBotConfig 不认识的字段不会报错（pydantic 默认忽略 extra）
+    cfg = load_feishu_config(project_dir)
+    if cfg.app_id and cfg.app_secret:
+        return [FeishuBotConfig(bot_id="default", primary=True, **cfg.model_dump())]
+    return []
 
 
 # ── 事件验证 ──
