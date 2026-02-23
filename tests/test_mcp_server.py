@@ -326,11 +326,16 @@ class TestToolMetricsIntegration:
             )
         )
         data = json.loads(result.root.content[0].text)
-        assert "total_tool_calls" in data
-        assert "tools" in data
-        assert "uptime_seconds" in data
+        # 无 since 时返回 memory + persistent 两层
+        assert "memory" in data
+        assert "persistent" in data
+        memory = data["memory"]
+        assert "total_tool_calls" in memory
+        assert "tools" in memory
+        assert "uptime_seconds" in memory
+        assert memory["source"] == "memory"
         # list_employees 的调用应在其中（get_tool_metrics 自身也会被记录）
-        assert "list_employees" in data["tools"]
+        assert "list_employees" in memory["tools"]
 
     def test_get_tool_metrics_filter_by_name(self):
         """get_tool_metrics 支持 tool_name 过滤."""
@@ -368,8 +373,10 @@ class TestToolMetricsIntegration:
             )
         )
         data = json.loads(result.root.content[0].text)
-        assert "list_employees" in data["tools"]
-        assert "get_employee" not in data["tools"]
+        # 无 since 时返回 memory + persistent 两层
+        memory_tools = data["memory"]["tools"]
+        assert "list_employees" in memory_tools
+        assert "get_employee" not in memory_tools
 
     def test_metrics_endpoint_includes_tool_data(self):
         """MetricsCollector.snapshot() 应包含 tool_metrics."""

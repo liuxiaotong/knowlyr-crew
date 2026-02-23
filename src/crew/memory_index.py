@@ -90,24 +90,11 @@ class MemorySearchIndex:
     # ── PG 辅助 ──
 
     def _setup_tables_pg(self, conn) -> None:
-        """PG 模式下表由 init_db() 创建，此处仅确认表存在."""
-        cur = conn.cursor()
-        # entries 表已由 database.init_db() 创建
-        # 这里只做安全检查，不重复建表
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS entries (
-                id TEXT PRIMARY KEY,
-                employee TEXT,
-                kind TEXT,
-                source TEXT,
-                title TEXT,
-                content TEXT,
-                metadata TEXT,
-                created_at TEXT
-            )
-            """
-        )
+        """PG 模式下 entries 表由 database.init_db() 统一创建，此处为空操作.
+
+        DDL 定义集中在 database._PG_CREATE_ENTRIES，避免重复维护。
+        """
+        pass
 
     # ── rebuild ──
 
@@ -423,7 +410,7 @@ class MemorySearchIndex:
                 sql += " AND kind = %s"
                 params.append(kind)
 
-            sql += " LIMIT %s"
+            sql += " ORDER BY created_at DESC LIMIT %s"
             params.append(limit)
 
             cur.execute(sql, params)

@@ -86,7 +86,7 @@ class ToolMetricsCollector:
             stats["total_ms"] += duration_ms
             stats["last_called"] = now
 
-        # 异步写持久化（不阻塞主流程）
+        # 持久化双写（写入失败不影响主流程）
         try:
             from crew.event_collector import get_event_collector
 
@@ -1144,10 +1144,18 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     tool_name=tool_filter, since=since
                 )
             else:
-                # 无时间范围：内存热缓存 + 持久化补充
-                data = _tool_metrics.snapshot(tool_name=tool_filter)
-                persistent = _tool_metrics.snapshot_persistent(tool_name=tool_filter)
-                data["persistent"] = persistent
+                # 无时间范围：返回 memory + persistent 两层数据
+                memory_snap = _tool_metrics.snapshot(tool_name=tool_filter)
+                persistent_snap = _tool_metrics.snapshot_persistent(tool_name=tool_filter)
+                data = {
+                    "memory": {
+                        "source": "memory",
+                        "total_tool_calls": memory_snap["total_tool_calls"],
+                        "uptime_seconds": memory_snap["uptime_seconds"],
+                        "tools": memory_snap["tools"],
+                    },
+                    "persistent": persistent_snap,
+                }
             return [
                 TextContent(
                     type="text",
@@ -1166,12 +1174,13 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     since=arguments.get("since"),
                 )
             else:
+                limit = min(arguments.get("limit", 100), 1000)
                 data = ec.query(
                     event_type=arguments.get("event_type"),
                     event_name=arguments.get("event_name"),
                     since=arguments.get("since"),
                     until=arguments.get("until"),
-                    limit=arguments.get("limit", 100),
+                    limit=limit,
                 )
             return [
                 TextContent(

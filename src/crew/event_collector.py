@@ -58,15 +58,6 @@ def _ph(n: int = 1) -> str:
     return ", ".join([p] * n)
 
 
-def _row_to_dict(row, *, pg: bool) -> dict[str, Any]:
-    """将数据库行转为 dict."""
-    if pg:
-        # psycopg2 RealDictRow 或 tuple + description
-        return dict(row) if hasattr(row, "keys") else dict(row)
-    else:
-        return dict(row)
-
-
 class EventCollector:
     """事件收集器 — 线程安全，支持 PG / SQLite 双后端."""
 

@@ -228,19 +228,22 @@ def init_db() -> None:
 
         # entries (memory_index)
         cur.execute(_PG_CREATE_ENTRIES)
-        for sql in _PG_CREATE_ENTRIES_TRGM:
-            try:
-                cur.execute(sql)
-            except Exception as e:
-                # pg_trgm 扩展可能需要 superuser；索引创建失败不致命
-                logger.warning("pg_trgm 索引创建警告: %s", e)
-                conn.rollback()
-                conn.commit()
 
         # memory_vectors
         cur.execute(_PG_CREATE_MEMORY_VECTORS)
         for sql in _PG_CREATE_MEMORY_VECTORS_INDEXES:
             cur.execute(sql)
+
+    # pg_trgm 索引在独立事务中创建，失败不影响已建好的表
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        for sql in _PG_CREATE_ENTRIES_TRGM:
+            try:
+                cur.execute(sql)
+            except Exception as e:
+                logger.warning("pg_trgm 索引创建警告（非致命）: %s", e)
+                conn.rollback()
+                break
 
     logger.info("PG init_db() 完成")
 
