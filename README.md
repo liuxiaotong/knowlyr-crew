@@ -2,20 +2,20 @@
 
 <h1>knowlyr-crew</h1>
 
-<h3>Adversarial Multi-Agent Deliberation Engine<br/>with Persistent Memory Evolution</h3>
+<h3>Structured Dialectical Deliberation Engine for AI Workforces<br/>with Persistent Episodic Memory</h3>
 
-<p><strong>对抗式多智能体协商引擎 — 声明式定义 · MCP 协议原生 · 持续经验进化</strong><br/>
-<em>Declarative AI workforce engine — adversarial deliberation, protocol-native interoperability, evolving through experience</em></p>
+<p><strong>声明式 AI 员工引擎 — 结构化辩证协商 · MCP 协议原生 · 持续经验积累</strong><br/>
+<em>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</em></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1860+_passed-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1830_passed-brightgreen.svg)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
-[![Modes](https://img.shields.io/badge/Interaction_Modes-9-red.svg)](#adversarial-deliberation-protocol)
+[![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#structured-dialectical-deliberation)
 
 [Abstract](#abstract) · [Problem Statement](#problem-statement) · [Formal Framework](#formal-framework) · [Architecture](#architecture) · [Key Innovations](#key-innovations) · [Quick Start](#quick-start) · [Employee Specification](#employee-specification) · [Production Server](#production-server) · [CLI Reference](#cli-reference) · [Ecosystem](#ecosystem) · [References](#references)
 
@@ -25,25 +25,26 @@
 
 ## Abstract
 
-现有多智能体系统普遍受限于**共识偏差** (consensus bias)、**无状态推理** (stateless inference) 和**框架耦合** (framework coupling)。knowlyr-crew 提出一种声明式多智能体协商框架：通过**对抗性交互协议** (adversarial interaction protocols) 打破回声室效应，通过**指数衰减持久记忆** (exponentially-decayed persistent memory) 实现经验积累与自然遗忘，通过 **MCP 协议原生集成** (Model Context Protocol) 消除框架锁定。
+多智能体协作系统的主要失效模式有三：**群体偏见** (groupthink，Janis, 1972)、**共享信息偏差** (shared information bias，Stasser & Titus, 1985) 和**框架锁定** (framework lock-in)。knowlyr-crew 提出一种声明式多智能体协商框架：通过结构化辩证协议打破信息采样偏差，通过指数衰减持久记忆（受 Ebbinghaus 遗忘曲线启发）实现认知积累与自然淘汰，通过 MCP 协议原生集成消除工具链耦合。
 
-系统实现「**定义 → 协商 → 决策 → 评估 → 记忆更新**」的自校正闭环 (self-correcting loop)，将 RLHF (Reinforcement Learning from Human Feedback) 思想引入 Agent 运行时——人工评估结果直接反馈为 Agent 的持久化记忆，驱动认知持续进化。
+系统实现「**定义 → 协商 → 决策 → 评估 → 记忆更新**」的自校正闭环，将人类反馈直接反馈为 Agent 的持久化记忆——这与 RLHF 的核心机制（Christiano et al., 2017）在功能上同构：人工评估结果塑造后续推理行为。
 
-> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements adversarial multi-agent deliberation with 9 interaction modes and forced-disagreement mechanisms, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop inspired by RLHF.
+> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
 
 ---
 
 ## Problem Statement
 
-多智能体系统 (Multi-Agent Systems, MAS) 的研究表明，Agent 间的简单协作往往退化为**群体思维** (groupthink)——所有参与者迅速趋同于一个"看起来合理"的共识，有价值的异见被系统性压制 (Janis, 1972)。当前 AI Agent 框架在此基础上叠加了两个工程问题：
+多智能体协作的失效机制在认知心理学和组织决策研究中有扎实的实证基础：
 
-| 根本性问题 | 形式化定义 | 现有框架的局限 | Crew 的方法 |
+| 根本性问题 | 研究基础 | 现有框架的局限 | Crew 的方法 |
 |:---|:---|:---|:---|
-| **共识偏差**<br/>Consensus Bias | 多 Agent 协作中系统性趋同于多数意见，压制有价值的少数异见 | CrewAI / AutoGen 无强制分歧机制，Agent 间以"补充"代替"质疑" | 对抗性协商协议：9 种交互模式 + 分歧配额 $\rho_{max}$ + 张力种子注入 |
-| **推理无状态**<br/>Stateless Inference | 每次会话从零开始，同一认知错误反复出现 $\forall t: s_t \perp s_{t-1}$ | LangChain memory 是滑动窗口 buffer，非语义化持久存储 | 指数衰减持久记忆 + 评估闭环：决策→执行→复盘→纠正→进化 |
-| **框架耦合**<br/>Framework Lock-in | Agent 定义绑定特定 SDK/IDE，迁移成本 $\propto$ 定义复杂度 | 各框架自有格式互不兼容，换 IDE 即失效 | MCP 协议原生：声明式 YAML/Markdown，跨 IDE 零修改 |
+| **群体偏见**<br/>Groupthink | 群体在压力下趋向一致，压制异见（Janis, 1972）；即使错误的少数意见也能改善多数决策质量（Nemeth, 1994） | CrewAI / AutoGen 无强制分歧机制，Agent 间以"补充"代替"质疑" | 结构化辩证协商：9 种交互模式 + 分歧配额 $\rho_{max}$ + 张力种子注入 |
+| **共享信息偏差**<br/>Shared Information Bias | 群体讨论中优先交流成员共同知道的信息，忽视个体独有信息（Stasser & Titus, 1985）；专注于任务的认知冲突（cognitive conflict）提升决策质量（Amason, 1996） | 无结构的多 Agent 对话强化已知信息，个体专有视角被淹没 | 角色化参与者 + `focus` 约束 + `must_challenge` 强制跨视角交换 |
+| **推理无状态**<br/>Stateless Inference | 每次会话从零开始，同一认知错误反复出现 $\forall t: s_t \perp s_{t-1}$ | LangChain memory 是滑动窗口 buffer，非语义化持久存储 | 指数衰减持久记忆 + 评估闭环：决策 → 执行 → 复盘 → 纠正 → 进化 |
+| **框架锁定**<br/>Framework Lock-in | Agent 定义绑定特定 SDK/IDE，迁移成本 $\propto$ 定义复杂度 | 各框架自有格式互不兼容，换 IDE 即失效 | MCP 协议原生：声明式 YAML/Markdown，跨 IDE 零修改 |
 
-> Crew 不是又一个编排框架。它是 AI 数字员工的**能力定义层**和**经验进化层**——"谁做什么、怎么协商、学到了什么"，而将身份管理和运行时交互交给 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id)。
+> Crew 不是又一个编排框架。它是 AI 数字员工的**能力定义层**和**经验积累层**——"谁做什么、怎么协商、学到了什么"，而将身份管理和运行时交互交给 [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id)。
 
 ---
 
@@ -60,7 +61,7 @@ $$e = \langle \text{name}, \text{model}, \text{tools}, \text{prompt}, \text{args
 - $\text{tools} \subseteq \mathcal{T}$ — 可用工具集，受 `PermissionPolicy` 约束
 - $\text{prompt}: \Sigma^* \to \Sigma^*$ — Markdown 模板函数，支持变量替换与上下文注入
 
-### Adversarial Deliberation Protocol
+### Structured Dialectical Deliberation
 
 讨论过程形式化为四元组 $D = \langle P, R, \Phi, \Psi \rangle$：
 
@@ -71,11 +72,11 @@ $$e = \langle \text{name}, \text{model}, \text{tools}, \text{prompt}, \text{args
 | $\Phi$ | 分歧约束函数 | $\text{must\_challenge}(p_i) \subseteq P \setminus \{p_i\}$; $\text{max\_agree\_ratio}(p_i) \in [0, 1]$ |
 | $\Psi$ | 张力种子集 | 预设争议点注入，强制议题空间多样化 |
 
-**关键约束**：当 $\Phi$ 定义了 $\text{max\_agree\_ratio}(p_i) = \rho$，参与者 $p_i$ 在整个讨论中同意其他人观点的比例不得超过 $\rho$，系统强制产生有价值的分歧。
+**关键约束**：当 $\Phi$ 定义了 $\text{max\_agree\_ratio}(p_i) = \rho$，参与者 $p_i$ 在整个讨论中同意其他人观点的比例不得超过 $\rho$，强制产生认知冲突（cognitive conflict）而非群体偏见。这对应于组织决策研究中的 Devil's Advocacy 方法（Schwenk, 1990）。
 
 ### Memory Evolution Model
 
-每条记忆 $m$ 的有效置信度随时间衰减，遵循 Ebbinghaus 遗忘曲线启发的指数模型：
+每条记忆 $m$ 的有效置信度随时间衰减，遵循 Ebbinghaus 遗忘曲线的指数模型：
 
 $$C_{\text{eff}}(t) = C_0 \cdot \left(\frac{1}{2}\right)^{t / \tau}$$
 
@@ -85,11 +86,11 @@ $$C_{\text{eff}}(t) = C_0 \cdot \left(\frac{1}{2}\right)^{t / \tau}$$
 
 $$\text{score}(q, m) = \alpha \cdot \cos(\mathbf{v}_q, \mathbf{v}_m) + (1 - \alpha) \cdot \text{keyword}(q, m), \quad \alpha = 0.7$$
 
-**纠正链**实现认知自校正：$\text{correct}(m_{\text{old}}, m_{\text{new}})$ 将 $m_{\text{old}}$ 标记为 superseded ($C \leftarrow 0$)，创建 correction 类型新条目 ($C \leftarrow 1.0$)。
+**纠正链**实现认知自校正，对应记忆再巩固（reconsolidation）的计算模型：$\text{correct}(m_{\text{old}}, m_{\text{new}})$ 将 $m_{\text{old}}$ 标记为 superseded ($C \leftarrow 0$)，创建 correction 类型新条目 ($C \leftarrow 1.0$)。
 
-### Evaluation Feedback Loop (RLHF-Inspired)
+### Evaluation Feedback Loop
 
-借鉴 RLHF 的核心思想——人工反馈直接塑造 Agent 行为：
+借鉴 RLHF 的核心机制——人工反馈直接塑造 Agent 行为（Christiano et al., 2017）：
 
 ```
 track(employee, category, prediction) → Decision d
@@ -101,7 +102,7 @@ evaluate(d, outcome, evaluation) → MemoryEntry m_correction
 employee.next_inference(context ∪ {m_correction})
 ```
 
-三种决策类别：`estimate`（估算）/ `recommendation`（建议）/ `commitment`（承诺），评估结论自动作为 `correction` 写入持久记忆，形成**决策→执行→复盘→改进**的闭环。
+三种决策类别：`estimate`（估算）/ `recommendation`（建议）/ `commitment`（承诺）。评估结论自动作为 `correction` 写入持久记忆，形成**决策 → 执行 → 复盘 → 改进**的闭环。
 
 ---
 
@@ -131,12 +132,12 @@ graph LR
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | 声明式员工定义解析，YAML/Markdown 双格式，优先级发现 |
 | **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
-| **Deliberation** | Discussion Engine | 9 种对抗性交互模式，强制分歧，拓扑排序执行计划 |
+| **Deliberation** | Discussion Engine | 9 种结构化交互模式，认知冲突约束，拓扑排序执行计划 |
 | **Orchestration** | Pipeline · Route · Task Registry | 并行/串行/条件/循环编排，断点恢复，多模型路由 |
 | **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，重要性排序，访问追踪，跨员工 Pattern 共享，多后端 Embedding 降级 |
 | **Evaluation** | Evaluation Engine | 决策追踪，回溯评估，自动纠正记忆 |
 | **Execution** | Providers · Cost Tracker | 7 Provider 统一调用，重试/降级/逐任务成本计量 |
-| **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，6 项定时任务（巡检/复盘/KPI/知识周刊），触发型自动委派 |
+| **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，定时任务（巡检/复盘/KPI/知识周刊），触发型自动委派 |
 | **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限矩阵查询，工具调用审计日志，CI 部署后自动审计，审计失败飞书告警 |
 
 ### MCP Primitive Mapping
@@ -145,7 +146,7 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | 每位员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/日志/项目检测等 | 20 |
+| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/指标/项目检测等 | 20 |
 
 <details>
 <summary>20 个 MCP Tools 详情</summary>
@@ -167,11 +168,11 @@ graph LR
 | `evaluate_decision` | 评估决策并将经验写入员工记忆 |
 | `list_meeting_history` | 查看讨论会历史记录 |
 | `get_meeting_detail` | 获取讨论会完整记录 |
-| `crew_feedback` | 提交工作反馈到 knowlyr-id |
-| `crew_status` | 查询 Agent 状态 |
 | `list_tool_schemas` | 列出所有可用工具定义（按角色过滤） |
 | `get_permission_matrix` | 查看员工权限矩阵与策略 |
 | `get_audit_log` | 查询工具调用审计日志 |
+| `get_tool_metrics` | 查询工具调用统计指标 |
+| `query_events` | 查询系统事件流 |
 
 </details>
 
@@ -188,9 +189,11 @@ knowlyr-crew mcp -t sse --api-token SECRET      # 启用 Bearer 认证
 
 ## Key Innovations
 
-### 1. Adversarial Deliberation Protocol
+### 1. Structured Dialectical Deliberation
 
-多 Agent 协作的核心挑战在于**认识论多元性** (epistemic diversity) 的维护——如何确保讨论产出有价值的分歧，而非简单的附和。Crew 实现 9 种结构化交互模式，每种模式对参与者施加不同的论辩约束：
+多 Agent 协作的核心挑战在于**认识论多元性** (epistemic diversity) 的维护。Stasser & Titus (1985) 的实验表明，无结构群体讨论中，成员共知的信息被讨论的频率显著高于个体独有信息，导致最优决策被系统性忽略。Nemeth (1994) 则发现，即使是错误的少数意见，只要持续表达，也能改善多数群体的决策质量——因为它迫使多数派更仔细地审视自己的假设。
+
+Crew 实现 9 种结构化交互模式，每种模式对参与者施加不同的论辩约束：
 
 | Mode | 中文 | 机制描述 |
 |:---|:---|:---|
@@ -198,17 +201,17 @@ knowlyr-crew mcp -t sse --api-token SECRET      # 启用 Bearer 认证
 | `challenge` | 质疑挑战 | 每位参与者必须对至少一人的结论提出有据质疑 |
 | `response` | 回应辩护 | 结构化回应，禁止模糊回避，必须明确接受/部分接受/反驳 |
 | `cross-examine` | 交叉盘问 | 三维度深度盘问：事实挑战 / 逻辑推演 / 替代方案 |
-| `steelman-then-attack` | 先强化后攻击 | 先构建对方论点的最强形式，再攻击其残余弱点 |
+| `steelman-then-attack` | 先强化后攻击 | 先构建对方论点的最强形式（steel-manning），再攻击其残余弱点 |
 | `debate` | 结构化辩论 | 正反方对抗，要求引用具体事实和数据 |
 | `brainstorm` | 发散创意 | 暂停评判，最大化创意空间 |
 | `vote` | 投票决策 | 强制给出明确立场 + 简要理由 |
 | `free` | 自由讨论 | 无结构约束的开放式交流 |
 
-**对抗性约束** (Adversarial Constraints)：
+**辩证约束** (Dialectical Constraints)——对应 Schwenk (1990) Devil's Advocacy 方法论的计算实现：
 
 - **`stance`** — 预设立场，强制参与者从特定视角论辩
-- **`must_challenge`** — 必须质疑指定参与者，禁止"我同意"式回避
-- **`max_agree_ratio`** — 分歧配额 $\rho_{max} \in [0, 1]$，量化控制同意比例
+- **`must_challenge`** — 必须质疑指定参与者，对抗共享信息偏差
+- **`max_agree_ratio`** — 分歧配额 $\rho_{max} \in [0, 1]$，量化控制认知冲突密度
 - **`tension_seeds`** — 争议种子注入，确保议题空间覆盖关键张力维度
 - **`min_disagreements`** — 每轮最少分歧数，量化辩论产出
 
@@ -261,7 +264,7 @@ knowlyr-crew discuss run architecture-review --orchestrated
 
 ### 2. Persistent Memory with Exponential Decay
 
-人类记忆遵循 Ebbinghaus 遗忘曲线——新鲜的经验权重高，陈旧的记忆逐渐淡化。Crew 将这一认知科学原理引入 Agent 系统：
+Ebbinghaus (1885) 的遗忘曲线表明，记忆强度随时间呈指数下降，间隔重复（spaced repetition）可有效对抗遗忘。Crew 将这一认知科学原理引入 Agent 系统的知识持久化机制中：
 
 **五种记忆类别**：
 
@@ -285,11 +288,11 @@ OpenAI text-embedding-3-small → Gemini text-embedding-004 → TF-IDF (zero-dep
 
 **跨员工工作模式** (`pattern`)：从个体经验中提炼的可复用工作模式，自动标记为共享（`shared: true`），可设置触发条件 (`trigger_condition`) 和适用范围 (`applicability`)，其他员工在匹配场景下自动获取。
 
-**跨员工共享**：通过 `visibility: open` 标记的记忆自动进入共享记忆池，其他员工可检索。
+**纠正链**对应记忆科学中的 reconsolidation 机制：$\text{correct}(m_{\text{old}}, m_{\text{new}})$ 不是删除旧记忆，而是将其置信度归零并创建有溯源链接的新条目，保留认知演化轨迹。
 
-**自动记忆** (`auto_memory: true`)：员工执行任务后自动保存摘要到持久记忆（`category=finding`），无需手动调用。全部 33 名员工已启用。
+**自检学习闭环**：通过 `_templates/selfcheck.md` 共享模板，员工每次任务结束时自动输出自检清单。系统从输出中提取自检结果，写入 `correction` 记忆，下次执行时自动注入——形成 **执行 → 自检 → 记忆 → 改进** 的持续学习闭环。
 
-**自检学习闭环**：通过 `_templates/selfcheck.md` 共享模板，所有员工每次任务结束时自动输出自检清单。系统从输出中提取自检结果（通过/待改进），写入 `correction` 记忆。下次执行同一员工时，"上次教训"自动注入 prompt——形成 **执行 → 自检 → 记忆 → 改进** 的持续学习闭环。
+**自动记忆** (`auto_memory: true`)：员工执行任务后自动保存摘要到持久记忆（`category=finding`），无需手动调用。
 
 ```bash
 knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
@@ -301,7 +304,7 @@ knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天
 
 ### 3. Evaluation Feedback Loop
 
-追踪决策质量，回溯评估后自动将经验教训写入员工记忆——形成 RLHF 启发的自校正闭环：
+追踪决策质量，回溯评估后自动将经验教训写入员工记忆——与 RLHF（Christiano et al., 2017）的核心机制在功能上同构：人工偏好反馈直接影响后续模型行为，此处为人工评估结果直接影响后续推理上下文：
 
 ```mermaid
 graph LR
@@ -317,7 +320,7 @@ graph LR
     style M fill:#2da44e,color:#fff,stroke:#2da44e
 ```
 
-三种决策类别：`estimate`（估算）/ `recommendation`（建议）/ `commitment`（承诺）。评估结论自动作为 `correction` 写入该员工持久记忆，后续推理时自动注入——Agent 从自身错误中学习。
+三种决策类别：`estimate`（估算）/ `recommendation`（建议）/ `commitment`（承诺）。评估结论自动作为 `correction` 写入该员工持久记忆，后续推理时自动注入——Agent 从自身决策误差中更新认知。
 
 ```bash
 # 记录决策
@@ -330,7 +333,7 @@ knowlyr-crew eval run <id> "实际花了 5 天" \
 
 ### 4. Declarative Employee Specification
 
-类比 **Infrastructure as Code** (Terraform 定义基础设施 / Kubernetes 定义服务)，Crew 用声明式规范定义 AI 员工——配置与提示词分离，版本可追踪，IDE 无关：
+类比 **Infrastructure as Code** (Morris, 2016)——Terraform 用声明式 HCL 定义基础设施，Kubernetes 用 YAML 定义服务期望状态，Crew 用声明式规范定义 AI 员工的能力边界——配置与提示词分离，版本可追踪，IDE 无关：
 
 **目录格式（推荐）**：
 
@@ -396,7 +399,6 @@ output:
 | `refactor-guide` | `refactor` | 代码结构分析、重构建议 |
 | `doc-writer` | `doc` | 文档生成（README / API / CHANGELOG） |
 | `pr-creator` | `pr` | 分析变更、创建 Pull Request |
-| `employee-generator` | `scaffold` | 将需求转化为 employee 定义草稿 |
 
 </details>
 
@@ -495,7 +497,7 @@ routing_templates:
 | **三级权限** | A（自主执行）/ B（需确认）/ C（看场景），委派名单自动标注 |
 | **自动降级** | 连续 3 次任务失败 → 权限从 A/B 降至 C，持久化到 JSON |
 | **路由模板** | `route` 工具按模板展开为 `delegate_chain`，支持多流程行、CI 步骤标注、人类判断节点、仓库绑定 |
-| **KPI 度量** | 每位员工声明 3 条 KPI 指标，周报 cron 自动评估并生成 A/B/C/D 评级 |
+| **KPI 度量** | 每位员工声明 KPI 指标，周报 cron 自动评估并生成 A/B/C/D 评级 |
 | **手动恢复** | API 一键恢复被降级的权限 |
 
 ### 7. Cost-Aware Orchestration
@@ -541,7 +543,7 @@ knowlyr-crew list
 # 2. 运行代码审查（自动检测项目类型）
 knowlyr-crew run review main --smart-context
 
-# 3. 发起多员工对抗性讨论
+# 3. 发起多员工结构化讨论
 knowlyr-crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块安全性"
 
 # 4. 追踪决策并评估
@@ -596,14 +598,14 @@ AI 员工可以**并行委派**多位同事执行任务，或**组织多人会�
 | `query_data` | 细粒度业务数据查询 |
 | `find_free_time` | 飞书忙闲查询，多人共同空闲 |
 
-**主动巡检 & 自驱运营**：通过 `.crew/cron.yaml` 配置 6 项定时任务：
+**主动巡检 & 自驱运营**：通过 `.crew/cron.yaml` 配置定时任务：
 
 | 调度 | 说明 |
 |:---|:---|
 | 每天 9:00 | 晨间巡检——业务数据、待办、日程、系统状态 → 飞书简报 |
 | 每天 23:00 | AI 日记——基于当日工作和记忆写个人日记 |
 | 每周四 16:00 | 团队知识周刊——跨团队工作产出 + 共性问题 + 最佳实践 → 飞书文档 |
-| 每周五 17:00 | KPI 周报——33 名员工逐一评级 + 异常自动委派（D 级 → HR 跟进，连续待改进 → 团队关注） |
+| 每周五 17:00 | KPI 周报——员工逐一评级 + 异常自动委派（D 级 → HR 跟进，连续待改进 → 团队关注） |
 | 每周五 18:00 | 周复盘——本周亮点、问题、下周建议 |
 
 ---
@@ -879,7 +881,7 @@ graph LR
 | Audit | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | Identity | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
 | Accounting | **knowlyr-ledger** | 统一账本 · 复式记账 · 行锁安全 · 幂等交易 | [GitHub](https://github.com/liuxiaotong/knowlyr-ledger) |
-| Deliberation | **Crew** | 对抗式多智能体协商 · 持久记忆进化 · MCP 原生 | You are here |
+| Deliberation | **Crew** | 结构化辩证协商 · 持久记忆积累 · MCP 原生 | You are here |
 | Agent Training | **knowlyr-gym** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
 ---
@@ -890,7 +892,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-pytest -v    # 1860+ test cases
+uv run --extra dev --extra mcp pytest tests/ -q    # 1830 test cases
 ```
 
 ---
@@ -900,6 +902,10 @@ pytest -v    # 1860+ test cases
 - **Model Context Protocol (MCP)** — Anthropic, 2024. Agent 工具交互的开放标准协议
 - **Multi-Agent Systems** — Wooldridge, M., 2009. *An Introduction to MultiAgent Systems*. Wiley
 - **Groupthink** — Janis, I.L., 1972. *Victims of Groupthink*. Houghton Mifflin
+- **Shared Information Bias** — Stasser, G. & Titus, W., 1985. *Pooling of Unshared Information in Group Decision Making.* JPSP, 48(6)
+- **Minority Influence** — Nemeth, C.J., 1994. *The Value of Minority Dissent.* In S. Moscovici et al. (Eds.), *Minority Influence*. Nelson-Hall
+- **Devil's Advocacy** — Schwenk, C.R., 1990. *Effects of devil's advocacy and dialectical inquiry on decision making.* Organizational Behavior and Human Decision Processes, 47(1)
+- **Cognitive Conflict** — Amason, A.C., 1996. *Distinguishing the Effects of Functional and Dysfunctional Conflict.* Academy of Management Journal, 39(1)
 - **RLHF** — Christiano, P. et al., 2017. *Deep RL from Human Preferences.* [arXiv:1706.03741](https://arxiv.org/abs/1706.03741)
 - **Ebbinghaus Forgetting Curve** — Ebbinghaus, H., 1885. *Über das Gedächtnis* — 记忆衰减模型的启发来源
 - **Infrastructure as Code** — Morris, K., 2016. *Infrastructure as Code*. O'Reilly — 声明式规范的范式来源
@@ -914,5 +920,5 @@ pytest -v    # 1860+ test cases
 ---
 
 <div align="center">
-<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — adversarial multi-agent deliberation engine</sub>
+<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — structured dialectical deliberation engine for AI workforces</sub>
 </div>
