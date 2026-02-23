@@ -2,7 +2,9 @@
 
 import json
 import logging
+import threading
 import time as _time
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,148 @@ from crew.pipeline import (
     load_pipeline,
     validate_pipeline,
 )
+
+
+class ToolMetricsCollector:
+    """Tool 调用使用率埋点收集器 — 线程安全.
+
+    内存热缓存 + EventCollector 持久化双写。
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._start_time = _time.monotonic()
+        self._total_calls = 0
+        # per-tool stats: {tool_name: {calls, success, failed, total_ms, last_called, errors: {type: count}}}
+        self._by_tool: dict[str, dict] = {}
+
+    def record(
+        self,
+        *,
+        tool_name: str,
+        duration_ms: float,
+        success: bool,
+        error_type: str = "",
+    ) -> None:
+        """记录一次 Tool 调用（内存 + 持久化双写）."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._total_calls += 1
+            if tool_name not in self._by_tool:
+                self._by_tool[tool_name] = {
+                    "calls": 0,
+                    "success": 0,
+                    "failed": 0,
+                    "total_ms": 0.0,
+                    "last_called": "",
+                    "errors": {},
+                }
+            stats = self._by_tool[tool_name]
+            stats["calls"] += 1
+            if success:
+                stats["success"] += 1
+            else:
+                stats["failed"] += 1
+                if error_type:
+                    stats["errors"][error_type] = stats["errors"].get(error_type, 0) + 1
+            stats["total_ms"] += duration_ms
+            stats["last_called"] = now
+
+        # 异步写持久化（不阻塞主流程）
+        try:
+            from crew.event_collector import get_event_collector
+
+            ec = get_event_collector()
+            ec.record(
+                event_type="tool_call",
+                event_name=tool_name,
+                duration_ms=duration_ms,
+                success=success,
+                error_type=error_type,
+                source="mcp",
+            )
+        except Exception:
+            pass  # 持久化失败不影响主流程
+
+    def snapshot(self, tool_name: str | None = None) -> dict:
+        """返回 Tool 使用率快照（内存热缓存）.
+
+        Args:
+            tool_name: 可选，过滤单个 Tool
+        """
+        with self._lock:
+            result: dict = {
+                "uptime_seconds": round(_time.monotonic() - self._start_time),
+                "total_tool_calls": self._total_calls,
+                "tools": {},
+            }
+            items = self._by_tool.items()
+            if tool_name:
+                items = [(k, v) for k, v in items if k == tool_name]
+            for name, stats in items:
+                avg_ms = round(stats["total_ms"] / stats["calls"], 1) if stats["calls"] else 0
+                result["tools"][name] = {
+                    "calls": stats["calls"],
+                    "success": stats["success"],
+                    "failed": stats["failed"],
+                    "avg_duration_ms": avg_ms,
+                    "last_called": stats["last_called"],
+                    "errors": dict(stats["errors"]),
+                }
+            return result
+
+    def snapshot_persistent(
+        self,
+        tool_name: str | None = None,
+        since: str | None = None,
+    ) -> dict:
+        """从 events 表读取持久化统计.
+
+        Args:
+            tool_name: 可选，过滤单个 Tool
+            since: 可选，ISO 8601 时间戳，只统计此时间之后的事件
+        """
+        try:
+            from crew.event_collector import get_event_collector
+
+            ec = get_event_collector()
+            agg = ec.aggregate(event_type="tool_call", since=since)
+            tools: dict = {}
+            total = 0
+            for row in agg:
+                if tool_name and row["event_name"] != tool_name:
+                    continue
+                total += row["count"]
+                tools[row["event_name"]] = {
+                    "calls": row["count"],
+                    "success": row["success_count"],
+                    "failed": row["fail_count"],
+                    "avg_duration_ms": row["avg_duration_ms"],
+                    "last_called": row["last_seen"],
+                }
+            return {
+                "source": "persistent",
+                "total_tool_calls": total,
+                "tools": tools,
+            }
+        except Exception:
+            return {"source": "persistent", "total_tool_calls": 0, "tools": {}, "error": "unavailable"}
+
+    def reset(self) -> None:
+        """重置内存统计."""
+        with self._lock:
+            self._start_time = _time.monotonic()
+            self._total_calls = 0
+            self._by_tool.clear()
+
+
+# 全局 Tool 指标收集器单例
+_tool_metrics = ToolMetricsCollector()
+
+
+def get_tool_metrics_collector() -> ToolMetricsCollector:
+    """获取全局 Tool 指标收集器."""
+    return _tool_metrics
 
 
 def _get_version() -> str:
@@ -462,19 +606,88 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     },
                 },
             ),
+            Tool(
+                name="get_tool_metrics",
+                description="查询 MCP Tool 使用率统计 — 调用次数、成功/失败、平均耗时等（支持持久化历史数据）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {
+                            "type": "string",
+                            "description": "按工具名过滤（可选，不传则返回所有工具的统计）",
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "ISO 8601 时间戳，只统计此时间之后的事件（可选，不传则统计全部历史）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="query_events",
+                description="查询统一埋点事件 — 支持按 event_type / event_name / 时间范围过滤",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "event_type": {
+                            "type": "string",
+                            "description": "事件类型过滤（tool_call / employee_run / pipeline_run / discussion_run 等）",
+                        },
+                        "event_name": {
+                            "type": "string",
+                            "description": "事件名称过滤（如工具名、员工名等）",
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "起始时间 ISO 8601（可选）",
+                        },
+                        "until": {
+                            "type": "string",
+                            "description": "截止时间 ISO 8601（可选）",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "最大返回条数（默认 100）",
+                            "default": 100,
+                        },
+                        "aggregate": {
+                            "type": "boolean",
+                            "description": "是否返回聚合统计而非原始事件（默认 false）",
+                            "default": False,
+                        },
+                    },
+                },
+            ),
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         """调用工具."""
         logger.info("tool_call: %s", name)
+        t0 = _time.monotonic()
+        success = True
+        error_type = ""
         try:
-            return await _handle_tool(name, arguments)
+            result = await _handle_tool(name, arguments)
+            return result
         except (KeyboardInterrupt, SystemExit):
             raise
-        except Exception:
+        except Exception as exc:
+            success = False
+            error_type = type(exc).__name__
             logger.exception("tool_call_error: %s", name)
             return [TextContent(type="text", text=f"内部错误: {name}")]
+        finally:
+            try:
+                duration_ms = (_time.monotonic() - t0) * 1000
+                _tool_metrics.record(
+                    tool_name=name,
+                    duration_ms=duration_ms,
+                    success=success,
+                    error_type=error_type,
+                )
+            except Exception:
+                pass  # 埋点不能影响主流程
 
     async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "list_employees":
@@ -919,6 +1132,51 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 TextContent(
                     type="text",
                     text=json.dumps(records, ensure_ascii=False, indent=2),
+                )
+            ]
+
+        elif name == "get_tool_metrics":
+            tool_filter = arguments.get("tool_name")
+            since = arguments.get("since")
+            if since:
+                # 有时间范围：从持久化读取
+                data = _tool_metrics.snapshot_persistent(
+                    tool_name=tool_filter, since=since
+                )
+            else:
+                # 无时间范围：内存热缓存 + 持久化补充
+                data = _tool_metrics.snapshot(tool_name=tool_filter)
+                persistent = _tool_metrics.snapshot_persistent(tool_name=tool_filter)
+                data["persistent"] = persistent
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(data, ensure_ascii=False, indent=2),
+                )
+            ]
+
+        elif name == "query_events":
+            from crew.event_collector import get_event_collector
+
+            ec = get_event_collector()
+            is_aggregate = arguments.get("aggregate", False)
+            if is_aggregate:
+                data = ec.aggregate(
+                    event_type=arguments.get("event_type"),
+                    since=arguments.get("since"),
+                )
+            else:
+                data = ec.query(
+                    event_type=arguments.get("event_type"),
+                    event_name=arguments.get("event_name"),
+                    since=arguments.get("since"),
+                    until=arguments.get("until"),
+                    limit=arguments.get("limit", 100),
+                )
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(data, ensure_ascii=False, indent=2),
                 )
             ]
 

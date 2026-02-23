@@ -97,7 +97,7 @@ class MetricsCollector:
     def snapshot(self) -> dict:
         """返回当前指标快照."""
         with self._lock:
-            return {
+            data = {
                 "uptime_seconds": round(time.monotonic() - self._start_time),
                 "calls": {
                     "total": self._total_calls,
@@ -116,6 +116,23 @@ class MetricsCollector:
                     for p, samples in self._latency_by_provider.items()
                 },
             }
+        # 追加 MCP Tool 使用率数据（在锁外获取，避免死锁）
+        try:
+            from crew.mcp_server import get_tool_metrics_collector
+
+            data["tool_metrics"] = get_tool_metrics_collector().snapshot()
+        except Exception:
+            pass  # MCP 未安装或未初始化时跳过
+
+        # 追加 events 表聚合数据
+        try:
+            from crew.event_collector import get_event_collector
+
+            ec = get_event_collector()
+            data["events_summary"] = ec.aggregate()
+        except Exception:
+            pass  # EventCollector 未初始化时跳过
+        return data
 
     def reset(self) -> None:
         """重置所有指标."""

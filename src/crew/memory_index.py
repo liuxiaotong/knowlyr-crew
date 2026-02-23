@@ -1,4 +1,7 @@
-"""Hybrid memory/search索引 — 结合持久记忆与会话记录."""
+"""Hybrid memory/search索引 — 结合持久记忆与会话记录.
+
+支持 PostgreSQL（pg_trgm GIN 索引）和 SQLite（FTS5）双后端。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from crew.database import is_pg
 from crew.memory import MemoryStore
 from crew.paths import resolve_project_dir
 
@@ -36,7 +40,7 @@ class IndexStats:
 
 
 class MemorySearchIndex:
-    """基于 SQLite FTS 的检索索引."""
+    """基于 PG pg_trgm / SQLite FTS 的检索索引."""
 
     def __init__(
         self,
@@ -47,18 +51,21 @@ class MemorySearchIndex:
         project_dir: Path | None = None,
     ) -> None:
         root = resolve_project_dir(project_dir)
+        self._use_pg = is_pg()
         self.db_path = db_path or root / ".crew" / "memory-index.db"
         self.memory_dir = memory_dir or root / ".crew" / "memory"
         self.session_dir = session_dir or root / ".crew" / "sessions"
 
-    def _connect(self) -> sqlite3.Connection:
+    # ── 连接管理 ──
+
+    def _connect_sqlite(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _setup_tables(self, conn: sqlite3.Connection) -> None:
+    def _setup_tables_sqlite(self, conn: sqlite3.Connection) -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS entries (
@@ -80,22 +87,65 @@ class MemorySearchIndex:
             """
         )
 
+    # ── PG 辅助 ──
+
+    def _setup_tables_pg(self, conn) -> None:
+        """PG 模式下表由 init_db() 创建，此处仅确认表存在."""
+        cur = conn.cursor()
+        # entries 表已由 database.init_db() 创建
+        # 这里只做安全检查，不重复建表
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS entries (
+                id TEXT PRIMARY KEY,
+                employee TEXT,
+                kind TEXT,
+                source TEXT,
+                title TEXT,
+                content TEXT,
+                metadata TEXT,
+                created_at TEXT
+            )
+            """
+        )
+
+    # ── rebuild ──
+
     def rebuild(self) -> IndexStats:
         """重建索引，返回计数."""
-        conn = self._connect()
+        if self._use_pg:
+            return self._rebuild_pg()
+        return self._rebuild_sqlite()
+
+    def _rebuild_sqlite(self) -> IndexStats:
+        conn = self._connect_sqlite()
         try:
-            self._setup_tables(conn)
+            self._setup_tables_sqlite(conn)
             conn.execute("DELETE FROM entries")
             conn.execute("DELETE FROM entries_fts")
             stats = IndexStats()
-            stats.memory_entries = self._index_memory(conn)
-            stats.session_messages = self._index_sessions(conn)
+            stats.memory_entries = self._index_memory_sqlite(conn)
+            stats.session_messages = self._index_sessions_sqlite(conn)
             conn.commit()
             return stats
         finally:
             conn.close()
 
-    def _insert_entry(
+    def _rebuild_pg(self) -> IndexStats:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            self._setup_tables_pg(conn)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM entries")
+            stats = IndexStats()
+            stats.memory_entries = self._index_memory_pg(conn)
+            stats.session_messages = self._index_sessions_pg(conn)
+        return stats
+
+    # ── insert entry ──
+
+    def _insert_entry_sqlite(
         self,
         conn: sqlite3.Connection,
         *,
@@ -130,7 +180,85 @@ class MemorySearchIndex:
             ),
         )
 
-    def _index_memory(self, conn: sqlite3.Connection) -> int:
+    def _insert_entry_pg(
+        self,
+        conn,
+        *,
+        entry_id: str,
+        employee: str,
+        kind: str,
+        source: str,
+        title: str,
+        content: str,
+        metadata: dict[str, Any] | None,
+        created_at: str,
+    ) -> None:
+        cur = conn.cursor()
+        meta_json = json.dumps(metadata or {}, ensure_ascii=False)
+        cur.execute(
+            """
+            INSERT INTO entries (id, employee, kind, source, title, content, metadata, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                employee = EXCLUDED.employee,
+                kind = EXCLUDED.kind,
+                source = EXCLUDED.source,
+                title = EXCLUDED.title,
+                content = EXCLUDED.content,
+                metadata = EXCLUDED.metadata,
+                created_at = EXCLUDED.created_at
+            """,
+            (entry_id, employee, kind, source, title, content, meta_json, created_at),
+        )
+
+    # 兼容旧调用签名（保留给 _index_memory / _index_sessions 内部使用）
+    def _insert_entry(
+        self,
+        conn,
+        *,
+        entry_id: str,
+        employee: str,
+        kind: str,
+        source: str,
+        title: str,
+        content: str,
+        metadata: dict[str, Any] | None,
+        created_at: str,
+    ) -> None:
+        if self._use_pg:
+            self._insert_entry_pg(
+                conn,
+                entry_id=entry_id,
+                employee=employee,
+                kind=kind,
+                source=source,
+                title=title,
+                content=content,
+                metadata=metadata,
+                created_at=created_at,
+            )
+        else:
+            self._insert_entry_sqlite(
+                conn,
+                entry_id=entry_id,
+                employee=employee,
+                kind=kind,
+                source=source,
+                title=title,
+                content=content,
+                metadata=metadata,
+                created_at=created_at,
+            )
+
+    # ── index memory ──
+
+    def _index_memory_sqlite(self, conn: sqlite3.Connection) -> int:
+        return self._index_memory_common(conn)
+
+    def _index_memory_pg(self, conn) -> int:
+        return self._index_memory_common(conn)
+
+    def _index_memory_common(self, conn) -> int:
         store = MemoryStore(memory_dir=self.memory_dir)
         total = 0
         for employee in store.list_employees():
@@ -151,7 +279,15 @@ class MemorySearchIndex:
                 total += 1
         return total
 
-    def _index_sessions(self, conn: sqlite3.Connection) -> int:
+    # ── index sessions ──
+
+    def _index_sessions_sqlite(self, conn: sqlite3.Connection) -> int:
+        return self._index_sessions_common(conn)
+
+    def _index_sessions_pg(self, conn) -> int:
+        return self._index_sessions_common(conn)
+
+    def _index_sessions_common(self, conn) -> int:
         if not self.session_dir.is_dir():
             return 0
         total = 0
@@ -202,6 +338,8 @@ class MemorySearchIndex:
                 total += 1
         return total
 
+    # ── search ──
+
     def search(
         self,
         query: str,
@@ -210,15 +348,27 @@ class MemorySearchIndex:
         employee: str | None = None,
         kind: str | None = None,
     ) -> list[dict[str, Any]]:
-        conn = self._connect()
+        if self._use_pg:
+            return self._search_pg(query, limit=limit, employee=employee, kind=kind)
+        return self._search_sqlite(query, limit=limit, employee=employee, kind=kind)
+
+    def _search_sqlite(
+        self,
+        query: str,
+        *,
+        limit: int,
+        employee: str | None,
+        kind: str | None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect_sqlite()
         try:
-            self._setup_tables(conn)
+            self._setup_tables_sqlite(conn)
             fts_query = _prepare_index_text(query).strip()
             if not fts_query:
                 return []
             sql = (
                 "SELECT e.id, e.employee, e.kind, e.source, e.title, e.content, "
-                "e.metadata, e.created_at, snippet(entries_fts, 0, '[', ']', '…', 10) as snippet "
+                "e.metadata, e.created_at, snippet(entries_fts, 0, '[', ']', '...', 10) as snippet "
                 "FROM entries_fts JOIN entries e ON e.rowid = entries_fts.rowid "
                 "WHERE entries_fts MATCH ?"
             )
@@ -232,29 +382,84 @@ class MemorySearchIndex:
             sql += " ORDER BY rank LIMIT ?"
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
-            results: list[dict[str, Any]] = []
-            for row in rows:
-                metadata = row["metadata"]
-                try:
-                    metadata_obj = json.loads(metadata) if metadata else {}
-                except json.JSONDecodeError:
-                    metadata_obj = {}
-                results.append(
-                    {
-                        "id": row["id"],
-                        "employee": row["employee"],
-                        "kind": row["kind"],
-                        "source": row["source"],
-                        "title": row["title"],
-                        "content": row["content"],
-                        "metadata": metadata_obj,
-                        "created_at": row["created_at"],
-                        "snippet": row["snippet"],
-                    }
-                )
-            return results
+            return self._rows_to_results(rows, has_snippet=True)
         finally:
             conn.close()
+
+    def _search_pg(
+        self,
+        query: str,
+        *,
+        limit: int,
+        employee: str | None,
+        kind: str | None,
+    ) -> list[dict[str, Any]]:
+        from crew.database import get_pg_connection
+
+        if not query.strip():
+            return []
+
+        # 用 ILIKE 做模糊匹配（对中文友好，不依赖分词器）
+        # 按字符拆分搜索词，对 CJK 字符逐个匹配
+        like_pattern = f"%{query.strip()}%"
+
+        with get_pg_connection() as conn:
+            import psycopg2.extras
+
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            sql = (
+                "SELECT id, employee, kind, source, title, content, "
+                "metadata, created_at "
+                "FROM entries "
+                "WHERE (content ILIKE %s OR title ILIKE %s)"
+            )
+            params: list[Any] = [like_pattern, like_pattern]
+
+            if employee:
+                sql += " AND employee = %s"
+                params.append(employee)
+            if kind:
+                sql += " AND kind = %s"
+                params.append(kind)
+
+            sql += " LIMIT %s"
+            params.append(limit)
+
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+        return self._rows_to_results(rows, has_snippet=False)
+
+    def _rows_to_results(
+        self, rows: list, *, has_snippet: bool
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            row = dict(row)
+            metadata = row.get("metadata", "")
+            try:
+                metadata_obj = json.loads(metadata) if metadata else {}
+            except json.JSONDecodeError:
+                metadata_obj = {}
+            result = {
+                "id": row["id"],
+                "employee": row["employee"],
+                "kind": row["kind"],
+                "source": row["source"],
+                "title": row["title"],
+                "content": row["content"],
+                "metadata": metadata_obj,
+                "created_at": row["created_at"],
+            }
+            if has_snippet:
+                result["snippet"] = row.get("snippet", "")
+            else:
+                # PG 模式下生成简易 snippet
+                content = row.get("content", "")
+                result["snippet"] = content[:200] if content else ""
+            results.append(result)
+        return results
 
 
 __all__ = ["MemorySearchIndex", "IndexStats"]

@@ -1,4 +1,7 @@
-"""语义记忆搜索 — 基于 embedding 的相关记忆检索（混合搜索 + 多后端）."""
+"""语义记忆搜索 — 基于 embedding 的相关记忆检索（混合搜索 + 多后端）.
+
+支持 PostgreSQL（bytea）和 SQLite（BLOB）双后端存储。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +12,8 @@ import struct
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from crew.database import is_pg
 
 if TYPE_CHECKING:
     from crew.memory import MemoryEntry
@@ -33,8 +38,10 @@ def _pack_embedding(embedding: list[float]) -> bytes:
     return struct.pack(f"{len(embedding)}f", *embedding)
 
 
-def _unpack_embedding(data: bytes) -> list[float]:
+def _unpack_embedding(data: bytes | memoryview) -> list[float]:
     """将 bytes 解包为 float 列表."""
+    if isinstance(data, memoryview):
+        data = bytes(data)
     n = len(data) // 4
     return list(struct.unpack(f"{n}f", data))
 
@@ -51,7 +58,7 @@ class SemanticMemoryIndex:
     """基于 embedding 的语义记忆索引（混合搜索）.
 
     搜索策略：向量余弦相似度 + 关键词匹配，加权合并。
-    存储: SQLite 文件（{memory_dir}/embeddings.db）
+    存储: PostgreSQL (bytea) 或 SQLite 文件（{memory_dir}/embeddings.db）
     Embedding: OpenAI > Gemini > TF-IDF 降级
     """
 
@@ -61,9 +68,12 @@ class SemanticMemoryIndex:
 
     def __init__(self, memory_dir: Path):
         self.memory_dir = memory_dir
+        self._use_pg = is_pg()
         self._db_path = memory_dir / "embeddings.db"
         self._conn: sqlite3.Connection | None = None
         self._embedder: _Embedder | None = None
+
+    # ── SQLite 连接管理 ──
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -99,6 +109,8 @@ class SemanticMemoryIndex:
             self._embedder = _create_embedder()
         return self._embedder
 
+    # ── index ──
+
     def index(self, entry: MemoryEntry) -> bool:
         """为一条记忆计算 embedding 并存储.
 
@@ -111,13 +123,45 @@ class SemanticMemoryIndex:
             return False
 
         tags_str = ",".join(entry.tags) if hasattr(entry, "tags") and entry.tags else ""
+        packed = _pack_embedding(embedding)
+
+        if self._use_pg:
+            self._index_pg(entry.id, entry.employee, packed, entry.content, tags_str)
+        else:
+            self._index_sqlite(entry.id, entry.employee, packed, entry.content, tags_str)
+        return True
+
+    def _index_sqlite(
+        self, entry_id: str, employee: str, packed: bytes, content: str, tags_str: str
+    ) -> None:
         conn = self._get_conn()
         conn.execute(
             "INSERT OR REPLACE INTO memory_vectors (id, employee, embedding, content, tags) VALUES (?, ?, ?, ?, ?)",
-            (entry.id, entry.employee, _pack_embedding(embedding), entry.content, tags_str),
+            (entry_id, employee, packed, content, tags_str),
         )
         conn.commit()
-        return True
+
+    def _index_pg(
+        self, entry_id: str, employee: str, packed: bytes, content: str, tags_str: str
+    ) -> None:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO memory_vectors (id, employee, embedding, content, tags)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    employee = EXCLUDED.employee,
+                    embedding = EXCLUDED.embedding,
+                    content = EXCLUDED.content,
+                    tags = EXCLUDED.tags
+                """,
+                (entry_id, employee, packed, content, tags_str),
+            )
+
+    # ── remove ──
 
     def remove(self, entry_id: str) -> bool:
         """从索引中删除一条记忆.
@@ -125,10 +169,25 @@ class SemanticMemoryIndex:
         Returns:
             True 如果条目存在并被删除.
         """
+        if self._use_pg:
+            return self._remove_pg(entry_id)
+        return self._remove_sqlite(entry_id)
+
+    def _remove_sqlite(self, entry_id: str) -> bool:
         conn = self._get_conn()
         cursor = conn.execute("DELETE FROM memory_vectors WHERE id = ?", (entry_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+    def _remove_pg(self, entry_id: str) -> bool:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM memory_vectors WHERE id = %s", (entry_id,))
+            return cur.rowcount > 0
+
+    # ── search ──
 
     def search(
         self, employee: str, query: str, limit: int = 10, timeout: float = 10.0
@@ -141,11 +200,10 @@ class SemanticMemoryIndex:
         Returns:
             [(id, content, score), ...] 按综合分数降序排列.
         """
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT id, embedding, content FROM memory_vectors WHERE employee = ?",
-            (employee,),
-        ).fetchall()
+        if self._use_pg:
+            rows = self._fetch_vectors_pg(employee)
+        else:
+            rows = self._fetch_vectors_sqlite(employee)
 
         if not rows:
             return []
@@ -188,6 +246,28 @@ class SemanticMemoryIndex:
         scored.sort(key=lambda x: x[2], reverse=True)
         return scored[:limit]
 
+    def _fetch_vectors_sqlite(self, employee: str) -> list[tuple[str, bytes, str]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, embedding, content FROM memory_vectors WHERE employee = ?",
+            (employee,),
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def _fetch_vectors_pg(self, employee: str) -> list[tuple[str, bytes, str]]:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, embedding, content FROM memory_vectors WHERE employee = %s",
+                (employee,),
+            )
+            rows = cur.fetchall()
+        return [(r[0], bytes(r[1]) if isinstance(r[1], memoryview) else r[1], r[2]) for r in rows]
+
+    # ── search_cross_employee ──
+
     def search_cross_employee(
         self,
         query: str,
@@ -200,16 +280,10 @@ class SemanticMemoryIndex:
         Returns:
             [(id, employee, content, score), ...] 按分数降序.
         """
-        conn = self._get_conn()
-        if exclude_employee:
-            rows = conn.execute(
-                "SELECT id, employee, embedding, content FROM memory_vectors WHERE employee != ?",
-                (exclude_employee,),
-            ).fetchall()
+        if self._use_pg:
+            rows = self._fetch_all_vectors_pg(exclude_employee)
         else:
-            rows = conn.execute(
-                "SELECT id, employee, embedding, content FROM memory_vectors",
-            ).fetchall()
+            rows = self._fetch_all_vectors_sqlite(exclude_employee)
 
         if not rows:
             return []
@@ -243,15 +317,55 @@ class SemanticMemoryIndex:
         scored.sort(key=lambda x: x[3], reverse=True)
         return scored[:limit]
 
+    def _fetch_all_vectors_sqlite(
+        self, exclude_employee: str
+    ) -> list[tuple[str, str, bytes, str]]:
+        conn = self._get_conn()
+        if exclude_employee:
+            rows = conn.execute(
+                "SELECT id, employee, embedding, content FROM memory_vectors WHERE employee != ?",
+                (exclude_employee,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, employee, embedding, content FROM memory_vectors",
+            ).fetchall()
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+    def _fetch_all_vectors_pg(
+        self, exclude_employee: str
+    ) -> list[tuple[str, str, bytes, str]]:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            if exclude_employee:
+                cur.execute(
+                    "SELECT id, employee, embedding, content FROM memory_vectors WHERE employee != %s",
+                    (exclude_employee,),
+                )
+            else:
+                cur.execute(
+                    "SELECT id, employee, embedding, content FROM memory_vectors",
+                )
+            rows = cur.fetchall()
+        return [
+            (r[0], r[1], bytes(r[2]) if isinstance(r[2], memoryview) else r[2], r[3])
+            for r in rows
+        ]
+
+    # ── reindex ──
+
     def reindex(self, employee: str, entries: list[MemoryEntry]) -> int:
         """全量重建某员工的索引.
 
         Returns:
             成功索引的条目数.
         """
-        conn = self._get_conn()
-        conn.execute("DELETE FROM memory_vectors WHERE employee = ?", (employee,))
-        conn.commit()
+        if self._use_pg:
+            self._delete_employee_pg(employee)
+        else:
+            self._delete_employee_sqlite(employee)
 
         count = 0
         for entry in entries:
@@ -259,14 +373,47 @@ class SemanticMemoryIndex:
                 count += 1
         return count
 
+    def _delete_employee_sqlite(self, employee: str) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM memory_vectors WHERE employee = ?", (employee,))
+        conn.commit()
+
+    def _delete_employee_pg(self, employee: str) -> None:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM memory_vectors WHERE employee = %s", (employee,))
+
+    # ── has_index ──
+
     def has_index(self, employee: str) -> bool:
         """检查某员工是否有索引数据."""
+        if self._use_pg:
+            return self._has_index_pg(employee)
+        return self._has_index_sqlite(employee)
+
+    def _has_index_sqlite(self, employee: str) -> bool:
         conn = self._get_conn()
         row = conn.execute(
             "SELECT COUNT(*) FROM memory_vectors WHERE employee = ?",
             (employee,),
         ).fetchone()
         return row[0] > 0 if row else False
+
+    def _has_index_pg(self, employee: str) -> bool:
+        from crew.database import get_pg_connection
+
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM memory_vectors WHERE employee = %s",
+                (employee,),
+            )
+            row = cur.fetchone()
+        return row[0] > 0 if row else False
+
+    # ── 生命周期 ──
 
     def __enter__(self) -> SemanticMemoryIndex:
         return self
