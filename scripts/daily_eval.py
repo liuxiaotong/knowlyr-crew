@@ -496,6 +496,7 @@ def run_daily_eval(
     provider: str = "openai",
     base_url: str | None = None,
     api_key: str | None = None,
+    employee_filter: str | None = None,
 ) -> dict[str, Any]:  # noqa: PLR0913
     """执行每日评估.
 
@@ -507,6 +508,7 @@ def run_daily_eval(
         provider: LLM 提供商
         base_url: API base URL
         api_key: API key
+        employee_filter: 只评估指定员工（slug 名），None 表示全部
 
     Returns:
         汇总统计 dict
@@ -551,7 +553,24 @@ def run_daily_eval(
     if before_filter != len(trajectories):
         logger.info("过滤无归属轨迹: %d → %d", before_filter, len(trajectories))
 
-    # Step 2: 逐条评分
+    # 按员工过滤
+    if employee_filter:
+        before_emp = len(trajectories)
+        trajectories = [
+            t for t in trajectories
+            if traj_employee(t) == employee_filter
+        ]
+        logger.info("员工过滤 [%s]: %d → %d", employee_filter, before_emp, len(trajectories))
+
+    # Step 2: 逐条评分（增量写入：每条评完立刻追加到 JSONL）
+    EVALUATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    # 文件名含员工名（按人跑时隔离）或 all
+    eval_suffix = employee_filter or "all"
+    eval_path = EVALUATIONS_DIR / f"{date_display}.{eval_suffix}.jsonl"
+    # force 模式清空旧文件，否则追加
+    if force:
+        eval_path.write_text("", encoding="utf-8")
+
     results = []
     last_source_file = cursor
     for i, traj in enumerate(trajectories):
@@ -584,6 +603,10 @@ def run_daily_eval(
         }
         results.append(result)
 
+        # 增量写入：每条评完立刻追加
+        with open(eval_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(result, ensure_ascii=False) + "\n")
+
         # 更新游标
         source_file = traj.get("_source_file", "")
         if source_file and source_file > last_source_file:
@@ -591,7 +614,7 @@ def run_daily_eval(
 
     logger.info("评分完成: %d/%d 成功", len(results), len(trajectories))
 
-    # Step 3: 写入评分结果（幂等：覆盖写入）
+    # Step 3: 汇总写入（兼容旧格式 {date}.jsonl）
     _write_evaluations(date_display, results)
 
     # Step 4: 导出高分范例
@@ -732,6 +755,7 @@ def main() -> None:
     parser.add_argument("--provider", default="openai", help="LLM 提供商（默认 openai）")
     parser.add_argument("--base-url", help="API base URL")
     parser.add_argument("--api-key", help="API key")
+    parser.add_argument("--employee", help="只评估指定员工（slug 名）")
 
     args = parser.parse_args()
 
@@ -743,6 +767,7 @@ def main() -> None:
         provider=args.provider,
         base_url=args.base_url,
         api_key=args.api_key,
+        employee_filter=args.employee,
     )
 
     print(f"\n=== 评估完成 ===")
