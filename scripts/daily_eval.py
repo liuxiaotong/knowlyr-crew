@@ -570,6 +570,23 @@ def run_daily_eval(
         ]
         logger.info("员工过滤 [%s]: %d → %d", employee_filter, before_emp, len(trajectories))
 
+    # 过滤空壳轨迹（steps 全空 = 采集 bug，不值得评分）
+    def _is_hollow(t: dict) -> bool:
+        steps = t.get("steps", [])
+        if not steps:
+            return True
+        # 全部 step 的 tool 都是 unknown 且 output 为空 → 空壳
+        return all(
+            (s.get("tool_call", {}).get("name") or s.get("tool_name") or s.get("tool", "")) in ("unknown", "")
+            and not (s.get("tool_result", {}).get("output") or s.get("tool_output") or s.get("output", ""))
+            for s in steps
+        )
+
+    before_hollow = len(trajectories)
+    trajectories = [t for t in trajectories if not _is_hollow(t)]
+    if before_hollow != len(trajectories):
+        logger.info("过滤空壳轨迹: %d → %d", before_hollow, len(trajectories))
+
     # Step 2: 逐条评分（增量写入：每条评完立刻追加到 JSONL）
     EVALUATIONS_DIR.mkdir(parents=True, exist_ok=True)
     # 文件名含员工名（按人跑时隔离）或 all
