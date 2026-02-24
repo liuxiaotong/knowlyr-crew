@@ -1,0 +1,37 @@
+{
+  "employee": "community-operator",
+  "character_name": "周念慈",
+  "domain": "conversation",
+  "test_cases": [
+    {
+      "id": "co-001",
+      "task": "我们的开源项目刚发布了 v1.0，请写一篇社区公告（中文），发布在 GitHub Discussions 和微信公众号。",
+      "expected_behaviors": ["突出核心功能", "包含使用入门", "鼓励社区参与", "语言适合目标受众"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "co-002",
+      "task": "社区用户反馈：「你们的文档太烂了，根本看不懂，浪费我一下午」。请给出回复方案（要安抚情绪，又要收集具体反馈）。",
+      "expected_behaviors": ["表达歉意和感谢", "不反驳不辩解", "引导提供具体问题", "承诺改进行动"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "co-003",
+      "task": "请为我们的标注平台策划一个「社区标注挑战赛」活动，目标是吸引 100 个新用户参与标注任务。",
+      "expected_behaviors": ["活动规则清晰", "奖励机制合理", "考虑传播渠道", "包含时间线和里程碑"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "co-004",
+      "task": "请为本周的社区周报撰写内容，已知本周数据：\n- 新增 GitHub Star 23 个\n- 合并 PR 5 个\n- 关闭 Issue 8 个\n- 新增贡献者 2 人\n- 发布 v0.1.32 热修复",
+      "expected_behaviors": ["数据呈现清晰", "突出亮点", "感谢贡献者", "预告下周计划"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "co-005",
+      "task": "社区里两个活跃贡献者因为技术方案选择（REST vs GraphQL）在 Issue 里吵起来了，言辞越来越激烈。请给出调解方案。",
+      "expected_behaviors": ["保持中立", "引导回归技术讨论", "设定沟通规范", "提出决策机制"],
+      "difficulty": "advanced"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "employee": "doc-writer",
+  "character_name": "苏文",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "dw-001",
+      "task": "为以下函数写一段 docstring（Google style）：\n\ndef retry(fn, max_attempts=3, backoff=1.0, exceptions=(Exception,)):\n    for attempt in range(max_attempts):\n        try:\n            return fn()\n        except exceptions as e:\n            if attempt == max_attempts - 1:\n                raise\n            time.sleep(backoff * (2 ** attempt))",
+      "expected_behaviors": ["使用Google docstring格式", "描述参数类型和含义", "描述返回值", "描述异常行为"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "dw-002",
+      "task": "项目刚完成从 SQLite 迁移到 PostgreSQL 的工作。请写一段 CHANGELOG 条目，涵盖：破坏性变更（配置格式改了）、新功能（支持连接池）、迁移指南。",
+      "expected_behaviors": ["分类列出变更", "标注破坏性变更", "包含迁移步骤", "语言简洁准确"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "dw-003",
+      "task": "为一个新的 crew 员工写 README.md，这个员工叫「数据清洗专家」，负责数据管线中的数据质量检查和清洗。需要包含：简介、使用方式、配置参数、常见场景示例。",
+      "expected_behaviors": ["结构清晰", "包含代码示例", "包含配置说明", "包含使用场景"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "dw-004",
+      "task": "以下 API 有 5 个端点，请写 API 文档：\n- POST /api/tasks: 创建任务（body: title, description, assignee）\n- GET /api/tasks: 列出任务（query: status, page, limit）\n- GET /api/tasks/:id: 获取任务详情\n- PATCH /api/tasks/:id: 更新任务\n- DELETE /api/tasks/:id: 删除任务",
+      "expected_behaviors": ["每个端点有请求/响应示例", "标注参数类型", "标注HTTP状态码", "标注认证要求"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "dw-005",
+      "task": "项目架构发生了重大变更：从单体架构拆分为 3 个微服务（用户服务、订单服务、通知服务）。请写一份架构决策记录（ADR），解释为什么要拆、怎么拆、有什么风险。",
+      "expected_behaviors": ["包含背景和动机", "包含决策内容", "包含替代方案", "包含风险和缓解措施"],
+      "difficulty": "advanced"
+    }
+  ]
+}

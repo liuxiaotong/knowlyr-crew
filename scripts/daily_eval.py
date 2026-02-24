@@ -200,11 +200,18 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
     # 格式 A: session_converter 输出（已经是标准格式）
     if isinstance(data.get("task"), str) and isinstance(data.get("steps"), list):
         if data["steps"] and "tool" in data["steps"][0]:
+            # 确保 metadata 中包含 channel 和 session_id
+            meta = data.get("metadata", {})
+            if "channel" not in meta or "session_id" not in meta:
+                meta.setdefault("channel", "")
+                meta.setdefault("session_id", meta.get("task_id", ""))
+                data["metadata"] = meta
             return data
 
     # 格式 B: agentrecorder Trajectory（task 是对象）
     if isinstance(data.get("task"), dict):
         task_desc = data["task"].get("description", "")
+        task_id = data["task"].get("task_id", "")
         steps = []
         for s in data.get("steps", []):
             tc = s.get("tool_call", {})
@@ -217,7 +224,8 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
                 }
             )
         outcome = data.get("outcome", {})
-        employee = data.get("metadata", {}).get("employee", "")
+        raw_meta = data.get("metadata", {})
+        employee = raw_meta.get("employee", "")
         return {
             "task": task_desc,
             "steps": steps,
@@ -226,6 +234,8 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
                 "employee": employee,
                 "model": data.get("model", ""),
                 "timestamp": "",
+                "channel": raw_meta.get("channel", ""),
+                "session_id": task_id,
             },
         }
 
@@ -248,6 +258,8 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
                 "employee": data["employee"],
                 "model": data.get("model", ""),
                 "timestamp": "",
+                "channel": data.get("channel", ""),
+                "session_id": data.get("task_id", ""),
             },
         }
 

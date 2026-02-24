@@ -1,0 +1,37 @@
+{
+  "employee": "frontend-engineer",
+  "character_name": "卫子昂",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "fe-001",
+      "task": "请用 React + TypeScript 实现一个搜索输入框组件，要求：\n- 输入时防抖 300ms\n- 显示加载状态\n- 支持键盘 ESC 清空\n- 无结果时显示提示",
+      "expected_behaviors": ["使用debounce", "处理loading状态", "键盘事件处理", "TypeScript类型定义"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "fe-002",
+      "task": "以下 React 组件有性能问题，请分析并优化：\n\nfunction UserList({ users, onSelect }) {\n  const sorted = users.sort((a, b) => a.name.localeCompare(b.name));\n  return (\n    <ul>\n      {sorted.map(user => (\n        <li key={user.id} onClick={() => onSelect(user)}>\n          <Avatar url={user.avatar} />\n          <span>{user.name}</span>\n        </li>\n      ))}\n    </ul>\n  );\n}",
+      "expected_behaviors": ["指出sort修改原数组", "建议useMemo", "建议useCallback", "建议React.memo"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "fe-003",
+      "task": "设计一个前端表单验证方案：注册表单包含用户名、邮箱、密码、确认密码四个字段。要求实时验证 + 提交时整体验证，错误信息友好。",
+      "expected_behaviors": ["实时验证策略", "提交时验证", "错误信息展示", "考虑用户体验"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "fe-004",
+      "task": "页面上有一个表格，数据量可能达到 10000 行，当前直接渲染全部行导致页面卡顿。请给出优化方案。",
+      "expected_behaviors": ["建议虚拟滚动", "考虑分页方案", "提及具体库", "考虑搜索和筛选"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "fe-005",
+      "task": "我们的 SPA 应用首屏加载需要 8 秒，bundle 大小 2.5MB。请给出系统性的性能优化方案。",
+      "expected_behaviors": ["代码分割", "懒加载", "资源优化", "性能度量指标"],
+      "difficulty": "advanced"
+    }
+  ]
+}

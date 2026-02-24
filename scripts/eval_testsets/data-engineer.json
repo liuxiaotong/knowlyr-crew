@@ -1,0 +1,37 @@
+{
+  "employee": "data-engineer",
+  "character_name": "罗清河",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "de-001",
+      "task": "设计一个 ETL 管线：从 MySQL 拉取用户行为日志（日增 100 万行），清洗后写入分析用的 PostgreSQL 表。请给出方案。",
+      "expected_behaviors": ["增量拉取策略", "数据清洗规则", "错误处理", "考虑性能和调度"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "de-002",
+      "task": "数据质量检查发现以下问题：\n- user_id 字段有 3% 的空值\n- created_at 有 0.5% 的未来时间（比当前时间晚）\n- email 字段有 12% 不符合邮箱格式\n请给出数据修复方案和预防措施。",
+      "expected_behaviors": ["针对每种问题给修复方案", "区分可修复和需人工介入", "给出预防性校验规则", "建议监控告警"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "de-003",
+      "task": "我们有一个实时数据管线，从 Kafka 消费消息写入 ClickHouse。最近发现消息积压，consumer lag 持续增长。请分析可能原因并给出优化方案。",
+      "expected_behaviors": ["分析积压原因", "建议消费端优化", "考虑分区和并行", "给出监控指标"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "de-004",
+      "task": "请写一个 Python 脚本的伪代码：从 CSV 文件读取数据，做去重、空值填充、类型转换，然后批量写入 PostgreSQL。要求支持断点续传。",
+      "expected_behaviors": ["批量处理", "断点续传机制", "错误处理", "日志记录"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "de-005",
+      "task": "公司要做一个数据仓库，目前有 3 个数据源：MySQL（业务数据）、MongoDB（用户行为）、外部 API（第三方数据）。请设计数据仓库架构。",
+      "expected_behaviors": ["分层架构设计", "数据建模方案", "调度策略", "考虑数据一致性"],
+      "difficulty": "advanced"
+    }
+  ]
+}

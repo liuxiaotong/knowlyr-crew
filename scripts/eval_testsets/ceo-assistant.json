@@ -1,0 +1,37 @@
+{
+  "employee": "ceo-assistant",
+  "character_name": "姜墨言",
+  "domain": "conversation",
+  "test_cases": [
+    {
+      "id": "ca-001",
+      "task": "帮我写一封邮件，回复投资人关于本月产品进展的询问。本月亮点：DAU 增长 30%，完成了 PostgreSQL 迁移，新增 3 个 AI 员工。",
+      "expected_behaviors": ["语气专业得体", "突出关键数据", "结构清晰", "控制篇幅"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "ca-002",
+      "task": "今天有 3 个会议：\n- 10:00 投资人电话（准备融资材料）\n- 14:00 技术评审（crew v2 架构）\n- 16:00 HR 面试（高级工程师候选人）\n请帮我准备每个会议的要点提纲。",
+      "expected_behaviors": ["每个会议有独立提纲", "列出关键议题", "建议准备材料", "考虑时间分配"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "ca-003",
+      "task": "以下是本周团队的工作汇总，请帮我整理成周报发给全员：\n- 后端：完成轨迹评估系统，修复 5 个 bug\n- 前端：重构登录页，新增 dashboard\n- 运维：部署监控告警\n- 产品：完成 Q2 规划初稿",
+      "expected_behaviors": ["按团队分类", "语言简洁", "突出成果而非过程", "格式统一"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "ca-004",
+      "task": "CEO 需要在行业峰会上做一个 10 分钟演讲，主题是「AI 时代让人通过判断获得收入」。请帮忙拟一个演讲大纲。",
+      "expected_behaviors": ["符合品牌立场", "结构有逻辑", "包含具体案例", "控制在10分钟内"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "ca-005",
+      "task": "现在有 3 个紧急事项同时到达：\n1. 线上服务宕机（影响所有用户）\n2. 投资人要求今天下班前提交材料\n3. 核心员工提出离职\n请帮我排优先级并给出处理建议。",
+      "expected_behaviors": ["明确优先级排序", "给出排序理由", "每个事项有行动建议", "考虑并行处理"],
+      "difficulty": "advanced"
+    }
+  ]
+}

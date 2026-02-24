@@ -1,0 +1,37 @@
+{
+  "employee": "code-reviewer",
+  "character_name": "林锐",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "cr-001",
+      "task": "审查以下 Python 代码，指出安全风险和改进建议：\n\ndef login(username, password):\n    query = f\"SELECT * FROM users WHERE name='{username}' AND pass='{password}'\"\n    return db.execute(query).fetchone()",
+      "expected_behaviors": ["指出SQL注入风险", "建议参数化查询", "建议密码哈希"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "cr-002",
+      "task": "审查以下代码的并发安全性：\n\nclass Counter:\n    def __init__(self):\n        self.count = 0\n    \n    async def increment(self):\n        current = self.count\n        await asyncio.sleep(0.01)\n        self.count = current + 1\n        return self.count",
+      "expected_behaviors": ["指出竞态条件", "建议使用锁或原子操作", "解释并发场景下的问题"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "cr-003",
+      "task": "审查以下 API 端点设计：\n\n@app.post(\"/api/users/delete\")\nasync def delete_user(user_id: int):\n    await db.execute(\"DELETE FROM users WHERE id = ?\", (user_id,))\n    await db.execute(\"DELETE FROM orders WHERE user_id = ?\", (user_id,))\n    await db.execute(\"DELETE FROM sessions WHERE user_id = ?\", (user_id,))\n    return {\"ok\": True}",
+      "expected_behaviors": ["指出应使用DELETE方法", "建议事务包裹", "建议软删除", "考虑级联删除"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "cr-004",
+      "task": "审查以下 Python 代码的错误处理：\n\ndef process_file(path):\n    try:\n        data = open(path).read()\n        result = json.loads(data)\n        transformed = transform(result)\n        save_to_db(transformed)\n        return True\n    except Exception:\n        return False",
+      "expected_behaviors": ["指出吞掉所有异常", "建议分层catch", "建议使用with语句", "建议记录日志"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "cr-005",
+      "task": "审查以下微服务间调用代码的健壮性：\n\nasync def get_user_profile(user_id):\n    user = await user_service.get(user_id)\n    orders = await order_service.list(user_id)\n    recommendations = await ml_service.recommend(user_id)\n    notifications = await notification_service.unread(user_id)\n    return {\n        \"user\": user,\n        \"orders\": orders,\n        \"recommendations\": recommendations,\n        \"notifications\": notifications\n    }",
+      "expected_behaviors": ["建议并发请求", "建议超时控制", "建议降级策略", "考虑部分失败处理"],
+      "difficulty": "advanced"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "employee": "test-engineer",
+  "character_name": "程薇",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "te-001",
+      "task": "为以下函数设计测试用例（列出测试场景，不需要写代码）：\n\ndef divide(a: float, b: float) -> float:\n    if b == 0:\n        raise ValueError(\"除数不能为零\")\n    return a / b",
+      "expected_behaviors": ["包含正常情况", "包含零除测试", "包含边界值", "包含负数测试"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "te-002",
+      "task": "以下是一个用户注册接口，请设计完整的测试矩阵：\n- 输入：username（2-20字符，字母数字下划线）, email（合法邮箱）, password（8位以上，含大小写和数字）\n- 输出：成功返回用户对象，失败返回错误信息\n- 约束：username和email不能重复",
+      "expected_behaviors": ["包含等价类划分", "包含边界值分析", "包含组合测试", "包含重复校验测试"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "te-003",
+      "task": "一个电商下单流程涉及：库存检查 → 创建订单 → 扣减库存 → 支付 → 发送通知。请设计集成测试方案，重点关注异常流程。",
+      "expected_behaviors": ["覆盖各环节失败场景", "考虑超时和重试", "考虑并发下单", "考虑部分失败回滚"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "te-004",
+      "task": "Review 以下 pytest 测试代码，指出问题：\n\ndef test_user_crud():\n    user = create_user(\"alice\", \"alice@test.com\")\n    assert user.id > 0\n    user.name = \"bob\"\n    update_user(user)\n    fetched = get_user(user.id)\n    assert fetched.name == \"bob\"\n    delete_user(user.id)\n    assert get_user(user.id) is None",
+      "expected_behaviors": ["指出单个测试做太多事", "建议拆分为独立测试", "指出测试间依赖", "建议使用fixture"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "te-005",
+      "task": "我们的 CI 跑 800+ 测试需要 12 分钟，团队抱怨太慢。请给出测试加速方案。",
+      "expected_behaviors": ["建议并行执行", "建议分层测试策略", "建议mock外部依赖", "考虑测试选择性运行"],
+      "difficulty": "advanced"
+    }
+  ]
+}

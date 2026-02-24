@@ -1,0 +1,37 @@
+{
+  "employee": "hr-manager",
+  "character_name": "叶心蕾",
+  "domain": "advisory",
+  "test_cases": [
+    {
+      "id": "hr-001",
+      "task": "团队需要招一个初级后端工程师（Python），请撰写一份 JD（职位描述），包括职责、要求、加分项。",
+      "expected_behaviors": ["职责描述清晰", "区分必须和加分项", "要求合理不过高", "体现团队文化"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "hr-002",
+      "task": "一个员工（AI 员工「代码审查师」）最近表现下滑：审查质量不稳定，有时会遗漏明显 bug。请给出绩效改进方案。",
+      "expected_behaviors": ["分析可能原因", "给出具体改进措施", "设定观察期和指标", "考虑prompt优化"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "hr-003",
+      "task": "团队目前有 12 个 AI 员工，但工作量分配不均：代码审查师和后端工程师任务堆积，文档工程师和UX设计师闲置。请给出团队优化建议。",
+      "expected_behaviors": ["分析工作量分布", "建议技能复用", "考虑新增或调整岗位", "给出短期和长期方案"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "hr-004",
+      "task": "我们需要评估是否要新增一个「安全审计师」AI 员工岗位。请分析需求合理性并给出建议。",
+      "expected_behaviors": ["分析现有安全能力缺口", "评估岗位必要性", "考虑由现有员工兼任的可能", "给出岗位定义建议"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "hr-005",
+      "task": "请为我们的 AI 员工团队设计一个季度复盘模板，用于评估每个员工的表现和团队整体效能。",
+      "expected_behaviors": ["包含个人绩效指标", "包含团队协作评估", "包含改进方向", "可量化可操作"],
+      "difficulty": "basic"
+    }
+  ]
+}

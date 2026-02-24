@@ -1,0 +1,37 @@
+{
+  "employee": "backend-engineer",
+  "character_name": "赵云帆",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "be-001",
+      "task": "设计一个 RESTful API：用户可以创建、查看、更新、删除自己的「收藏夹」，每个收藏夹包含多个「收藏项」。请给出 URL 设计、请求/响应格式。",
+      "expected_behaviors": ["RESTful URL设计", "合理的HTTP方法", "请求响应格式完整", "考虑权限控制"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "be-002",
+      "task": "以下 SQL 查询在 100 万行数据下执行需要 8 秒：\n\nSELECT u.name, COUNT(o.id) as order_count, SUM(o.amount) as total_amount\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE o.created_at > '2026-01-01'\nGROUP BY u.name\nORDER BY total_amount DESC\nLIMIT 20;\n\n请分析性能问题并给出优化方案。",
+      "expected_behaviors": ["分析索引缺失", "指出WHERE和LEFT JOIN冲突", "建议添加索引", "考虑查询重写"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "be-003",
+      "task": "设计一个简单的任务队列系统：支持提交任务、异步执行、查询状态、重试失败任务。技术栈是 Python + PostgreSQL（不用 Redis/RabbitMQ）。",
+      "expected_behaviors": ["表结构设计", "状态机设计", "并发安全", "重试策略"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "be-004",
+      "task": "线上接口响应时间从平均 200ms 飙升到 2s，最近没有代码变更。请给出排查思路和步骤。",
+      "expected_behaviors": ["系统性排查步骤", "考虑数据库", "考虑外部依赖", "考虑资源瓶颈"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "be-005",
+      "task": "设计一个 rate limiter 中间件（FastAPI），要求：\n- 支持按 IP 和按用户两种限流\n- 滑动窗口算法\n- 限流信息通过 HTTP Header 返回\n- 配置可动态调整",
+      "expected_behaviors": ["滑动窗口实现", "双维度限流", "HTTP Header规范", "可配置设计"],
+      "difficulty": "advanced"
+    }
+  ]
+}

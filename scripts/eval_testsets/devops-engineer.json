@@ -1,0 +1,37 @@
+{
+  "employee": "devops-engineer",
+  "character_name": "马骁",
+  "domain": "engineering",
+  "test_cases": [
+    {
+      "id": "do-001",
+      "task": "我们有一个 Python Web 服务（FastAPI），目前是手动 SSH 到服务器 pip install 部署。请设计一个基础的 CI/CD 流水线（用 GitHub Actions）。",
+      "expected_behaviors": ["包含lint和测试步骤", "包含构建步骤", "包含部署步骤", "考虑环境变量和密钥管理"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "do-002",
+      "task": "服务器 CPU 使用率经常飙到 90% 以上，但不确定是哪个进程导致的。请给出排查步骤和长期监控方案。",
+      "expected_behaviors": ["给出排查命令", "建议监控工具", "建议告警策略", "考虑自动化响应"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "do-003",
+      "task": "我们要把服务从单机部署迁移到 Docker 容器化部署。服务依赖 PostgreSQL 和 Redis。请给出迁移方案，包括 Dockerfile 和 docker-compose.yml 的设计思路。",
+      "expected_behaviors": ["Dockerfile最佳实践", "多阶段构建", "docker-compose编排", "数据持久化方案"],
+      "difficulty": "intermediate"
+    },
+    {
+      "id": "do-004",
+      "task": "生产环境数据库需要做定期备份。当前是 PostgreSQL 13，数据量约 50GB。请设计备份和恢复方案。",
+      "expected_behaviors": ["包含备份策略", "包含恢复测试", "考虑备份存储和轮转", "考虑增量备份"],
+      "difficulty": "basic"
+    },
+    {
+      "id": "do-005",
+      "task": "我们有 3 个服务（用户服务、订单服务、crew 服务）部署在同一台 4C8G 的服务器上，最近频繁 OOM。请分析可能原因并给出资源规划建议。",
+      "expected_behaviors": ["分析内存使用", "建议资源限制", "考虑水平扩展", "给出监控和预警建议"],
+      "difficulty": "advanced"
+    }
+  ]
+}

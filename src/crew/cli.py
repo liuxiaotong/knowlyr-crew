@@ -1234,6 +1234,7 @@ def _run_employee_job(
                 emp.name,
                 task_desc,
                 model=effective_model,
+                channel="cli",
             )
             traj_collector.__enter__()
         except Exception:
