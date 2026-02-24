@@ -74,7 +74,7 @@ async def _tool_list_agents(
         info = {
             "name": name,
             "display_name": emp.display_name or name,
-            "title": emp.title or "",
+            "title": emp.summary or emp.display_name or "",
             "status": emp.agent_status or "active",
             "model": emp.model or "",
             "tags": emp.tags or [],
