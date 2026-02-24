@@ -230,6 +230,33 @@ class CrewEngine:
             except Exception:
                 pass
 
+            # 高分范例注入 — 从 exemplar 记忆中选取近期优秀执行案例
+            try:
+                exemplars = memory_store.query(
+                    employee.name,
+                    category="finding",
+                    limit=3,
+                    max_visibility=max_visibility,
+                )
+                # 过滤只含 exemplar tag 的记忆
+                exemplars = [e for e in exemplars if "exemplar" in (e.tags or [])]
+                if exemplars:
+                    ex_lines = [f"- {e.content}" for e in exemplars]
+                    parts.extend(
+                        [
+                            "",
+                            "---",
+                            "",
+                            "## 高分范例",
+                            "",
+                            "以下是你近期表现优秀的任务案例，可作为参考：",
+                            "",
+                        ]
+                        + ex_lines
+                    )
+            except Exception:
+                pass
+
             # 可复用工作模式推荐 — 跨员工共享的 pattern
             try:
                 patterns = memory_store.query_patterns(

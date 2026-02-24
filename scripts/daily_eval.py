@@ -97,6 +97,7 @@ def _get_domain(employee: str) -> str:
 
 # ── 游标管理 ─────────────────────────────────────────────────────────
 
+
 def _read_cursor() -> str:
     """读取增量游标（上次处理的最后一个 session 文件名）."""
     if CURSOR_FILE.exists():
@@ -111,6 +112,7 @@ def _write_cursor(last_file: str) -> None:
 
 
 # ── 轨迹采集 ─────────────────────────────────────────────────────────
+
 
 def _collect_from_sessions(target_date: str, cursor: str) -> list[dict[str, Any]]:
     """从 .crew/sessions/ 目录增量采集指定日期的轨迹.
@@ -207,11 +209,13 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
         for s in data.get("steps", []):
             tc = s.get("tool_call", {})
             tr = s.get("tool_result", {})
-            steps.append({
-                "tool": tc.get("name", "respond"),
-                "params": tc.get("parameters", {}),
-                "output": tr.get("output", ""),
-            })
+            steps.append(
+                {
+                    "tool": tc.get("name", "respond"),
+                    "params": tc.get("parameters", {}),
+                    "output": tr.get("output", ""),
+                }
+            )
         outcome = data.get("outcome", {})
         employee = data.get("metadata", {}).get("employee", "")
         return {
@@ -229,11 +233,13 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
     if "employee" in data and "task" in data and isinstance(data.get("task"), str):
         steps = []
         for s in data.get("steps", []):
-            steps.append({
-                "tool": s.get("tool_name", "respond"),
-                "params": s.get("tool_params", {}),
-                "output": s.get("tool_output", ""),
-            })
+            steps.append(
+                {
+                    "tool": s.get("tool_name", "respond"),
+                    "params": s.get("tool_params", {}),
+                    "output": s.get("tool_output", ""),
+                }
+            )
         return {
             "task": data["task"],
             "steps": steps,
@@ -250,9 +256,16 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
 
 # ── 评分 ─────────────────────────────────────────────────────────────
 
-def _try_gym_score(trajectory: dict[str, Any], domain: str, use_judge: bool = False,
-                   model_name: str = "", provider: str = "openai",
-                   base_url: str | None = None, api_key: str | None = None) -> dict[str, Any] | None:
+
+def _try_gym_score(
+    trajectory: dict[str, Any],
+    domain: str,
+    use_judge: bool = False,
+    model_name: str = "",
+    provider: str = "openai",
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any] | None:
     """尝试用 gym RewardEngine 评分. 返回 None 表示 import 失败."""
     try:
         from agentreward.config import RewardConfig
@@ -309,10 +322,7 @@ def _fallback_score(trajectory: dict[str, Any]) -> dict[str, Any]:
         score += 0.2
 
     # thought 字段加分（检查原始轨迹数据中是否有 thought）
-    has_thought = any(
-        s.get("thought") or s.get("output", "")
-        for s in steps
-    )
+    has_thought = any(s.get("thought") or s.get("output", "") for s in steps)
     if has_thought:
         score += 0.1
 
@@ -353,7 +363,8 @@ def score_trajectory(
     employee_use_judge = use_judge and employee != "hr-manager"
 
     result = _try_gym_score(
-        trajectory, domain,
+        trajectory,
+        domain,
         use_judge=employee_use_judge,
         model_name=model_name,
         provider=provider,
@@ -368,6 +379,7 @@ def score_trajectory(
 
 
 # ── 日报生成 ─────────────────────────────────────────────────────────
+
 
 def _generate_report(
     date_str: str,
@@ -392,12 +404,14 @@ def _generate_report(
 
     # 总体统计
     scores = [r["total_score"] for r in results]
-    lines.extend([
-        f"- 平均分: {statistics.mean(scores):.2f}",
-        f"- 最高分: {max(scores):.2f}",
-        f"- 最低分: {min(scores):.2f}",
-        "",
-    ])
+    lines.extend(
+        [
+            f"- 平均分: {statistics.mean(scores):.2f}",
+            f"- 最高分: {max(scores):.2f}",
+            f"- 最低分: {min(scores):.2f}",
+            "",
+        ]
+    )
 
     # 按员工分组
     by_employee: dict[str, list[dict[str, Any]]] = {}
@@ -446,13 +460,16 @@ def _generate_report(
     if exemplar_count:
         lines.append(f"## 高分范例")
         lines.append("")
-        lines.append(f"本日 {exemplar_count} 条轨迹达到范例标准 (>= {EXEMPLAR_THRESHOLD})，已导出到 exemplars/ 目录。")
+        lines.append(
+            f"本日 {exemplar_count} 条轨迹达到范例标准 (>= {EXEMPLAR_THRESHOLD})，已导出到 exemplars/ 目录。"
+        )
         lines.append("")
 
     return "\n".join(lines)
 
 
 # ── 主流程 ───────────────────────────────────────────────────────────
+
 
 def run_daily_eval(
     target_date: str | None = None,
@@ -494,8 +511,12 @@ def run_daily_eval(
     traj_file_trajs = _collect_from_trajectories_file(target_date)
     trajectories.extend(traj_file_trajs)
 
-    logger.info("采集到 %d 条轨迹 (sessions: %d, trajectories.jsonl: %d)",
-                len(trajectories), len(trajectories) - len(traj_file_trajs), len(traj_file_trajs))
+    logger.info(
+        "采集到 %d 条轨迹 (sessions: %d, trajectories.jsonl: %d)",
+        len(trajectories),
+        len(trajectories) - len(traj_file_trajs),
+        len(traj_file_trajs),
+    )
 
     if not trajectories:
         logger.info("无新增轨迹，生成空日报")
@@ -513,7 +534,8 @@ def run_daily_eval(
 
         try:
             score_result = score_trajectory(
-                traj, employee,
+                traj,
+                employee,
                 use_judge=use_judge,
                 model_name=model_name,
                 provider=provider,
@@ -576,8 +598,16 @@ def _write_evaluations(date_display: str, results: list[dict[str, Any]]) -> None
 
 
 def _export_exemplars(results: list[dict[str, Any]]) -> int:
-    """将高分轨迹导出到 .crew/exemplars/{employee_name}/."""
+    """将高分轨迹导出到 .crew/exemplars/{employee_name}/ 并写入 MemoryStore."""
     count = 0
+    memory_store = None
+    try:
+        from crew.memory import MemoryStore
+
+        memory_store = MemoryStore(project_dir=CREW_ROOT)
+    except Exception as e:
+        logger.warning("MemoryStore 初始化失败，跳过记忆写入: %s", e)
+
     for r in results:
         if r["total_score"] >= EXEMPLAR_THRESHOLD:
             employee = r["employee"]
@@ -589,7 +619,65 @@ def _export_exemplars(results: list[dict[str, Any]]) -> int:
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(r, f, ensure_ascii=False, indent=2)
             count += 1
+
+            # 写入 MemoryStore（去重：同一 session 不重复写入）
+            if memory_store is not None:
+                _write_exemplar_memory(memory_store, r)
+
     return count
+
+
+def _build_exemplar_content(result: dict[str, Any]) -> str:
+    """从评分结果构建范例记忆内容."""
+    score = result["total_score"]
+    task = (result.get("task") or "")[:100]
+    # 从 rubric_scores 提取亮点（取分数最高的维度）
+    rubric = result.get("rubric_scores", {})
+    highlights = ""
+    if rubric:
+        top_dims = sorted(rubric.items(), key=lambda x: x[1], reverse=True)[:3]
+        highlights = "；".join(f"{k}={v:.2f}" for k, v in top_dims)
+    if highlights:
+        return f"[高分范例 {score:.2f}分] 任务：{task}。表现亮点：{highlights}"
+    return f"[高分范例 {score:.2f}分] 任务：{task}"
+
+
+def _write_exemplar_memory(
+    memory_store: MemoryStore,
+    result: dict[str, Any],
+) -> None:
+    """将单条高分范例写入 MemoryStore（去重）."""
+    employee = result["employee"]
+    session_id = result.get("session_id") or ""
+
+    # 去重：用 source_session 检查是否已写入过
+    if session_id:
+        try:
+            existing = memory_store.query(
+                employee,
+                category="finding",
+                limit=50,
+            )
+            for entry in existing:
+                if entry.source_session == session_id and "exemplar" in (entry.tags or []):
+                    logger.debug("范例记忆已存在，跳过: %s/%s", employee, session_id)
+                    return
+        except Exception:
+            pass
+
+    content = _build_exemplar_content(result)
+    try:
+        memory_store.add(
+            employee=employee,
+            category="finding",
+            content=content,
+            source_session=session_id,
+            tags=["exemplar", "high-score"],
+            origin_employee=employee,
+        )
+        logger.debug("范例记忆写入: %s", employee)
+    except Exception as e:
+        logger.warning("范例记忆写入失败 [%s]: %s", employee, e)
 
 
 def _write_report(date_display: str, results: list[dict[str, Any]]) -> None:
@@ -603,13 +691,16 @@ def _write_report(date_display: str, results: list[dict[str, Any]]) -> None:
 
 # ── CLI 入口 ─────────────────────────────────────────────────────────
 
+
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="每日自动评估脚本")
     parser.add_argument("--date", help="目标日期 YYYYMMDD（默认昨天）")
     parser.add_argument("--force", action="store_true", help="强制重跑（忽略游标）")
-    parser.add_argument("--with-judge", action="store_true", help="启用 LLM Judge（默认只走规则层）")
+    parser.add_argument(
+        "--with-judge", action="store_true", help="启用 LLM Judge（默认只走规则层）"
+    )
     parser.add_argument("--model", default="kimi-k2.5", help="LLM Judge 模型（默认 kimi-k2.5）")
     parser.add_argument("--provider", default="openai", help="LLM 提供商（默认 openai）")
     parser.add_argument("--base-url", help="API base URL")
