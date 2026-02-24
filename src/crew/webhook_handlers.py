@@ -633,6 +633,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 name,
                 _task_desc,
                 channel=channel,
+                output_dir=ctx.project_dir / ".crew" / "trajectories",
             )
             _traj_collector.__enter__()
         except Exception:

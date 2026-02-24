@@ -468,6 +468,7 @@ async def arun_pipeline(
                 pipeline.description or pipeline.name,
                 model=model or "",
                 channel="pipeline",
+                output_dir=project_dir / ".crew" / "trajectories",
             )
             _traj_collector.__enter__()
         except ImportError:

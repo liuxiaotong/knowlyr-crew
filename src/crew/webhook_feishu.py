@@ -775,6 +775,7 @@ async def _feishu_dispatch(
                 employee_name,
                 task_text[:200],
                 channel="feishu",
+                output_dir=ctx.project_dir / ".crew" / "trajectories",
             )
             _traj_collector.__enter__()
         except Exception:

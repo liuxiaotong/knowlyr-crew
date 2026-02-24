@@ -91,6 +91,7 @@ async def _execute_task(
             record.target_name,
             _task_desc[:200],
             channel="delegate",
+            output_dir=ctx.project_dir / ".crew" / "trajectories",
         )
         _traj_collector.__enter__()
     except Exception:
