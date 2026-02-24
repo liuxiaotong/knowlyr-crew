@@ -594,6 +594,168 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _run_and_callback(
+    *,
+    ctx: _AppContext,
+    name: str,
+    args: dict,
+    agent_id: int | None,
+    model: str | None,
+    user_message: str,
+    message_history: list | None,
+    extra_context: str | None,
+    sender_name: str,
+    channel: str,
+    callback_channel_id: int,
+    callback_sender_id: int,
+    callback_parent_id: int | None,
+) -> None:
+    """后台执行员工 + 回调蚁聚发频道消息（异步回调模式）."""
+    import time as _time
+
+    import httpx
+
+    from crew.webhook_context import _ANTGATHER_API_TOKEN, _ANTGATHER_API_URL
+
+    logger.info(
+        "异步回调开始: emp=%s channel=%d sender=%d",
+        name, callback_channel_id, callback_sender_id,
+    )
+
+    # 注入额外上下文
+    _args = dict(args)
+    if extra_context:
+        task = _args.get("task", "")
+        _args["task"] = (extra_context + "\n\n" + task) if task else extra_context
+
+    # 轨迹录制
+    _traj_collector = None
+    try:
+        from crew.trajectory import TrajectoryCollector, resolve_character_name
+
+        _task_desc = _extract_task_description(
+            user_message if isinstance(user_message, str) else str(user_message)
+        )
+        _char_name = resolve_character_name(name, project_dir=ctx.project_dir)
+        _traj_collector = TrajectoryCollector(
+            _char_name, _task_desc,
+            channel=channel,
+            output_dir=ctx.project_dir / ".crew" / "trajectories",
+        )
+        _traj_collector.__enter__()
+    except Exception:
+        _traj_collector = None
+
+    # 执行员工（fast/full path 路由）
+    try:
+        from crew.discovery import discover_employees
+        from crew.tool_schema import AGENT_TOOLS
+        from crew.webhook_feishu import _needs_tools
+
+        discovery = discover_employees(project_dir=ctx.project_dir)
+        emp = discovery.get(name)
+        has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
+        use_fast_path = (
+            has_tools
+            and emp is not None
+            and emp.fallback_model
+            and isinstance(user_message, str)
+            and not _needs_tools(user_message)
+        )
+
+        _t0 = _time.monotonic()
+        if use_fast_path:
+            from crew.webhook_feishu import _feishu_fast_reply
+
+            result = await _feishu_fast_reply(
+                ctx, emp, user_message,
+                message_history=message_history,
+                max_visibility="private",
+                extra_context=extra_context,
+                sender_name=sender_name,
+            )
+        else:
+            import crew.webhook as _wh
+
+            result = await _wh._execute_employee(
+                ctx, name, _args,
+                agent_id=agent_id, model=model,
+                user_message=user_message,
+                message_history=message_history,
+            )
+
+        _elapsed = _time.monotonic() - _t0
+        _path = "fast" if use_fast_path else "full"
+        _m = result.get("model", "?") if isinstance(result, dict) else "?"
+        _in = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+        _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+        logger.warning(
+            "异步回调执行完成 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
+            _path, _elapsed, _m, _in, _out, name, user_message[:40],
+        )
+    except Exception:
+        logger.exception("异步回调执行失败: emp=%s channel=%d", name, callback_channel_id)
+        result = None
+
+    # 轨迹录制完成
+    if _traj_collector is not None:
+        try:
+            _traj_collector.finish(success=result is not None)
+        except Exception as _te:
+            logger.debug("异步轨迹录制失败: %s", _te)
+        finally:
+            _traj_collector.__exit__(None, None, None)
+
+    # 记录任务
+    try:
+        record = ctx.registry.create(
+            trigger=channel, target_type="employee", target_name=name, args=_args,
+        )
+        ctx.registry.update(record.task_id, "completed", result=result)
+    except Exception:
+        pass
+
+    # 回调蚁聚：发频道消息
+    output = ""
+    if isinstance(result, dict):
+        output = (result.get("output") or "").strip()
+    if not output:
+        logger.warning("异步回调: 员工返回空内容，跳过回调 emp=%s channel=%d", name, callback_channel_id)
+        return
+
+    if not _ANTGATHER_API_URL or not _ANTGATHER_API_TOKEN:
+        logger.error("异步回调: 蚁聚 API 未配置，无法发送频道消息")
+        return
+
+    callback_url = f"{_ANTGATHER_API_URL}/api/internal/channels/{callback_channel_id}/messages"
+    callback_payload: dict[str, Any] = {
+        "sender_id": callback_sender_id,
+        "content": output,
+    }
+    if callback_parent_id:
+        callback_payload["parent_id"] = callback_parent_id
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                callback_url,
+                json=callback_payload,
+                headers={"Authorization": f"Bearer {_ANTGATHER_API_TOKEN}"},
+            )
+        if resp.is_success:
+            logger.info(
+                "异步回调成功: emp=%s channel=%d len=%d",
+                name, callback_channel_id, len(output),
+            )
+        else:
+            logger.error(
+                "异步回调失败 (HTTP %d): %s, emp=%s channel=%d",
+                resp.status_code, resp.text[:200], name, callback_channel_id,
+            )
+    except Exception:
+        logger.exception("异步回调请求异常: emp=%s channel=%d", name, callback_channel_id)
+
+
 async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     """直接触发员工（支持 SSE 流式输出 + 对话模式）."""
     from starlette.responses import JSONResponse
@@ -615,6 +777,32 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         extra_context = payload.get("extra_context")
         channel = payload.get("channel", "api")
         sender_name = payload.get("sender_name") or _parse_sender_name(extra_context) or "Kai"
+
+        # ── 异步回调模式（频道 @mention）──
+        callback_channel_id = payload.get("callback_channel_id")
+        callback_sender_id = payload.get("callback_sender_id")
+        callback_parent_id = payload.get("callback_parent_id")
+
+        if callback_channel_id:
+            # 立即返回 202，后台处理 + 回调蚁聚
+            asyncio.create_task(
+                _run_and_callback(
+                    ctx=ctx,
+                    name=name,
+                    args=args,
+                    agent_id=agent_id,
+                    model=model,
+                    user_message=user_message,
+                    message_history=message_history,
+                    extra_context=extra_context,
+                    sender_name=sender_name,
+                    channel=channel,
+                    callback_channel_id=callback_channel_id,
+                    callback_sender_id=callback_sender_id,
+                    callback_parent_id=callback_parent_id,
+                )
+            )
+            return JSONResponse({"status": "accepted"}, status_code=202)
 
         # 注入额外上下文到 args（和飞书 handler 相同模式）
         if extra_context:
