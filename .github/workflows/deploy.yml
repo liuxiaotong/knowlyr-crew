@@ -56,7 +56,7 @@ jobs:
       - name: Install eval crontab
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
-            crontab -l 2>/dev/null | grep -v daily_eval > /tmp/_cron_clean || true
+            crontab -l 2>/dev/null | grep -v 'run_daily_eval\.sh' > /tmp/_cron_clean || true
             echo "0 23 * * * /opt/knowlyr-crew/project/scripts/run_daily_eval.sh >> /var/log/knowlyr-crew-eval.log 2>&1" >> /tmp/_cron_clean
             crontab /tmp/_cron_clean
             rm -f /tmp/_cron_clean

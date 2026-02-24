@@ -143,6 +143,8 @@ def _check_behaviors(output: str, expected_behaviors: list[str]) -> dict[str, bo
 
     简单的字符串匹配，每个 expected_behavior 拆分为关键词，
     检查输出中是否包含大部分关键词。
+
+    TODO: S7 — 当前为粗粒度关键词匹配，考虑引入语义相似度或 LLM 判断提升准确性。
     """
     output_lower = output.lower()
     results: dict[str, bool] = {}

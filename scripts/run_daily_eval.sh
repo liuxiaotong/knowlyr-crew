@@ -5,6 +5,11 @@
 set -a; source /opt/knowlyr-crew/.env; set +a
 cd /opt/knowlyr-crew/project
 
+if [ -z "$AIBERM_API_KEY" ]; then
+    echo "[$(date)] ERROR: AIBERM_API_KEY 未设置，跳过评估"
+    exit 1
+fi
+
 PYTHON=/opt/knowlyr-crew/venv/bin/python
 SCRIPT=scripts/daily_eval.py
 MODEL=claude-opus-4-6

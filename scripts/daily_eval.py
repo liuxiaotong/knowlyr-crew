@@ -16,6 +16,8 @@
     # 同时启用 LLM Judge（默认只走规则层）
     python scripts/daily_eval.py --with-judge --model kimi-k2.5
 
+TODO: S5 — 考虑和 run_eval_testset.py 共享评分引擎，减少重复逻辑
+
 幂等性:
     同一天跑两遍结果一样。评分结果按日期写入固定路径，重复执行会覆盖。
     游标记录已处理的最后一个 session 文件名，增量拉取新数据。
@@ -141,21 +143,11 @@ _SOUL_PROMPT_MIN_LEN = 200
 def _extract_task_from_soul_prompt(text: str) -> str | None:
     """尝试从 soul prompt 中提取 ## 任务 之后的实际任务描述.
 
-    返回提取到的任务文本，提取不到返回 None。
+    委托给 crew.trajectory.extract_task_from_soul_prompt 公共实现。
     """
-    import re
+    from crew.trajectory import extract_task_from_soul_prompt
 
-    # 匹配 ## 任务 或 ## 本次任务 等变体
-    m = re.search(r"##\s*(?:本次)?任务\s*\n+(.+)", text, re.DOTALL)
-    if m:
-        task_text = m.group(1).strip()
-        # 截取到下一个 ## 标题或文本结尾
-        next_section = re.search(r"\n##\s", task_text)
-        if next_section:
-            task_text = task_text[: next_section.start()].strip()
-        if task_text:
-            return task_text
-    return None
+    return extract_task_from_soul_prompt(text)
 
 
 def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
@@ -166,7 +158,8 @@ def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
     2. task 以"你是"开头且超 200 字 → 尝试提取 ## 任务 后的内容
     3. steps 中字段名不统一 → 标准化 tool/params/output
     """
-    traj = trajectory  # 就地修改（避免深拷贝开销）
+    # Intentional in-place mutation for performance — 避免大量深拷贝开销
+    traj = trajectory
 
     # ── task 清洗 ──
     task = traj.get("task")
@@ -227,7 +220,24 @@ def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_domain(employee: str) -> str:
-    return EMPLOYEE_DOMAIN_MAP.get(employee, "conversation")
+    domain = EMPLOYEE_DOMAIN_MAP.get(employee)
+    if domain:
+        return domain
+    # fallback: 尝试从员工角色推断（新增员工无需手动加 MAP）
+    try:
+        from crew.discovery import discover_employees
+
+        disc = discover_employees(project_dir=CREW_ROOT)
+        emp = disc.get(employee)
+        if emp:
+            role = (emp.description or "").lower()
+            if any(k in role for k in ("工程", "engineer", "开发", "测试", "test", "运维", "devops")):
+                return "engineering"
+            if any(k in role for k in ("研究", "设计", "经理", "顾问", "法务", "财务", "HR", "hr")):
+                return "advisory"
+    except Exception:
+        pass
+    return "conversation"  # 默认
 
 
 def traj_employee(traj: dict[str, Any]) -> str:
@@ -719,19 +729,10 @@ def run_daily_eval(
         logger.info("员工过滤 [%s]: %d → %d", employee_filter, before_emp, len(trajectories))
 
     # 过滤空壳轨迹（steps 全空 = 采集 bug，不值得评分）
-    def _is_hollow(t: dict) -> bool:
-        steps = t.get("steps", [])
-        if not steps:
-            return True
-        # 全部 step 的 tool 都是 unknown 且 output 为空 → 空壳
-        return all(
-            (s.get("tool_call", {}).get("name") or s.get("tool_name") or s.get("tool", "")) in ("unknown", "")
-            and not (s.get("tool_result", {}).get("output") or s.get("tool_output") or s.get("output", ""))
-            for s in steps
-        )
+    from crew.trajectory import is_hollow_trajectory
 
     before_hollow = len(trajectories)
-    trajectories = [t for t in trajectories if not _is_hollow(t)]
+    trajectories = [t for t in trajectories if not is_hollow_trajectory(t)]
     if before_hollow != len(trajectories):
         logger.info("过滤空壳轨迹: %d → %d", before_hollow, len(trajectories))
 
@@ -787,8 +788,8 @@ def run_daily_eval(
 
     logger.info("评分完成: %d/%d 成功", len(results), len(trajectories))
 
-    # Step 3: 汇总写入（兼容旧格式 {date}.jsonl）
-    _write_evaluations(date_display, results)
+    # Step 3: 汇总写入（兼容旧格式 {date}.jsonl，按人模式跳过全局文件）
+    _write_evaluations(date_display, results, employee_filter=employee_filter)
 
     # Step 4: 导出高分范例
     exemplar_count = _export_exemplars(results)
@@ -797,8 +798,8 @@ def run_daily_eval(
     # Step 5: 生成日报
     _write_report(date_display, results)
 
-    # Step 6: 更新游标
-    if last_source_file and last_source_file != cursor:
+    # Step 6: 更新游标（仅全量模式更新，按人模式跳过避免竞争）
+    if not employee_filter and last_source_file and last_source_file != cursor:
         _write_cursor(last_source_file)
         logger.info("游标更新: %s", last_source_file[:20])
 
@@ -810,14 +811,22 @@ def run_daily_eval(
     }
 
 
-def _write_evaluations(date_display: str, results: list[dict[str, Any]]) -> None:
-    """写入评分结果到 .crew/evaluations/{date}.jsonl（覆盖写入，保证幂等）."""
+def _write_evaluations(
+    date_display: str,
+    results: list[dict[str, Any]],
+    employee_filter: str | None = None,
+) -> None:
+    """写入评分结果到 .crew/evaluations/{date}.jsonl（覆盖写入，保证幂等）.
+
+    按人模式只写 per-employee 文件，不写全局汇总（避免多进程覆盖冲突）。
+    """
     EVALUATIONS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = EVALUATIONS_DIR / f"{date_display}.jsonl"
-    with open(output_path, "w", encoding="utf-8") as f:
-        for r in results:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    logger.info("评分结果: %s (%d 条)", output_path, len(results))
+    if not employee_filter:
+        output_path = EVALUATIONS_DIR / f"{date_display}.jsonl"
+        with open(output_path, "w", encoding="utf-8") as f:
+            for r in results:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        logger.info("评分结果: %s (%d 条)", output_path, len(results))
 
 
 def _export_exemplars(results: list[dict[str, Any]]) -> int:
@@ -879,7 +888,7 @@ def _write_exemplar_memory(
             existing = memory_store.query(
                 employee,
                 category="finding",
-                limit=50,
+                limit=100,
             )
             for entry in existing:
                 if entry.source_session == session_id and "exemplar" in (entry.tags or []):

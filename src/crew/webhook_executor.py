@@ -18,6 +18,19 @@ from crew.webhook_tools import get_all_tool_handlers
 
 _TOOL_HANDLERS: dict[str, Any] = get_all_tool_handlers()
 
+# 后台任务引用集合 — 防止 GC 提前回收 + 异常日志
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """后台 task 完成回调：记录异常日志 + 从引用集合移除."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("后台任务异常: %s", exc, exc_info=exc)
+
 
 async def _dispatch_task(
     ctx: _AppContext,
@@ -58,9 +71,11 @@ async def _dispatch_task(
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id)
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return JSONResponse(
         {"task_id": record.task_id, "status": "pending"},
         status_code=202,
@@ -84,19 +99,17 @@ async def _execute_task(
     # ── 轨迹录制 ──
     _traj_collector = None
     try:
-        from crew.trajectory import TrajectoryCollector, resolve_character_name
+        from crew.trajectory import TrajectoryCollector
 
         _task_desc = record.args.get("task", "") or record.target_name
-        _char_name = resolve_character_name(record.target_name, project_dir=ctx.project_dir)
-        _traj_collector = TrajectoryCollector(
-            _char_name,
-            _task_desc[:200],
-            channel="delegate",
-            output_dir=ctx.project_dir / ".crew" / "trajectories",
+        _traj_collector = TrajectoryCollector.create_for_employee(
+            record.target_name, _task_desc, channel="delegate", project_dir=ctx.project_dir,
         )
-        _traj_collector.__enter__()
     except Exception:
         _traj_collector = None
+
+    if _traj_collector is not None:
+        _traj_collector.__enter__()
 
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
@@ -153,14 +166,17 @@ async def _execute_task(
             except Exception as e:
                 logger.debug("成本追踪失败: %s", e)
 
-        # 完成轨迹录制（成功）
+        # 完成轨迹录制（成功，finally 确保 __exit__ 被调用）
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=True)
             except Exception as _te:
                 logger.debug("delegate 轨迹录制失败: %s", _te)
             finally:
-                _traj_collector.__exit__(None, None, None)
+                try:
+                    _traj_collector.__exit__(None, None, None)
+                except Exception:
+                    pass
                 _traj_collector = None
 
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
@@ -315,14 +331,17 @@ async def _execute_task(
             except Exception as e:
                 logger.warning("任务后处理失败 (employee=%s): %s", record.target_name, e)
     except Exception as e:
-        # 完成轨迹录制（失败）
+        # 完成轨迹录制（失败，finally 确保 __exit__ 被调用）
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=False)
             except Exception:
                 pass
             finally:
-                _traj_collector.__exit__(None, None, None)
+                try:
+                    _traj_collector.__exit__(None, None, None)
+                except Exception:
+                    pass
                 _traj_collector = None
 
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)

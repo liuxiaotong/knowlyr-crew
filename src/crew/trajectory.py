@@ -39,9 +39,12 @@ def resolve_character_name(slug_or_name: str, *, project_dir: Path | None = None
     """
     if not slug_or_name:
         return slug_or_name
-    # 已经是中文 → 直接返回
+    # 基本 CJK 区判断（\u4e00-\u9fff），覆盖所有常用中文字符，满足员工名检测需求
     if any("\u4e00" <= c <= "\u9fff" for c in slug_or_name):
         return slug_or_name
+    # 缓存上限保护（正常 ~33 员工，超 200 说明有异常数据，清空重建）
+    if len(_NAME_CACHE) > 200:
+        _NAME_CACHE.clear()
     # 缓存命中
     if slug_or_name in _NAME_CACHE:
         return _NAME_CACHE[slug_or_name]
@@ -57,6 +60,51 @@ def resolve_character_name(slug_or_name: str, *, project_dir: Path | None = None
     except Exception:
         pass
     return slug_or_name
+
+
+def is_hollow_trajectory(data: dict[str, Any]) -> bool:
+    """判断轨迹是否为空壳（steps 全空或无实质内容）.
+
+    公共函数，供 daily_eval.py / clean_trajectories.py 复用。
+    """
+    steps = data.get("steps", [])
+    if not steps:
+        return True
+    # 全部 step 的 tool 都是 unknown/空 且 output 为空 → 空壳
+    for s in steps:
+        tool = (
+            s.get("tool")
+            or (s.get("tool_call", {}) or {}).get("name")
+            or s.get("tool_name", "")
+        )
+        output = (
+            s.get("output")
+            or (s.get("tool_result", {}) or {}).get("output")
+            or s.get("tool_output", "")
+        )
+        token_count = s.get("token_count", 0) or 0
+        if tool not in ("unknown", "") or output or token_count > 0:
+            return False
+    return True
+
+
+def extract_task_from_soul_prompt(text: str) -> str | None:
+    """尝试从 soul prompt 中提取 ## 任务 之后的实际任务描述.
+
+    公共函数，供 daily_eval.py / clean_trajectories.py / webhook_handlers.py 复用。
+    返回提取到的任务文本，提取不到返回 None。
+    """
+    import re
+
+    m = re.search(r"##\s*(?:本次)?任务\s*\n+(.+)", text, re.DOTALL)
+    if m:
+        task_text = m.group(1).strip()
+        next_section = re.search(r"\n##\s", task_text)
+        if next_section:
+            task_text = task_text[: next_section.start()].strip()
+        if task_text:
+            return task_text
+    return None
 
 
 def _try_import_recorder():
@@ -101,6 +149,23 @@ class TrajectoryCollector:
         self._step_count = 0
         self._token: contextvars.Token | None = None
         self._pending: dict[str, Any] | None = None
+
+    @classmethod
+    def create_for_employee(
+        cls,
+        employee_name: str,
+        task_description: str,
+        channel: str,
+        project_dir: Path,
+    ) -> TrajectoryCollector:
+        """工厂方法：resolve 中文名 + 设置 output_dir."""
+        char_name = resolve_character_name(employee_name, project_dir=project_dir)
+        return cls(
+            char_name,
+            task_description[:200],
+            channel=channel,
+            output_dir=project_dir / ".crew" / "trajectories",
+        )
 
     def __enter__(self) -> TrajectoryCollector:
         self._token = _collector_var.set(self)

@@ -30,32 +30,20 @@ from pathlib import Path
 from typing import Any
 
 CREW_ROOT = Path(__file__).resolve().parent.parent
+
+# 确保 crew 模块可导入
+sys.path.insert(0, str(CREW_ROOT / "src"))
+
 DEFAULT_FILE = CREW_ROOT / ".crew" / "trajectories" / "trajectories.jsonl"
 
 # ── 检测函数 ──────────────────────────────────────────────────────────
 
 
 def _is_hollow(data: dict[str, Any]) -> bool:
-    """判断轨迹是否为空壳（steps 全空或无实质内容）."""
-    steps = data.get("steps", [])
-    if not steps:
-        return True
-    # 全部 step 的 tool 都是 unknown/空 且 output 为空 → 空壳
-    for s in steps:
-        tool = (
-            s.get("tool")
-            or (s.get("tool_call", {}) or {}).get("name")
-            or s.get("tool_name", "")
-        )
-        output = (
-            s.get("output")
-            or (s.get("tool_result", {}) or {}).get("output")
-            or s.get("tool_output", "")
-        )
-        token_count = s.get("token_count", 0) or 0
-        if tool not in ("unknown", "") or output or token_count > 0:
-            return False
-    return True
+    """判断轨迹是否为空壳 — 委托给 crew.trajectory 公共实现."""
+    from crew.trajectory import is_hollow_trajectory
+
+    return is_hollow_trajectory(data)
 
 
 def _is_soul_prompt_task(task: str) -> bool:
@@ -64,17 +52,10 @@ def _is_soul_prompt_task(task: str) -> bool:
 
 
 def _extract_task_from_soul_prompt(text: str) -> str | None:
-    """尝试从 soul prompt 中提取 ## 任务 之后的实际任务描述."""
-    m = re.search(r"##\s*(?:本次)?任务\s*\n+(.+)", text, re.DOTALL)
-    if m:
-        task_text = m.group(1).strip()
-        # 截取到下一个 ## 标题或文本结尾
-        next_section = re.search(r"\n##\s", task_text)
-        if next_section:
-            task_text = task_text[: next_section.start()].strip()
-        if task_text:
-            return task_text
-    return None
+    """尝试从 soul prompt 中提取 ## 任务 — 委托给 crew.trajectory 公共实现."""
+    from crew.trajectory import extract_task_from_soul_prompt
+
+    return extract_task_from_soul_prompt(text)
 
 
 def _get_task_string(data: dict[str, Any]) -> str:

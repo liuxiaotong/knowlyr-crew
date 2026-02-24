@@ -10,6 +10,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 后台任务引用集合 — 防止 GC 提前回收 + 异常日志
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """后台 task 完成回调：记录异常日志 + 从引用集合移除."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("后台任务异常: %s", exc, exc_info=exc)
+
+
 import re as _re
 
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
@@ -631,20 +645,19 @@ async def _run_and_callback(
     # 轨迹录制
     _traj_collector = None
     try:
-        from crew.trajectory import TrajectoryCollector, resolve_character_name
+        from crew.trajectory import TrajectoryCollector
 
         _task_desc = _extract_task_description(
             user_message if isinstance(user_message, str) else str(user_message)
         )
-        _char_name = resolve_character_name(name, project_dir=ctx.project_dir)
-        _traj_collector = TrajectoryCollector(
-            _char_name, _task_desc,
-            channel=channel,
-            output_dir=ctx.project_dir / ".crew" / "trajectories",
+        _traj_collector = TrajectoryCollector.create_for_employee(
+            name, _task_desc, channel=channel, project_dir=ctx.project_dir,
         )
-        _traj_collector.__enter__()
     except Exception:
         _traj_collector = None
+
+    if _traj_collector is not None:
+        _traj_collector.__enter__()
 
     # 执行员工（fast/full path 路由）
     try:
@@ -689,7 +702,7 @@ async def _run_and_callback(
         _m = result.get("model", "?") if isinstance(result, dict) else "?"
         _in = result.get("input_tokens", 0) if isinstance(result, dict) else 0
         _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
-        logger.warning(
+        logger.info(
             "异步回调执行完成 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
             _path, _elapsed, _m, _in, _out, name, user_message[:40],
         )
@@ -697,14 +710,17 @@ async def _run_and_callback(
         logger.exception("异步回调执行失败: emp=%s channel=%d", name, callback_channel_id)
         result = None
 
-    # 轨迹录制完成
+    # 轨迹录制完成（finally 确保 __exit__ 被调用）
     if _traj_collector is not None:
         try:
             _traj_collector.finish(success=result is not None)
         except Exception as _te:
             logger.debug("异步轨迹录制失败: %s", _te)
         finally:
-            _traj_collector.__exit__(None, None, None)
+            try:
+                _traj_collector.__exit__(None, None, None)
+            except Exception:
+                pass
 
     # 记录任务
     try:
@@ -780,12 +796,27 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
         # ── 异步回调模式（频道 @mention）──
         callback_channel_id = payload.get("callback_channel_id")
+        if callback_channel_id is not None:
+            try:
+                callback_channel_id = int(callback_channel_id)
+            except (TypeError, ValueError):
+                callback_channel_id = None
         callback_sender_id = payload.get("callback_sender_id")
+        if callback_sender_id is not None:
+            try:
+                callback_sender_id = int(callback_sender_id)
+            except (TypeError, ValueError):
+                callback_sender_id = None
         callback_parent_id = payload.get("callback_parent_id")
+        if callback_parent_id is not None:
+            try:
+                callback_parent_id = int(callback_parent_id)
+            except (TypeError, ValueError):
+                callback_parent_id = None
 
         if callback_channel_id:
             # 立即返回 202，后台处理 + 回调蚁聚
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _run_and_callback(
                     ctx=ctx,
                     name=name,
@@ -802,6 +833,8 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     callback_parent_id=callback_parent_id,
                 )
             )
+            _background_tasks.add(task)
+            task.add_done_callback(_task_done_callback)
             return JSONResponse({"status": "accepted"}, status_code=202)
 
         # 注入额外上下文到 args（和飞书 handler 相同模式）
@@ -812,21 +845,19 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         # ── 轨迹录制 ──
         _traj_collector = None
         try:
-            from crew.trajectory import TrajectoryCollector, resolve_character_name
+            from crew.trajectory import TrajectoryCollector
 
             _task_desc = _extract_task_description(
                 user_message if isinstance(user_message, str) else str(user_message)
             )
-            _char_name = resolve_character_name(name, project_dir=ctx.project_dir)
-            _traj_collector = TrajectoryCollector(
-                _char_name,
-                _task_desc,
-                channel=channel,
-                output_dir=ctx.project_dir / ".crew" / "trajectories",
+            _traj_collector = TrajectoryCollector.create_for_employee(
+                name, _task_desc, channel=channel, project_dir=ctx.project_dir,
             )
-            _traj_collector.__enter__()
         except Exception:
             _traj_collector = None
+
+        if _traj_collector is not None:
+            _traj_collector.__enter__()
 
         # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
         import time as _time
@@ -877,7 +908,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         _m = result.get("model", "?") if isinstance(result, dict) else "?"
         _in = result.get("input_tokens", 0) if isinstance(result, dict) else 0
         _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
-        logger.warning(
+        logger.info(
             "站内回复 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
             _path,
             _elapsed,
@@ -888,14 +919,17 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             user_message[:40],
         )
 
-        # 完成轨迹录制
+        # 完成轨迹录制（finally 确保 __exit__ 被调用）
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=True)
             except Exception as _te:
                 logger.debug("站内轨迹录制失败: %s", _te)
             finally:
-                _traj_collector.__exit__(None, None, None)
+                try:
+                    _traj_collector.__exit__(None, None, None)
+                except Exception:
+                    pass
 
         # 记录任务用于成本追踪
         record = ctx.registry.create(
@@ -1159,7 +1193,9 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
 
     from crew.webhook_executor import _resume_chain
 
-    asyncio.create_task(_resume_chain(ctx, task_id))
+    task = asyncio.create_task(_resume_chain(ctx, task_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return JSONResponse({"status": "approved", "task_id": task_id})
 
 
