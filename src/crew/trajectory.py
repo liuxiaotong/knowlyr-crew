@@ -167,6 +167,22 @@ class TrajectoryCollector:
             output_dir=project_dir / ".crew" / "trajectories",
         )
 
+    @classmethod
+    def try_create_for_employee(
+        cls,
+        employee_name: str,
+        task_description: str,
+        channel: str,
+        project_dir: Path,
+    ) -> TrajectoryCollector | None:
+        """工厂方法：尝试创建 collector，失败时返回 None 而非抛异常."""
+        try:
+            return cls.create_for_employee(
+                employee_name, task_description, channel=channel, project_dir=project_dir,
+            )
+        except Exception:
+            return None
+
     def __enter__(self) -> TrajectoryCollector:
         self._token = _collector_var.set(self)
         return self

@@ -262,8 +262,10 @@ class MemoryStore:
             applicability=applicability or [],
             origin_employee=origin_employee or employee,
         )
-        with self._employee_file(employee).open("a", encoding="utf-8") as f:
-            f.write(entry.model_dump_json() + "\n")
+        path = self._employee_file(employee)
+        with file_lock(path):
+            with path.open("a", encoding="utf-8") as f:
+                f.write(entry.model_dump_json() + "\n")
         self._auto_index(entry)
         self._enforce_capacity(employee)
         return entry
@@ -821,6 +823,27 @@ class MemoryStore:
                 return True
 
         return False
+
+    def count(self, employee: str) -> int:
+        """返回员工的有效记忆条数（排除已覆盖和已过期的），无需加载全部内容."""
+        path = self._employee_file(employee)
+        if not path.exists():
+            return 0
+        n = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = MemoryEntry(**json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if entry.superseded_by:
+                continue
+            if self._is_expired(entry):
+                continue
+            n += 1
+        return n
 
     def list_employees(self) -> list[str]:
         """列出有记忆的员工."""

@@ -21,11 +21,25 @@ class TestValidatePythonCode:
     def test_valid_import_json(self):
         assert _validate_python_code("import json\nprint(json.dumps({'a':1}))") is None
 
-    def test_valid_import_httpx(self):
-        assert _validate_python_code("import httpx") is None
+    def test_blocked_import_httpx(self):
+        result = _validate_python_code("import httpx")
+        assert result is not None
+        assert "不允许" in result
 
-    def test_valid_import_bs4(self):
-        assert _validate_python_code("from bs4 import BeautifulSoup") is None
+    def test_blocked_import_bs4(self):
+        result = _validate_python_code("from bs4 import BeautifulSoup")
+        assert result is not None
+        assert "不允许" in result
+
+    def test_blocked_os_system_via_attribute(self):
+        result = _validate_python_code("import json\njson.system()")
+        assert result is not None
+        assert "不允许" in result
+
+    def test_blocked_subprocess_popen_via_attribute(self):
+        result = _validate_python_code("x.Popen(['ls'])")
+        assert result is not None
+        assert "不允许" in result
 
     def test_valid_import_from(self):
         assert _validate_python_code("from datetime import datetime") is None

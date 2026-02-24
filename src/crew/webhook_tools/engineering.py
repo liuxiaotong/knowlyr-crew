@@ -943,9 +943,6 @@ _ALLOWED_MODULES: set[str] = {
     "fractions",
     "bisect",
     "heapq",
-    "httpx",
-    "bs4",
-    "lxml",
 }
 
 # 禁止调用的内置函数
@@ -988,6 +985,16 @@ def _validate_python_code(code: str) -> str | None:
                 mod = node.module.split(".")[0]
                 if mod not in _ALLOWED_MODULES:
                     return f"不允许导入 {node.module}（安全限制）"
+
+        # 检查危险属性访问（os.system 等）
+        if isinstance(node, ast.Attribute):
+            _BLOCKED_ATTRS = {
+                "system", "popen", "exec", "spawn", "call", "run", "Popen",
+                "check_output", "check_call", "getstatusoutput", "execvp", "execve",
+                "fork", "kill", "remove", "rmdir", "unlink", "rmtree",
+            }
+            if node.attr in _BLOCKED_ATTRS:
+                return f"不允许调用 .{node.attr}()（安全限制）"
 
         # 检查危险函数调用
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):

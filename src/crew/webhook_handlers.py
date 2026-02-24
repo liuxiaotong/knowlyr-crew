@@ -29,6 +29,16 @@ import re as _re
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
 
 
+def _safe_int(value: str | None, default: int = 0) -> int:
+    """安全转换为 int，转换失败时返回默认值."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
     """更新 employee.yaml 中的指定字段."""
     import tempfile
@@ -263,10 +273,10 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    limit = int(request.query_params.get("memory_limit", "10"))
+    limit = _safe_int(request.query_params.get("memory_limit", "10"), 10)
     sort_by = request.query_params.get("sort_by", "created_at")
-    min_importance = int(request.query_params.get("min_importance", "0"))
-    max_tokens = int(request.query_params.get("max_tokens", "0"))  # 0=不限
+    min_importance = _safe_int(request.query_params.get("min_importance", "0"), 0)
+    max_tokens = _safe_int(request.query_params.get("max_tokens", "0"), 0)  # 0=不限
 
     # 读取 soul.md
     soul = ""
@@ -456,7 +466,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
         {
             "ok": True,
             "deleted": employee.name,
-            "remote_disabled": remote_disabled,
         }
     )
 
@@ -643,21 +652,19 @@ async def _run_and_callback(
         _args["task"] = (extra_context + "\n\n" + task) if task else extra_context
 
     # 轨迹录制
-    _traj_collector = None
-    try:
-        from crew.trajectory import TrajectoryCollector
+    from contextlib import ExitStack
 
-        _task_desc = _extract_task_description(
-            user_message if isinstance(user_message, str) else str(user_message)
-        )
-        _traj_collector = TrajectoryCollector.create_for_employee(
-            name, _task_desc, channel=channel, project_dir=ctx.project_dir,
-        )
-    except Exception:
-        _traj_collector = None
+    from crew.trajectory import TrajectoryCollector
 
+    _exit_stack = ExitStack()
+    _task_desc = _extract_task_description(
+        user_message if isinstance(user_message, str) else str(user_message)
+    )
+    _traj_collector = TrajectoryCollector.try_create_for_employee(
+        name, _task_desc, channel=channel, project_dir=ctx.project_dir,
+    )
     if _traj_collector is not None:
-        _traj_collector.__enter__()
+        _exit_stack.enter_context(_traj_collector)
 
     # 执行员工（fast/full path 路由）
     try:
@@ -710,17 +717,14 @@ async def _run_and_callback(
         logger.exception("异步回调执行失败: emp=%s channel=%d", name, callback_channel_id)
         result = None
 
-    # 轨迹录制完成（finally 确保 __exit__ 被调用）
+    # 轨迹录制完成
     if _traj_collector is not None:
         try:
             _traj_collector.finish(success=result is not None)
         except Exception as _te:
             logger.debug("异步轨迹录制失败: %s", _te)
         finally:
-            try:
-                _traj_collector.__exit__(None, None, None)
-            except Exception:
-                pass
+            _exit_stack.close()
 
     # 记录任务
     try:
@@ -843,21 +847,19 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             args["task"] = (extra_context + "\n\n" + task) if task else extra_context
 
         # ── 轨迹录制 ──
-        _traj_collector = None
-        try:
-            from crew.trajectory import TrajectoryCollector
+        from contextlib import ExitStack
 
-            _task_desc = _extract_task_description(
-                user_message if isinstance(user_message, str) else str(user_message)
-            )
-            _traj_collector = TrajectoryCollector.create_for_employee(
-                name, _task_desc, channel=channel, project_dir=ctx.project_dir,
-            )
-        except Exception:
-            _traj_collector = None
+        from crew.trajectory import TrajectoryCollector
 
+        _exit_stack = ExitStack()
+        _task_desc = _extract_task_description(
+            user_message if isinstance(user_message, str) else str(user_message)
+        )
+        _traj_collector = TrajectoryCollector.try_create_for_employee(
+            name, _task_desc, channel=channel, project_dir=ctx.project_dir,
+        )
         if _traj_collector is not None:
-            _traj_collector.__enter__()
+            _exit_stack.enter_context(_traj_collector)
 
         # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
         import time as _time
@@ -919,17 +921,14 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             user_message[:40],
         )
 
-        # 完成轨迹录制（finally 确保 __exit__ 被调用）
+        # 完成轨迹录制
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=True)
             except Exception as _te:
                 logger.debug("站内轨迹录制失败: %s", _te)
             finally:
-                try:
-                    _traj_collector.__exit__(None, None, None)
-                except Exception:
-                    pass
+                _exit_stack.close()
 
         # 记录任务用于成本追踪
         record = ctx.registry.create(
@@ -1220,7 +1219,7 @@ async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
 
     from crew.cost import query_cost_summary
 
-    days = int(request.query_params.get("days", "7"))
+    days = _safe_int(request.query_params.get("days", "7"), 7)
     employee = request.query_params.get("employee")
     source = request.query_params.get("source")
 
@@ -1294,9 +1293,9 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
     from crew.memory import MemoryStore
 
-    days = int(request.query_params.get("days", "7"))
+    days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
-    limit = int(request.query_params.get("limit", "50"))
+    limit = _safe_int(request.query_params.get("limit", "50"), 50)
 
     result = discover_employees(ctx.project_dir)
     store = MemoryStore(project_dir=ctx.project_dir)
@@ -1427,7 +1426,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
     from crew.organization import get_effective_authority, load_organization
 
-    days = int(request.query_params.get("days", "7"))
+    days = _safe_int(request.query_params.get("days", "7"), 7)
     if days not in (7, 30, 90):
         days = 7
 
@@ -1490,15 +1489,14 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     store = MemoryStore(project_dir=ctx.project_dir)
     memory_counts: dict[str, int] = {}
     for name in result.employees:
-        memories = store.query(name, limit=1000)
-        memory_counts[name] = len(memories)
+        memory_counts[name] = store.count(name)
 
     # 聚合员工运行时数据
     from datetime import datetime, timedelta
 
     cutoff = datetime.now() - timedelta(days=days)
     emp_runtime: dict[str, dict] = {}
-    for rec in ctx.registry._tasks.values():
+    for rec in ctx.registry.snapshot():
         if rec.target_type != "employee":
             continue
         rname = rec.target_name
@@ -1634,7 +1632,7 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse
 
-    days = int(request.query_params.get("days", "7"))
+    days = _safe_int(request.query_params.get("days", "7"), 7)
     cutoff = datetime.now() - timedelta(days=days)
     cutoff_str = cutoff.isoformat()
 
@@ -1645,7 +1643,7 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     total_failed = 0
     total_cost = 0.0
 
-    for t in ctx.registry._tasks.values():
+    for t in ctx.registry.snapshot():
         if not t.created_at or t.created_at.isoformat() < cutoff_str:
             continue
         if t.status not in ("completed", "failed"):
@@ -1682,7 +1680,8 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     if ctx.project_dir:
         traj_file = ctx.project_dir / ".crew" / "trajectories" / "trajectories.jsonl"
         if traj_file.exists():
-            traj_count = sum(1 for _ in open(traj_file, "r", encoding="utf-8"))
+            with open(traj_file, "r", encoding="utf-8") as _f:
+                traj_count = sum(1 for _ in _f)
 
     return JSONResponse({
         "daily": daily_list,

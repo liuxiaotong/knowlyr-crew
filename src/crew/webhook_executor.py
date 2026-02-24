@@ -97,19 +97,19 @@ async def _execute_task(
     ctx.registry.update(task_id, "running")
 
     # ── 轨迹录制 ──
-    _traj_collector = None
-    try:
-        from crew.trajectory import TrajectoryCollector
+    from contextlib import ExitStack
 
-        _task_desc = record.args.get("task", "") or record.target_name
-        _traj_collector = TrajectoryCollector.create_for_employee(
-            record.target_name, _task_desc, channel="delegate", project_dir=ctx.project_dir,
-        )
-    except Exception:
-        _traj_collector = None
+    from crew.trajectory import TrajectoryCollector
 
+    _exit_stack = ExitStack()
+    _traj_collector = TrajectoryCollector.try_create_for_employee(
+        record.target_name,
+        record.args.get("task", "") or record.target_name,
+        channel="delegate",
+        project_dir=ctx.project_dir,
+    )
     if _traj_collector is not None:
-        _traj_collector.__enter__()
+        _exit_stack.enter_context(_traj_collector)
 
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
@@ -166,18 +166,14 @@ async def _execute_task(
             except Exception as e:
                 logger.debug("成本追踪失败: %s", e)
 
-        # 完成轨迹录制（成功，finally 确保 __exit__ 被调用）
+        # 完成轨迹录制（成功）
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=True)
             except Exception as _te:
                 logger.debug("delegate 轨迹录制失败: %s", _te)
             finally:
-                try:
-                    _traj_collector.__exit__(None, None, None)
-                except Exception:
-                    pass
-                _traj_collector = None
+                _exit_stack.close()
 
         logger.info("任务完成 [trace=%s] task=%s", trace_id, task_id)
         ctx.registry.update(task_id, "completed", result=result)
@@ -331,18 +327,14 @@ async def _execute_task(
             except Exception as e:
                 logger.warning("任务后处理失败 (employee=%s): %s", record.target_name, e)
     except Exception as e:
-        # 完成轨迹录制（失败，finally 确保 __exit__ 被调用）
+        # 完成轨迹录制（失败）
         if _traj_collector is not None:
             try:
                 _traj_collector.finish(success=False)
             except Exception:
                 pass
             finally:
-                try:
-                    _traj_collector.__exit__(None, None, None)
-                except Exception:
-                    pass
-                _traj_collector = None
+                _exit_stack.close()
 
         logger.exception("任务执行失败 [trace=%s]: %s", trace_id, task_id)
         ctx.registry.update(task_id, "failed", error=str(e))
@@ -669,6 +661,49 @@ async def _resume_chain(ctx: _AppContext, task_id: str) -> None:
         ctx.registry.update(task_id, "failed", error=str(e))
 
 
+def _process_load_tools(
+    arguments: dict[str, Any],
+    deferred_names: set[str],
+    loaded_deferred: set[str],
+    tool_schemas: list[dict[str, Any]],
+) -> str:
+    """处理 load_tools 请求的公共逻辑（Anthropic/OpenAI 格式共用）.
+
+    就地修改 loaded_deferred 和 tool_schemas，返回结果消息。
+    """
+    from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema, get_tool_schema
+
+    requested = {n.strip() for n in arguments.get("names", "").split(",") if n.strip()}
+    # 展开技能包名为工具名
+    expanded: set[str] = set()
+    for rn in requested:
+        if rn in SKILL_PACKS:
+            expanded |= SKILL_PACKS[rn]["tools"]
+        else:
+            expanded.add(rn)
+    newly = []
+    for tn in sorted(expanded):
+        if tn in deferred_names and tn not in loaded_deferred:
+            schema = get_tool_schema(tn)
+            if schema:
+                tool_schemas.append(schema)
+                loaded_deferred.add(tn)
+                newly.append(tn)
+    remaining = deferred_names - loaded_deferred
+    if not remaining:
+        tool_schemas[:] = [s for s in tool_schemas if s["name"] != "load_tools"]
+    else:
+        new_load_schema = _make_load_tools_schema(remaining)
+        for s in tool_schemas:
+            if s["name"] == "load_tools":
+                s["description"] = new_load_schema["description"]
+    return (
+        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
+        if newly
+        else "这些工具已加载。"
+    )
+
+
 async def _execute_employee_with_tools(
     ctx: _AppContext,
     name: str,
@@ -820,39 +855,8 @@ async def _execute_employee_with_tools(
             finished = False
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
-                    # ── 延迟加载工具（支持技能包名） ──
-                    from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
-
-                    requested = {
-                        n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()
-                    }
-                    # 展开技能包名为工具名
-                    expanded: set[str] = set()
-                    for rn in requested:
-                        if rn in SKILL_PACKS:
-                            expanded |= SKILL_PACKS[rn]["tools"]
-                        else:
-                            expanded.add(rn)
-                    newly = []
-                    for tn in sorted(expanded):
-                        if tn in deferred_names and tn not in loaded_deferred:
-                            schema = get_tool_schema(tn)
-                            if schema:
-                                tool_schemas.append(schema)
-                                loaded_deferred.add(tn)
-                                newly.append(tn)
-                    remaining = deferred_names - loaded_deferred
-                    if not remaining:
-                        tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
-                    else:
-                        new_load_schema = _make_load_tools_schema(remaining)
-                        for s in tool_schemas:
-                            if s["name"] == "load_tools":
-                                s["description"] = new_load_schema["description"]
-                    load_msg = (
-                        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
-                        if newly
-                        else "这些工具已加载。"
+                    load_msg = _process_load_tools(
+                        tc.arguments, deferred_names, loaded_deferred, tool_schemas,
                     )
                     tool_results.append(
                         {
@@ -914,38 +918,8 @@ async def _execute_employee_with_tools(
             finished = False
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
-                    # ── 延迟加载工具（支持技能包名） ──
-                    from crew.tool_schema import SKILL_PACKS, _make_load_tools_schema
-
-                    requested = {
-                        n.strip() for n in tc.arguments.get("names", "").split(",") if n.strip()
-                    }
-                    expanded: set[str] = set()
-                    for rn in requested:
-                        if rn in SKILL_PACKS:
-                            expanded |= SKILL_PACKS[rn]["tools"]
-                        else:
-                            expanded.add(rn)
-                    newly = []
-                    for tn in sorted(expanded):
-                        if tn in deferred_names and tn not in loaded_deferred:
-                            schema = get_tool_schema(tn)
-                            if schema:
-                                tool_schemas.append(schema)
-                                loaded_deferred.add(tn)
-                                newly.append(tn)
-                    remaining = deferred_names - loaded_deferred
-                    if not remaining:
-                        tool_schemas = [s for s in tool_schemas if s["name"] != "load_tools"]
-                    else:
-                        new_load_schema = _make_load_tools_schema(remaining)
-                        for s in tool_schemas:
-                            if s["name"] == "load_tools":
-                                s["description"] = new_load_schema["description"]
-                    load_msg = (
-                        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
-                        if newly
-                        else "这些工具已加载。"
+                    load_msg = _process_load_tools(
+                        tc.arguments, deferred_names, loaded_deferred, tool_schemas,
                     )
                     messages.append(
                         {

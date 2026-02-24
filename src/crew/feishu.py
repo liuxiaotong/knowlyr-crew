@@ -19,6 +19,32 @@ from crew.paths import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
+# ── 共享 httpx 连接池 ──
+
+import httpx
+
+_feishu_client: httpx.AsyncClient | None = None
+
+
+def get_feishu_client() -> httpx.AsyncClient:
+    """获取共享的飞书 httpx 客户端（连接池复用）."""
+    global _feishu_client
+    if _feishu_client is None or _feishu_client.is_closed:
+        _feishu_client = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _feishu_client
+
+
+async def close_feishu_client() -> None:
+    """关闭共享客户端（应用退出时调用）."""
+    global _feishu_client
+    if _feishu_client is not None:
+        await _feishu_client.aclose()
+        _feishu_client = None
+
+
 FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
 TOKEN_REFRESH_MARGIN = 300  # 过期前 5 分钟刷新
 MESSAGE_SEND_TIMEOUT = 30.0
@@ -160,14 +186,12 @@ class FeishuTokenManager:
 
     async def _refresh(self) -> str:
         """POST /auth/v3/tenant_access_token/internal."""
-        import httpx
-
         url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
         payload = {"app_id": self._app_id, "app_secret": self._app_secret}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(url, json=payload)
+        data = resp.json()
 
         code = data.get("code", -1)
         if code != 0:
@@ -202,17 +226,15 @@ async def get_user_name(
     if open_id in _USER_NAME_CACHE:
         return _USER_NAME_CACHE[open_id]
 
-    import httpx
-
     token = await token_manager.get_token()
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{FEISHU_API_BASE}/contact/v3/users/{open_id}",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"user_id_type": "open_id"},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            f"{FEISHU_API_BASE}/contact/v3/users/{open_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"user_id_type": "open_id"},
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             name = data.get("data", {}).get("user", {}).get("name", "")
@@ -425,41 +447,39 @@ async def download_feishu_image(
     优先使用消息资源接口 GET /im/v1/messages/{message_id}/resources/{file_key}，
     回退到图片接口 GET /im/v1/images/{image_key}。
     """
-    import httpx
-
     token = await token_manager.get_token()
     headers = {"Authorization": f"Bearer {token}"}
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # 优先：消息资源下载（支持 v3 image_key）
-        if message_id:
-            url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/resources/{image_key}"
-            resp = await client.get(url, headers=headers, params={"type": "image"})
-            if resp.status_code == 200:
-                content_type = resp.headers.get("content-type", "")
-                if "json" not in content_type:
-                    # 成功拿到二进制图片
-                    return _parse_image_response(resp)
-            import logging as _logging
+    client = get_feishu_client()
+    # 优先：消息资源下载（支持 v3 image_key）
+    if message_id:
+        url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/resources/{image_key}"
+        resp = await client.get(url, headers=headers, params={"type": "image"})
+        if resp.status_code == 200:
+            content_type = resp.headers.get("content-type", "")
+            if "json" not in content_type:
+                # 成功拿到二进制图片
+                return _parse_image_response(resp)
+        import logging as _logging
 
-            _logging.getLogger(__name__).warning(
-                "飞书消息资源下载失败: status=%s body=%s",
-                resp.status_code,
-                resp.text[:300],
-            )
+        _logging.getLogger(__name__).warning(
+            "飞书消息资源下载失败: status=%s body=%s",
+            resp.status_code,
+            resp.text[:300],
+        )
 
-        # 回退：图片接口
-        url = f"{FEISHU_API_BASE}/im/v1/images/{image_key}"
-        resp = await client.get(url, headers=headers, params={"image_type": "message"})
-        if resp.status_code != 200:
-            import logging as _logging
+    # 回退：图片接口
+    url = f"{FEISHU_API_BASE}/im/v1/images/{image_key}"
+    resp = await client.get(url, headers=headers, params={"image_type": "message"})
+    if resp.status_code != 200:
+        import logging as _logging
 
-            _logging.getLogger(__name__).warning(
-                "飞书图片下载响应: status=%s body=%s",
-                resp.status_code,
-                resp.text[:300],
-            )
-            resp.raise_for_status()
+        _logging.getLogger(__name__).warning(
+            "飞书图片下载响应: status=%s body=%s",
+            resp.status_code,
+            resp.text[:300],
+        )
+        resp.raise_for_status()
 
     return _parse_image_response(resp)
 
@@ -538,8 +558,6 @@ async def send_feishu_message(
     msg_type: str = "interactive",
 ) -> dict[str, Any]:
     """通过 Message API 发送消息到飞书群."""
-    import httpx
-
     token = await token_manager.get_token()
     url = f"{FEISHU_API_BASE}/im/v1/messages"
 
@@ -556,9 +574,9 @@ async def send_feishu_message(
         "content": content_str,
     }
 
-    async with httpx.AsyncClient(timeout=MESSAGE_SEND_TIMEOUT) as client:
-        resp = await client.post(url, json=body, headers=headers, params=params)
-        data = resp.json()
+    client = get_feishu_client()
+    resp = await client.post(url, json=body, headers=headers, params=params)
+    data = resp.json()
 
     code = data.get("code", -1)
     if code != 0:
@@ -645,8 +663,6 @@ async def send_feishu_reply(
     text: str,
 ) -> dict[str, Any]:
     """回复指定消息（形成 thread）."""
-    import httpx
-
     text = _sanitize_feishu_text(text)
     token = await token_manager.get_token()
     url = f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply"
@@ -660,9 +676,9 @@ async def send_feishu_reply(
         "content": _json.dumps({"text": text}, ensure_ascii=False),
     }
 
-    async with httpx.AsyncClient(timeout=MESSAGE_SEND_TIMEOUT) as client:
-        resp = await client.post(url, json=body, headers=headers)
-        data = resp.json()
+    client = get_feishu_client()
+    resp = await client.post(url, json=body, headers=headers)
+    data = resp.json()
 
     code = data.get("code", -1)
     if code != 0:
@@ -675,9 +691,8 @@ async def send_feishu_reply(
         if plain:
             logger.warning("飞书回复 230001 降级重试 (len=%d→%d)", len(text), len(plain))
             body["content"] = _json.dumps({"text": plain}, ensure_ascii=False)
-            async with httpx.AsyncClient(timeout=MESSAGE_SEND_TIMEOUT) as client:
-                resp = await client.post(url, json=body, headers=headers)
-                data = resp.json()
+            resp = await client.post(url, json=body, headers=headers)
+            data = resp.json()
 
     return data
 
@@ -707,8 +722,6 @@ async def create_calendar_event(
         {"ok": True, "event_id": "...", "summary": "..."} 或
         {"ok": False, "error": "..."}
     """
-    import httpx
-
     cal_id = calendar_id or os.environ.get("FEISHU_CALENDAR_ID", "")
     if not cal_id:
         return {"ok": False, "error": "未配置 FEISHU_CALENDAR_ID"}
@@ -723,40 +736,40 @@ async def create_calendar_event(
         body["description"] = description[:2048]
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{FEISHU_API_BASE}/calendar/v4/calendars/{cal_id}/events",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            data = resp.json()
-            code = data.get("code", -1)
-            msg = data.get("msg", "")
-            if code != 0:
-                logger.warning(
-                    "飞书创建日程 API 失败: code=%s msg=%s cal_id=%s summary=%s",
-                    code,
-                    msg,
-                    cal_id,
-                    summary,
-                )
-                return {"ok": False, "error": msg or "未知错误"}
-            event = data.get("data", {}).get("event", {})
-            event_id = event.get("event_id", "")
-            logger.info(
-                "飞书创建日程成功: event_id=%s cal_id=%s summary=%s",
-                event_id,
+        client = get_feishu_client()
+        resp = await client.post(
+            f"{FEISHU_API_BASE}/calendar/v4/calendars/{cal_id}/events",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        data = resp.json()
+        code = data.get("code", -1)
+        msg = data.get("msg", "")
+        if code != 0:
+            logger.warning(
+                "飞书创建日程 API 失败: code=%s msg=%s cal_id=%s summary=%s",
+                code,
+                msg,
                 cal_id,
                 summary,
             )
-            return {
-                "ok": True,
-                "event_id": event_id,
-                "summary": event.get("summary", summary),
-            }
+            return {"ok": False, "error": msg or "未知错误"}
+        event = data.get("data", {}).get("event", {})
+        event_id = event.get("event_id", "")
+        logger.info(
+            "飞书创建日程成功: event_id=%s cal_id=%s summary=%s",
+            event_id,
+            cal_id,
+            summary,
+        )
+        return {
+            "ok": True,
+            "event_id": event_id,
+            "summary": event.get("summary", summary),
+        }
     except Exception as e:
         logger.error("飞书创建日程失败: %s (cal_id=%s)", e, cal_id)
         return {"ok": False, "error": str(e)}
@@ -779,8 +792,6 @@ async def add_attendees_to_event(
     Returns:
         {"ok": True} 或 {"ok": False, "error": "..."}
     """
-    import httpx
-
     if not attendee_open_ids:
         return {"ok": True}
 
@@ -789,21 +800,21 @@ async def add_attendees_to_event(
     body = {"attendees": attendees, "need_notification": True}
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{FEISHU_API_BASE}/calendar/v4/calendars/{calendar_id}"
-                f"/events/{event_id}/attendees?user_id_type=open_id",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            data = resp.json()
-            if data.get("code") != 0:
-                logger.warning("添加日程参与者失败: %s", data.get("msg"))
-                return {"ok": False, "error": data.get("msg", "未知错误")}
-            return {"ok": True}
+        client = get_feishu_client()
+        resp = await client.post(
+            f"{FEISHU_API_BASE}/calendar/v4/calendars/{calendar_id}"
+            f"/events/{event_id}/attendees?user_id_type=open_id",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            logger.warning("添加日程参与者失败: %s", data.get("msg"))
+            return {"ok": False, "error": data.get("msg", "未知错误")}
+        return {"ok": True}
     except Exception as e:
         logger.error("添加日程参与者异常: %s", e)
         return {"ok": False, "error": str(e)}
@@ -831,8 +842,6 @@ async def get_freebusy(
     -------
     dict — 飞书 API 原始结果或 {"error": ...}
     """
-    import httpx
-
     token = await token_mgr.get_token()
     url = f"{FEISHU_API_BASE}/calendar/v4/freebusy/list"
     payload = {
@@ -842,16 +851,16 @@ async def get_freebusy(
         "user_ids": user_ids,
     }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                url,
-                json=payload,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            data = resp.json()
-            if data.get("code", -1) != 0:
-                return {"error": data.get("msg", f"HTTP {resp.status_code}")}
-            return data.get("data", {})
+        client = get_feishu_client()
+        resp = await client.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = resp.json()
+        if data.get("code", -1) != 0:
+            return {"error": data.get("msg", f"HTTP {resp.status_code}")}
+        return data.get("data", {})
     except Exception as e:
         return {"error": str(e)}
 

@@ -12,6 +12,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 后台任务引用集合 — 防止 GC 提前回收 + 异常日志
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """后台 task 完成回调：记录异常日志 + 从引用集合移除."""
+    _background_tasks.discard(task)
+    if not task.cancelled():
+        exc = task.exception()
+        if exc:
+            logger.error("后台任务异常: %s", exc, exc_info=exc)
+
 
 async def _tool_delegate_async(
     args: dict,
@@ -41,7 +53,9 @@ async def _tool_delegate_async(
     )
     from crew.webhook_executor import _execute_task
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    task = asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return f"已异步委派给 {employee_name}。任务 ID: {record.task_id}"
 
 
@@ -182,7 +196,9 @@ async def _tool_organize_meeting(
     )
     from crew.webhook_executor import _execute_task
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    task = asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return (
         f"已组织会议。会议 ID: {record.task_id}\n"
         f"参会者: {', '.join(employees_list)}\n"
@@ -239,7 +255,9 @@ async def _tool_run_pipeline(
     )
     from crew.webhook_executor import _execute_task
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    task = asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return f"已启动流水线 {name}。任务 ID: {record.task_id}（异步执行中）"
 
 
@@ -279,7 +297,9 @@ async def _tool_delegate_chain(
     )
     from crew.webhook_executor import _execute_task
 
-    asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    task = asyncio.create_task(_execute_task(ctx, record.task_id, agent_id=agent_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     return f"已启动委派链: {chain_name}。任务 ID: {record.task_id}（异步执行中）"
 
 

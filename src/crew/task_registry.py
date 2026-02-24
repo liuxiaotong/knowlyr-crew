@@ -208,6 +208,11 @@ class TaskRegistry:
         filtered = [r for r in self._tasks.values() if r.status == status]
         return sorted(filtered, key=lambda r: r.created_at, reverse=True)[:limit]
 
+    def snapshot(self) -> list[TaskRecord]:
+        """返回所有任务记录的快照（防止外部直接访问 _tasks）."""
+        with self._lock:
+            return list(self._tasks.values())
+
     def list_by_type(self, target_type: str, limit: int = 20) -> list[TaskRecord]:
         """按目标类型筛选任务，最新的在前."""
         filtered = [r for r in self._tasks.values() if r.target_type == target_type]

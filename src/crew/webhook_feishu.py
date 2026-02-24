@@ -8,6 +8,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 后台任务引用集合 — 防止 GC 提前回收 + 异常日志
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """后台 task 完成回调：记录异常日志 + 从引用集合移除."""
+    _background_tasks.discard(task)
+    if not task.cancelled():
+        exc = task.exception()
+        if exc:
+            logger.error("后台任务异常: %s", exc, exc_info=exc)
+
+
 from crew.webhook_context import FeishuBotContext, _AppContext
 
 
@@ -106,7 +119,9 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
     # 通过 webhook 模块查找，确保 mock patch 生效
     import crew.webhook as _wh
 
-    asyncio.create_task(_wh._feishu_dispatch(ctx, msg_event, bot_ctx=bot_ctx))
+    task = asyncio.create_task(_wh._feishu_dispatch(ctx, msg_event, bot_ctx=bot_ctx))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
 
     return JSONResponse({"message": "ok"})
 
@@ -398,7 +413,9 @@ async def _feishu_approve_dispatch(
     # approve — 恢复链执行
     from crew.webhook_executor import _resume_chain
 
-    asyncio.create_task(_resume_chain(ctx, task_id))
+    task = asyncio.create_task(_resume_chain(ctx, task_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
     await _reply_text(f"已批准任务 {task_id}，继续执行中...")
 
 
@@ -480,7 +497,9 @@ async def _feishu_route_dispatch(
     )
     import crew.webhook as _wh
 
-    asyncio.create_task(_wh._execute_task(ctx, record.task_id))
+    task = asyncio.create_task(_wh._execute_task(ctx, record.task_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done_callback)
 
     # 回复确认
     await _reply_text(
