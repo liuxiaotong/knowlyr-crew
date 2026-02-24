@@ -1122,17 +1122,23 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     """接收外部 agent 的轨迹数据 — POST /api/trajectory/report."""
     from starlette.responses import JSONResponse
 
-    # payload 大小限制 512KB
+    # payload 大小限制 2MB（大轨迹可能有数百步）
     body = await request.body()
-    if len(body) > 512 * 1024:
-        return JSONResponse({"error": "payload too large (max 512KB)"}, status_code=413)
+    if len(body) > 2 * 1024 * 1024:
+        return JSONResponse({"error": "payload too large (max 2MB)"}, status_code=413)
 
     try:
         payload = await request.json()
     except (ValueError, TypeError):
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    employee_name = payload.get("employee_name", "")
+    # 兼容多种字段名: employee_name / name / employee
+    employee_name = (
+        payload.get("employee_name")
+        or payload.get("name")
+        or payload.get("employee")
+        or ""
+    )
     steps = payload.get("steps")
     if not employee_name or not steps:
         return JSONResponse(
@@ -1156,10 +1162,14 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
             output_dir=output_dir,
         )
         for s in steps:
+            # tool_params 必须是 dict，agent 可能传了 string
+            raw_params = s.get("tool_params", {})
+            if not isinstance(raw_params, dict):
+                raw_params = {"_raw": str(raw_params)[:500]}
             tc.add_tool_step(
                 thought=str(s.get("thought", ""))[:2000],
                 tool_name=s.get("tool_name", "unknown"),
-                tool_params=s.get("tool_params", {}),
+                tool_params=raw_params,
                 tool_output=str(s.get("tool_output", ""))[:2000],
                 tool_exit_code=s.get("tool_exit_code", 0),
             )
