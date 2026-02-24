@@ -90,6 +90,92 @@ EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
 
 EXEMPLAR_THRESHOLD = 0.7
 
+# 匹配 soul prompt 开头模式（"你是XXX" 后面跟角色描述）
+_SOUL_PROMPT_PREFIX = "你是"
+_SOUL_PROMPT_MIN_LEN = 200
+
+
+def _extract_task_from_soul_prompt(text: str) -> str | None:
+    """尝试从 soul prompt 中提取 ## 任务 之后的实际任务描述.
+
+    返回提取到的任务文本，提取不到返回 None。
+    """
+    import re
+
+    # 匹配 ## 任务 或 ## 本次任务 等变体
+    m = re.search(r"##\s*(?:本次)?任务\s*\n+(.+)", text, re.DOTALL)
+    if m:
+        task_text = m.group(1).strip()
+        # 截取到下一个 ## 标题或文本结尾
+        next_section = re.search(r"\n##\s", task_text)
+        if next_section:
+            task_text = task_text[: next_section.start()].strip()
+        if task_text:
+            return task_text
+    return None
+
+
+def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
+    """评分前防御性清洗轨迹数据.
+
+    处理三类脏数据:
+    1. task 是 dict → 提取 description
+    2. task 以"你是"开头且超 200 字 → 尝试提取 ## 任务 后的内容
+    3. steps 中字段名不统一 → 标准化 tool/params/output
+    """
+    traj = trajectory  # 就地修改（避免深拷贝开销）
+
+    # ── task 清洗 ──
+    task = traj.get("task")
+    if isinstance(task, dict):
+        # 格式 B: agentrecorder Trajectory 对象的 task 字段
+        traj["task"] = task.get("description") or task.get("task_id", "")
+
+    task = traj.get("task", "")
+    if (
+        isinstance(task, str)
+        and task.startswith(_SOUL_PROMPT_PREFIX)
+        and len(task) > _SOUL_PROMPT_MIN_LEN
+    ):
+        extracted = _extract_task_from_soul_prompt(task)
+        if extracted:
+            traj["task"] = extracted
+        # 提取不到的不改，让评分正常走（评分结果可能偏低但不会崩）
+
+    # ── steps 字段标准化 ──
+    for step in traj.get("steps", []):
+        # tool_call.name → tool
+        if "tool" not in step:
+            tc = step.get("tool_call", {})
+            if isinstance(tc, dict) and tc.get("name"):
+                step["tool"] = tc["name"]
+            elif step.get("tool_name"):
+                step["tool"] = step["tool_name"]
+            else:
+                step["tool"] = "unknown"
+
+        # tool_call.parameters → params
+        if "params" not in step:
+            tc = step.get("tool_call", {})
+            if isinstance(tc, dict) and "parameters" in tc:
+                step["params"] = tc["parameters"]
+            elif "tool_params" in step:
+                step["params"] = step["tool_params"]
+            else:
+                step["params"] = {}
+
+        # tool_result.output → output
+        if "output" not in step:
+            tr = step.get("tool_result", {})
+            if isinstance(tr, dict) and "output" in tr:
+                step["output"] = tr["output"]
+            elif "tool_output" in step:
+                step["output"] = step["tool_output"]
+            else:
+                step["output"] = ""
+
+    return traj
+
 
 def _get_domain(employee: str) -> str:
     return EMPLOYEE_DOMAIN_MAP.get(employee, "conversation")
@@ -382,6 +468,9 @@ def score_trajectory(
 
     叶心蕾的轨迹强制走规则层（不用 LLM Judge）。
     """
+    # 防御性清洗：处理 task dict/soul prompt/字段名不统一
+    trajectory = _sanitize_trajectory(trajectory)
+
     domain = _get_domain(employee)
 
     # 叶心蕾自己的轨迹只走规则层
