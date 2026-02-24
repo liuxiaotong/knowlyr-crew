@@ -11,7 +11,7 @@ MODEL=claude-opus-4-6
 PROVIDER=openai
 BASE_URL=https://aiberm.com/v1
 MAX_PARALLEL=3
-DATE=${1:-}  # 可选参数：指定日期 YYYYMMDD，不传则评估昨天
+DATE=${1:-$(date +%Y%m%d)}  # 可选参数：指定日期 YYYYMMDD，不传则评估当天
 
 # 获取活跃员工列表
 EMPLOYEES=$($PYTHON -c "
