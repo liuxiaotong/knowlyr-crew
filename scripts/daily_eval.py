@@ -88,6 +88,14 @@ EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
     "benchmark-specialist": "advisory",
 }
 
+# 各域的参考步数默认值（用于 efficiency 计算）
+DOMAIN_REFERENCE_STEPS: dict[str, int] = {
+    "conversation": 3,   # 对话类：回复+偶尔查资料
+    "engineering": 15,    # 工程类：读代码+改代码+跑测试
+    "advisory": 5,        # 顾问类：分析+建议
+    "discussion": 3,      # 讨论类：发言
+}
+
 EXEMPLAR_THRESHOLD = 0.7
 
 # 匹配 soul prompt 开头模式（"你是XXX" 后面跟角色描述）
@@ -173,6 +181,12 @@ def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
                 step["output"] = step["tool_output"]
             else:
                 step["output"] = ""
+
+    # ── reference_steps 默认值（解决 efficiency 恒=1.0） ──
+    if traj.get("reference_steps") is None:
+        employee = traj.get("metadata", {}).get("employee", "")
+        domain = _get_domain(employee)
+        traj["reference_steps"] = DOMAIN_REFERENCE_STEPS.get(domain, 10)
 
     return traj
 

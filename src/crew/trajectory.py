@@ -218,10 +218,15 @@ class TrajectoryCollector:
                 )
                 for s in self._steps
             ]
+            # task 统一为 string（不包装成 TaskInfo dict），
+            # 避免下游 daily_eval 等消费端遇到 dict 格式的 task
+            task_str = self.task_description
+            if isinstance(task_str, dict):
+                task_str = task_str.get("description", "") or str(task_str)
             traj = Trajectory(
                 task=TaskInfo(
                     task_id=f"crew-{uuid.uuid4().hex[:8]}",
-                    description=self.task_description,
+                    description=task_str,
                     domain="crew",
                 ),
                 agent=f"crew/{self.employee_name}",
@@ -242,11 +247,15 @@ class TrajectoryCollector:
             return traj
 
         # fallback: agentrecorder 未安装，写纯 JSON
+        # task 统一为 string
+        task_str = self.task_description
+        if isinstance(task_str, dict):
+            task_str = task_str.get("description", "") or str(task_str)
         data = {
             "task_id": f"crew-{uuid.uuid4().hex[:8]}",
             "employee": self.employee_name,
             "channel": self.channel,
-            "task": self.task_description,
+            "task": task_str,
             "model": self.model,
             "steps": self._steps,
             "success": success,

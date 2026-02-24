@@ -51,6 +51,32 @@ def _parse_sender_name(extra_context: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def _extract_task_description(text: str) -> str:
+    """从 user_message 提取简洁的 task_description，过滤 soul prompt 污染.
+
+    规则：
+    - 以"你是"开头或超过 500 字 → 疑似 soul prompt，尝试提取 ## 任务 内容
+    - 否则取前 200 字
+    """
+    if not text:
+        return ""
+    is_soul_prompt = text.startswith("你是") or len(text) > 500
+    if is_soul_prompt:
+        # 尝试提取 ## 任务 后的内容
+        m = _re.search(r"##\s*(?:本次)?任务\s*\n+(.+)", text, _re.DOTALL)
+        if m:
+            task_text = m.group(1).strip()
+            # 截取到下一个 ## 标题或文本结尾
+            next_section = _re.search(r"\n##\s", task_text)
+            if next_section:
+                task_text = task_text[: next_section.start()].strip()
+            if task_text:
+                return task_text[:200]
+        # 提取不到则用前 200 字，但不用 soul prompt 的"你是XXX"开头
+        return text[:200]
+    return text[:200]
+
+
 async def _health(request: Any) -> Any:
     """健康检查."""
     from starlette.responses import JSONResponse
@@ -600,9 +626,12 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         try:
             from crew.trajectory import TrajectoryCollector
 
+            _task_desc = _extract_task_description(
+                user_message if isinstance(user_message, str) else str(user_message)
+            )
             _traj_collector = TrajectoryCollector(
                 name,
-                (user_message if isinstance(user_message, str) else str(user_message))[:200],
+                _task_desc,
                 channel=channel,
             )
             _traj_collector.__enter__()
