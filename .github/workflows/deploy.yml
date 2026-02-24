@@ -43,12 +43,25 @@ jobs:
         with:
           sparse-checkout: scripts
 
-      - name: Audit employee config
-        id: audit
+      - name: Deploy scripts
         run: |
           scp -i ~/.ssh/deploy_key \
             scripts/audit_employees.py \
-            root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/scripts/audit_employees.py
+            scripts/daily_eval.py \
+            root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/scripts/
+
+      - name: Install eval crontab
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            crontab -l 2>/dev/null | grep -v daily_eval.py > /tmp/_cron_clean || true
+            echo "0 23 * * * cd /opt/knowlyr-crew/project && /opt/knowlyr-crew/venv/bin/python scripts/daily_eval.py --with-judge --model claude-sonnet-4-5 --provider openai --base-url https://aiberm.com/v1 --api-key \$AIBERM_API_KEY >> /var/log/knowlyr-crew-eval.log 2>&1" >> /tmp/_cron_clean
+            crontab /tmp/_cron_clean
+            rm -f /tmp/_cron_clean
+          '
+
+      - name: Audit employee config
+        id: audit
+        run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             cd /opt/knowlyr-crew/project &&
             /opt/knowlyr-crew/venv/bin/python scripts/audit_employees.py --json
