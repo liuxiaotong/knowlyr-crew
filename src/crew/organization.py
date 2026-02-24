@@ -87,7 +87,7 @@ _MODEL_TIER_FIELDS = (
 
 
 def apply_model_defaults(
-    employees: dict[str, Employee],
+    employees: dict[str, Employee],  # noqa: F821
     org: Organization,
 ) -> None:
     """按 model_tier 从 organization.model_defaults 填充员工空字段.

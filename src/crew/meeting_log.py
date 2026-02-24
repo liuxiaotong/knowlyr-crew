@@ -47,7 +47,7 @@ class MeetingLogger:
 
     def save(
         self,
-        discussion: Discussion,
+        discussion: Discussion,  # noqa: F821
         prompt: str,
         args: dict[str, str] | None = None,
     ) -> str:

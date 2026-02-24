@@ -14,7 +14,7 @@ async def _tool_github_prs(
     args: dict,
     *,
     agent_id: int | None = None,
-    ctx: _AppContext | None = None,
+    ctx: _AppContext | None = None,  # noqa: F821
 ) -> str:
     """查看 GitHub 仓库 PR 列表."""
     import httpx
@@ -58,7 +58,7 @@ async def _tool_github_issues(
     args: dict,
     *,
     agent_id: int | None = None,
-    ctx: _AppContext | None = None,
+    ctx: _AppContext | None = None,  # noqa: F821
 ) -> str:
     """查看 GitHub 仓库 Issue 列表."""
     import httpx
@@ -110,7 +110,7 @@ async def _tool_github_repo_activity(
     args: dict,
     *,
     agent_id: int | None = None,
-    ctx: _AppContext | None = None,
+    ctx: _AppContext | None = None,  # noqa: F821
 ) -> str:
     """查看 GitHub 仓库最近活动."""
     from datetime import datetime, timedelta, timezone

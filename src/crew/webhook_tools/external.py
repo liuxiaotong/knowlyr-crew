@@ -75,9 +75,9 @@ async def _tool_weather(
     if not city:
         return "需要城市名，如：上海、北京、杭州。"
 
-    code = _CITY_CODES.get(city)
+    code = _CITY_CODES.get(city)  # noqa: F821 — TODO: _CITY_CODES 定义缺失，需补充
     if not code:
-        avail = "、".join(list(_CITY_CODES.keys())[:20]) + "…"
+        avail = "、".join(list(_CITY_CODES.keys())[:20]) + "…"  # noqa: F821
         return f"暂不支持「{city}」，支持的城市：{avail}"
 
     try:

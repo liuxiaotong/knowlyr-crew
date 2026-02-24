@@ -464,7 +464,7 @@ async def download_feishu_image(
     return _parse_image_response(resp)
 
 
-def _parse_image_response(resp: httpx.Response) -> tuple[bytes, str]:
+def _parse_image_response(resp: httpx.Response) -> tuple[bytes, str]:  # noqa: F821
     """从 httpx 响应中提取图片 bytes 和 media_type."""
     content_type = resp.headers.get("content-type", "image/png")
     if "jpeg" in content_type or "jpg" in content_type:

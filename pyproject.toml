@@ -94,7 +94,6 @@ ignore = [
     "B011",   # assert False
     "B017",   # assertRaises(Exception)
     "F841",   # local variable assigned but never used (TODO: 分批清理)
-    "F821",   # undefined name (动态 import / TYPE_CHECKING)
 ]
 
 [tool.ruff.lint.per-file-ignores]

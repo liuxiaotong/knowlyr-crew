@@ -54,6 +54,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                     status_code=400,
                 )
         # 无 Content-Length 时（chunked transfer），限制实际 body 大小
+        # TODO: S-9 — chunked 请求应流式检查大小，避免内存耗尽
         if request.method in ("POST", "PUT", "PATCH") and not content_length:
             body = await request.body()
             if len(body) > self.max_bytes:

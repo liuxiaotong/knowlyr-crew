@@ -8,6 +8,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
 from crew.webhook_context import FeishuBotContext, _AppContext
 
 
@@ -87,7 +89,7 @@ async def _handle_feishu_event(request: Any, ctx: _AppContext) -> Any:
         logger.warning("飞书消息类型不支持: msg_type=%s", msg_type)
         return JSONResponse({"message": "unsupported message type"})
 
-    logger.warning(
+    logger.info(
         "飞书消息 [%s]: type=%s chat=%s text=%s image_key=%s mentions=%d",
         getattr(bot_ctx.config, "bot_id", "?"),
         msg_event.msg_type,
@@ -249,7 +251,6 @@ async def _feishu_fast_reply(
 
     from crew.executor import aexecute_prompt
 
-    _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     _now = _dt.now()
     _date_str = _now.strftime("%Y-%m-%d")
     _weekday_str = _WEEKDAY_CN[_now.weekday()]
@@ -509,8 +510,9 @@ async def _feishu_dispatch(
         _token_mgr = bot_ctx.token_mgr
     else:
         # 兼容旧调用路径
-        assert ctx.feishu_config is not None
-        assert ctx.feishu_token_mgr is not None
+        if ctx.feishu_config is None or ctx.feishu_token_mgr is None:
+            logger.error("飞书配置缺失，无法处理消息")
+            return
         _config = ctx.feishu_config
         _token_mgr = ctx.feishu_token_mgr
 
@@ -677,7 +679,6 @@ async def _feishu_dispatch(
 
         from datetime import datetime as _dt
 
-        _WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         _now = _dt.now()
         _date_header = f"今天是 {_now.strftime('%Y-%m-%d')}（{_WEEKDAY_CN[_now.weekday()]}）。\n"
 

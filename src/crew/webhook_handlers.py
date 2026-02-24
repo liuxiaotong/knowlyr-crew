@@ -29,6 +29,35 @@ import re as _re
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
 
 
+def _find_employee(result: Any, identifier: str) -> Any:
+    """按 agent_id（数字）或 name（字符串）查找员工."""
+    try:
+        agent_id = int(identifier)
+        for emp in result.employees.values():
+            if emp.agent_id == agent_id:
+                return emp
+        return None
+    except ValueError:
+        return result.get(identifier)
+
+
+def _ok_response(data: dict | None = None, status_code: int = 200) -> Any:
+    """统一成功响应格式 — 后续逐步迁移各端点使用."""
+    from starlette.responses import JSONResponse
+
+    body: dict[str, Any] = {"ok": True}
+    if data:
+        body.update(data)
+    return JSONResponse(body, status_code=status_code)
+
+
+def _error_response(message: str, status_code: int = 400) -> Any:
+    """统一错误响应格式 — 后续逐步迁移各端点使用."""
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"ok": False, "error": message}, status_code=status_code)
+
+
 def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
     """更新 employee.yaml 中的指定字段."""
     import tempfile
@@ -118,17 +147,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir)
 
-    # 按 agent_id（数字）或 name（字符串）查找
-    employee = None
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                employee = emp
-                break
-    except ValueError:
-        employee = result.get(identifier)
-
+    employee = _find_employee(result, identifier)
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
@@ -250,16 +269,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir)
 
-    employee = None
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                employee = emp
-                break
-    except ValueError:
-        employee = result.get(identifier)
-
+    employee = _find_employee(result, identifier)
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
@@ -363,16 +373,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir)
 
-    employee = None
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                employee = emp
-                break
-    except ValueError:
-        employee = result.get(identifier)
-
+    employee = _find_employee(result, identifier)
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
@@ -425,16 +426,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir, cache_ttl=0)
 
-    employee = None
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                employee = emp
-                break
-    except ValueError:
-        employee = result.get(identifier)
-
+    employee = _find_employee(result, identifier)
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
@@ -456,7 +448,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
         {
             "ok": True,
             "deleted": employee.name,
-            "remote_disabled": remote_disabled,
         }
     )
 
@@ -1243,16 +1234,7 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir)
 
-    employee = None
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                employee = emp
-                break
-    except ValueError:
-        employee = result.get(identifier)
-
+    employee = _find_employee(result, identifier)
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
