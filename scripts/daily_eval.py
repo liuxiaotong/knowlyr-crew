@@ -95,6 +95,11 @@ def _get_domain(employee: str) -> str:
     return EMPLOYEE_DOMAIN_MAP.get(employee, "conversation")
 
 
+def traj_employee(traj: dict[str, Any]) -> str:
+    """从标准化轨迹中提取员工名."""
+    return traj.get("metadata", {}).get("employee", "unknown")
+
+
 # ── 游标管理 ─────────────────────────────────────────────────────────
 
 
@@ -535,6 +540,16 @@ def run_daily_eval(
         # 仍然生成日报（记录"今日无数据"）
         _write_report(date_display, [])
         return {"date": date_display, "total": 0, "scored": 0}
+
+    # 过滤无归属轨迹
+    SKIP_EMPLOYEES = {"unknown", "unknown-agent", ""}
+    before_filter = len(trajectories)
+    trajectories = [
+        t for t in trajectories
+        if traj_employee(t) not in SKIP_EMPLOYEES
+    ]
+    if before_filter != len(trajectories):
+        logger.info("过滤无归属轨迹: %d → %d", before_filter, len(trajectories))
 
     # Step 2: 逐条评分
     results = []
