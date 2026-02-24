@@ -290,6 +290,8 @@ def _try_gym_score(
     except ImportError:
         return None
 
+    # crew 轨迹的 outcome 全是 success=true，无实际意义
+    # 因此 outcome_weight=0，全靠 process(LLM judge) + efficiency 打分
     if use_judge and model_name:
         config = RewardConfig(
             rule_weight=0.3,
@@ -299,6 +301,9 @@ def _try_gym_score(
             provider=provider,
             base_url=base_url,
             api_key=api_key,
+            outcome_weight=0.0,
+            process_weight=0.9,
+            efficiency_weight=0.1,
         )
     else:
         config = RewardConfig(
@@ -318,6 +323,7 @@ def _try_gym_score(
         "total_score": round(reward.total_score, 4),
         "outcome_score": round(reward.outcome_score, 4),
         "process_score": round(reward.process_score, 4),
+        "efficiency_score": round(reward.efficiency_score, 4),
         "rubric_scores": {k: round(v, 4) for k, v in rubric_scores.items()},
         "engine": "gym",
     }
@@ -351,10 +357,12 @@ def _fallback_score(trajectory: dict[str, Any]) -> dict[str, Any]:
     if not has_error:
         score += 0.1
 
+    efficiency = 1.0 if len(steps) < 10 else max(0.0, 10.0 / len(steps))
     return {
         "total_score": round(min(score, 1.0), 4),
         "outcome_score": 0.6 if outcome.get("success") else 0.0,
         "process_score": round(score - (0.6 if outcome.get("success") else 0.0), 4),
+        "efficiency_score": round(efficiency, 4),
         "rubric_scores": {},
         "engine": "fallback",
     }
