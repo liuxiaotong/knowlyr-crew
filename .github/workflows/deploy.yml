@@ -54,7 +54,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             crontab -l 2>/dev/null | grep -v daily_eval.py > /tmp/_cron_clean || true
-            echo "0 23 * * * set -a; source /opt/knowlyr-crew/.env; set +a; cd /opt/knowlyr-crew/project && /opt/knowlyr-crew/venv/bin/python scripts/daily_eval.py --with-judge --model claude-sonnet-4-6 --provider openai --base-url https://aiberm.com/v1 --api-key \$AIBERM_API_KEY >> /var/log/knowlyr-crew-eval.log 2>&1" >> /tmp/_cron_clean
+            echo "0 23 * * * set -a; source /opt/knowlyr-crew/.env; set +a; cd /opt/knowlyr-crew/project && /opt/knowlyr-crew/venv/bin/python scripts/daily_eval.py --with-judge --model claude-opus-4-6 --provider openai --base-url https://aiberm.com/v1 --api-key \$AIBERM_API_KEY >> /var/log/knowlyr-crew-eval.log 2>&1" >> /tmp/_cron_clean
             crontab /tmp/_cron_clean
             rm -f /tmp/_cron_clean
           '
