@@ -771,8 +771,11 @@ async def _feishu_dispatch(
         try:
             from crew.trajectory import TrajectoryCollector
 
+            from crew.trajectory import resolve_character_name
+
+            _char_name = resolve_character_name(employee_name, project_dir=ctx.project_dir)
             _traj_collector = TrajectoryCollector(
-                employee_name,
+                _char_name,
                 task_text[:200],
                 channel="feishu",
                 output_dir=ctx.project_dir / ".crew" / "trajectories",

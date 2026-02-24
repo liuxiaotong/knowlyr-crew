@@ -84,11 +84,12 @@ async def _execute_task(
     # ── 轨迹录制 ──
     _traj_collector = None
     try:
-        from crew.trajectory import TrajectoryCollector
+        from crew.trajectory import TrajectoryCollector, resolve_character_name
 
         _task_desc = record.args.get("task", "") or record.target_name
+        _char_name = resolve_character_name(record.target_name, project_dir=ctx.project_dir)
         _traj_collector = TrajectoryCollector(
-            record.target_name,
+            _char_name,
             _task_desc[:200],
             channel="delegate",
             output_dir=ctx.project_dir / ".crew" / "trajectories",

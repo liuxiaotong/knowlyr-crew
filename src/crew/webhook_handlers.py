@@ -624,13 +624,14 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         # ── 轨迹录制 ──
         _traj_collector = None
         try:
-            from crew.trajectory import TrajectoryCollector
+            from crew.trajectory import TrajectoryCollector, resolve_character_name
 
             _task_desc = _extract_task_description(
                 user_message if isinstance(user_message, str) else str(user_message)
             )
+            _char_name = resolve_character_name(name, project_dir=ctx.project_dir)
             _traj_collector = TrajectoryCollector(
-                name,
+                _char_name,
                 _task_desc,
                 channel=channel,
                 output_dir=ctx.project_dir / ".crew" / "trajectories",
@@ -1139,6 +1140,13 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         or payload.get("employee")
         or ""
     )
+    # slug → 中文名统一
+    try:
+        from crew.trajectory import resolve_character_name
+
+        employee_name = resolve_character_name(employee_name, project_dir=ctx.project_dir)
+    except Exception:
+        pass
     steps = payload.get("steps")
     if not employee_name or not steps:
         return JSONResponse(

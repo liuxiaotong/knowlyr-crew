@@ -53,6 +53,41 @@ logger = logging.getLogger(__name__)
 
 # 员工-评估域映射（复用 crew_eval.py 的映射）
 EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
+    # 中文名 (character_name) — 统一使用中文名作为 key
+    "姜墨言": "conversation",
+    "柳若曦": "conversation",
+    "周念慈": "conversation",
+    "林锐": "engineering",
+    "赵云帆": "engineering",
+    "卫子昂": "engineering",
+    "程薇": "engineering",
+    "丁雪筠": "engineering",
+    "马骁": "engineering",
+    "孙策安": "engineering",
+    "谢安": "engineering",
+    "贺铭": "engineering",
+    "钟瑞": "engineering",
+    "顾然": "engineering",
+    "秦合": "engineering",
+    "苏文": "engineering",
+    "罗清河": "engineering",
+    "郑锐航": "engineering",
+    "傅语桥": "engineering",
+    "黄维达": "engineering",
+    "陆明哲": "advisory",
+    "叶心蕾": "advisory",
+    "曹正宇": "advisory",
+    "宋正言": "advisory",
+    "许鹏举": "advisory",
+    "温若瑜": "advisory",
+    "唐思远": "advisory",
+    "方逸凡": "advisory",
+    "苏映彤": "advisory",
+    "沈若兰": "advisory",
+    "韩泽民": "advisory",
+    "林晓桐": "advisory",
+    "陈启明": "advisory",
+    # slug 兼容（旧数据迁移前过渡）
     "ceo-assistant": "conversation",
     "customer-success": "conversation",
     "community-operator": "conversation",
@@ -488,7 +523,7 @@ def score_trajectory(
     domain = _get_domain(employee)
 
     # 叶心蕾自己的轨迹只走规则层
-    employee_use_judge = use_judge and employee != "hr-manager"
+    employee_use_judge = use_judge and employee not in ("hr-manager", "叶心蕾")
 
     result = _try_gym_score(
         trajectory,
@@ -663,6 +698,16 @@ def run_daily_eval(
     ]
     if before_filter != len(trajectories):
         logger.info("过滤无归属轨迹: %d → %d", before_filter, len(trajectories))
+
+    # 过滤 training channel（训练/测试数据不参与正式评分）
+    SKIP_CHANNELS = {"training", "test", "debug"}
+    before_channel = len(trajectories)
+    trajectories = [
+        t for t in trajectories
+        if (t.get("metadata", {}).get("channel") or "") not in SKIP_CHANNELS
+    ]
+    if before_channel != len(trajectories):
+        logger.info("过滤非工作channel: %d → %d", before_channel, len(trajectories))
 
     # 按员工过滤
     if employee_filter:

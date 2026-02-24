@@ -28,6 +28,36 @@ _collector_var: contextvars.ContextVar[TrajectoryCollector | None] = contextvars
     "trajectory_collector", default=None
 )
 
+# slug → 中文名 缓存（进程级）
+_NAME_CACHE: dict[str, str] = {}
+
+
+def resolve_character_name(slug_or_name: str, *, project_dir: Path | None = None) -> str:
+    """将 slug 统一映射为中文名 (character_name).
+
+    如果已经是中文名则原样返回。discovery 不可用时返回原始值。
+    """
+    if not slug_or_name:
+        return slug_or_name
+    # 已经是中文 → 直接返回
+    if any("\u4e00" <= c <= "\u9fff" for c in slug_or_name):
+        return slug_or_name
+    # 缓存命中
+    if slug_or_name in _NAME_CACHE:
+        return _NAME_CACHE[slug_or_name]
+    # 查 discovery
+    try:
+        from crew.discovery import discover_employees
+
+        discovery = discover_employees(project_dir=project_dir)
+        emp = discovery.get(slug_or_name)
+        if emp and emp.character_name:
+            _NAME_CACHE[slug_or_name] = emp.character_name
+            return emp.character_name
+    except Exception:
+        pass
+    return slug_or_name
+
 
 def _try_import_recorder():
     """尝试导入 agentrecorder，不可用时返回 None."""
