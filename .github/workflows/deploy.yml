@@ -53,15 +53,19 @@ jobs:
             scripts/run_daily_eval.sh \
             root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/scripts/
 
-      - name: Deploy static assets
+      - name: Deploy static assets & reload
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} \
             'mkdir -p /opt/knowlyr-crew/project/static/avatars'
           scp -i ~/.ssh/deploy_key \
             static/avatars/*.webp \
             root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/static/avatars/
-          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} \
-            'chmod +x /opt/knowlyr-crew/project/scripts/run_daily_eval.sh'
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            chmod +x /opt/knowlyr-crew/project/scripts/run_daily_eval.sh
+            systemctl restart knowlyr-crew
+            sleep 2
+            curl -sf http://localhost:8765/health
+          '
 
       - name: Install eval crontab
         run: |
