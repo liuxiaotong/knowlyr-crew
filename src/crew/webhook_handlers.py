@@ -1773,7 +1773,7 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     if ctx.project_dir:
         traj_file = ctx.project_dir / ".crew" / "trajectories" / "trajectories.jsonl"
         if traj_file.exists():
-            with open(traj_file, "r", encoding="utf-8") as _f:
+            with open(traj_file, encoding="utf-8") as _f:
                 traj_count = sum(1 for _ in _f)
 
     return JSONResponse({

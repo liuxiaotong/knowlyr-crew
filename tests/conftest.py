@@ -1,6 +1,5 @@
 """全局测试配置 — 用 fixture 员工替代已删除的内置员工."""
 
-import os
 from pathlib import Path
 
 import pytest

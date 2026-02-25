@@ -149,6 +149,7 @@ def main(ctx: click.Context, verbose: bool):
 
 def _register_commands() -> None:
     """注册所有子模块的命令到 main group."""
+    from crew.cli.discuss import changelog_draft, discuss, meetings
     from crew.cli.employee import (
         avatar,
         catalog,
@@ -163,11 +164,7 @@ def _register_commands() -> None:
         show,
         validate,
     )
-    from crew.cli.pipeline import pipeline
-    from crew.cli.route import route
-    from crew.cli.discuss import changelog_draft, discuss, meetings
     from crew.cli.memory import memory
-    from crew.cli.server import agent, mcp, serve
     from crew.cli.ops import (
         agents,
         cron_group,
@@ -180,6 +177,9 @@ def _register_commands() -> None:
         template,
         trajectory,
     )
+    from crew.cli.pipeline import pipeline
+    from crew.cli.route import route
+    from crew.cli.server import agent, mcp, serve
 
     # employee.py 的命令
     main.add_command(list_cmd, "list")

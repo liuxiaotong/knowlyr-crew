@@ -1,7 +1,6 @@
 """员工操作命令 — list, show, run, validate, init, delete, avatar, rollback, catalog, permissions, lint, check."""
 
 import json
-import logging
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -12,21 +11,9 @@ import click
 import jsonschema
 
 from crew import sdk
-from crew.discovery import discover_employees
-from crew.discussion import load_discussion, validate_discussion
-from crew.engine import CrewEngine
-from crew.lanes import lane_lock
-from crew.log import WorkLogger
-from crew.parser import parse_employee, parse_employee_dir, validate_employee
-from crew.pipeline import load_pipeline, validate_pipeline
-from crew.session_recorder import SessionRecorder
-
 from crew.cli import (
-    EMPLOYEE_SUBDIR,
-    _default_display_name,
     _employee_root,
     _finish_transcript,
-    _parse_variables,
     _record_session_summary,
     _record_transcript_event,
     _record_transcript_message,
@@ -34,6 +21,13 @@ from crew.cli import (
     _suggest_similar,
     logger,
 )
+from crew.discovery import discover_employees
+from crew.discussion import load_discussion, validate_discussion
+from crew.engine import CrewEngine
+from crew.lanes import lane_lock
+from crew.log import WorkLogger
+from crew.parser import parse_employee, parse_employee_dir, validate_employee
+from crew.pipeline import load_pipeline, validate_pipeline
 
 # ── list ──
 

@@ -26,8 +26,9 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

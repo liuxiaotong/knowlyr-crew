@@ -1,14 +1,11 @@
 """讨论会命令 — discuss group + meetings group + changelog + ingest."""
 
-import json
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
-
-from crew.lanes import lane_lock
 
 from crew.cli import (
     _finish_transcript,
@@ -17,6 +14,7 @@ from crew.cli import (
     _record_transcript_message,
     _start_transcript,
 )
+from crew.lanes import lane_lock
 
 
 @click.group()

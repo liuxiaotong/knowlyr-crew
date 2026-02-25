@@ -721,9 +721,7 @@ async def _execute_employee_with_tools(
     from crew.providers import Provider, detect_provider
     from crew.tool_schema import (
         AGENT_TOOLS,
-        _make_load_tools_schema,
         employee_tools_to_schemas,
-        get_tool_schema,
     )
 
     discovery = discover_employees(project_dir=ctx.project_dir)

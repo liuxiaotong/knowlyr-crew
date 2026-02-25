@@ -1,14 +1,10 @@
 """流水线命令 — pipeline group + checkpoint subgroup."""
 
 import asyncio
-import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import click
-
-from crew.lanes import LaneLock
 
 from crew.cli import (
     _finish_transcript,
@@ -18,6 +14,7 @@ from crew.cli import (
     _start_transcript,
     _suggest_similar,
 )
+from crew.lanes import LaneLock
 
 
 @click.group()

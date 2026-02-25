@@ -312,7 +312,6 @@ def _evaluate_check(
     resolved = _resolve_output_refs(check, outputs_by_id, outputs_by_index, prev_output, execute)
     if contains:
         return contains in resolved
-    from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FuturesTimeout
 
     with ThreadPoolExecutor(max_workers=1) as pool:

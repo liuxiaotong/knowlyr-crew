@@ -1,10 +1,5 @@
 """测试 EventCollector — 统一埋点事件收集器."""
 
-import json
-import os
-import tempfile
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -120,7 +115,6 @@ class TestEventCollectorQuery:
     def test_query_since_until(self, collector):
         """时间范围过滤."""
         # 手动插入带已知时间戳的记录
-        import sqlite3
 
         conn = collector._get_conn()
         conn.execute(
@@ -205,7 +199,6 @@ class TestEventCollectorAggregate:
 
     def test_aggregate_with_since(self, collector):
         """since 过滤应生效."""
-        import sqlite3
 
         conn = collector._get_conn()
         conn.execute(

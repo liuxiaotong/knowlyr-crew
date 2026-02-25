@@ -1,6 +1,5 @@
 """服务器命令 — serve + mcp + agent group."""
 
-import sys
 from pathlib import Path
 
 import click

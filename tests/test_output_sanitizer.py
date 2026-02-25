@@ -1,6 +1,5 @@
 """Tests for crew.output_sanitizer — LLM 输出清洗."""
 
-import pytest
 
 from crew.output_sanitizer import strip_internal_tags
 

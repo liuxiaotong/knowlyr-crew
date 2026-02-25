@@ -4,13 +4,8 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import click
-
-from crew.discovery import discover_employees
-from crew.session_recorder import SessionRecorder
-from crew.template_manager import apply_template, discover_templates
 
 from crew.cli import (
     _default_display_name,
@@ -18,7 +13,9 @@ from crew.cli import (
     _parse_variables,
     _suggest_similar,
 )
-
+from crew.discovery import discover_employees
+from crew.session_recorder import SessionRecorder
+from crew.template_manager import apply_template, discover_templates
 
 # ── template 命令 ──
 
