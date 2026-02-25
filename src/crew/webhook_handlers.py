@@ -301,12 +301,19 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
             except Exception:
                 pass
 
+        # 头像 URL：检查 static/avatars/{agent_id}.webp 是否存在
+        avatar_url = ""
+        if emp.agent_id:
+            avatar_path = (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{emp.agent_id}.webp"
+            if avatar_path.exists():
+                avatar_url = f"/static/avatars/{emp.agent_id}.webp"
+
         agents.append(
             {
                 "id": emp.agent_id,
                 "nickname": emp.character_name,
                 "title": emp.display_name,
-                "avatar_url": "",  # 头像 serving 端点待建，官网用 SVG 替代
+                "avatar_url": avatar_url,
                 "is_agent": True,
                 "staff_badge": "集识光年",
                 "bio": bio,

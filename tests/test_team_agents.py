@@ -176,6 +176,67 @@ class TestTeamAgents:
         assert data[0]["bio"] == "让代码更优雅"
         assert data[0]["domains"] == ["后端开发", "API设计"]
 
+    def test_avatar_url_when_file_exists(self, tmp_path):
+        """头像文件存在时返回相对 URL."""
+        from crew.discovery import DiscoveryResult
+
+        # 创建 static/avatars/ 目录和头像文件
+        avatars_dir = tmp_path / "static" / "avatars"
+        avatars_dir.mkdir(parents=True)
+        (avatars_dir / "3081.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
+
+        employees = {
+            "eng": _make_employee("eng", "赵云帆", "后端工程师", 3081, "active"),
+        }
+        mock_result = DiscoveryResult(employees=employees, conflicts=[])
+
+        with patch("crew.discovery.discover_employees", return_value=mock_result):
+            app = create_webhook_app(
+                project_dir=tmp_path,
+                token=TOKEN,
+                config=WebhookConfig(),
+            )
+            client = TestClient(app)
+            resp = client.get("/api/team/agents")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["avatar_url"] == "/static/avatars/3081.webp"
+
+    def test_avatar_url_empty_when_no_file(self):
+        """头像文件不存在时返回空字符串."""
+        from crew.discovery import DiscoveryResult
+
+        employees = {
+            "eng": _make_employee("eng", agent_id=9999, agent_status="active"),
+        }
+        mock_result = DiscoveryResult(employees=employees, conflicts=[])
+
+        with patch("crew.discovery.discover_employees", return_value=mock_result):
+            client = _make_client()
+            resp = client.get("/api/team/agents")
+
+        data = resp.json()
+        assert data[0]["avatar_url"] == ""
+
+    def test_static_avatar_serving(self, tmp_path):
+        """静态头像文件可通过 HTTP 直接访问，不需要认证."""
+        avatars_dir = tmp_path / "static" / "avatars"
+        avatars_dir.mkdir(parents=True)
+        (avatars_dir / "3081.webp").write_bytes(b"fake-webp-content")
+
+        app = create_webhook_app(
+            project_dir=tmp_path,
+            token=TOKEN,
+            config=WebhookConfig(),
+        )
+        client = TestClient(app)
+
+        # 无 token 也能访问静态文件
+        resp = client.get("/static/avatars/3081.webp")
+        assert resp.status_code == 200
+        assert resp.content == b"fake-webp-content"
+
     def test_no_auth_required(self):
         """公开端点，无 token 也能访问."""
         from crew.discovery import DiscoveryResult

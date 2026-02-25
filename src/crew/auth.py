@@ -11,6 +11,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
+def _path_matches_skip(path: str, skip_paths: list[str]) -> bool:
+    """检查请求路径是否匹配 skip 列表（精确匹配或前缀匹配）."""
+    return any(path == sp or path.startswith(sp + "/") for sp in skip_paths)
+
+
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """校验 Authorization: Bearer <token>（时序安全比较）."""
 
@@ -20,7 +25,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         self.skip_paths = skip_paths or ["/health"]
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in self.skip_paths:
+        if _path_matches_skip(request.url.path, self.skip_paths):
             return await call_next(request)
 
         auth = request.headers.get("authorization", "")
@@ -91,7 +96,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._buckets: dict[str, list[float]] = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in self.skip_paths:
+        if _path_matches_skip(request.url.path, self.skip_paths):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"

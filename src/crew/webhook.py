@@ -372,6 +372,13 @@ def create_webhook_app(
 
     app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 
+    # 静态文件挂载（头像等）
+    avatars_dir = (project_dir or Path(".")) / "static" / "avatars"
+    if avatars_dir.is_dir():
+        from starlette.staticfiles import StaticFiles
+
+        app.mount("/static/avatars", StaticFiles(directory=str(avatars_dir)), name="avatars")
+
     from crew.auth import RequestSizeLimitMiddleware
 
     app.add_middleware(RequestSizeLimitMiddleware)
@@ -379,9 +386,10 @@ def create_webhook_app(
     if token:
         from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
-        skip_paths = ["/health", "/webhook/github", "/feishu/event", "/api/team/agents"] + [
-            f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots
-        ]
+        skip_paths = [
+            "/health", "/webhook/github", "/feishu/event",
+            "/api/team/agents", "/static",
+        ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
