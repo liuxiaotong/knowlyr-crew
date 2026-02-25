@@ -137,9 +137,9 @@ args:
 
     def test_agent_id_parsed(self):
         """应解析 frontmatter 中的 agent_id."""
-        content = "---\nname: test\ndescription: 测试\nagent_id: 3060\n---\n\n内容。\n"
+        content = "---\nname: test\ndescription: 测试\nagent_id: AI3060\n---\n\n内容。\n"
         emp = parse_employee_string(content)
-        assert emp.agent_id == 3060
+        assert emp.agent_id == "AI3060"
 
     def test_agent_id_none_by_default(self):
         """未设置 agent_id 时应为 None."""
@@ -223,11 +223,11 @@ class TestParseEmployeeDir:
         emp_dir = tmp_path / "with-agent"
         emp_dir.mkdir()
         (emp_dir / "employee.yaml").write_text(
-            "name: test-agent\ndescription: test\nagent_id: 3050\n"
+            "name: test-agent\ndescription: test\nagent_id: AI3050\n"
         )
         (emp_dir / "prompt.md").write_text("内容")
         emp = parse_employee_dir(emp_dir)
-        assert emp.agent_id == 3050
+        assert emp.agent_id == "AI3050"
 
     def test_validate_dir_employee(self):
         """目录解析的员工应能通过校验."""

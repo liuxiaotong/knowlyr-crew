@@ -745,14 +745,14 @@ class TestIdentityPassthrough:
         client = _make_client()
         resp = client.post(
             "/run/employee/code-reviewer",
-            json={"args": {"target": "main"}, "agent_id": 42},
+            json={"args": {"target": "main"}, "agent_id": "AI42"},
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert resp.status_code == 202
         # _execute_task 应收到 agent_id
         mock_execute.assert_called_once()
         call_kwargs = mock_execute.call_args
-        assert call_kwargs.kwargs.get("agent_id") == 42
+        assert call_kwargs.kwargs.get("agent_id") == "AI42"
 
     @patch("crew.webhook._execute_task", new_callable=AsyncMock)
     def test_pipeline_passes_agent_id(self, mock_execute):
@@ -760,13 +760,13 @@ class TestIdentityPassthrough:
         client = _make_client()
         resp = client.post(
             "/run/pipeline/full-review",
-            json={"args": {"target": "main"}, "agent_id": 99},
+            json={"args": {"target": "main"}, "agent_id": "AI99"},
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert resp.status_code == 202
         mock_execute.assert_called_once()
         call_kwargs = mock_execute.call_args
-        assert call_kwargs.kwargs.get("agent_id") == 99
+        assert call_kwargs.kwargs.get("agent_id") == "AI99"
 
     @patch("crew.webhook._execute_task", new_callable=AsyncMock)
     def test_no_agent_id_defaults_none(self, mock_execute):
@@ -961,7 +961,7 @@ class TestStreamErrorHandling:
 class TestEmployeeUpdatePUT:
     """PUT /api/employees/{identifier} — employee.yaml 唯一真相源."""
 
-    def _make_emp(self, tmp_path, name="test-emp", agent_id=3080):
+    def _make_emp(self, tmp_path, name="test-emp", agent_id="AI3080"):
         """创建带 source_path 的 Employee + 真实 employee.yaml."""
         from crew.models import Employee
 
@@ -1014,12 +1014,12 @@ class TestEmployeeUpdatePUT:
         """PUT 可通过 agent_id 查找员工."""
         from crew.models import DiscoveryResult
 
-        emp, emp_dir = self._make_emp(tmp_path, agent_id=3081)
+        emp, emp_dir = self._make_emp(tmp_path, agent_id="AI3081")
         mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
 
         client = _make_client()
         resp = client.put(
-            "/api/employees/3081",
+            "/api/employees/AI3081",
             json={"temperature": 0.8},
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
@@ -1051,7 +1051,7 @@ class TestEmployeeUpdatePUT:
             name="emp",
             description="d",
             body="b",
-            agent_id=999,
+            agent_id="AI999",
             source_path=tmp_path,
         )
         mock_discover.return_value = DiscoveryResult(employees={"emp": emp})
@@ -1188,7 +1188,7 @@ class TestModelTierUpdatable:
         config = {
             "name": "test-emp",
             "description": "test desc",
-            "agent_id": 9000,
+            "agent_id": "AI9000",
             "model_tier": "claude",
         }
         (emp_dir / "employee.yaml").write_text(
@@ -1199,7 +1199,7 @@ class TestModelTierUpdatable:
             name="test-emp",
             description="test desc",
             body="test body",
-            agent_id=9000,
+            agent_id="AI9000",
             model_tier="claude",
             source_path=emp_dir,
         )
@@ -1291,7 +1291,7 @@ class TestProjectStatusEndpoint:
             character_name="甲",
             description="员工A",
             body="body a",
-            agent_id=1001,
+            agent_id="AI1001",
             agent_status="active",
             source_path=tmp_path,
         )
@@ -1301,7 +1301,7 @@ class TestProjectStatusEndpoint:
             character_name="乙",
             description="员工B",
             body="body b",
-            agent_id=1002,
+            agent_id="AI1002",
             agent_status="frozen",
             source_path=tmp_path,
         )
@@ -1391,7 +1391,7 @@ class TestEmployeeStateEndpoint:
             character_name="测试",
             description="测试员工",
             body="test body",
-            agent_id=3090,
+            agent_id="AI3090",
             agent_status="frozen",
             source_path=emp_dir,
         )

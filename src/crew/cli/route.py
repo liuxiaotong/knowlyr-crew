@@ -134,7 +134,7 @@ def route_run(
     name: str,
     task: str,
     overrides_raw: tuple[str, ...],
-    agent_id: int | None,
+    agent_id: str | None,
     smart_context: bool,
     output: str | None,
     execute: bool,

@@ -68,13 +68,13 @@ class TestEventCollectorRecord:
             event_name="product-manager",
             duration_ms=100.0,
             success=True,
-            metadata={"agent_id": 42, "args": {"topic": "test"}},
+            metadata={"agent_id": "AI42", "args": {"topic": "test"}},
         )
         rows = collector.query()
         assert len(rows) == 1
         meta = rows[0]["metadata"]
         assert isinstance(meta, dict)
-        assert meta["agent_id"] == 42
+        assert meta["agent_id"] == "AI42"
 
     def test_record_multiple(self, collector):
         """多条写入应全部持久化."""

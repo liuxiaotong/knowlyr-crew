@@ -592,7 +592,7 @@ def _generate_mock_response(tool_name: str, arguments: dict[str, Any]) -> str:
             }
         )
     if tool_name == "list_agents":
-        return '[{"agent_id": 3073, "name": "ceo-assistant", "status": "active"}, {"agent_id": 3001, "name": "code-reviewer", "status": "active"}, {"agent_id": 3002, "name": "product-manager", "status": "active"}]'
+        return '[{"agent_id": "AI3073", "name": "ceo-assistant", "status": "active"}, {"agent_id": "AI3001", "name": "code-reviewer", "status": "active"}, {"agent_id": "AI3002", "name": "product-manager", "status": "active"}]'
     if tool_name == "read_messages":
         unread = random.randint(0, 5)
         return json.dumps(
@@ -929,7 +929,7 @@ def _run_employee_job(
     emp,
     positional_args: tuple[str, ...],
     named_args: tuple[str, ...],
-    agent_id: int | None,
+    agent_id: str | None,
     smart_context: bool,
     raw: bool,
     to_clipboard: bool,
@@ -1279,7 +1279,7 @@ def run(
     name: str,
     positional_args: tuple[str, ...],
     named_args: tuple[str, ...],
-    agent_id: int | None,
+    agent_id: str | None,
     smart_context: bool,
     raw: bool,
     to_clipboard: bool,

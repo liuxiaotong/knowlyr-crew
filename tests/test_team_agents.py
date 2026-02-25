@@ -20,7 +20,7 @@ def _make_employee(
     name: str,
     character_name: str = "",
     display_name: str = "",
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     agent_status: str = "active",
     tags: list[str] | None = None,
     source_path: Path | None = None,
@@ -56,9 +56,9 @@ class TestTeamAgents:
         from crew.discovery import DiscoveryResult
 
         employees = {
-            "eng-a": _make_employee("eng-a", "张三", "工程师A", 3001, "active", ["Python"]),
-            "eng-b": _make_employee("eng-b", "李四", "工程师B", 3002, "frozen", ["Go"]),
-            "eng-c": _make_employee("eng-c", "王五", "工程师C", 3003, "active", ["Rust"]),
+            "eng-a": _make_employee("eng-a", "张三", "工程师A", "AI3001", "active", ["Python"]),
+            "eng-b": _make_employee("eng-b", "李四", "工程师B", "AI3002", "frozen", ["Go"]),
+            "eng-c": _make_employee("eng-c", "王五", "工程师C", "AI3003", "active", ["Rust"]),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
 
@@ -82,7 +82,7 @@ class TestTeamAgents:
 
         employees = {
             "backend-eng": _make_employee(
-                "backend-eng", "赵云帆", "后端工程师", 3081, "active", ["Python", "FastAPI"]
+                "backend-eng", "赵云帆", "后端工程师", "AI3081", "active", ["Python", "FastAPI"]
             ),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
@@ -112,9 +112,9 @@ class TestTeamAgents:
         from crew.discovery import DiscoveryResult
 
         employees = {
-            "c": _make_employee("c", agent_id=3090, agent_status="active"),
-            "a": _make_employee("a", agent_id=3050, agent_status="active"),
-            "b": _make_employee("b", agent_id=3070, agent_status="active"),
+            "c": _make_employee("c", agent_id="AI3090", agent_status="active"),
+            "a": _make_employee("a", agent_id="AI3050", agent_status="active"),
+            "b": _make_employee("b", agent_id="AI3070", agent_status="active"),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
 
@@ -131,7 +131,7 @@ class TestTeamAgents:
         from crew.discovery import DiscoveryResult
 
         employees = {
-            "frozen-a": _make_employee("frozen-a", agent_id=3001, agent_status="frozen"),
+            "frozen-a": _make_employee("frozen-a", agent_id="AI3001", agent_status="frozen"),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
 
@@ -162,7 +162,7 @@ class TestTeamAgents:
 
         employees = {
             "test-emp": _make_employee(
-                "test-emp", "测试员", "测试工程师", 3099, "active", source_path=emp_dir
+                "test-emp", "测试员", "测试工程师", "AI3099", "active", source_path=emp_dir
             ),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
@@ -186,7 +186,7 @@ class TestTeamAgents:
         (avatars_dir / "AI3081.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
 
         employees = {
-            "eng": _make_employee("eng", "赵云帆", "后端工程师", 3081, "active"),
+            "eng": _make_employee("eng", "赵云帆", "后端工程师", "AI3081", "active"),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
 
@@ -208,7 +208,7 @@ class TestTeamAgents:
         from crew.discovery import DiscoveryResult
 
         employees = {
-            "eng": _make_employee("eng", agent_id=9999, agent_status="active"),
+            "eng": _make_employee("eng", agent_id="AI9999", agent_status="active"),
         }
         mock_result = DiscoveryResult(employees=employees, conflicts=[])
 

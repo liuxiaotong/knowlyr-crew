@@ -39,7 +39,7 @@ async def _dispatch_task(
     target_name: str,
     args: dict[str, str],
     sync: bool = False,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     model: str | None = None,
 ) -> Any:
     """创建任务并调度执行."""
@@ -85,7 +85,7 @@ async def _dispatch_task(
 async def _execute_task(
     ctx: _AppContext,
     task_id: str,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     model: str | None = None,
     trace_id: str = "",
 ) -> None:
@@ -356,7 +356,7 @@ async def _execute_pipeline(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     task_id: str | None = None,
 ) -> dict[str, Any]:
     """执行 pipeline."""
@@ -709,7 +709,7 @@ async def _execute_employee_with_tools(
     name: str,
     args: dict[str, str],
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     model: str | None = None,
     user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
@@ -1001,7 +1001,7 @@ async def _handle_tool_call(
     employee_name: str,
     tool_name: str,
     arguments: dict[str, Any],
-    agent_id: int | None,
+    agent_id: str | None,
     guard: Any | None = None,
     max_visibility: str = "open",
 ) -> str | None:
@@ -1072,7 +1072,7 @@ async def _execute_employee(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     model: str | None = None,
     user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
@@ -1159,7 +1159,7 @@ async def _stream_employee(
     ctx: _AppContext,
     name: str,
     args: dict[str, str],
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     model: str | None = None,
 ) -> Any:
     """SSE 流式执行单个员工."""

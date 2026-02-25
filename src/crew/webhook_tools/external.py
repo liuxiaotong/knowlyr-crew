@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 async def _tool_web_search(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """搜索互联网（Bing cn）."""
     import re
@@ -65,7 +65,7 @@ async def _tool_web_search(
 async def _tool_weather(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查天气（国内城市）."""
@@ -121,7 +121,7 @@ async def _tool_weather(
 async def _tool_exchange_rate(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查汇率."""
@@ -155,7 +155,7 @@ async def _tool_exchange_rate(
 async def _tool_stock_price(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查股价（A股/美股）."""
@@ -235,7 +235,7 @@ def _notion_blocks_to_text(blocks: list[dict]) -> str:
 async def _tool_notion_search(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """搜索 Notion 页面."""
@@ -284,7 +284,7 @@ async def _tool_notion_search(
 async def _tool_notion_read(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """读取 Notion 页面内容."""
@@ -333,7 +333,7 @@ async def _tool_notion_read(
 async def _tool_notion_create(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """在 Notion 创建新页面."""
@@ -389,7 +389,7 @@ async def _tool_notion_create(
 async def _tool_read_url(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """读取网页正文."""
@@ -453,7 +453,7 @@ async def _tool_read_url(
 async def _tool_rss_read(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """读取 RSS/Atom 订阅源."""
@@ -515,7 +515,7 @@ async def _tool_rss_read(
 async def _tool_translate(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """中英互译（MyMemory API）."""
@@ -571,7 +571,7 @@ async def _tool_translate(
 async def _tool_countdown(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """计算距离目标日期的倒计时."""
@@ -608,7 +608,7 @@ async def _tool_countdown(
 async def _tool_trending(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """热搜聚合（微博 / 知乎）."""
@@ -663,7 +663,7 @@ async def _tool_trending(
 async def _tool_summarize(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """长文摘要（由模型自身完成）."""
@@ -686,7 +686,7 @@ async def _tool_summarize(
 async def _tool_sentiment(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """情感分析（由模型自身完成）."""
@@ -704,7 +704,7 @@ async def _tool_sentiment(
 async def _tool_email_send(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """发送邮件（暂未对接 SMTP）."""
@@ -718,7 +718,7 @@ async def _tool_email_send(
 async def _tool_qrcode(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """生成二维码."""
@@ -737,7 +737,7 @@ async def _tool_qrcode(
 async def _tool_express_track(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """快递物流查询."""
@@ -791,7 +791,7 @@ async def _tool_express_track(
 async def _tool_flight_info(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """航班查询（暂用 web_search 代理）."""
@@ -806,7 +806,7 @@ async def _tool_flight_info(
 async def _tool_aqi(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """空气质量查询."""

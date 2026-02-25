@@ -304,7 +304,7 @@ def checkpoint_resume(
 def pipeline_run(
     name_or_path: str,
     named_args: tuple[str, ...],
-    agent_id: int | None,
+    agent_id: str | None,
     smart_context: bool,
     output: str | None,
     parallel: bool,

@@ -43,7 +43,7 @@ class WorkLogger:
         self,
         employee_name: str,
         args: dict[str, str] | None = None,
-        agent_id: int | None = None,
+        agent_id: str | None = None,
         detail: str | None = None,
     ) -> str:
         """创建新的工作 session.

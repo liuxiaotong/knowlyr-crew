@@ -595,7 +595,7 @@ def render_discussion(
     discussion: Discussion,
     initial_args: dict[str, str] | None = None,
     project_dir: Path | None = None,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     smart_context: bool = True,
 ) -> str:
     """渲染讨论会，生成完整的讨论指令 prompt."""
@@ -978,7 +978,7 @@ def render_discussion_plan(
     discussion: Discussion,
     initial_args: dict[str, str] | None = None,
     project_dir: Path | None = None,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     smart_context: bool = True,
 ) -> DiscussionPlan:
     """渲染编排式讨论计划 — 每个参会者独立 prompt.

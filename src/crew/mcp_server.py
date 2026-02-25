@@ -249,7 +249,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "additionalProperties": {"type": "string"},
                         },
                         "agent_id": {
-                            "type": "integer",
+                            "type": "string",
                             "description": "绑定的平台 Agent ID（可选）",
                         },
                     },
@@ -311,7 +311,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "additionalProperties": {"type": "string"},
                         },
                         "agent_id": {
-                            "type": "integer",
+                            "type": "string",
                             "description": "绑定的平台 Agent ID（可选）",
                         },
                         "smart_context": {
@@ -377,7 +377,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "additionalProperties": {"type": "string"},
                         },
                         "agent_id": {
-                            "type": "integer",
+                            "type": "string",
                             "description": "绑定的平台 Agent ID（可选）",
                         },
                         "smart_context": {

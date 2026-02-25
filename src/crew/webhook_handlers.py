@@ -40,15 +40,16 @@ def _safe_int(value: str | None, default: int = 0) -> int:
 
 
 def _find_employee(result: Any, identifier: str) -> Any:
-    """按 agent_id（数字）或 name（字符串）查找员工."""
-    try:
-        agent_id = int(identifier)
-        for emp in result.employees.values():
-            if emp.agent_id == agent_id:
-                return emp
-        return None
-    except ValueError:
-        return result.get(identifier)
+    """按 agent_id 或 name（字符串）查找员工."""
+    # 先按 name 查找
+    emp = result.get(identifier)
+    if emp is not None:
+        return emp
+    # 再按 agent_id 查找（agent_id 现在是 "AI3050" 格式的字符串）
+    for emp in result.employees.values():
+        if emp.agent_id == identifier:
+            return emp
+    return None
 
 
 def _ok_response(data: dict | None = None, status_code: int = 200) -> Any:
@@ -301,10 +302,10 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
             except Exception:
                 pass
 
-        # 对外 ID 格式：AI 前缀 + 数字（内部 agent_id 保留纯数字）
-        public_id = f"AI{emp.agent_id}" if emp.agent_id else None
+        # agent_id 已经是 "AI3050" 格式的字符串
+        public_id = emp.agent_id if emp.agent_id else None
 
-        # 头像 URL：检查 static/avatars/AI{agent_id}.webp 是否存在
+        # 头像 URL：检查 static/avatars/{agent_id}.webp 是否存在
         avatar_url = ""
         if public_id:
             avatar_path = (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{public_id}.webp"
@@ -676,7 +677,7 @@ async def _run_and_callback(
     ctx: _AppContext,
     name: str,
     args: dict,
-    agent_id: int | None,
+    agent_id: str | None,
     model: str | None,
     user_message: str,
     message_history: list | None,

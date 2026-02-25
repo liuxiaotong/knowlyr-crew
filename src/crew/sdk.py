@@ -54,7 +54,7 @@ def generate_prompt_by_name(
     args: dict[str, str] | None = None,
     positional: Sequence[str] | None = None,
     raw: bool = False,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     smart_context: bool = False,
     project_dir: Path | None = None,
 ):
@@ -79,7 +79,7 @@ def run_pipeline_steps(
     steps: Iterable[tuple[str, dict[str, str]]],
     *,
     smart_context: bool = True,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     project_dir: Path | None = None,
 ) -> list[str]:
     """Helper to render a sequence of (employee, args) prompts."""

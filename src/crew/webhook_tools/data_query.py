@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _tool_send_message(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """发私信 — 通过蚁聚 internal API."""
     import httpx
@@ -59,7 +59,7 @@ async def _tool_send_message(
 
 
 async def _tool_list_agents(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """查看所有 AI 同事的列表和当前状态（本地数据）."""
     import json
@@ -85,7 +85,7 @@ async def _tool_list_agents(
 
 
 async def _tool_create_note(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """保存备忘/笔记到 .crew/notes/."""
     import re
@@ -131,7 +131,7 @@ async def _tool_create_note(
 
 
 async def _tool_lookup_user(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """按昵称查用户详情（过渡期走 knowlyr-id）."""
     import httpx
@@ -152,7 +152,7 @@ async def _tool_lookup_user(
 
 
 async def _tool_read_notes(
-    args: dict, *, agent_id: int | None = None, ctx: _AppContext | None = None
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
 ) -> str:
     """列出最近笔记，可选按关键词过滤."""
     keyword = args.get("keyword", "")
@@ -198,7 +198,7 @@ def _find_report() -> Path | None:
 async def _tool_project_status(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查询 knowlyr 项目状态."""

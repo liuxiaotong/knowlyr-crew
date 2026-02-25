@@ -28,7 +28,7 @@ def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
 async def _tool_delegate_async(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """异步委派 — 立即返回 task_id，后台执行."""
@@ -62,7 +62,7 @@ async def _tool_delegate_async(
 async def _tool_check_task(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查询任务状态和结果."""
@@ -119,7 +119,7 @@ async def _tool_check_task(
 async def _tool_list_tasks(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """列出最近的任务."""
@@ -155,7 +155,7 @@ async def _tool_list_tasks(
 async def _tool_organize_meeting(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """组织多员工会议（异步）."""
@@ -210,7 +210,7 @@ async def _tool_organize_meeting(
 async def _tool_check_meeting(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查询会议进展（check_task 别名）."""
@@ -223,7 +223,7 @@ async def _tool_check_meeting(
 async def _tool_run_pipeline(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """执行预定义流水线（异步）."""
@@ -267,7 +267,7 @@ async def _tool_run_pipeline(
 async def _tool_delegate_chain(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """顺序委派链（异步）."""
@@ -306,7 +306,7 @@ async def _tool_delegate_chain(
 async def _tool_schedule_task(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """创建定时任务."""
@@ -351,7 +351,7 @@ async def _tool_schedule_task(
 async def _tool_list_schedules(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """列出定时任务."""
@@ -377,7 +377,7 @@ async def _tool_list_schedules(
 async def _tool_cancel_schedule(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """取消定时任务."""
@@ -397,7 +397,7 @@ async def _tool_cancel_schedule(
 async def _tool_agent_file_read(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """读取项目目录内的文件."""
@@ -445,7 +445,7 @@ async def _tool_agent_file_read(
 async def _tool_agent_file_grep(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """在项目目录内搜索文件内容."""
@@ -504,7 +504,7 @@ async def _tool_agent_file_grep(
 async def _tool_find_free_time(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查询飞书用户共同空闲时间."""
@@ -591,7 +591,7 @@ async def _tool_find_free_time(
 async def _tool_query_cost(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """查询 token 消耗和成本汇总."""
@@ -628,7 +628,7 @@ async def _tool_query_cost(
 async def _tool_route(
     args: dict,
     *,
-    agent_id: int | None = None,
+    agent_id: str | None = None,
     ctx: _AppContext | None = None,
 ) -> str:
     """按路由模板发起委派链."""
