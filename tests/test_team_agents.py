@@ -95,8 +95,8 @@ class TestTeamAgents:
         assert len(data) == 1
         agent = data[0]
 
-        # 校验所有必需字段
-        assert agent["id"] == 3081
+        # 校验所有必需字段（ID 为 AI 前缀字符串）
+        assert agent["id"] == "AI3081"
         assert agent["nickname"] == "赵云帆"
         assert agent["title"] == "后端工程师"
         assert agent["avatar_url"] == ""
@@ -124,7 +124,7 @@ class TestTeamAgents:
 
         data = resp.json()
         ids = [a["id"] for a in data]
-        assert ids == [3050, 3070, 3090]
+        assert ids == ["AI3050", "AI3070", "AI3090"]
 
     def test_empty_when_no_active(self):
         """全部 frozen 时返回空数组."""
@@ -183,7 +183,7 @@ class TestTeamAgents:
         # 创建 static/avatars/ 目录和头像文件
         avatars_dir = tmp_path / "static" / "avatars"
         avatars_dir.mkdir(parents=True)
-        (avatars_dir / "3081.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
+        (avatars_dir / "AI3081.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
 
         employees = {
             "eng": _make_employee("eng", "赵云帆", "后端工程师", 3081, "active"),
@@ -201,7 +201,7 @@ class TestTeamAgents:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data[0]["avatar_url"] == "/static/avatars/3081.webp"
+        assert data[0]["avatar_url"] == "/static/avatars/AI3081.webp"
 
     def test_avatar_url_empty_when_no_file(self):
         """头像文件不存在时返回空字符串."""
@@ -223,7 +223,7 @@ class TestTeamAgents:
         """静态头像文件可通过 HTTP 直接访问，不需要认证."""
         avatars_dir = tmp_path / "static" / "avatars"
         avatars_dir.mkdir(parents=True)
-        (avatars_dir / "3081.webp").write_bytes(b"fake-webp-content")
+        (avatars_dir / "AI3081.webp").write_bytes(b"fake-webp-content")
 
         app = create_webhook_app(
             project_dir=tmp_path,
@@ -233,7 +233,7 @@ class TestTeamAgents:
         client = TestClient(app)
 
         # 无 token 也能访问静态文件
-        resp = client.get("/static/avatars/3081.webp")
+        resp = client.get("/static/avatars/AI3081.webp")
         assert resp.status_code == 200
         assert resp.content == b"fake-webp-content"
 

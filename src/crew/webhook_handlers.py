@@ -301,16 +301,19 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
             except Exception:
                 pass
 
-        # 头像 URL：检查 static/avatars/{agent_id}.webp 是否存在
+        # 对外 ID 格式：AI 前缀 + 数字（内部 agent_id 保留纯数字）
+        public_id = f"AI{emp.agent_id}" if emp.agent_id else None
+
+        # 头像 URL：检查 static/avatars/AI{agent_id}.webp 是否存在
         avatar_url = ""
-        if emp.agent_id:
-            avatar_path = (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{emp.agent_id}.webp"
+        if public_id:
+            avatar_path = (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{public_id}.webp"
             if avatar_path.exists():
-                avatar_url = f"/static/avatars/{emp.agent_id}.webp"
+                avatar_url = f"/static/avatars/{public_id}.webp"
 
         agents.append(
             {
-                "id": emp.agent_id,
+                "id": public_id,
                 "nickname": emp.character_name,
                 "title": emp.display_name,
                 "avatar_url": avatar_url,
@@ -322,8 +325,8 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
             }
         )
 
-    # 按 id (agent_id) 升序排列，None 排最后
-    agents.sort(key=lambda a: (a["id"] is None, a["id"] or 0))
+    # 按 id 升序排列，None 排最后
+    agents.sort(key=lambda a: (a["id"] is None, a["id"] or ""))
 
     return JSONResponse(agents)
 
