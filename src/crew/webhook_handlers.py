@@ -308,7 +308,9 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
         # 头像 URL：检查 static/avatars/{agent_id}.webp 是否存在
         avatar_url = ""
         if public_id:
-            avatar_path = (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{public_id}.webp"
+            avatar_path = (
+                (ctx.project_dir or Path(".")) / "static" / "avatars" / f"{public_id}.webp"
+            )
             if avatar_path.exists():
                 avatar_url = f"/static/avatars/{public_id}.webp"
 
@@ -697,7 +699,9 @@ async def _run_and_callback(
 
     logger.info(
         "异步回调开始: emp=%s channel=%d sender=%d",
-        name, callback_channel_id, callback_sender_id,
+        name,
+        callback_channel_id,
+        callback_sender_id,
     )
 
     # 注入额外上下文
@@ -716,7 +720,10 @@ async def _run_and_callback(
         user_message if isinstance(user_message, str) else str(user_message)
     )
     _traj_collector = TrajectoryCollector.try_create_for_employee(
-        name, _task_desc, channel=channel, project_dir=ctx.project_dir,
+        name,
+        _task_desc,
+        channel=channel,
+        project_dir=ctx.project_dir,
     )
     if _traj_collector is not None:
         _exit_stack.enter_context(_traj_collector)
@@ -743,7 +750,9 @@ async def _run_and_callback(
             from crew.webhook_feishu import _feishu_fast_reply
 
             result = await _feishu_fast_reply(
-                ctx, emp, user_message,
+                ctx,
+                emp,
+                user_message,
                 message_history=message_history,
                 max_visibility="private",
                 extra_context=extra_context,
@@ -753,8 +762,11 @@ async def _run_and_callback(
             import crew.webhook as _wh
 
             result = await _wh._execute_employee(
-                ctx, name, _args,
-                agent_id=agent_id, model=model,
+                ctx,
+                name,
+                _args,
+                agent_id=agent_id,
+                model=model,
                 user_message=user_message,
                 message_history=message_history,
             )
@@ -766,7 +778,13 @@ async def _run_and_callback(
         _out = result.get("output_tokens", 0) if isinstance(result, dict) else 0
         logger.info(
             "异步回调执行完成 [%s] %.1fs model=%s in=%d out=%d emp=%s msg=%s",
-            _path, _elapsed, _m, _in, _out, name, user_message[:40],
+            _path,
+            _elapsed,
+            _m,
+            _in,
+            _out,
+            name,
+            user_message[:40],
         )
     except Exception:
         logger.exception("异步回调执行失败: emp=%s channel=%d", name, callback_channel_id)
@@ -784,7 +802,10 @@ async def _run_and_callback(
     # 记录任务
     try:
         record = ctx.registry.create(
-            trigger=channel, target_type="employee", target_name=name, args=_args,
+            trigger=channel,
+            target_type="employee",
+            target_name=name,
+            args=_args,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
     except Exception:
@@ -797,7 +818,9 @@ async def _run_and_callback(
     if isinstance(result, dict):
         output = strip_internal_tags((result.get("output") or "").strip())
     if not output:
-        logger.warning("异步回调: 员工返回空内容，跳过回调 emp=%s channel=%d", name, callback_channel_id)
+        logger.warning(
+            "异步回调: 员工返回空内容，跳过回调 emp=%s channel=%d", name, callback_channel_id
+        )
         return
 
     if not _ANTGATHER_API_URL or not _ANTGATHER_API_TOKEN:
@@ -822,12 +845,17 @@ async def _run_and_callback(
         if resp.is_success:
             logger.info(
                 "异步回调成功: emp=%s channel=%d len=%d",
-                name, callback_channel_id, len(output),
+                name,
+                callback_channel_id,
+                len(output),
             )
         else:
             logger.error(
                 "异步回调失败 (HTTP %d): %s, emp=%s channel=%d",
-                resp.status_code, resp.text[:200], name, callback_channel_id,
+                resp.status_code,
+                resp.text[:200],
+                name,
+                callback_channel_id,
             )
     except Exception:
         logger.exception("异步回调请求异常: emp=%s channel=%d", name, callback_channel_id)
@@ -913,7 +941,10 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             user_message if isinstance(user_message, str) else str(user_message)
         )
         _traj_collector = TrajectoryCollector.try_create_for_employee(
-            name, _task_desc, channel=channel, project_dir=ctx.project_dir,
+            name,
+            _task_desc,
+            channel=channel,
+            project_dir=ctx.project_dir,
         )
         if _traj_collector is not None:
             _exit_stack.enter_context(_traj_collector)
@@ -1406,10 +1437,7 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
 
     # 兼容多种字段名: employee_name / name / employee
     employee_name = (
-        payload.get("employee_name")
-        or payload.get("name")
-        or payload.get("employee")
-        or ""
+        payload.get("employee_name") or payload.get("name") or payload.get("employee") or ""
     )
     # slug → 中文名统一
     try:
@@ -1435,7 +1463,9 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     if expected_steps is not None and expected_steps != len(steps):
         logger.warning(
             "轨迹步骤数不匹配: expected_steps=%s, actual=%s (employee=%s)",
-            expected_steps, len(steps), employee_name,
+            expected_steps,
+            len(steps),
+            employee_name,
         )
 
     try:
@@ -1473,7 +1503,10 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
                 elif isinstance(raw_params, list):
                     raw_params = {"_list": raw_params, "_type": "list"}
                 else:
-                    raw_params = {"_raw": str(raw_params)[:8000], "_type": type(raw_params).__name__}
+                    raw_params = {
+                        "_raw": str(raw_params)[:8000],
+                        "_type": type(raw_params).__name__,
+                    }
 
             # 截断 thought / tool_output（8000 字符上限）
             thought_raw = str(s.get("thought", ""))
@@ -1495,7 +1528,9 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
                 tool_exit_code=s.get("tool_exit_code", 0),
             )
         result = tc.finish(success=success)
-        total_steps = result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
+        total_steps = (
+            result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
+        )
         resp_data: dict[str, Any] = {"ok": True, "steps_received": total_steps}
         if truncated_fields:
             resp_data["truncated_fields"] = truncated_fields
@@ -1636,7 +1671,9 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 "team": team,
                 "authority": authority,
                 "memory_count": memory_counts.get(name, 0),
-                "last_active_at": emp_runtime[name]["last_active_at"].isoformat() if emp_runtime.get(name, {}).get("last_active_at") else None,
+                "last_active_at": emp_runtime[name]["last_active_at"].isoformat()
+                if emp_runtime.get(name, {}).get("last_active_at")
+                else None,
                 "recent_task_count": emp_runtime.get(name, {}).get("recent_task_count", 0),
                 "success_count": emp_runtime.get(name, {}).get("success_count", 0),
                 "fail_count": emp_runtime.get(name, {}).get("fail_count", 0),
@@ -1730,7 +1767,9 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     cutoff_str = cutoff.isoformat()
 
     # 按日期聚合任务
-    daily: dict[str, dict] = defaultdict(lambda: {"tasks": 0, "success": 0, "failed": 0, "cost_usd": 0.0})
+    daily: dict[str, dict] = defaultdict(
+        lambda: {"tasks": 0, "success": 0, "failed": 0, "cost_usd": 0.0}
+    )
     total_tasks = 0
     total_success = 0
     total_failed = 0
@@ -1776,13 +1815,15 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
             with open(traj_file, encoding="utf-8") as _f:
                 traj_count = sum(1 for _ in _f)
 
-    return JSONResponse({
-        "daily": daily_list,
-        "totals": {
-            "trajectories": traj_count,
-            "tasks": total_tasks,
-            "success": total_success,
-            "failed": total_failed,
-            "total_cost_usd": round(total_cost, 4),
-        },
-    })
+    return JSONResponse(
+        {
+            "daily": daily_list,
+            "totals": {
+                "trajectories": traj_count,
+                "tasks": total_tasks,
+                "success": total_success,
+                "failed": total_failed,
+                "total_cost_usd": round(total_cost, 4),
+            },
+        }
+    )

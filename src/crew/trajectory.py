@@ -72,11 +72,7 @@ def is_hollow_trajectory(data: dict[str, Any]) -> bool:
         return True
     # 全部 step 的 tool 都是 unknown/空 且 output 为空 → 空壳
     for s in steps:
-        tool = (
-            s.get("tool")
-            or (s.get("tool_call", {}) or {}).get("name")
-            or s.get("tool_name", "")
-        )
+        tool = s.get("tool") or (s.get("tool_call", {}) or {}).get("name") or s.get("tool_name", "")
         output = (
             s.get("output")
             or (s.get("tool_result", {}) or {}).get("output")
@@ -178,7 +174,10 @@ class TrajectoryCollector:
         """工厂方法：尝试创建 collector，失败时返回 None 而非抛异常."""
         try:
             return cls.create_for_employee(
-                employee_name, task_description, channel=channel, project_dir=project_dir,
+                employee_name,
+                task_description,
+                channel=channel,
+                project_dir=project_dir,
             )
         except Exception:
             return None

@@ -131,6 +131,7 @@ def get_sqlite_connection(db_path: str | Path) -> sqlite3.Connection:
 
 # ── 通用 get_connection ──
 
+
 @contextlib.contextmanager
 def get_connection(sqlite_path: str | Path | None = None) -> Generator:
     """统一连接获取入口.
@@ -250,6 +251,7 @@ def init_db() -> None:
 
 
 # ── 清理 ──
+
 
 def close_all() -> None:
     """关闭所有连接（池 + SQLite 单例）. 测试 teardown 用."""

@@ -1254,7 +1254,12 @@ class TestGroupChatBotOwnership:
         from crew.webhook_feishu import _feishu_dispatch
 
         ctx, bot_moyan, bot_xinlei = self._make_multi_bot_ctx()
-        mock_exec.return_value = {"output": "收到", "model": "test", "input_tokens": 0, "output_tokens": 0}
+        mock_exec.return_value = {
+            "output": "收到",
+            "model": "test",
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
 
         msg_event = MagicMock()
         msg_event.chat_type = "group"
@@ -1286,7 +1291,11 @@ class TestGroupChatBotOwnership:
                 return_value=("hr-manager", "你好"),
             ):
                 with patch("crew.feishu.get_user_name", new_callable=AsyncMock, return_value="Kai"):
-                    with patch("crew.feishu.send_feishu_reply", new_callable=AsyncMock, return_value={"code": 0}):
+                    with patch(
+                        "crew.feishu.send_feishu_reply",
+                        new_callable=AsyncMock,
+                        return_value={"code": 0},
+                    ):
                         _run(_feishu_dispatch(ctx, msg_event, bot_ctx=bot_xinlei))
 
         # xinlei bot 应该处理了此消息

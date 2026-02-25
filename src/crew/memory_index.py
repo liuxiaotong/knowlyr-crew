@@ -418,9 +418,7 @@ class MemorySearchIndex:
 
         return self._rows_to_results(rows, has_snippet=False)
 
-    def _rows_to_results(
-        self, rows: list, *, has_snippet: bool
-    ) -> list[dict[str, Any]]:
+    def _rows_to_results(self, rows: list, *, has_snippet: bool) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for row in rows:
             row = dict(row)

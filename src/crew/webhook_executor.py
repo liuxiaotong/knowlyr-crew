@@ -698,9 +698,7 @@ def _process_load_tools(
             if s["name"] == "load_tools":
                 s["description"] = new_load_schema["description"]
     return (
-        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。"
-        if newly
-        else "这些工具已加载。"
+        f"已加载: {', '.join(newly)}。现在可以直接调用这些工具。" if newly else "这些工具已加载。"
     )
 
 
@@ -854,7 +852,10 @@ async def _execute_employee_with_tools(
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
                     load_msg = _process_load_tools(
-                        tc.arguments, deferred_names, loaded_deferred, tool_schemas,
+                        tc.arguments,
+                        deferred_names,
+                        loaded_deferred,
+                        tool_schemas,
                     )
                     tool_results.append(
                         {
@@ -917,7 +918,10 @@ async def _execute_employee_with_tools(
             for tc in result.tool_calls:
                 if tc.name == "load_tools":
                     load_msg = _process_load_tools(
-                        tc.arguments, deferred_names, loaded_deferred, tool_schemas,
+                        tc.arguments,
+                        deferred_names,
+                        loaded_deferred,
+                        tool_schemas,
                     )
                     messages.append(
                         {

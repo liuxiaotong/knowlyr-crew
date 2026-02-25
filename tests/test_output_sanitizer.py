@@ -1,6 +1,5 @@
 """Tests for crew.output_sanitizer — LLM 输出清洗."""
 
-
 from crew.output_sanitizer import strip_internal_tags
 
 
@@ -96,13 +95,7 @@ class TestStripInternalTags:
         assert "我去查一下你最近七天的工作记录" in result
 
     def test_tool_call_with_nesting(self):
-        text = (
-            "正在查询。\n"
-            "<search_data>\n"
-            "<query>近七天</query>\n"
-            "<limit>10</limit>\n"
-            "</search_data>"
-        )
+        text = "正在查询。\n<search_data>\n<query>近七天</query>\n<limit>10</limit>\n</search_data>"
         result = strip_internal_tags(text)
         assert "<search_data>" not in result
         assert "正在查询" in result

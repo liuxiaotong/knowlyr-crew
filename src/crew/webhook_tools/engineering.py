@@ -989,9 +989,24 @@ def _validate_python_code(code: str) -> str | None:
         # 检查危险属性访问（os.system 等）
         if isinstance(node, ast.Attribute):
             _BLOCKED_ATTRS = {
-                "system", "popen", "exec", "spawn", "call", "run", "Popen",
-                "check_output", "check_call", "getstatusoutput", "execvp", "execve",
-                "fork", "kill", "remove", "rmdir", "unlink", "rmtree",
+                "system",
+                "popen",
+                "exec",
+                "spawn",
+                "call",
+                "run",
+                "Popen",
+                "check_output",
+                "check_call",
+                "getstatusoutput",
+                "execvp",
+                "execve",
+                "fork",
+                "kill",
+                "remove",
+                "rmdir",
+                "unlink",
+                "rmtree",
             }
             if node.attr in _BLOCKED_ATTRS:
                 return f"不允许调用 .{node.attr}()（安全限制）"

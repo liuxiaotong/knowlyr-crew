@@ -147,6 +147,7 @@ def main(ctx: click.Context, verbose: bool):
 # ── 注册子模块命令 ──
 # 使用延迟 import 避免在顶层加载所有子模块
 
+
 def _register_commands() -> None:
     """注册所有子模块的命令到 main group."""
     from crew.cli.discuss import changelog_draft, discuss, meetings

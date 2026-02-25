@@ -1940,8 +1940,7 @@ SKILL_PACKS: dict[str, dict[str, Any]] = {
     "dev-tools": {
         "label": "开发工具",
         "description": "编码/JSON/正则/IP查询/文本处理/摘要",
-        "tools": TOOL_ROLE_PRESETS["dev-tools"]
-        | {"agent_file_read", "agent_file_grep"},
+        "tools": TOOL_ROLE_PRESETS["dev-tools"] | {"agent_file_read", "agent_file_grep"},
     },
     "life": {
         "label": "生活服务",

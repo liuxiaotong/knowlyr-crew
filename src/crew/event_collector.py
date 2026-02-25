@@ -333,9 +333,7 @@ class EventCollector:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return where, params
 
-    def _aggregate_pg(
-        self, *, event_type: str | None, since: str | None
-    ) -> list[dict[str, Any]]:
+    def _aggregate_pg(self, *, event_type: str | None, since: str | None) -> list[dict[str, Any]]:
         from crew.database import get_pg_connection
 
         where, params = self._build_aggregate_clauses(event_type=event_type, since=since)

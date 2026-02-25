@@ -387,8 +387,11 @@ def create_webhook_app(
         from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
         skip_paths = [
-            "/health", "/webhook/github", "/feishu/event",
-            "/api/team/agents", "/static",
+            "/health",
+            "/webhook/github",
+            "/feishu/event",
+            "/api/team/agents",
+            "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
         app.add_middleware(

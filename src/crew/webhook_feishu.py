@@ -22,6 +22,7 @@ def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
         if exc:
             logger.error("后台任务异常: %s", exc, exc_info=exc)
 
+
 from crew.webhook_context import FeishuBotContext, _AppContext
 
 
@@ -569,9 +570,7 @@ async def _feishu_dispatch(
             if _config.primary:
                 # primary bot 让出已被其他 bot 认领的员工
                 if employee_name in _other_bot_employees:
-                    logger.info(
-                        "群聊跳过: primary bot 让出 %s（属于其他 bot）", employee_name
-                    )
+                    logger.info("群聊跳过: primary bot 让出 %s（属于其他 bot）", employee_name)
                     return
             else:
                 # 非 primary bot 只接自己的 default_employee
@@ -796,7 +795,10 @@ async def _feishu_dispatch(
             from crew.trajectory import TrajectoryCollector
 
             _traj_collector = TrajectoryCollector.create_for_employee(
-                employee_name, task_text, channel="feishu", project_dir=ctx.project_dir,
+                employee_name,
+                task_text,
+                channel="feishu",
+                project_dir=ctx.project_dir,
             )
             _traj_collector.__enter__()
         except Exception:

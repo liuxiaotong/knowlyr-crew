@@ -164,7 +164,12 @@ class ToolMetricsCollector:
                 "tools": tools,
             }
         except Exception:
-            return {"source": "persistent", "total_tool_calls": 0, "tools": {}, "error": "unavailable"}
+            return {
+                "source": "persistent",
+                "total_tool_calls": 0,
+                "tools": {},
+                "error": "unavailable",
+            }
 
     def reset(self) -> None:
         """重置内存统计."""
@@ -1140,9 +1145,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             since = arguments.get("since")
             if since:
                 # 有时间范围：从持久化读取
-                data = _tool_metrics.snapshot_persistent(
-                    tool_name=tool_filter, since=since
-                )
+                data = _tool_metrics.snapshot_persistent(tool_name=tool_filter, since=since)
             else:
                 # 无时间范围：返回 memory + persistent 两层数据
                 memory_snap = _tool_metrics.snapshot(tool_name=tool_filter)

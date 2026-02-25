@@ -1,6 +1,5 @@
 """测试 EventCollector — 统一埋点事件收集器."""
 
-
 import pytest
 
 from crew.event_collector import EventCollector, _reset_singleton, get_event_collector
@@ -171,9 +170,19 @@ class TestEventCollectorAggregate:
 
     def test_aggregate_basic(self, collector):
         """基本聚合应返回正确的 count / success / fail."""
-        collector.record(event_type="tool_call", event_name="list_employees", duration_ms=10.0, success=True)
-        collector.record(event_type="tool_call", event_name="list_employees", duration_ms=20.0, success=True)
-        collector.record(event_type="tool_call", event_name="list_employees", duration_ms=5.0, success=False, error_type="E")
+        collector.record(
+            event_type="tool_call", event_name="list_employees", duration_ms=10.0, success=True
+        )
+        collector.record(
+            event_type="tool_call", event_name="list_employees", duration_ms=20.0, success=True
+        )
+        collector.record(
+            event_type="tool_call",
+            event_name="list_employees",
+            duration_ms=5.0,
+            success=False,
+            error_type="E",
+        )
         agg = collector.aggregate(event_type="tool_call")
         assert len(agg) == 1
         row = agg[0]
@@ -206,7 +215,9 @@ class TestEventCollectorAggregate:
             ("tool_call", "old_tool", "2026-01-01T00:00:00+00:00", 1.0, 1),
         )
         conn.commit()
-        collector.record(event_type="tool_call", event_name="new_tool", duration_ms=2.0, success=True)
+        collector.record(
+            event_type="tool_call", event_name="new_tool", duration_ms=2.0, success=True
+        )
 
         agg = collector.aggregate(event_type="tool_call", since="2026-02-01T00:00:00+00:00")
         names = [r["event_name"] for r in agg]

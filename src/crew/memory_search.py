@@ -317,9 +317,7 @@ class SemanticMemoryIndex:
         scored.sort(key=lambda x: x[3], reverse=True)
         return scored[:limit]
 
-    def _fetch_all_vectors_sqlite(
-        self, exclude_employee: str
-    ) -> list[tuple[str, str, bytes, str]]:
+    def _fetch_all_vectors_sqlite(self, exclude_employee: str) -> list[tuple[str, str, bytes, str]]:
         conn = self._get_conn()
         if exclude_employee:
             rows = conn.execute(
@@ -332,9 +330,7 @@ class SemanticMemoryIndex:
             ).fetchall()
         return [(r[0], r[1], r[2], r[3]) for r in rows]
 
-    def _fetch_all_vectors_pg(
-        self, exclude_employee: str
-    ) -> list[tuple[str, str, bytes, str]]:
+    def _fetch_all_vectors_pg(self, exclude_employee: str) -> list[tuple[str, str, bytes, str]]:
         from crew.database import get_pg_connection
 
         with get_pg_connection() as conn:
@@ -350,8 +346,7 @@ class SemanticMemoryIndex:
                 )
             rows = cur.fetchall()
         return [
-            (r[0], r[1], bytes(r[2]) if isinstance(r[2], memoryview) else r[2], r[3])
-            for r in rows
+            (r[0], r[1], bytes(r[2]) if isinstance(r[2], memoryview) else r[2], r[3]) for r in rows
         ]
 
     # ── reindex ──
