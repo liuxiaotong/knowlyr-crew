@@ -114,7 +114,7 @@ class CrewEngine:
         employee: Employee,
         args: dict[str, str] | None = None,
         positional: list[str] | None = None,
-        project_info: "ProjectInfo | None" = None,
+        project_info: "ProjectInfo | None" = None,  # noqa: F821
         max_visibility: str = "open",
     ) -> str:
         """生成完整的 system prompt.

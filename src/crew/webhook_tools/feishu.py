@@ -240,7 +240,7 @@ async def _tool_create_feishu_task(
     due_str = (args.get("due") or "").strip()
     description = args.get("description", "")
 
-    body: dict[str, Any] = {"summary": summary}
+    body: dict[str, Any] = {"summary": summary}  # noqa: F821
     if description:
         body["description"] = description
     if due_str:
@@ -413,7 +413,7 @@ async def _tool_update_feishu_task(
     due_str = (args.get("due") or "").strip()
     description = args.get("description")
 
-    body: dict[str, Any] = {}
+    body: dict[str, Any] = {}  # noqa: F821
     update_fields: list[str] = []
     if summary:
         body["summary"] = summary
@@ -1226,7 +1226,7 @@ async def _tool_list_feishu_approvals(
                 name = appr.get("approval_name", "未命名")
                 if not code:
                     continue
-                params: dict[str, Any] = {
+                params: dict[str, Any] = {  # noqa: F821
                     "approval_code": code,
                     "page_size": limit,
                 }
@@ -1280,7 +1280,7 @@ async def _tool_list_feishu_approvals(
 # ── 实用工具 ──
 
 # 单位换算表：(from, to) → multiplier  或  callable
-_UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {
+_UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {  # noqa: F821
     # 长度
     ("km", "mi"): 0.621371,
     ("mi", "km"): 1.60934,
@@ -1355,7 +1355,7 @@ async def _tool_create_feishu_spreadsheet(
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     try:
-        body: dict[str, Any] = {"title": title}
+        body: dict[str, Any] = {"title": title}  # noqa: F821
         if folder_token:
             body["folder_token"] = folder_token
 
@@ -1462,7 +1462,7 @@ async def _tool_feishu_bitable(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        params: dict[str, Any] = {"page_size": limit}
+        params: dict[str, Any] = {"page_size": limit}  # noqa: F821
         if filter_str:
             params["filter"] = filter_str
 

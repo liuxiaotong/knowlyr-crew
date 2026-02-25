@@ -70,7 +70,7 @@ async def _tool_calculate(
         "pow": pow,
     }
 
-    def _eval(node: ast.AST) -> Any:
+    def _eval(node: ast.AST) -> Any:  # noqa: F821
         if isinstance(node, ast.Expression):
             return _eval(node.body)
         if isinstance(node, ast.Constant):
@@ -146,7 +146,7 @@ async def _tool_unit_convert(
         return f"{value}°F = {result:.2f}°C"
 
     key = (from_u, to_u)
-    factor = _UNIT_CONVERSIONS.get(key)
+    factor = _UNIT_CONVERSIONS.get(key)  # noqa: F821 — TODO: 定义在 feishu.py，需迁移到此文件
     if factor is None:
         return f"不支持 {from_u} → {to_u} 的换算。支持：km/mi, m/ft, kg/lb, l/gal, gb/mb, c/f 等。"
 

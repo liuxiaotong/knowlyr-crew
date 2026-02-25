@@ -130,10 +130,10 @@ def _make_handler(ctx: _AppContext, handler):
 def create_webhook_app(
     project_dir: Path | None = None,
     token: str | None = None,
-    config: WebhookConfig | None = None,
-    cron_config: CronConfig | None = None,
+    config: WebhookConfig | None = None,  # noqa: F821
+    cron_config: CronConfig | None = None,  # noqa: F821
     cors_origins: list[str] | None = None,
-    feishu_config: FeishuConfig | None = None,
+    feishu_config: FeishuConfig | None = None,  # noqa: F821
     feishu_bots: list | None = None,
 ) -> Starlette:
     """创建 webhook Starlette 应用."""
