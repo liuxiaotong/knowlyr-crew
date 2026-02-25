@@ -1,3 +1,9 @@
+<div align="right">
+
+[English](landing-en.md) | **中文**
+
+</div>
+
 <div align="center">
 
 <h1>knowlyr-crew</h1>
@@ -8,6 +14,7 @@
 
 <p>
 <a href="https://github.com/liuxiaotong/knowlyr-crew">GitHub</a> ·
+<a href="https://github.com/liuxiaotong/knowlyr-crew/blob/main/README.zh-CN.md">完整文档</a> ·
 <a href="https://pypi.org/project/knowlyr-crew/">PyPI</a> ·
 <a href="https://knowlyr.com">knowlyr.com</a>
 </p>
