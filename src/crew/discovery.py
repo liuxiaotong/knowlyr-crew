@@ -72,7 +72,7 @@ def _scan_directory(
 
             # 权限配置校验（警告级别，不阻止加载）
             for w in validate_permissions(emp):
-                logger.warning("权限配置 %s: %s", emp.name, w)
+                logger.debug("权限配置 %s: %s", emp.name, w)
 
             employees.append(emp)
             seen_names.add(emp.name)
