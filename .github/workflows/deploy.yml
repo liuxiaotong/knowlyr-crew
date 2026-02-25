@@ -44,16 +44,13 @@ jobs:
           sparse-checkout: |
             scripts
             static
-            private/employees
 
-      - name: Deploy employee configs
+      - name: Sync private repo (employee configs)
         run: |
-          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} \
-            'mkdir -p /opt/knowlyr-crew/project/private/employees'
-          rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key" \
-            private/employees/ \
-            root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/private/employees/
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            cd /opt/knowlyr-crew/private-repo &&
+            git pull --ff-only origin main
+          '
 
       - name: Deploy scripts
         run: |
