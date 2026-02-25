@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1830_passed-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1859_passed-brightgreen.svg)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#structured-dialectical-deliberation)
@@ -136,9 +136,10 @@ graph LR
 | **Orchestration** | Pipeline · Route · Task Registry | 并行/串行/条件/循环编排，断点恢复，多模型路由 |
 | **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，重要性排序，访问追踪，跨员工 Pattern 共享，多后端 Embedding 降级 |
 | **Evaluation** | Evaluation Engine | 决策追踪，回溯评估，自动纠正记忆 |
-| **Execution** | Providers · Cost Tracker | 7 Provider 统一调用，重试/降级/逐任务成本计量 |
+| **Execution** | Providers · Output Sanitizer · Cost Tracker | 7 Provider 统一调用，重试/降级/逐任务成本计量，双层输出清洗（源头 + 出口） |
 | **Integration** | ID Client · Webhook · Cron | 身份联邦（Circuit Breaker），GitHub 事件路由，定时任务（巡检/复盘/KPI/知识周刊），触发型自动委派 |
 | **Observability** | Trajectory · Metrics · Audit | 零侵入轨迹录制 (contextvars)，权限矩阵查询，工具调用审计日志，CI 部署后自动审计，审计失败飞书告警 |
+| **CLI** | `cli/` 模块化包 (8 子模块) | employee · pipeline · route · discuss · memory · server · ops，命令延迟注册 |
 
 ### MCP Primitive Mapping
 
@@ -520,7 +521,18 @@ query_cost(days=30, employee="code-reviewer")
 curl /api/cost/summary?days=7
 ```
 
-### 8. Zero-Intrusion Trajectory Recording
+### 8. Output Sanitization — Defense in Depth
+
+LLM 原始输出可能包含内部推理标签（`<thinking>`、`<reflection>`、`<inner_monologue>`）和工具调用 XML 块——这些是模型的"工作草稿"，不应暴露给终端用户。Output Sanitizer 实现**双层防御** (defense in depth)：
+
+| 防御层 | 位置 | 职责 |
+|:---|:---|:---|
+| **源头清洗** | `webhook_executor` | LLM 返回值在进入业务逻辑前即清洗 |
+| **出口清洗** | `webhook_handlers` · `webhook_feishu` | 消息发送给用户/回调前二次清洗 |
+
+清洗规则覆盖 5 类标签模式（正则匹配 + 内容移除），处理嵌套标签和多行残余空白。任一层遗漏时另一层兜底——借鉴网络安全的纵深防御原则 (Schneier, 2000)。
+
+### 9. Zero-Intrusion Trajectory Recording
 
 通过 `contextvars.ContextVar` 实现**零侵入轨迹录制**——无需修改任何业务代码，自动捕获 Agent 的思考、工具调用、执行结果、token 消耗：
 
@@ -892,7 +904,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-uv run --extra dev --extra mcp pytest tests/ -q    # 1830 test cases
+uv run --extra dev --extra mcp pytest tests/ -q    # 1859 test cases
 ```
 
 ---
@@ -908,6 +920,7 @@ uv run --extra dev --extra mcp pytest tests/ -q    # 1830 test cases
 - **Cognitive Conflict** — Amason, A.C., 1996. *Distinguishing the Effects of Functional and Dysfunctional Conflict.* Academy of Management Journal, 39(1)
 - **RLHF** — Christiano, P. et al., 2017. *Deep RL from Human Preferences.* [arXiv:1706.03741](https://arxiv.org/abs/1706.03741)
 - **Ebbinghaus Forgetting Curve** — Ebbinghaus, H., 1885. *Über das Gedächtnis* — 记忆衰减模型的启发来源
+- **Defense in Depth** — Schneier, B., 2000. *Secrets and Lies: Digital Security in a Networked World*. Wiley — 多层防御原则的来源
 - **Infrastructure as Code** — Morris, K., 2016. *Infrastructure as Code*. O'Reilly — 声明式规范的范式来源
 - **Gymnasium** — Towers et al., 2024. *Gymnasium: A Standard Interface for RL Environments.* [arXiv:2407.17032](https://arxiv.org/abs/2407.17032)
 
