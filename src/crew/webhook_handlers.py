@@ -1366,7 +1366,18 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     channel = payload.get("channel", "pull")
     success = payload.get("success", True)
 
+    # ── 完整性校验 ──
+    truncated_fields: list[str] = []  # 记录哪些字段被截断
+    expected_steps = payload.get("expected_steps")
+    if expected_steps is not None and expected_steps != len(steps):
+        logger.warning(
+            "轨迹步骤数不匹配: expected_steps=%s, actual=%s (employee=%s)",
+            expected_steps, len(steps), employee_name,
+        )
+
     try:
+        import json as _json
+
         from crew.trajectory import TrajectoryCollector
 
         output_dir = (ctx.project_dir / ".crew" / "trajectories") if ctx.project_dir else Path(".")
@@ -1378,20 +1389,54 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
             output_dir=output_dir,
         )
         for s in steps:
-            # tool_params 必须是 dict，agent 可能传了 string
+            # tool_name 必须存在，否则标记为 unknown
+            tool_name = s.get("tool_name") or "unknown"
+
+            # tool_params 规范化：尽量保留原始结构
             raw_params = s.get("tool_params", {})
             if not isinstance(raw_params, dict):
-                raw_params = {"_raw": str(raw_params)[:500]}
+                if isinstance(raw_params, str):
+                    # 尝试 JSON 解析
+                    try:
+                        parsed = _json.loads(raw_params)
+                        if isinstance(parsed, dict):
+                            raw_params = parsed
+                        elif isinstance(parsed, list):
+                            raw_params = {"_list": parsed, "_type": "list"}
+                        else:
+                            raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
+                    except (ValueError, TypeError):
+                        raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
+                elif isinstance(raw_params, list):
+                    raw_params = {"_list": raw_params, "_type": "list"}
+                else:
+                    raw_params = {"_raw": str(raw_params)[:8000], "_type": type(raw_params).__name__}
+
+            # 截断 thought / tool_output（8000 字符上限）
+            thought_raw = str(s.get("thought", ""))
+            if len(thought_raw) > 8000:
+                thought_raw = thought_raw[:8000]
+                if "thought" not in truncated_fields:
+                    truncated_fields.append("thought")
+            tool_output_raw = str(s.get("tool_output", ""))
+            if len(tool_output_raw) > 8000:
+                tool_output_raw = tool_output_raw[:8000]
+                if "tool_output" not in truncated_fields:
+                    truncated_fields.append("tool_output")
+
             tc.add_tool_step(
-                thought=str(s.get("thought", ""))[:2000],
-                tool_name=s.get("tool_name", "unknown"),
+                thought=thought_raw,
+                tool_name=tool_name,
                 tool_params=raw_params,
-                tool_output=str(s.get("tool_output", ""))[:2000],
+                tool_output=tool_output_raw,
                 tool_exit_code=s.get("tool_exit_code", 0),
             )
         result = tc.finish(success=success)
         total_steps = result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
-        return JSONResponse({"ok": True, "steps_recorded": total_steps})
+        resp_data: dict[str, Any] = {"ok": True, "steps_received": total_steps}
+        if truncated_fields:
+            resp_data["truncated_fields"] = truncated_fields
+        return JSONResponse(resp_data)
     except Exception as e:
         logger.exception("轨迹上报处理失败")
         return JSONResponse({"error": str(e)}, status_code=500)
