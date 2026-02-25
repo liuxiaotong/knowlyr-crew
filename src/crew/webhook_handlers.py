@@ -728,9 +728,11 @@ async def _run_and_callback(
         pass
 
     # 回调蚁聚：发频道消息
+    from crew.output_sanitizer import strip_internal_tags
+
     output = ""
     if isinstance(result, dict):
-        output = (result.get("output") or "").strip()
+        output = strip_internal_tags((result.get("output") or "").strip())
     if not output:
         logger.warning("异步回调: 员工返回空内容，跳过回调 emp=%s channel=%d", name, callback_channel_id)
         return

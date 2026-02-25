@@ -366,10 +366,15 @@ async def _feishu_fast_reply(
         max_tokens=500,
     )
 
+    # 清洗内部标签（<thinking>、工具调用 XML 等）
+    from crew.output_sanitizer import strip_internal_tags
+
+    output = strip_internal_tags(result.content) if result else ""
+
     return {
         "employee": emp.name,
         "prompt": prompt[:500],
-        "output": result.content if result else "",
+        "output": output,
         "model": result.model if result else chat_model,
         "input_tokens": result.input_tokens if result else 0,
         "output_tokens": result.output_tokens if result else 0,
@@ -862,6 +867,12 @@ async def _feishu_dispatch(
                 logger.debug("飞书轨迹录制失败: %s", _te)
             finally:
                 _traj_collector.__exit__(None, None, None)
+
+        # 清洗内部标签（<thinking>、工具调用 XML 等）
+        from crew.output_sanitizer import strip_internal_tags
+
+        if isinstance(result, dict) and result.get("output"):
+            result["output"] = strip_internal_tags(result["output"])
 
         # 记录对话历史
         output_text = result.get("output", "") if isinstance(result, dict) else str(result)

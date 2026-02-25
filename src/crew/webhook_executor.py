@@ -979,6 +979,11 @@ async def _execute_employee_with_tools(
     except Exception:
         pass
 
+    # 清洗内部标签（<thinking>、工具调用 XML 等）
+    from crew.output_sanitizer import strip_internal_tags
+
+    final_content = strip_internal_tags(final_content)
+
     return {
         "employee": name,
         "prompt": prompt[:500],
@@ -1133,10 +1138,14 @@ async def _execute_employee(
         result = None
 
     if result is not None:
+        # 清洗内部标签（<thinking>、工具调用 XML 等）
+        from crew.output_sanitizer import strip_internal_tags
+
+        cleaned_output = strip_internal_tags(result.content)
         return {
             "employee": name,
             "prompt": prompt,
-            "output": result.content,
+            "output": cleaned_output,
             "model": result.model,
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
