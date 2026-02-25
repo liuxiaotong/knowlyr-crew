@@ -1,33 +1,18 @@
-<div align="right">
-
-**English** | [中文](README.zh-CN.md)
-
-</div>
-
 <div align="center">
 
 <h1>knowlyr-crew</h1>
 
-<h3>Structured Dialectical Deliberation Engine for AI Workforces<br/>with Persistent Episodic Memory</h3>
+<h2>Structured Dialectical Deliberation Engine<br/>for AI Workforces</h2>
 
-<p><strong>声明式 AI 员工引擎 — 结构化辩证协商 · MCP 协议原生 · 持续经验积累</strong><br/>
-<em>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</em></p>
+<p>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</p>
 
-[![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
-<br/>
-[![Tests](https://img.shields.io/badge/tests-1859_passed-brightgreen.svg)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-primitive-mapping)
-[![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
-[![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#structured-dialectical-deliberation)
-
-[Abstract](#abstract) · [Problem Statement](#problem-statement) · [Formal Framework](#formal-framework) · [Architecture](#architecture) · [Key Innovations](#key-innovations) · [Quick Start](#quick-start) · [Employee Specification](#employee-specification) · [Production Server](#production-server) · [CLI Reference](#cli-reference) · [Ecosystem](#ecosystem) · [References](#references)
+<p>
+<a href="https://github.com/liuxiaotong/knowlyr-crew">GitHub</a> ·
+<a href="https://pypi.org/project/knowlyr-crew/">PyPI</a> ·
+<a href="https://knowlyr.com">knowlyr.com</a>
+</p>
 
 </div>
-
----
 
 ## Abstract
 
@@ -36,8 +21,6 @@ The primary failure modes of multi-agent collaboration systems are threefold: **
 The system implements a self-correcting closed loop of "**define -> deliberate -> decide -> evaluate -> update memory**", feeding human feedback directly into agents' persistent memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human evaluation outcomes shape subsequent inference behavior.
 
 > **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
-
----
 
 ## Problem Statement
 
@@ -51,8 +34,6 @@ The failure mechanisms of multi-agent collaboration have a solid empirical found
 | **Framework Lock-in** | Agent definitions are bound to specific SDKs/IDEs; migration cost $\propto$ definition complexity | Each framework uses its own incompatible format -- switching IDEs renders definitions useless | Protocol-native MCP: declarative YAML/Markdown, zero-modification cross-IDE portability |
 
 > Crew is not yet another orchestration framework. It is the **capability definition layer** and **experience accumulation layer** for AI digital employees -- "who does what, how they deliberate, and what they've learned" -- while delegating identity management and runtime interactions to [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id).
-
----
 
 ## Formal Framework
 
@@ -109,8 +90,6 @@ employee.next_inference(context ∪ {m_correction})
 ```
 
 Three decision categories: `estimate` / `recommendation` / `commitment`. Evaluation conclusions are automatically written as `correction` entries into persistent memory, forming a closed loop of **decision -> execution -> retrospective -> improvement**.
-
----
 
 ## Architecture
 
@@ -191,8 +170,6 @@ knowlyr-crew mcp -t sse --port 9000             # SSE (remote connection)
 knowlyr-crew mcp -t http --port 9001            # Streamable HTTP
 knowlyr-crew mcp -t sse --api-token SECRET      # Enable Bearer authentication
 ```
-
----
 
 ## Key Innovations
 
@@ -548,8 +525,6 @@ Crew produces trajectories -> agentrecorder standard format -> knowlyr-gym PRM s
 
 This is the data bridge connecting **Crew** (collaboration layer) and **knowlyr-gym** (training layer) -- real interaction trajectories produced during Crew runtime can be directly used for agent reinforcement learning training.
 
----
-
 ## Quick Start
 
 ```bash
@@ -588,8 +563,6 @@ knowlyr-crew memory show product-manager
 
 Once configured, the AI IDE can directly invoke `code-reviewer` for code review, `test-engineer` for writing tests, `run_pipeline` for chaining multi-employee pipelines, and `run_discussion` for initiating multi-employee discussions.
 
----
-
 ## Async Delegation & Meeting Orchestration
 
 AI employees can **delegate in parallel** to multiple colleagues for task execution, or **organize multi-person meetings** for asynchronous deliberation:
@@ -625,8 +598,6 @@ User -> 姜墨言: "Have code-reviewer review the PR and test-engineer write tes
 | Thursday 16:00 | Team knowledge digest -- cross-team work output + common issues + best practices -> Feishu document |
 | Friday 17:00 | KPI weekly report -- per-employee rating + anomaly auto-delegation (D-grade -> HR follow-up, consecutive improvement items -> team attention) |
 | Friday 18:00 | Weekly retrospective -- highlights, issues, and recommendations for next week |
-
----
 
 ## Production Server
 
@@ -680,8 +651,6 @@ knowlyr-crew serve --port 8765 --token YOUR_SECRET
 ### Webhook Configuration
 
 `.crew/webhook.yaml` defines event routing rules (GitHub HMAC-SHA256 signature verification); `.crew/cron.yaml` defines scheduled tasks (croniter parsing). The KPI weekly report cron includes built-in anomaly auto-delegation rules -- employees rated D (no output) are automatically escalated to HR, and consecutive self-check improvement items trigger team attention notifications.
-
----
 
 ## Integrations
 
@@ -750,8 +719,6 @@ Tongyi Wanxiang (DashScope) generates realistic professional portrait avatars, 7
 pip install knowlyr-crew[avatar]
 knowlyr-crew avatar security-auditor
 ```
-
----
 
 ## CLI Reference
 
@@ -851,8 +818,6 @@ knowlyr-crew log show <session_id>
 
 </details>
 
----
-
 ## Ecosystem
 
 <details>
@@ -903,19 +868,6 @@ graph LR
 | Deliberation | **Crew** | Structured dialectical deliberation · persistent memory accumulation · MCP-native | You are here |
 | Agent Training | **knowlyr-gym** | Gymnasium-style RL framework · process reward model · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
----
-
-## Development
-
-```bash
-git clone https://github.com/liuxiaotong/knowlyr-crew.git
-cd knowlyr-crew
-pip install -e ".[all]"
-uv run --extra dev --extra mcp pytest tests/ -q    # 1859 test cases
-```
-
----
-
 ## References
 
 - **Model Context Protocol (MCP)** -- Anthropic, 2024. Open standard protocol for agent-tool interaction
@@ -930,15 +882,3 @@ uv run --extra dev --extra mcp pytest tests/ -q    # 1859 test cases
 - **Defense in Depth** -- Schneier, B., 2000. *Secrets and Lies: Digital Security in a Networked World*. Wiley -- Source of the multi-layer defense principle
 - **Infrastructure as Code** -- Morris, K., 2016. *Infrastructure as Code*. O'Reilly -- Paradigm source for declarative specifications
 - **Gymnasium** -- Towers et al., 2024. *Gymnasium: A Standard Interface for RL Environments.* [arXiv:2407.17032](https://arxiv.org/abs/2407.17032)
-
----
-
-## License
-
-[MIT](LICENSE)
-
----
-
-<div align="center">
-<sub><a href="https://github.com/liuxiaotong">knowlyr</a> — structured dialectical deliberation engine for AI workforces</sub>
-</div>
