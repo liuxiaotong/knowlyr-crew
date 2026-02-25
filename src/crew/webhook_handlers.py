@@ -269,6 +269,58 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
     return JSONResponse({"items": items})
 
 
+async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
+    """返回 active 状态的 AI 员工展示数据（供官网 about 页面使用）.
+
+    返回格式兼容官网模板，每个元素包含:
+    id, nickname, title, avatar_url, is_agent, staff_badge, bio, expertise, domains
+    """
+    import yaml as _yaml
+    from starlette.responses import JSONResponse
+
+    from crew.discovery import discover_employees
+
+    result = discover_employees(ctx.project_dir)
+    agents = []
+    for emp in result.employees.values():
+        if emp.agent_status != "active":
+            continue
+
+        # 从 employee.yaml 读取 bio 和 domains（Employee 模型未收录这两个字段）
+        bio = ""
+        domains: list[str] = []
+        if emp.source_path and (emp.source_path / "employee.yaml").exists():
+            try:
+                raw = _yaml.safe_load(
+                    (emp.source_path / "employee.yaml").read_text(encoding="utf-8")
+                )
+                if isinstance(raw, dict):
+                    bio = raw.get("bio", "")
+                    raw_domains = raw.get("domains", [])
+                    domains = raw_domains if isinstance(raw_domains, list) else []
+            except Exception:
+                pass
+
+        agents.append(
+            {
+                "id": emp.agent_id,
+                "nickname": emp.character_name,
+                "title": emp.display_name,
+                "avatar_url": "",  # 头像 serving 端点待建，官网用 SVG 替代
+                "is_agent": True,
+                "staff_badge": "集识光年",
+                "bio": bio,
+                "expertise": emp.tags,
+                "domains": domains,
+            }
+        )
+
+    # 按 id (agent_id) 升序排列，None 排最后
+    agents.sort(key=lambda a: (a["id"] is None, a["id"] or 0))
+
+    return JSONResponse(agents)
+
+
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
     from starlette.responses import JSONResponse

@@ -77,6 +77,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_org_memories,
     _handle_project_status,
     _handle_run_employee,
+    _handle_team_agents,
     _handle_trajectory_report,
     _handle_run_pipeline,
     _handle_run_route,
@@ -281,6 +282,11 @@ def create_webhook_app(
             for bot_id in ctx.feishu_bots
         ],
         Route(
+            "/api/team/agents",
+            endpoint=_make_handler(ctx, _handle_team_agents),
+            methods=["GET"],
+        ),
+        Route(
             "/api/employees",
             endpoint=_make_handler(ctx, _handle_employee_list),
             methods=["GET"],
@@ -373,7 +379,7 @@ def create_webhook_app(
     if token:
         from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
 
-        skip_paths = ["/health", "/webhook/github", "/feishu/event"] + [
+        skip_paths = ["/health", "/webhook/github", "/feishu/event", "/api/team/agents"] + [
             f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots
         ]
         app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
