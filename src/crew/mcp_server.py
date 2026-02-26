@@ -711,6 +711,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     "triggers": e.triggers,
                     "model": e.model,
                     "layer": e.source_layer,
+                    "avatar_url": f"/static/avatars/{e.agent_id}.webp" if e.agent_id else None,
                 }
                 for e in employees
             ]

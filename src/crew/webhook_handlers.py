@@ -253,6 +253,7 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
     result = discover_employees(ctx.project_dir)
     items = []
     for emp in result.employees.values():
+        avatar_url = f"/static/avatars/{emp.agent_id}.webp" if emp.agent_id else None
         items.append(
             {
                 "name": emp.name,
@@ -264,6 +265,7 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
                 "model": emp.model,
                 "model_tier": emp.model_tier,
                 "tags": emp.tags,
+                "avatar_url": avatar_url,
             }
         )
 
