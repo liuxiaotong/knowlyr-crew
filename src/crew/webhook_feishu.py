@@ -804,37 +804,43 @@ async def _feishu_dispatch(
         except Exception:
             _traj_collector = None
 
-        # ── 闲聊快速路径 ──
-        # 纯闲聊不需要 98 个工具和 agent loop，直接用 soul prompt 回复
-        # 省 ~80K tokens / $0.07 per message
+        # ── engine.chat() 统一对话路径 ──
+        # 无图片：走 engine.chat()（内部自动 fast/full 路由）
+        # 有图片：保留旧的 full path（engine.chat 暂不支持多模态）
         import time as _time
 
         _t0 = _time.monotonic()
 
-        use_fast_path = (
-            has_tools
-            and image_data is None
-            and isinstance(user_msg, str)
-            and not _needs_tools(task_text)
-            and not _prev_was_full  # 上一轮用了工具，跟进也走 full path
-            and emp is not None
-        )
+        if image_data is None:
+            # 把飞书对话场景上下文（日期、群聊/私聊说明）拼入消息前缀
+            if chat_context:
+                chat_message = f"[场景]\n{chat_context}\n\n[消息]\n{task_text}"
+            else:
+                chat_message = task_text
 
-        if use_fast_path:
-            try:
-                result = await _feishu_fast_reply(
-                    ctx,
-                    emp,
-                    task_text,
-                    message_history,
-                    max_visibility=_visibility,
-                    sender_name=sender_name or "Kai",
-                )
-            except Exception as fast_exc:
-                logger.warning("闲聊快速路径失败，回退完整路径: %s", fast_exc)
-                use_fast_path = False
-        if not use_fast_path:
-            # 通过 webhook 模块查找，确保 mock patch 生效
+            from crew.engine import CrewEngine
+
+            _engine = CrewEngine(project_dir=ctx.project_dir)
+            _sender_id = msg_event.sender_id or "kai"
+            result = await _engine.chat(
+                employee_id=employee_name,
+                message=chat_message,
+                channel="lark",
+                sender_id=_sender_id,
+                max_visibility=_visibility,
+                message_history=message_history,
+            )
+            _path_label = "fast" if result.get("tokens_used", 0) < 2000 else "full"
+            _elapsed = _time.monotonic() - _t0
+            _tokens = result.get("tokens_used", 0)
+            logger.info(
+                "飞书回复 [engine] %.1fs tokens=%d msg=%s",
+                _elapsed,
+                _tokens,
+                task_text[:40],
+            )
+        else:
+            # 图片路径：保留完整 agent loop（engine.chat 暂不支持多模态）
             import crew.webhook as _wh
 
             result = await _wh._execute_employee(
@@ -845,21 +851,20 @@ async def _feishu_dispatch(
                 user_message=user_msg,
                 message_history=message_history,
             )
-
-        _elapsed = _time.monotonic() - _t0
-        _path_label = "fast" if use_fast_path else "full"
-        _model_used = result.get("model", "?") if isinstance(result, dict) else "?"
-        _in_tok = result.get("input_tokens", 0) if isinstance(result, dict) else 0
-        _out_tok = result.get("output_tokens", 0) if isinstance(result, dict) else 0
-        logger.info(
-            "飞书回复 [%s] %.1fs model=%s in=%d out=%d msg=%s",
-            _path_label,
-            _elapsed,
-            _model_used,
-            _in_tok,
-            _out_tok,
-            task_text[:40],
-        )
+            _elapsed = _time.monotonic() - _t0
+            _path_label = "full"
+            _model_used = result.get("model", "?") if isinstance(result, dict) else "?"
+            _in_tok = result.get("input_tokens", 0) if isinstance(result, dict) else 0
+            _out_tok = result.get("output_tokens", 0) if isinstance(result, dict) else 0
+            logger.info(
+                "飞书回复 [%s/image] %.1fs model=%s in=%d out=%d msg=%s",
+                _path_label,
+                _elapsed,
+                _model_used,
+                _in_tok,
+                _out_tok,
+                task_text[:40],
+            )
 
         # 完成轨迹录制
         if _traj_collector is not None:
@@ -871,13 +876,21 @@ async def _feishu_dispatch(
                 _traj_collector.__exit__(None, None, None)
 
         # 清洗内部标签（<thinking>、工具调用 XML 等）
+        # engine.chat() 返回 "reply" 键；旧路径返回 "output" 键
         from crew.output_sanitizer import strip_internal_tags
 
-        if isinstance(result, dict) and result.get("output"):
-            result["output"] = strip_internal_tags(result["output"])
+        if isinstance(result, dict):
+            if result.get("output"):
+                result["output"] = strip_internal_tags(result["output"])
+            if result.get("reply"):
+                result["reply"] = strip_internal_tags(result["reply"])
 
-        # 记录对话历史
-        output_text = result.get("output", "") if isinstance(result, dict) else str(result)
+        # 记录对话历史（兼容 engine.chat() 的 "reply" 和旧路径的 "output"）
+        output_text = (
+            result.get("reply") or result.get("output", "")
+            if isinstance(result, dict)
+            else str(result)
+        )
         if ctx.feishu_chat_store:
             ctx.feishu_chat_store.append(
                 msg_event.chat_id, "user", task_text, sender_name=sender_name
