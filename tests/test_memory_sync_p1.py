@@ -9,14 +9,12 @@
 
 import json
 import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from crew.memory import MemoryConfig, MemoryStore
-from crew.memory_cache import _CACHE, invalidate
-
+from crew.memory import MemoryStore
+from crew.memory_cache import _CACHE
 
 # ── Fixtures ──
 
@@ -52,8 +50,8 @@ class TestMemoryAddHandler:
     @pytest.mark.asyncio
     async def test_add_memory_success(self, tmp_path):
         """成功写入记忆."""
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         mem_dir = tmp_path / ".crew" / "memory"
         mem_dir.mkdir(parents=True)
@@ -84,8 +82,8 @@ class TestMemoryAddHandler:
     @pytest.mark.asyncio
     async def test_add_memory_idempotent(self, tmp_path):
         """同 session + category 不重复写入."""
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         mem_dir = tmp_path / ".crew" / "memory"
         mem_dir.mkdir(parents=True)
@@ -121,8 +119,8 @@ class TestMemoryAddHandler:
     @pytest.mark.asyncio
     async def test_add_memory_missing_fields(self, tmp_path):
         """缺少必填字段返回 400."""
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         ctx = MagicMock(spec=_AppContext)
         ctx.project_dir = tmp_path
@@ -138,8 +136,8 @@ class TestMemoryAddHandler:
     @pytest.mark.asyncio
     async def test_add_memory_invalid_category(self, tmp_path):
         """无效 category 返回 400."""
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         ctx = MagicMock(spec=_AppContext)
         ctx.project_dir = tmp_path
@@ -160,8 +158,8 @@ class TestMemoryAddHandler:
     async def test_add_memory_invalidates_cache(self, tmp_path):
         """写入后缓存被失效."""
         from crew.memory_cache import get_prompt_cached
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         mem_dir = tmp_path / ".crew" / "memory"
         mem_dir.mkdir(parents=True)
@@ -397,8 +395,8 @@ class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_write_then_query(self, tmp_path):
         """通过 API 写入后能通过 query 查到."""
-        from crew.webhook_handlers import _handle_memory_add
         from crew.webhook_context import _AppContext
+        from crew.webhook_handlers import _handle_memory_add
 
         mem_dir = tmp_path / ".crew" / "memory"
         mem_dir.mkdir(parents=True)

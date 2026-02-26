@@ -7,16 +7,12 @@
 4. engine — 集成 get_prompt_cached
 """
 
-import json
-import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from crew.memory import MemoryConfig, MemoryStore
+from crew.memory import MemoryStore
 from crew.memory_cache import (
-    MemorySnapshot,
     _CACHE,
     _count_lines,
     get_prompt_cached,
@@ -24,7 +20,6 @@ from crew.memory_cache import (
     invalidate_all,
 )
 from crew.reply_postprocess import push_if_needed, should_push
-
 
 # ── Fixtures ──
 
