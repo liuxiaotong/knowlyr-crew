@@ -470,7 +470,17 @@ async def _tool_rss_read(
 ) -> str:
     """读取 RSS/Atom 订阅源."""
     import re
-    import xml.etree.ElementTree as ET  # noqa: S405 — TODO(S-2): 考虑用 defusedxml 防 XXE
+
+    try:
+        import defusedxml.ElementTree as ET
+    except ImportError:
+        import logging as _logging
+        import xml.etree.ElementTree as ET  # noqa: S405
+
+        _logging.getLogger(__name__).warning(
+            "defusedxml 未安装，RSS 解析使用标准库 xml.etree.ElementTree（无 XXE 防护）。"
+            "建议安装: pip install 'knowlyr-crew[webhook]'"
+        )
 
     import httpx
 

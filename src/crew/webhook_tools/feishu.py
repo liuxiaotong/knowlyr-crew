@@ -1,8 +1,4 @@
-"""飞书工具函数 — 日历、任务、文档、表格、群聊、审批等.
-
-TODO(W-5): 25 处 `async with httpx.AsyncClient()` 应替换为 crew.feishu.get_feishu_client()
-共享连接池，避免每次请求都做 TLS 握手。需要单独 PR 处理。
-"""
+"""飞书工具函数 — 日历、任务、文档、表格、群聊、审批等."""
 
 from __future__ import annotations
 
@@ -10,11 +6,12 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from crew.feishu import get_feishu_client
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
-
 
 async def _tool_create_feishu_event(
     args: dict,
@@ -93,9 +90,7 @@ async def _tool_create_feishu_event(
     else:
         return f"创建失败: {result.get('error', '未知错误')}"
 
-
 # ── 飞书日程查询/删除 ──
-
 
 async def _tool_read_feishu_calendar(
     args: dict,
@@ -107,8 +102,6 @@ async def _tool_read_feishu_calendar(
     import os
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -135,17 +128,18 @@ async def _tool_read_feishu_calendar(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "start_time": str(int(start_dt.timestamp())),
-                    "end_time": str(int(end_dt.timestamp())),
-                    "page_size": 50,
-                },
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "start_time": str(int(start_dt.timestamp())),
+                "end_time": str(int(end_dt.timestamp())),
+                "page_size": 50,
+            },
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"查询失败: {data.get('msg', '未知错误')}"
@@ -178,7 +172,6 @@ async def _tool_read_feishu_calendar(
     except Exception as e:
         return f"查询失败: {e}"
 
-
 async def _tool_delete_feishu_event(
     args: dict,
     *,
@@ -187,8 +180,6 @@ async def _tool_delete_feishu_event(
 ) -> str:
     """删除飞书日历日程."""
     import os
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -205,12 +196,13 @@ async def _tool_delete_feishu_event(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.delete(
-                f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events/{event_id}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.delete(
+            f"https://open.feishu.cn/open-apis/calendar/v4/calendars/{cal_id}/events/{event_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"日程已删除 (event_id={event_id})。"
@@ -218,9 +210,7 @@ async def _tool_delete_feishu_event(
     except Exception as e:
         return f"删除失败: {e}"
 
-
 # ── 飞书待办任务 ──
-
 
 async def _tool_create_feishu_task(
     args: dict,
@@ -231,8 +221,6 @@ async def _tool_create_feishu_task(
     """在飞书创建待办任务."""
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -259,13 +247,14 @@ async def _tool_create_feishu_task(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                "https://open.feishu.cn/open-apis/task/v2/tasks",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=body,
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/task/v2/tasks",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=body,
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             task = data.get("data", {}).get("task", {})
@@ -275,7 +264,6 @@ async def _tool_create_feishu_task(
         return f"创建失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"创建失败: {e}"
-
 
 async def _tool_list_feishu_tasks(
     args: dict,
@@ -287,8 +275,6 @@ async def _tool_list_feishu_tasks(
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
 
-    import httpx
-
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
 
@@ -296,13 +282,14 @@ async def _tool_list_feishu_tasks(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://open.feishu.cn/open-apis/task/v2/tasks",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"page_size": limit},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            "https://open.feishu.cn/open-apis/task/v2/tasks",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"page_size": limit},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"查询失败: {data.get('msg', '未知错误')}"
@@ -329,7 +316,6 @@ async def _tool_list_feishu_tasks(
     except Exception as e:
         return f"查询失败: {e}"
 
-
 async def _tool_complete_feishu_task(
     args: dict,
     *,
@@ -337,7 +323,6 @@ async def _tool_complete_feishu_task(
     ctx: _AppContext | None = None,
 ) -> str:
     """完成飞书待办任务."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -348,19 +333,19 @@ async def _tool_complete_feishu_task(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}/complete",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}/complete",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"任务已完成 ✅ [task_id={task_id}]"
         return f"操作失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"操作失败: {e}"
-
 
 async def _tool_delete_feishu_task(
     args: dict,
@@ -369,7 +354,6 @@ async def _tool_delete_feishu_task(
     ctx: _AppContext | None = None,
 ) -> str:
     """删除飞书待办任务."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -380,19 +364,19 @@ async def _tool_delete_feishu_task(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.delete(
-                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.delete(
+            f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"任务已删除 [task_id={task_id}]"
         return f"删除失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"删除失败: {e}"
-
 
 async def _tool_update_feishu_task(
     args: dict,
@@ -403,8 +387,6 @@ async def _tool_update_feishu_task(
     """更新飞书待办任务."""
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -441,14 +423,15 @@ async def _tool_update_feishu_task(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.patch(
-                f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                params={"update_fields": ",".join(update_fields)},
-                json=body,
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.patch(
+            f"https://open.feishu.cn/open-apis/task/v2/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            params={"update_fields": ",".join(update_fields)},
+            json=body,
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             parts = []
@@ -463,7 +446,6 @@ async def _tool_update_feishu_task(
     except Exception as e:
         return f"更新失败: {e}"
 
-
 async def _tool_feishu_chat_history(
     args: dict,
     *,
@@ -474,8 +456,6 @@ async def _tool_feishu_chat_history(
     import json as _json
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -488,18 +468,19 @@ async def _tool_feishu_chat_history(
     token = await ctx.feishu_token_mgr.get_token()
     tz_cn = _tz(timedelta(hours=8))
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://open.feishu.cn/open-apis/im/v1/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "container_id_type": "chat",
-                    "container_id": chat_id,
-                    "page_size": limit,
-                    "sort_type": "ByCreateTimeDesc",
-                },
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            "https://open.feishu.cn/open-apis/im/v1/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "container_id_type": "chat",
+                "container_id": chat_id,
+                "page_size": limit,
+                "sort_type": "ByCreateTimeDesc",
+            },
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"查询失败: {data.get('msg', '未知错误')}"
@@ -545,7 +526,6 @@ async def _tool_feishu_chat_history(
         return "\n".join(lines)
     except Exception as e:
         return f"查询失败: {e}"
-
 
 # ── 天气工具 ──
 
@@ -613,7 +593,6 @@ _CITY_CODES: dict[str, str] = {
     "扬州": "101190601",
 }
 
-
 async def _tool_search_feishu_docs(
     args: dict,
     *,
@@ -621,7 +600,6 @@ async def _tool_search_feishu_docs(
     ctx: _AppContext | None = None,
 ) -> str:
     """搜索飞书云文档."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置，无法搜索文档。"
@@ -632,12 +610,12 @@ async def _tool_search_feishu_docs(
         return "搜索关键词不能为空。"
 
     token = await ctx.feishu_token_mgr.get_token()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            "https://open.feishu.cn/open-apis/suite/docs-api/search/object",
-            json={"query": query, "count": count, "offset": 0},
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    client = get_feishu_client()
+    resp = await client.post(
+        "https://open.feishu.cn/open-apis/suite/docs-api/search/object",
+        json={"query": query, "count": count, "offset": 0},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     data = resp.json()
     if not data.get("data", {}).get("docs_entities"):
         return "没有找到匹配的文档。"
@@ -650,7 +628,6 @@ async def _tool_search_feishu_docs(
         lines.append(f"[{doc_type}] {title}\n{url}")
     return "\n---\n".join(lines)
 
-
 async def _tool_read_feishu_doc(
     args: dict,
     *,
@@ -658,7 +635,6 @@ async def _tool_read_feishu_doc(
     ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书文档内容."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置，无法读取文档。"
@@ -668,11 +644,11 @@ async def _tool_read_feishu_doc(
         return "缺少 document_id。"
 
     token = await ctx.feishu_token_mgr.get_token()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    client = get_feishu_client()
+    resp = await client.get(
+        f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     data = resp.json()
     content = data.get("data", {}).get("content", "")
     if not content:
@@ -681,7 +657,6 @@ async def _tool_read_feishu_doc(
         return content[:9500] + f"\n\n[内容已截断，共 {len(content)} 字符]"
     return content
 
-
 async def _tool_create_feishu_doc(
     args: dict,
     *,
@@ -689,7 +664,6 @@ async def _tool_create_feishu_doc(
     ctx: _AppContext | None = None,
 ) -> str:
     """在飞书创建新文档."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置，无法创建文档。"
@@ -705,47 +679,48 @@ async def _tool_create_feishu_doc(
     if folder_token:
         create_body["folder_token"] = folder_token
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            "https://open.feishu.cn/open-apis/docx/v1/documents",
-            json=create_body,
+    client = get_feishu_client()
+    resp = await client.post(
+        "https://open.feishu.cn/open-apis/docx/v1/documents",
+        json=create_body,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    data = resp.json()
+    doc_id = data.get("data", {}).get("document", {}).get("document_id", "")
+    if not doc_id:
+        return f"创建文档失败: {data.get('msg', '未知错误')}"
+
+    if content:
+        await client.post(
+            f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
+            json={
+                "children": [
+                    {
+                        "block_type": 2,
+                        "text": {"elements": [{"text_run": {"content": content}}]},
+                    }
+                ],
+            },
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
-        data = resp.json()
-        doc_id = data.get("data", {}).get("document", {}).get("document_id", "")
-        if not doc_id:
-            return f"创建文档失败: {data.get('msg', '未知错误')}"
-
-        if content:
-            await client.post(
-                f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
-                json={
-                    "children": [
-                        {
-                            "block_type": 2,
-                            "text": {"elements": [{"text_run": {"content": content}}]},
-                        }
-                    ],
-                },
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            )
 
     url = f"https://feishu.cn/docx/{doc_id}"
     return f"文档已创建：{title}\n{url}"
 
-
 _URL_RE = re.compile(r"https?://\S+")
-
 
 async def _fetch_og_meta(url: str) -> dict[str, str]:
     """抓取页面 Open Graph 元数据（title / description / image）."""
-    import httpx
-
     meta: dict[str, str] = {}
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            html = resp.text[:20_000]  # 只看前 20k，够提取 meta 了
+        client = get_feishu_client()
+        resp = await client.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5.0,
+            follow_redirects=True,
+        )
+        html = resp.text[:20_000]  # 只看前 20k，够提取 meta 了
 
         # og:title / og:description / og:image
         for prop in ("title", "description", "image"):
@@ -771,7 +746,6 @@ async def _fetch_og_meta(url: str) -> dict[str, str]:
     except Exception:
         pass
     return meta
-
 
 def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> dict:
     """根据链接和 OG 元数据构建飞书卡片."""
@@ -821,7 +795,6 @@ def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> d
         "elements": elements,
     }
 
-
 async def _tool_send_feishu_group(
     args: dict,
     *,
@@ -858,7 +831,6 @@ async def _tool_send_feishu_group(
         return f"消息已发送到群 {chat_id}。"
     return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
 
-
 async def _tool_send_feishu_file(
     args: dict,
     *,
@@ -867,8 +839,6 @@ async def _tool_send_feishu_file(
 ) -> str:
     """上传文件并发送到飞书群."""
     import json as _json
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置，无法发文件。"
@@ -883,44 +853,43 @@ async def _tool_send_feishu_file(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # 1. 上传文件
-            resp = await client.post(
-                f"{base}/im/v1/files",
-                headers={"Authorization": f"Bearer {token}"},
-                data={"file_type": "stream", "file_name": file_name},
-                files={"file": (file_name, content.encode("utf-8"))},
-            )
-            data = resp.json()
-            if data.get("code") != 0:
-                return f"文件上传失败: {data.get('msg', '未知错误')}"
+        client = get_feishu_client()
+        # 1. 上传文件
+        resp = await client.post(
+            f"{base}/im/v1/files",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"file_type": "stream", "file_name": file_name},
+            files={"file": (file_name, content.encode("utf-8"))},
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return f"文件上传失败: {data.get('msg', '未知错误')}"
 
-            file_key = data.get("data", {}).get("file_key", "")
-            if not file_key:
-                return "文件上传成功但未返回 file_key。"
+        file_key = data.get("data", {}).get("file_key", "")
+        if not file_key:
+            return "文件上传成功但未返回 file_key。"
 
-            # 2. 发送文件消息到群
-            resp = await client.post(
-                f"{base}/im/v1/messages",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
-                params={"receive_id_type": "chat_id"},
-                json={
-                    "receive_id": chat_id,
-                    "msg_type": "file",
-                    "content": _json.dumps({"file_key": file_key}),
-                },
-            )
-            data = resp.json()
+        # 2. 发送文件消息到群
+        resp = await client.post(
+            f"{base}/im/v1/messages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            params={"receive_id_type": "chat_id"},
+            json={
+                "receive_id": chat_id,
+                "msg_type": "file",
+                "content": _json.dumps({"file_key": file_key}),
+            },
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"文件 {file_name} 已发送到群 {chat_id}。"
         return f"文件发送失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"发送文件失败: {e}"
-
 
 async def _tool_list_feishu_groups(
     args: dict,
@@ -929,34 +898,33 @@ async def _tool_list_feishu_groups(
     ctx: _AppContext | None = None,
 ) -> str:
     """列出机器人加入的所有飞书群."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://open.feishu.cn/open-apis/im/v1/chats",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"page_size": 50},
-            )
-            data = resp.json()
-            if data.get("code") != 0:
-                return f"查询失败: {data.get('msg', '未知错误')}"
-            items = data.get("data", {}).get("items", [])
-            if not items:
-                return "机器人没有加入任何群。"
-            lines = []
-            for item in items:
-                name = item.get("name", "未命名")
-                chat_id = item.get("chat_id", "")
-                lines.append(f"{name} — {chat_id}")
-            return "\n".join(lines)
+        client = get_feishu_client()
+        resp = await client.get(
+            "https://open.feishu.cn/open-apis/im/v1/chats",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"page_size": 50},
+            timeout=15.0,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return f"查询失败: {data.get('msg', '未知错误')}"
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return "机器人没有加入任何群。"
+        lines = []
+        for item in items:
+            name = item.get("name", "未命名")
+            chat_id = item.get("chat_id", "")
+            lines.append(f"{name} — {chat_id}")
+        return "\n".join(lines)
     except Exception as e:
         return f"查询失败: {e}"
-
 
 async def _tool_send_feishu_dm(
     args: dict,
@@ -966,8 +934,6 @@ async def _tool_send_feishu_dm(
 ) -> str:
     """给飞书用户发私聊消息."""
     import json as _json
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -981,24 +947,24 @@ async def _tool_send_feishu_dm(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
-                    "receive_id": open_id,
-                    "msg_type": "text",
-                    "content": _json.dumps({"text": text}),
-                },
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "receive_id": open_id,
+                "msg_type": "text",
+                "content": _json.dumps({"text": text}),
+            },
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"私聊消息已发送给 {open_id}。"
         return f"发送失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"发送失败: {e}"
-
 
 async def _tool_feishu_group_members(
     args: dict,
@@ -1007,7 +973,6 @@ async def _tool_feishu_group_members(
     ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书群成员列表."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1018,13 +983,14 @@ async def _tool_feishu_group_members(
 
     token = await ctx.feishu_token_mgr.get_token()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"https://open.feishu.cn/open-apis/im/v1/chats/{chat_id}/members",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"page_size": 50},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            f"https://open.feishu.cn/open-apis/im/v1/chats/{chat_id}/members",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"page_size": 50},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"查询失败: {data.get('msg', '未知错误')}"
@@ -1042,9 +1008,7 @@ async def _tool_feishu_group_members(
     except Exception as e:
         return f"查询失败: {e}"
 
-
 # ── GitHub 工具 ──
-
 
 async def _tool_read_feishu_sheet(
     args: dict,
@@ -1053,7 +1017,6 @@ async def _tool_read_feishu_sheet(
     ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书表格数据."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1070,25 +1033,25 @@ async def _tool_read_feishu_sheet(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if not sheet_id:
-                meta_resp = await client.get(
-                    f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
-                    headers=headers,
-                )
-                meta = meta_resp.json()
-                sheets = meta.get("data", {}).get("sheets", [])
-                if not sheets:
-                    return "该表格没有工作表。"
-                sheet_id = sheets[0].get("sheet_id", "")
-
-            full_range = f"{sheet_id}!{range_str}"
-            resp = await client.get(
-                f"{base}/sheets/v2/spreadsheets/{ss_token}/values/{full_range}",
+        client = get_feishu_client()
+        if not sheet_id:
+            meta_resp = await client.get(
+                f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
                 headers=headers,
-                params={"valueRenderOption": "ToString"},
             )
-            data = resp.json()
+            meta = meta_resp.json()
+            sheets = meta.get("data", {}).get("sheets", [])
+            if not sheets:
+                return "该表格没有工作表。"
+            sheet_id = sheets[0].get("sheet_id", "")
+
+        full_range = f"{sheet_id}!{range_str}"
+        resp = await client.get(
+            f"{base}/sheets/v2/spreadsheets/{ss_token}/values/{full_range}",
+            headers=headers,
+            params={"valueRenderOption": "ToString"},
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"读取失败: {data.get('msg', '未知错误')}"
@@ -1110,7 +1073,6 @@ async def _tool_read_feishu_sheet(
     except Exception as e:
         return f"读取表格失败: {e}"
 
-
 async def _tool_update_feishu_sheet(
     args: dict,
     *,
@@ -1119,8 +1081,6 @@ async def _tool_update_feishu_sheet(
 ) -> str:
     """写入飞书表格数据."""
     import json as _json
-
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1149,30 +1109,30 @@ async def _tool_update_feishu_sheet(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if not sheet_id:
-                meta_resp = await client.get(
-                    f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                meta = meta_resp.json()
-                sheets = meta.get("data", {}).get("sheets", [])
-                if not sheets:
-                    return "该表格没有工作表。"
-                sheet_id = sheets[0].get("sheet_id", "")
-
-            full_range = f"{sheet_id}!{range_str}"
-            resp = await client.put(
-                f"{base}/sheets/v2/spreadsheets/{ss_token}/values",
-                headers=headers,
-                json={
-                    "valueRange": {
-                        "range": full_range,
-                        "values": values,
-                    },
-                },
+        client = get_feishu_client()
+        if not sheet_id:
+            meta_resp = await client.get(
+                f"{base}/sheets/v3/spreadsheets/{ss_token}/sheets/query",
+                headers={"Authorization": f"Bearer {token}"},
             )
-            data = resp.json()
+            meta = meta_resp.json()
+            sheets = meta.get("data", {}).get("sheets", [])
+            if not sheets:
+                return "该表格没有工作表。"
+            sheet_id = sheets[0].get("sheet_id", "")
+
+        full_range = f"{sheet_id}!{range_str}"
+        resp = await client.put(
+            f"{base}/sheets/v2/spreadsheets/{ss_token}/values",
+            headers=headers,
+            json={
+                "valueRange": {
+                    "range": full_range,
+                    "values": values,
+                },
+            },
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"写入失败: {data.get('msg', '未知错误')}"
@@ -1182,9 +1142,7 @@ async def _tool_update_feishu_sheet(
     except Exception as e:
         return f"写入表格失败: {e}"
 
-
 # ── 飞书审批工具 ──
-
 
 async def _tool_list_feishu_approvals(
     args: dict,
@@ -1193,7 +1151,6 @@ async def _tool_list_feishu_approvals(
     ctx: _AppContext | None = None,
 ) -> str:
     """查看飞书审批列表."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1206,14 +1163,14 @@ async def _tool_list_feishu_approvals(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # 先获取审批定义列表
-            resp = await client.get(
-                f"{base}/approval/v4/approvals",
-                headers=headers,
-                params={"page_size": 20},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        # 先获取审批定义列表
+        resp = await client.get(
+            f"{base}/approval/v4/approvals",
+            headers=headers,
+            params={"page_size": 20},
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"获取审批失败: {data.get('msg', '未知错误')}"
@@ -1224,51 +1181,50 @@ async def _tool_list_feishu_approvals(
 
         # 遍历审批定义，查实例
         all_instances: list[str] = []
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for appr in approvals[:5]:  # 只查前 5 个审批定义
-                code = appr.get("approval_code", "")
-                name = appr.get("approval_name", "未命名")
-                if not code:
-                    continue
-                params: dict[str, Any] = {  # noqa: F821
-                    "approval_code": code,
-                    "page_size": limit,
-                }
-                if status != "ALL":
-                    params["status"] = status
-                inst_resp = await client.get(
-                    f"{base}/approval/v4/instances",
-                    headers=headers,
-                    params=params,
-                )
-                inst_data = inst_resp.json()
-                instances = inst_data.get("data", {}).get("instance_list", [])
-                for inst in instances:
-                    inst_code = inst.get("instance_code", "")
-                    inst_status = inst.get("status", "")
-                    start_time = inst.get("start_time", "")
-                    # 转换时间戳
-                    ts_str = ""
-                    if start_time:
-                        try:
-                            from datetime import datetime, timedelta
-                            from datetime import timezone as _tz
+        for appr in approvals[:5]:  # 只查前 5 个审批定义
+            code = appr.get("approval_code", "")
+            name = appr.get("approval_name", "未命名")
+            if not code:
+                continue
+            params: dict[str, Any] = {  # noqa: F821
+                "approval_code": code,
+                "page_size": limit,
+            }
+            if status != "ALL":
+                params["status"] = status
+            inst_resp = await client.get(
+                f"{base}/approval/v4/instances",
+                headers=headers,
+                params=params,
+            )
+            inst_data = inst_resp.json()
+            instances = inst_data.get("data", {}).get("instance_list", [])
+            for inst in instances:
+                inst_code = inst.get("instance_code", "")
+                inst_status = inst.get("status", "")
+                start_time = inst.get("start_time", "")
+                # 转换时间戳
+                ts_str = ""
+                if start_time:
+                    try:
+                        from datetime import datetime, timedelta
+                        from datetime import timezone as _tz
 
-                            ts = (
-                                int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
-                            )
-                            dt = datetime.fromtimestamp(ts, _tz(timedelta(hours=8)))
-                            ts_str = dt.strftime("%m-%d %H:%M")
-                        except (ValueError, OSError):
-                            ts_str = start_time
-                    status_icon = {"PENDING": "⏳", "APPROVED": "✅", "REJECTED": "❌"}.get(
-                        inst_status, "📋"
-                    )
-                    all_instances.append(f"{status_icon} [{name}] {ts_str} (instance={inst_code})")
-                    if len(all_instances) >= limit:
-                        break
+                        ts = (
+                            int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
+                        )
+                        dt = datetime.fromtimestamp(ts, _tz(timedelta(hours=8)))
+                        ts_str = dt.strftime("%m-%d %H:%M")
+                    except (ValueError, OSError):
+                        ts_str = start_time
+                status_icon = {"PENDING": "⏳", "APPROVED": "✅", "REJECTED": "❌"}.get(
+                    inst_status, "📋"
+                )
+                all_instances.append(f"{status_icon} [{name}] {ts_str} (instance={inst_code})")
                 if len(all_instances) >= limit:
                     break
+            if len(all_instances) >= limit:
+                break
 
         if not all_instances:
             label = {"PENDING": "待审批", "APPROVED": "已通过", "REJECTED": "已拒绝"}.get(
@@ -1279,7 +1235,6 @@ async def _tool_list_feishu_approvals(
         return "\n".join(all_instances)
     except Exception as e:
         return f"获取审批失败: {e}"
-
 
 # ── 实用工具 ──
 
@@ -1337,7 +1292,6 @@ _UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {  # noqa: F821
     ("kmh", "ms"): 1 / 3.6,
 }
 
-
 async def _tool_create_feishu_spreadsheet(
     args: dict,
     *,
@@ -1345,7 +1299,6 @@ async def _tool_create_feishu_spreadsheet(
     ctx: _AppContext | None = None,
 ) -> str:
     """在飞书创建新表格."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1363,13 +1316,13 @@ async def _tool_create_feishu_spreadsheet(
         if folder_token:
             body["folder_token"] = folder_token
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://open.feishu.cn/open-apis/sheets/v3/spreadsheets",
-                headers=headers,
-                json=body,
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/sheets/v3/spreadsheets",
+            headers=headers,
+            json=body,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"创建失败: {data.get('msg', '未知错误')}"
@@ -1381,9 +1334,7 @@ async def _tool_create_feishu_spreadsheet(
     except Exception as e:
         return f"创建表格失败: {e}"
 
-
 # ── 飞书通讯录搜索 ──
-
 
 async def _tool_feishu_contacts(
     args: dict,
@@ -1392,7 +1343,6 @@ async def _tool_feishu_contacts(
     ctx: _AppContext | None = None,
 ) -> str:
     """飞书通讯录搜索."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1406,13 +1356,14 @@ async def _tool_feishu_contacts(
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                "https://open.feishu.cn/open-apis/search/v1/user",
-                headers=headers,
-                json={"query": query, "page_size": limit},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/search/v1/user",
+            headers=headers,
+            json={"query": query, "page_size": limit},
+            timeout=15.0,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             # 如果没有搜索权限，回退到群成员查找
@@ -1437,9 +1388,7 @@ async def _tool_feishu_contacts(
     except Exception as e:
         return f"搜索通讯录失败: {e}"
 
-
 # ── 文本 & 开发工具 ──
-
 
 async def _tool_feishu_bitable(
     args: dict,
@@ -1448,7 +1397,6 @@ async def _tool_feishu_bitable(
     ctx: _AppContext | None = None,
 ) -> str:
     """读取飞书多维表格."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1470,13 +1418,13 @@ async def _tool_feishu_bitable(
         if filter_str:
             params["filter"] = filter_str
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{base}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
-                headers=headers,
-                params=params,
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.get(
+            f"{base}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
+            headers=headers,
+            params=params,
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"读取多维表格失败: {data.get('msg', '未知错误')}"
@@ -1497,7 +1445,6 @@ async def _tool_feishu_bitable(
     except Exception as e:
         return f"读取多维表格失败: {e}"
 
-
 async def _tool_feishu_wiki(
     args: dict,
     *,
@@ -1505,7 +1452,6 @@ async def _tool_feishu_wiki(
     ctx: _AppContext | None = None,
 ) -> str:
     """搜索飞书知识库."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1521,13 +1467,13 @@ async def _tool_feishu_wiki(
     base = "https://open.feishu.cn/open-apis"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{base}/wiki/v2/spaces/search",
-                headers=headers,
-                json={"query": query, "page_size": limit},
-            )
-            data = resp.json()
+        client = get_feishu_client()
+        resp = await client.post(
+            f"{base}/wiki/v2/spaces/search",
+            headers=headers,
+            json={"query": query, "page_size": limit},
+        )
+        data = resp.json()
 
         if data.get("code") != 0:
             return f"搜索知识库失败: {data.get('msg', '未知错误')}"
@@ -1551,7 +1497,6 @@ async def _tool_feishu_wiki(
     except Exception as e:
         return f"搜索知识库失败: {e}"
 
-
 async def _tool_approve_feishu(
     args: dict,
     *,
@@ -1559,7 +1504,6 @@ async def _tool_approve_feishu(
     ctx: _AppContext | None = None,
 ) -> str:
     """操作飞书审批（通过/拒绝）."""
-    import httpx
 
     if not ctx or not ctx.feishu_token_mgr:
         return "飞书未配置。"
@@ -1579,53 +1523,52 @@ async def _tool_approve_feishu(
     action_cn = "通过" if action == "approve" else "拒绝"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # 1. 获取审批实例详情，拿到 approval_code 和待处理任务节点
-            inst_resp = await client.get(
-                f"{base}/approval/v4/instances/{instance_id}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            inst_data = inst_resp.json()
-            if inst_data.get("code") != 0:
-                return f"获取审批实例失败: {inst_data.get('msg', '未知错误')}"
+        client = get_feishu_client()
+        # 1. 获取审批实例详情，拿到 approval_code 和待处理任务节点
+        inst_resp = await client.get(
+            f"{base}/approval/v4/instances/{instance_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        inst_data = inst_resp.json()
+        if inst_data.get("code") != 0:
+            return f"获取审批实例失败: {inst_data.get('msg', '未知错误')}"
 
-            instance = inst_data.get("data", {})
-            approval_code = instance.get("approval_code", "")
+        instance = inst_data.get("data", {})
+        approval_code = instance.get("approval_code", "")
 
-            # 2. 从 task_list 找 PENDING 状态的审批节点
-            task_list = instance.get("task_list", [])
-            pending_task = None
-            for t in task_list:
-                if t.get("status") == "PENDING":
-                    pending_task = t
-                    break
+        # 2. 从 task_list 找 PENDING 状态的审批节点
+        task_list = instance.get("task_list", [])
+        pending_task = None
+        for t in task_list:
+            if t.get("status") == "PENDING":
+                pending_task = t
+                break
 
-            if not pending_task:
-                return "没有待处理的审批节点，可能已被处理。"
+        if not pending_task:
+            return "没有待处理的审批节点，可能已被处理。"
 
-            task_node_id = pending_task.get("id", "")
-            user_id = pending_task.get("user_id", "")
+        task_node_id = pending_task.get("id", "")
+        user_id = pending_task.get("user_id", "")
 
-            # 3. 调用审批/拒绝 API
-            resp = await client.post(
-                f"{base}/approval/v4/tasks/{action}",
-                headers=headers,
-                json={
-                    "approval_code": approval_code,
-                    "instance_code": instance_id,
-                    "user_id": user_id,
-                    "task_id": task_node_id,
-                    "comment": comment or action_cn,
-                },
-            )
-            data = resp.json()
+        # 3. 调用审批/拒绝 API
+        resp = await client.post(
+            f"{base}/approval/v4/tasks/{action}",
+            headers=headers,
+            json={
+                "approval_code": approval_code,
+                "instance_code": instance_id,
+                "user_id": user_id,
+                "task_id": task_node_id,
+                "comment": comment or action_cn,
+            },
+        )
+        data = resp.json()
 
         if data.get("code") == 0:
             return f"审批已{action_cn}。"
         return f"审批操作失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"审批操作失败: {e}"
-
 
 HANDLERS: dict[str, object] = {
     "create_feishu_event": _tool_create_feishu_event,
