@@ -1248,17 +1248,18 @@ class TestGroupChatBotOwnership:
         # xinlei bot 应该不调用 _execute_employee
         mock_exec.assert_not_called()
 
-    @patch("crew.webhook._execute_employee", new_callable=AsyncMock)
-    def test_correct_bot_processes_its_employee(self, mock_exec):
+    @patch("crew.engine.CrewEngine.chat", new_callable=AsyncMock)
+    def test_correct_bot_processes_its_employee(self, mock_chat):
         """xinlei bot 应正常处理 @叶心蕾 → hr-manager 的消息."""
         from crew.webhook_feishu import _feishu_dispatch
 
         ctx, bot_moyan, bot_xinlei = self._make_multi_bot_ctx()
-        mock_exec.return_value = {
-            "output": "收到",
-            "model": "test",
-            "input_tokens": 0,
-            "output_tokens": 0,
+        mock_chat.return_value = {
+            "reply": "收到",
+            "employee_id": "hr-manager",
+            "memory_updated": False,
+            "tokens_used": 100,
+            "latency_ms": 50,
         }
 
         msg_event = MagicMock()
@@ -1298,5 +1299,5 @@ class TestGroupChatBotOwnership:
                     ):
                         _run(_feishu_dispatch(ctx, msg_event, bot_ctx=bot_xinlei))
 
-        # xinlei bot 应该处理了此消息
-        mock_exec.assert_called_once()
+        # xinlei bot 应该通过 engine.chat() 处理了此消息
+        mock_chat.assert_called_once()
