@@ -1532,7 +1532,57 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         total_steps = (
             result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
         )
+
+        # ── 写回链路：成功轨迹自动写入记忆 ──
+        memory_written = False
+        if success and task_description:
+            try:
+                from crew.memory import MemoryStore
+                from crew.memory_cache import invalidate as _invalidate_cache
+
+                _mem_store = MemoryStore(project_dir=ctx.project_dir)
+
+                # 用 task_id（轨迹的唯一标识）做幂等去重
+                _task_id = ""
+                if isinstance(result, dict):
+                    _task_id = result.get("task_id", "")
+                elif hasattr(result, "task") and hasattr(result.task, "task_id"):
+                    _task_id = result.task.task_id
+
+                # 幂等检查：同 session 同 category 不重复写
+                _should_write = True
+                if _task_id:
+                    _existing = _mem_store.query(employee_name, limit=50)
+                    for _e in _existing:
+                        if _e.source_session == _task_id and _e.category == "finding":
+                            _should_write = False
+                            break
+
+                if _should_write:
+                    # 从 task_description + steps 提取摘要
+                    _step_tools = [s.get("tool_name", "") for s in steps if s.get("tool_name")]
+                    _summary = f"[轨迹] {task_description[:200]}"
+                    if _step_tools:
+                        _unique_tools = list(dict.fromkeys(_step_tools))[:5]
+                        _summary += f" (工具: {', '.join(_unique_tools)})"
+                    _summary += f" [{total_steps}步]"
+
+                    _mem_store.add(
+                        employee=employee_name,
+                        category="finding",
+                        content=_summary[:500],
+                        source_session=_task_id,
+                        tags=["trajectory", "claude-code"],
+                    )
+                    _invalidate_cache(employee_name)
+                    memory_written = True
+                    logger.info("轨迹记忆写入成功: employee=%s task_id=%s", employee_name, _task_id)
+            except Exception as mem_err:
+                logger.warning("轨迹记忆写入失败（不影响轨迹上报）: %s", mem_err)
+
         resp_data: dict[str, Any] = {"ok": True, "steps_received": total_steps}
+        if memory_written:
+            resp_data["memory_written"] = True
         if truncated_fields:
             resp_data["truncated_fields"] = truncated_fields
         return JSONResponse(resp_data)

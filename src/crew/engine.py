@@ -173,9 +173,10 @@ class CrewEngine:
             if project_info.package_manager:
                 parts.append(f"**包管理**: {project_info.package_manager}")
 
-        # 本地持久化记忆（有 rendered body 时使用语义搜索 + 团队记忆）
+        # 本地持久化记忆（缓存层，恒定 <=800 token）
         try:
             from crew.memory import MemoryStore
+            from crew.memory_cache import get_prompt_cached
 
             memory_store = MemoryStore(project_dir=self.project_dir)
             # 获取同团队成员（用于注入队友记忆）
@@ -189,9 +190,10 @@ class CrewEngine:
                     _team_members = _org.teams[_tid].members
             except Exception:
                 pass
-            memory_text = memory_store.format_for_prompt(
+            memory_text = get_prompt_cached(
                 employee.name,
                 query=rendered,
+                store=memory_store,
                 employee_tags=employee.tags,
                 max_visibility=max_visibility,
                 team_members=_team_members,
