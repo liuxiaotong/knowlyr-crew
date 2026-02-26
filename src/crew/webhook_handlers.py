@@ -687,7 +687,7 @@ async def _run_and_callback(
     sender_name: str,
     channel: str,
     callback_channel_id: int,
-    callback_sender_id: int,
+    callback_sender_id: str | None,
     callback_parent_id: int | None,
 ) -> None:
     """后台执行员工 + 回调蚁聚发频道消息（异步回调模式）."""
@@ -698,7 +698,7 @@ async def _run_and_callback(
     from crew.webhook_context import _ANTGATHER_API_TOKEN, _ANTGATHER_API_URL
 
     logger.info(
-        "异步回调开始: emp=%s channel=%d sender=%d",
+        "异步回调开始: emp=%s channel=%d sender=%s",
         name,
         callback_channel_id,
         callback_sender_id,
@@ -892,10 +892,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 callback_channel_id = None
         callback_sender_id = payload.get("callback_sender_id")
         if callback_sender_id is not None:
-            try:
-                callback_sender_id = int(callback_sender_id)
-            except (TypeError, ValueError):
-                callback_sender_id = None
+            callback_sender_id = str(callback_sender_id)
         callback_parent_id = payload.get("callback_parent_id")
         if callback_parent_id is not None:
             try:
