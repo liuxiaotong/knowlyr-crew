@@ -527,6 +527,89 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
+    """轻量记忆写入 — POST /api/memory/add.
+
+    接受:
+        {
+            "employee": "backend-engineer",
+            "category": "decision" | "finding" | "correction",
+            "content": "记忆内容",
+            "source_session": "claude-sess-xxx",
+            "tags": ["auto-push", "claude-code"]
+        }
+
+    幂等：同 employee + source_session + category 不重复写入。
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    employee = payload.get("employee", "")
+    category = payload.get("category", "")
+    content = payload.get("content", "")
+    source_session = payload.get("source_session", "")
+    tags = payload.get("tags", [])
+
+    if not employee or not category or not content:
+        return JSONResponse(
+            {"error": "employee, category, content are required"}, status_code=400
+        )
+
+    valid_categories = {"decision", "estimate", "finding", "correction", "pattern"}
+    if category not in valid_categories:
+        return JSONResponse(
+            {"error": f"category must be one of {valid_categories}"}, status_code=400
+        )
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+
+    # 幂等检查：同 employee + source_session + category 不重复写入
+    if source_session:
+        existing = store.query(employee, limit=50)
+        for entry in existing:
+            if entry.source_session == source_session and entry.category == category:
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "duplicate source_session + category",
+                        "existing_id": entry.id,
+                    }
+                )
+
+    entry = store.add(
+        employee=employee,
+        category=category,
+        content=content,
+        source_session=source_session,
+        tags=tags if isinstance(tags, list) else [],
+    )
+
+    # 写入后失效缓存
+    try:
+        from crew.memory_cache import invalidate
+
+        invalidate(employee)
+    except Exception:
+        pass
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "skipped": False,
+            "entry_id": entry.id,
+            "employee": employee,
+            "category": category,
+        }
+    )
+
+
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
     """接收外部讨论数据，写入参与者记忆和会议记录."""
     from starlette.responses import JSONResponse

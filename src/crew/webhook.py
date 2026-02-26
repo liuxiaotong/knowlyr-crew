@@ -74,6 +74,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_employee_update,
     _handle_generic,
     _handle_github,
+    _handle_memory_add,
     _handle_memory_ingest,
     _handle_model_tiers,
     _handle_openclaw,
@@ -317,6 +318,11 @@ def create_webhook_app(
         Route(
             "/api/employees/{identifier}/authority/restore",
             endpoint=_make_handler(ctx, _handle_authority_restore),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/memory/add",
+            endpoint=_make_handler(ctx, _handle_memory_add),
             methods=["POST"],
         ),
         Route(
