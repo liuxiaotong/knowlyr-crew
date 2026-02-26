@@ -16,8 +16,6 @@
     # 同时启用 LLM Judge（默认只走规则层）
     python scripts/daily_eval.py --with-judge --model kimi-k2.5
 
-TODO: S5 — 考虑和 run_eval_testset.py 共享评分引擎，减少重复逻辑
-
 幂等性:
     同一天跑两遍结果一样。评分结果按日期写入固定路径，重复执行会覆盖。
     游标记录已处理的最后一个 session 文件名，增量拉取新数据。
@@ -53,196 +51,13 @@ sys.path.insert(0, str(CREW_ROOT / "src"))
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# 员工-评估域映射（复用 crew_eval.py 的映射）
-EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
-    # 中文名 (character_name) — 统一使用中文名作为 key
-    "姜墨言": "conversation",
-    "柳若曦": "conversation",
-    "周念慈": "conversation",
-    "林锐": "engineering",
-    "赵云帆": "engineering",
-    "卫子昂": "engineering",
-    "程薇": "engineering",
-    "丁雪筠": "engineering",
-    "马骁": "engineering",
-    "孙策安": "engineering",
-    "谢安": "engineering",
-    "贺铭": "engineering",
-    "钟瑞": "engineering",
-    "顾然": "engineering",
-    "秦合": "engineering",
-    "苏文": "engineering",
-    "罗清河": "engineering",
-    "郑锐航": "engineering",
-    "傅语桥": "engineering",
-    "黄维达": "engineering",
-    "陆明哲": "advisory",
-    "叶心蕾": "advisory",
-    "曹正宇": "advisory",
-    "宋正言": "advisory",
-    "许鹏举": "advisory",
-    "温若瑜": "advisory",
-    "唐思远": "advisory",
-    "方逸凡": "advisory",
-    "苏映彤": "advisory",
-    "沈若兰": "advisory",
-    "韩泽民": "advisory",
-    "林晓桐": "advisory",
-    "陈启明": "advisory",
-    # slug 兼容（旧数据迁移前过渡）
-    "ceo-assistant": "conversation",
-    "customer-success": "conversation",
-    "community-operator": "conversation",
-    "code-reviewer": "engineering",
-    "backend-engineer": "engineering",
-    "frontend-engineer": "engineering",
-    "test-engineer": "engineering",
-    "e2e-tester": "engineering",
-    "devops-engineer": "engineering",
-    "dba": "engineering",
-    "security-auditor": "engineering",
-    "debug-expert": "engineering",
-    "performance-optimizer": "engineering",
-    "refactor-guide": "engineering",
-    "pr-creator": "engineering",
-    "doc-writer": "engineering",
-    "data-engineer": "engineering",
-    "mlops-engineer": "engineering",
-    "i18n-expert": "engineering",
-    "product-manager": "advisory",
-    "hr-manager": "advisory",
-    "finance-expert": "advisory",
-    "legal-counsel": "advisory",
-    "bd-manager": "advisory",
-    "ux-designer": "advisory",
-    "api-designer": "advisory",
-    "solutions-architect": "advisory",
-    "algorithm-researcher": "advisory",
-    "nlp-researcher": "advisory",
-    "sociology-researcher": "advisory",
-    "economics-researcher": "advisory",
-    "data-quality-expert": "advisory",
-    "benchmark-specialist": "advisory",
-}
-
-# 各域的参考步数默认值（用于 efficiency 计算）
-DOMAIN_REFERENCE_STEPS: dict[str, int] = {
-    "conversation": 3,   # 对话类：回复+偶尔查资料
-    "engineering": 15,    # 工程类：读代码+改代码+跑测试
-    "advisory": 5,        # 顾问类：分析+建议
-    "discussion": 3,      # 讨论类：发言
-}
-
-EXEMPLAR_THRESHOLD = 0.7
-
-# 匹配 soul prompt 开头模式（"你是XXX" 后面跟角色描述）
-_SOUL_PROMPT_PREFIX = "你是"
-_SOUL_PROMPT_MIN_LEN = 200
-
-
-def _extract_task_from_soul_prompt(text: str) -> str | None:
-    """尝试从 soul prompt 中提取 ## 任务 之后的实际任务描述.
-
-    委托给 crew.trajectory.extract_task_from_soul_prompt 公共实现。
-    """
-    from crew.trajectory import extract_task_from_soul_prompt
-
-    return extract_task_from_soul_prompt(text)
-
-
-def _sanitize_trajectory(trajectory: dict[str, Any]) -> dict[str, Any]:
-    """评分前防御性清洗轨迹数据.
-
-    处理三类脏数据:
-    1. task 是 dict → 提取 description
-    2. task 以"你是"开头且超 200 字 → 尝试提取 ## 任务 后的内容
-    3. steps 中字段名不统一 → 标准化 tool/params/output
-    """
-    # Intentional in-place mutation for performance — 避免大量深拷贝开销
-    traj = trajectory
-
-    # ── task 清洗 ──
-    task = traj.get("task")
-    if isinstance(task, dict):
-        # 格式 B: agentrecorder Trajectory 对象的 task 字段
-        traj["task"] = task.get("description") or task.get("task_id", "")
-
-    task = traj.get("task", "")
-    if (
-        isinstance(task, str)
-        and task.startswith(_SOUL_PROMPT_PREFIX)
-        and len(task) > _SOUL_PROMPT_MIN_LEN
-    ):
-        extracted = _extract_task_from_soul_prompt(task)
-        if extracted:
-            traj["task"] = extracted
-        # 提取不到的不改，让评分正常走（评分结果可能偏低但不会崩）
-
-    # ── steps 字段标准化 ──
-    for step in traj.get("steps", []):
-        # tool_call.name → tool
-        if "tool" not in step:
-            tc = step.get("tool_call", {})
-            if isinstance(tc, dict) and tc.get("name"):
-                step["tool"] = tc["name"]
-            elif step.get("tool_name"):
-                step["tool"] = step["tool_name"]
-            else:
-                step["tool"] = "unknown"
-
-        # tool_call.parameters → params
-        if "params" not in step:
-            tc = step.get("tool_call", {})
-            if isinstance(tc, dict) and "parameters" in tc:
-                step["params"] = tc["parameters"]
-            elif "tool_params" in step:
-                step["params"] = step["tool_params"]
-            else:
-                step["params"] = {}
-
-        # tool_result.output → output
-        if "output" not in step:
-            tr = step.get("tool_result", {})
-            if isinstance(tr, dict) and "output" in tr:
-                step["output"] = tr["output"]
-            elif "tool_output" in step:
-                step["output"] = step["tool_output"]
-            else:
-                step["output"] = ""
-
-    # ── reference_steps 默认值（解决 efficiency 恒=1.0） ──
-    if traj.get("reference_steps") is None:
-        employee = traj.get("metadata", {}).get("employee", "")
-        domain = _get_domain(employee)
-        traj["reference_steps"] = DOMAIN_REFERENCE_STEPS.get(domain, 10)
-
-    return traj
-
-
-def _get_domain(employee: str) -> str:
-    domain = EMPLOYEE_DOMAIN_MAP.get(employee)
-    if domain:
-        return domain
-    # fallback: 尝试从员工角色推断（新增员工无需手动加 MAP）
-    try:
-        from crew.discovery import discover_employees
-
-        disc = discover_employees(project_dir=CREW_ROOT)
-        emp = disc.get(employee)
-        if emp:
-            role = (emp.description or "").lower()
-            if any(k in role for k in ("工程", "engineer", "开发", "测试", "test", "运维", "devops")):
-                return "engineering"
-            if any(k in role for k in ("研究", "设计", "经理", "顾问", "法务", "财务", "HR", "hr")):
-                return "advisory"
-    except Exception:
-        pass
-    return "conversation"  # 默认
-
-
-def traj_employee(traj: dict[str, Any]) -> str:
-    """从标准化轨迹中提取员工名."""
-    return traj.get("metadata", {}).get("employee", "unknown")
+from crew.scoring import (  # noqa: E402, I001
+    EXEMPLAR_THRESHOLD,
+    _build_exemplar_content,
+    _get_domain,
+    score_trajectory,
+    traj_employee,
+)
 
 
 # ── 游标管理 ─────────────────────────────────────────────────────────
@@ -416,139 +231,6 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-# ── 评分 ─────────────────────────────────────────────────────────────
-
-
-def _try_gym_score(
-    trajectory: dict[str, Any],
-    domain: str,
-    use_judge: bool = False,
-    model_name: str = "",
-    provider: str = "openai",
-    base_url: str | None = None,
-    api_key: str | None = None,
-) -> dict[str, Any] | None:
-    """尝试用 gym RewardEngine 评分. 返回 None 表示 import 失败."""
-    try:
-        from agentreward.config import RewardConfig
-        from agentreward.reward import RewardEngine
-    except ImportError:
-        return None
-
-    # crew 轨迹的 outcome 全是 success=true，无实际意义
-    # 因此 outcome_weight=0，全靠 process(LLM judge) + efficiency 打分
-    if use_judge and model_name:
-        config = RewardConfig(
-            rule_weight=0.3,
-            model_weight=0.7,
-            domain=domain,
-            model_name=model_name,
-            provider=provider,
-            base_url=base_url,
-            api_key=api_key,
-            outcome_weight=0.0,
-            process_weight=0.9,
-            efficiency_weight=0.1,
-        )
-    else:
-        config = RewardConfig(
-            rule_weight=1.0,
-            model_weight=0.0,
-            domain=domain,
-        )
-
-    engine = RewardEngine(config=config)
-    reward = engine.score(trajectory)
-
-    rubric_scores = {}
-    if reward.step_rewards:
-        rubric_scores = reward.step_rewards[0].rubric_scores
-
-    return {
-        "total_score": round(reward.total_score, 4),
-        "outcome_score": round(reward.outcome_score, 4),
-        "process_score": round(reward.process_score, 4),
-        "efficiency_score": round(reward.efficiency_score, 4),
-        "rubric_scores": {k: round(v, 4) for k, v in rubric_scores.items()},
-        "engine": "gym",
-    }
-
-
-def _fallback_score(trajectory: dict[str, Any]) -> dict[str, Any]:
-    """Fallback 评分：纯规则，不依赖 gym 包."""
-    steps = trajectory.get("steps", [])
-    outcome = trajectory.get("outcome", {})
-
-    score = 0.0
-
-    # 基础分：成功 = 0.6
-    if outcome.get("success", False):
-        score += 0.6
-
-    # 步数效率加分
-    if len(steps) < 10:
-        score += 0.2
-
-    # thought 字段加分（检查原始轨迹数据中是否有 thought）
-    has_thought = any(s.get("thought") or s.get("output", "") for s in steps)
-    if has_thought:
-        score += 0.1
-
-    # 无错误加分
-    has_error = any(
-        s.get("error") or (s.get("output", "") and "error" in s.get("output", "").lower()[:100])
-        for s in steps
-    )
-    if not has_error:
-        score += 0.1
-
-    efficiency = 1.0 if len(steps) < 10 else max(0.0, 10.0 / len(steps))
-    return {
-        "total_score": round(min(score, 1.0), 4),
-        "outcome_score": 0.6 if outcome.get("success") else 0.0,
-        "process_score": round(score - (0.6 if outcome.get("success") else 0.0), 4),
-        "efficiency_score": round(efficiency, 4),
-        "rubric_scores": {},
-        "engine": "fallback",
-    }
-
-
-def score_trajectory(
-    trajectory: dict[str, Any],
-    employee: str,
-    *,
-    use_judge: bool = False,
-    model_name: str = "",
-    provider: str = "openai",
-    base_url: str | None = None,
-    api_key: str | None = None,
-) -> dict[str, Any]:
-    """评分单条轨迹. 先尝试 gym，失败则 fallback.
-
-    叶心蕾的轨迹强制走规则层（不用 LLM Judge）。
-    """
-    # 防御性清洗：处理 task dict/soul prompt/字段名不统一
-    trajectory = _sanitize_trajectory(trajectory)
-
-    domain = _get_domain(employee)
-
-    # 叶心蕾自己的轨迹只走规则层
-    employee_use_judge = use_judge and employee not in ("hr-manager", "叶心蕾")
-
-    result = _try_gym_score(
-        trajectory,
-        domain,
-        use_judge=employee_use_judge,
-        model_name=model_name,
-        provider=provider,
-        base_url=base_url,
-        api_key=api_key,
-    )
-
-    if result is None:
-        result = _fallback_score(trajectory)
-
-    return result
 
 
 # ── 日报生成 ─────────────────────────────────────────────────────────
@@ -572,7 +254,7 @@ def _generate_report(
         return "\n".join(lines)
 
     # 使用的引擎
-    engines = set(r.get("engine", "?") for r in results)
+    engines = {r.get("engine", "?") for r in results}
     lines.append(f"- 评分引擎: {', '.join(engines)}")
 
     # 总体统计
@@ -631,7 +313,7 @@ def _generate_report(
     # 高分范例统计
     exemplar_count = sum(1 for r in results if r["total_score"] >= EXEMPLAR_THRESHOLD)
     if exemplar_count:
-        lines.append(f"## 高分范例")
+        lines.append("## 高分范例")
         lines.append("")
         lines.append(
             f"本日 {exemplar_count} 条轨迹达到范例标准 (>= {EXEMPLAR_THRESHOLD})，已导出到 exemplars/ 目录。"
@@ -859,23 +541,8 @@ def _export_exemplars(results: list[dict[str, Any]]) -> int:
     return count
 
 
-def _build_exemplar_content(result: dict[str, Any]) -> str:
-    """从评分结果构建范例记忆内容."""
-    score = result["total_score"]
-    task = (result.get("task") or "")[:100]
-    # 从 rubric_scores 提取亮点（取分数最高的维度）
-    rubric = result.get("rubric_scores", {})
-    highlights = ""
-    if rubric:
-        top_dims = sorted(rubric.items(), key=lambda x: x[1], reverse=True)[:3]
-        highlights = "；".join(f"{k}={v:.2f}" for k, v in top_dims)
-    if highlights:
-        return f"[高分范例 {score:.2f}分] 任务：{task}。表现亮点：{highlights}"
-    return f"[高分范例 {score:.2f}分] 任务：{task}"
-
-
 def _write_exemplar_memory(
-    memory_store: MemoryStore,
+    memory_store: Any,
     result: dict[str, Any],
 ) -> None:
     """将单条高分范例写入 MemoryStore（去重）."""
@@ -952,7 +619,7 @@ def main() -> None:
         employee_filter=args.employee,
     )
 
-    print(f"\n=== 评估完成 ===")
+    print("\n=== 评估完成 ===")
     print(f"日期: {summary['date']}")
     print(f"轨迹总数: {summary['total']}")
     print(f"成功评分: {summary['scored']}")

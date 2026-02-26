@@ -205,7 +205,6 @@ def main():
 
     success = 0
     failed = 0
-    skipped = 0
 
     for slug in slugs:
         result = sync_employee(

@@ -25,7 +25,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -38,14 +37,13 @@ CREW_ROOT = Path(__file__).resolve().parent.parent
 TESTSETS_DIR = Path(__file__).resolve().parent / "eval_testsets"
 EVALUATIONS_DIR = CREW_ROOT / ".crew" / "evaluations"
 
-# 确保 crew 模块和 scripts 可导入
+# 确保 crew 模块可导入
 sys.path.insert(0, str(CREW_ROOT / "src"))
-_scripts_dir = str(Path(__file__).resolve().parent)
-if _scripts_dir not in sys.path:
-    sys.path.insert(0, _scripts_dir)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+from crew.scoring import check_behavior_match  # noqa: E402
 
 DEFAULT_BASE_URL = "http://localhost:8765"
 
@@ -127,8 +125,8 @@ def run_test_case(
     # 提取输出文本
     output = data.get("result", "") or data.get("output", "") or data.get("content", "")
 
-    # 基础行为匹配：检查输出是否包含期望行为的关键词
-    behavior_matches = _check_behaviors(output, test_case.get("expected_behaviors", []))
+    # 行为匹配：加权 + 同义词 + 短语匹配
+    behavior_matches = check_behavior_match(output, test_case.get("expected_behaviors", []))
 
     return {
         "case_id": test_case["id"],
@@ -138,28 +136,6 @@ def run_test_case(
     }
 
 
-def _check_behaviors(output: str, expected_behaviors: list[str]) -> dict[str, bool]:
-    """检查输出是否包含期望行为的关键词.
-
-    简单的字符串匹配，每个 expected_behavior 拆分为关键词，
-    检查输出中是否包含大部分关键词。
-
-    TODO: S7 — 当前为粗粒度关键词匹配，考虑引入语义相似度或 LLM 判断提升准确性。
-    """
-    output_lower = output.lower()
-    results: dict[str, bool] = {}
-
-    for behavior in expected_behaviors:
-        # 将行为描述拆分为关键词
-        keywords = re.findall(r"[\u4e00-\u9fff]+|[a-zA-Z_]+", behavior.lower())
-        if not keywords:
-            results[behavior] = False
-            continue
-        # 至少匹配一半关键词算通过
-        matched = sum(1 for kw in keywords if kw in output_lower)
-        results[behavior] = matched >= max(1, len(keywords) // 2)
-
-    return results
 
 
 # ── 评分 ────────────────────────────────────────────────────────────
@@ -170,8 +146,8 @@ def _score_test_result(
     test_case: dict[str, Any],
     run_result: dict[str, Any],
 ) -> dict[str, Any]:
-    """评分单条测试结果，复用 daily_eval 的评分逻辑."""
-    from daily_eval import _fallback_score, score_trajectory
+    """评分单条测试结果，复用 crew.scoring 的评分逻辑."""
+    from crew.scoring import _fallback_score, score_trajectory
 
     if not run_result.get("success"):
         return {
@@ -466,7 +442,7 @@ def main() -> None:
         total = len(results)
         success = sum(1 for r in results if r.get("success"))
         avg_score = sum(r["total_score"] for r in results) / total if total else 0
-        print(f"\n=== 测试完成 ===")
+        print("\n=== 测试完成 ===")
         print(f"总数: {total}")
         print(f"成功: {success}")
         print(f"平均分: {avg_score:.2f}")

@@ -555,7 +555,6 @@ async def _tool_find_free_time(
 
         # 在工作时间（9-18点）找空闲
         free_slots = []
-        check_time = now
         for day_offset in range(days):
             day_start = datetime.fromtimestamp(now) + timedelta(days=day_offset)
             work_start = day_start.replace(hour=9, minute=0, second=0).timestamp()
