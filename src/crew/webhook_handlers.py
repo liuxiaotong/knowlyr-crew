@@ -827,6 +827,10 @@ async def _run_and_callback(
         logger.error("异步回调: 蚁聚 API 未配置，无法发送频道消息")
         return
 
+    # 引用回复时，默认 @原消息发送者（触发通知）
+    if callback_parent_id and sender_name and not output.startswith(f"@{sender_name}"):
+        output = f"@{sender_name} {output}"
+
     callback_url = f"{_ANTGATHER_API_URL}/api/internal/channels/{callback_channel_id}/messages"
     callback_payload: dict[str, Any] = {
         "sender_id": callback_sender_id,
