@@ -22,8 +22,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
 CREW_API_URL = os.environ.get("CREW_REMOTE_URL", "https://crew.knowlyr.com")
 CREW_API_TOKEN = os.environ.get("CREW_API_TOKEN", "")
@@ -33,8 +33,8 @@ LOCAL_CACHE_DIR = Path.home() / ".knowlyr" / "meta" / "employee-memories"
 INCREMENTAL_THRESHOLD_HOURS = 12
 
 # 默认参数
-DEFAULT_MEMORY_LIMIT = 30
-DEFAULT_MIN_IMPORTANCE = 3
+DEFAULT_MEMORY_LIMIT = 9999  # 全量同步（API 不支持 0=无限，用大数兜底）
+DEFAULT_MIN_IMPORTANCE = 0  # 不过滤重要度，拉取全部
 DEFAULT_DAYS = 30
 
 
@@ -158,11 +158,7 @@ def fetch_active_employees() -> list[str]:
         with urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-        employees = (
-            data
-            if isinstance(data, list)
-            else data.get("items", data.get("employees", []))
-        )
+        employees = data if isinstance(data, list) else data.get("items", data.get("employees", []))
         slugs = []
         for emp in employees:
             if isinstance(emp, dict):
@@ -181,8 +177,12 @@ def main():
     parser.add_argument("slugs", nargs="*", help="员工 slug（如 backend-engineer）")
     parser.add_argument("--all", action="store_true", help="同步所有活跃员工")
     parser.add_argument("--force", action="store_true", help="强制刷新（忽略增量检查）")
-    parser.add_argument("--memory-limit", type=int, default=DEFAULT_MEMORY_LIMIT, help="最大记忆条数")
-    parser.add_argument("--min-importance", type=int, default=DEFAULT_MIN_IMPORTANCE, help="最低重要性")
+    parser.add_argument(
+        "--memory-limit", type=int, default=DEFAULT_MEMORY_LIMIT, help="最大记忆条数"
+    )
+    parser.add_argument(
+        "--min-importance", type=int, default=DEFAULT_MIN_IMPORTANCE, help="最低重要性"
+    )
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help="最近 N 天的记忆")
 
     args = parser.parse_args()
@@ -221,10 +221,7 @@ def main():
             failed += 1
 
     print(
-        f"\n=== 同步完成 ===\n"
-        f"  成功: {success}\n"
-        f"  失败: {failed}\n"
-        f"  缓存目录: {LOCAL_CACHE_DIR}",
+        f"\n=== 同步完成 ===\n  成功: {success}\n  失败: {failed}\n  缓存目录: {LOCAL_CACHE_DIR}",
         file=sys.stderr,
     )
 

@@ -18,8 +18,8 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
 CREW_API_URL = os.environ.get("CREW_REMOTE_URL", "https://crew.knowlyr.com")
 CREW_API_TOKEN = os.environ.get("CREW_API_TOKEN", "")
@@ -40,8 +40,7 @@ def load_local_cache(slug: str) -> dict | None:
 def fetch_remote_state(slug: str) -> dict | None:
     """从 crew API 获取员工当前状态."""
     url = (
-        f"{CREW_API_URL.rstrip('/')}/api/employees/{slug}/state"
-        f"?memory_limit=50&min_importance=0"
+        f"{CREW_API_URL.rstrip('/')}/api/employees/{slug}/state?memory_limit=9999&min_importance=0"
     )
     headers = {"Authorization": f"Bearer {CREW_API_TOKEN}"}
     req = Request(url, headers=headers)
