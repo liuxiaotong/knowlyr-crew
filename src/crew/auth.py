@@ -58,20 +58,28 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                     {"error": "invalid content-length"},
                     status_code=400,
                 )
-        # 无 Content-Length 时（chunked transfer），限制实际 body 大小
-        # TODO: S-9 — chunked 请求应流式检查大小，避免内存耗尽
+        # 无 Content-Length 时（chunked transfer），流式读取并限制大小
         if request.method in ("POST", "PUT", "PATCH") and not content_length:
-            body = await request.body()
-            if len(body) > self.max_bytes:
-                return JSONResponse(
-                    {"error": "request too large"},
-                    status_code=413,
-                )
+            body_parts: list[bytes] = []
+            total_size = 0
+            async for chunk in request.stream():
+                total_size += len(chunk)
+                if total_size > self.max_bytes:
+                    return JSONResponse(
+                        {"error": "request too large"},
+                        status_code=413,
+                    )
+                body_parts.append(chunk)
+            # 缓存 body 供下游 handler 读取
+            request._body = b"".join(body_parts)  # noqa: SLF001
         return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """基于客户端 IP 的滑动窗口速率限制.
+
+    注意: 速率数据存于进程内 dict，多 worker 部署时各进程独立计数。
+    当前单 worker 部署无影响，扩容前需迁移到 Redis 或共享内存。
 
     Args:
         rate: 窗口期内最大请求数.

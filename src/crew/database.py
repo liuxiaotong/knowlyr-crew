@@ -263,6 +263,8 @@ def close_all() -> None:
     with _sqlite_lock:
         for conn in _sqlite_connections.values():
             try:
+                # WAL checkpoint 防止 -wal/-shm 文件无限增长
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 conn.close()
             except Exception:
                 pass

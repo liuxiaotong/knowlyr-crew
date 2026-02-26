@@ -26,6 +26,8 @@ from crew.providers import (
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
+# 注意: genai.configure() 修改全局状态，_gemini_lock 只保护 configure 调用。
+# 当前单 API key 安全；若需多 key 并发，应改为 per-request client 实例。
 _gemini_lock = threading.Lock()
 
 

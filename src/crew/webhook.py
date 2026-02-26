@@ -8,6 +8,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# 后台启动任务引用集合 — 防止 GC 提前回收
+_startup_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 try:
     from starlette.applications import Starlette
     from starlette.requests import Request
@@ -364,7 +367,9 @@ def create_webhook_app(
 
         if scheduler:
             await scheduler.start()
-        asyncio.create_task(_resume_incomplete_pipelines(ctx))
+        _task = asyncio.create_task(_resume_incomplete_pipelines(ctx))
+        _startup_tasks.add(_task)
+        _task.add_done_callback(_startup_tasks.discard)
 
     async def on_shutdown():
         if scheduler:

@@ -1,4 +1,8 @@
-"""飞书工具函数 — 日历、任务、文档、表格、群聊、审批等."""
+"""飞书工具函数 — 日历、任务、文档、表格、群聊、审批等.
+
+TODO(W-5): 25 处 `async with httpx.AsyncClient()` 应替换为 crew.feishu.get_feishu_client()
+共享连接池，避免每次请求都做 TLS 握手。需要单独 PR 处理。
+"""
 
 from __future__ import annotations
 

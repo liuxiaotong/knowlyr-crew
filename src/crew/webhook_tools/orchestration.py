@@ -455,6 +455,9 @@ async def _tool_agent_file_grep(
     pattern = args.get("pattern", "")
     if not pattern:
         return "错误: 必须提供 pattern"
+    # 防止 ReDoS: 限制 pattern 长度
+    if len(pattern) > 200:
+        return "错误: pattern 过长（上限 200 字符）"
 
     project_dir = ctx.project_dir or Path(".")
     search_path = project_dir

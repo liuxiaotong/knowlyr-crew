@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from crew.webhook_tools.feishu import _UNIT_CONVERSIONS
+
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
@@ -81,7 +83,12 @@ async def _tool_calculate(
             op = _OPS.get(type(node.op))
             if op is None:
                 raise ValueError(f"不支持的运算: {type(node.op).__name__}")
-            return op(_eval(node.left), _eval(node.right))
+            left, right = _eval(node.left), _eval(node.right)
+            # 防止巨指数 DoS（如 2**999999999）
+            if isinstance(node.op, ast.Pow):
+                if isinstance(right, (int, float)) and abs(right) > 10000:
+                    raise ValueError(f"指数过大: {right}（上限 10000）")
+            return op(left, right)
         if isinstance(node, ast.UnaryOp):
             op = _OPS.get(type(node.op))
             if op is None:
@@ -146,7 +153,7 @@ async def _tool_unit_convert(
         return f"{value}°F = {result:.2f}°C"
 
     key = (from_u, to_u)
-    factor = _UNIT_CONVERSIONS.get(key)  # noqa: F821 — TODO: 定义在 feishu.py，需迁移到此文件
+    factor = _UNIT_CONVERSIONS.get(key)
     if factor is None:
         return f"不支持 {from_u} → {to_u} 的换算。支持：km/mi, m/ft, kg/lb, l/gal, gb/mb, c/f 等。"
 
@@ -1007,6 +1014,16 @@ def _validate_python_code(code: str) -> str | None:
                 "rmdir",
                 "unlink",
                 "rmtree",
+                # 沙箱逃逸向量
+                "__import__",
+                "__subclasses__",
+                "__bases__",
+                "__mro__",
+                "__globals__",
+                "__builtins__",
+                "__code__",
+                "__reduce__",
+                "__reduce_ex__",
             }
             if node.attr in _BLOCKED_ATTRS:
                 return f"不允许调用 .{node.attr}()（安全限制）"
@@ -1054,7 +1071,8 @@ async def _tool_run_python(
     # 2. 超时限制
     timeout = min(max(int(args.get("timeout", 30) or 30), 5), 60)
 
-    # 3. 构建 wrapper（Linux 上加 resource limits）
+    # 3. 构建 wrapper（Linux 上加 resource limits + __builtins__ 限制）
+    _allowed_mods_repr = repr(_ALLOWED_MODULES)
     wrapper = textwrap.dedent("""\
         import sys
         try:
@@ -1063,8 +1081,29 @@ async def _tool_run_python(
             resource.setrlimit(resource.RLIMIT_CPU, ({timeout}, {timeout}))
         except (ImportError, ValueError, OSError):
             pass
-        exec(compile({code!r}, "<run_python>", "exec"))
-    """).format(timeout=timeout, code=code)
+        _SAFE_BUILTIN_NAMES = (
+            "abs", "all", "any", "bin", "bool", "bytes", "chr", "complex",
+            "dict", "divmod", "enumerate", "filter", "float", "format",
+            "frozenset", "hash", "hex", "int", "isinstance", "issubclass",
+            "iter", "len", "list", "map", "max", "min", "next", "oct",
+            "ord", "pow", "print", "range", "repr", "reversed", "round",
+            "set", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+            "True", "False", "None", "ArithmeticError", "AssertionError",
+            "AttributeError", "EOFError", "Exception", "IndexError",
+            "KeyError", "NameError", "OverflowError", "RuntimeError",
+            "StopIteration", "TypeError", "ValueError", "ZeroDivisionError",
+        )
+        import builtins as _b
+        _safe_builtins = {{n: getattr(_b, n) for n in _SAFE_BUILTIN_NAMES if hasattr(_b, n)}}
+        _ALLOWED = {allowed_mods}
+        _real_import = _b.__import__
+        def _restricted_import(name, *args, **kwargs):
+            if name.split(".")[0] not in _ALLOWED:
+                raise ImportError(f"不允许导入 {{name}}（安全限制）")
+            return _real_import(name, *args, **kwargs)
+        _safe_builtins["__import__"] = _restricted_import
+        exec(compile({code!r}, "<run_python>", "exec"), {{"__builtins__": _safe_builtins}})
+    """).format(timeout=timeout, code=code, allowed_mods=_allowed_mods_repr)
 
     # 4. subprocess 执行
     python = sys.executable or "python3"

@@ -21,19 +21,25 @@ logger = logging.getLogger(__name__)
 
 # ── 共享 httpx 连接池 ──
 
+import threading
+
 import httpx
 
 _feishu_client: httpx.AsyncClient | None = None
+_feishu_client_lock = threading.Lock()
 
 
 def get_feishu_client() -> httpx.AsyncClient:
     """获取共享的飞书 httpx 客户端（连接池复用）."""
     global _feishu_client
     if _feishu_client is None or _feishu_client.is_closed:
-        _feishu_client = httpx.AsyncClient(
-            timeout=30.0,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-        )
+        with _feishu_client_lock:
+            # double-check locking
+            if _feishu_client is None or _feishu_client.is_closed:
+                _feishu_client = httpx.AsyncClient(
+                    timeout=30.0,
+                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                )
     return _feishu_client
 
 

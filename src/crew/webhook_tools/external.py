@@ -9,6 +9,7 @@ from crew.webhook_context import (
     _NOTION_API_KEY,
     _NOTION_VERSION,
 )
+from crew.webhook_tools.feishu import _CITY_CODES
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
@@ -75,9 +76,9 @@ async def _tool_weather(
     if not city:
         return "需要城市名，如：上海、北京、杭州。"
 
-    code = _CITY_CODES.get(city)  # noqa: F821 — TODO: _CITY_CODES 定义缺失，需补充
+    code = _CITY_CODES.get(city)
     if not code:
-        avail = "、".join(list(_CITY_CODES.keys())[:20]) + "…"  # noqa: F821
+        avail = "、".join(list(_CITY_CODES.keys())[:20]) + "…"
         return f"暂不支持「{city}」，支持的城市：{avail}"
 
     try:
@@ -410,14 +411,23 @@ async def _tool_read_url(
     hostname = parsed.hostname or ""
     if not hostname:
         return "无效 URL。"
+
+    import socket
+
+    # 先解析 DNS，再校验 IP，防止 DNS rebinding 绕过
     try:
-        addr = ipaddress.ip_address(hostname)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-            return "不允许访问内网地址。"
-    except ValueError:
-        # hostname 不是 IP（域名），检查常见内网域名
-        if hostname in ("localhost", "metadata.google.internal"):
-            return "不允许访问内网地址。"
+        addr_infos = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror:
+        return f"DNS 解析失败: {hostname}"
+    for family, _type, _proto, _canonname, sockaddr in addr_infos:
+        try:
+            addr = ipaddress.ip_address(sockaddr[0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return "不允许访问内网地址。"
+        except ValueError:
+            pass
+    if hostname in ("localhost", "metadata.google.internal"):
+        return "不允许访问内网地址。"
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -458,7 +468,7 @@ async def _tool_rss_read(
 ) -> str:
     """读取 RSS/Atom 订阅源."""
     import re
-    import xml.etree.ElementTree as ET
+    import xml.etree.ElementTree as ET  # noqa: S405 — TODO(S-2): 考虑用 defusedxml 防 XXE
 
     import httpx
 

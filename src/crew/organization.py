@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 _cache: Organization | None = None
 _cache_time: float = 0.0
 _cache_lock = threading.Lock()
-_CACHE_TTL = 30.0  # seconds
+_CACHE_TTL = float(os.environ.get("CREW_ORG_CACHE_TTL", "30"))  # seconds
 
 
 def load_organization(project_dir: Path | None = None) -> Organization:
@@ -32,7 +33,7 @@ def load_organization(project_dir: Path | None = None) -> Organization:
     global _cache, _cache_time
 
     with _cache_lock:
-        if _cache is not None and (time.time() - _cache_time) < _CACHE_TTL:
+        if _cache is not None and (time.monotonic() - _cache_time) < _CACHE_TTL:
             return _cache
 
         candidates: list[Path] = []
@@ -47,14 +48,14 @@ def load_organization(project_dir: Path | None = None) -> Organization:
                     org = Organization(**(data or {}))
                     logger.info("组织架构已加载: %s", path)
                     _cache = org
-                    _cache_time = time.time()
+                    _cache_time = time.monotonic()
                     return org
                 except Exception as e:
                     logger.warning("组织架构加载失败 (%s): %s", path, e)
 
         org = Organization()
         _cache = org
-        _cache_time = time.time()
+        _cache_time = time.monotonic()
         return org
 
 
@@ -71,7 +72,7 @@ def set_cache(org: Organization) -> None:
     global _cache, _cache_time
     with _cache_lock:
         _cache = org
-        _cache_time = time.time()
+        _cache_time = time.monotonic()
 
 
 # ── 模型档位默认值 ──

@@ -797,30 +797,30 @@ class MemoryStore:
             True 如果找到并更新，False 如果未找到
         """
         for jsonl_file in self.memory_dir.glob("*.jsonl"):
-            lines = jsonl_file.read_text(encoding="utf-8").splitlines()
-            new_lines: list[str] = []
-            found = False
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    entry = MemoryEntry(**json.loads(stripped))
-                except (json.JSONDecodeError, ValueError):
-                    new_lines.append(stripped)
-                    continue
+            with file_lock(jsonl_file):
+                lines = jsonl_file.read_text(encoding="utf-8").splitlines()
+                new_lines: list[str] = []
+                found = False
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        entry = MemoryEntry(**json.loads(stripped))
+                    except (json.JSONDecodeError, ValueError):
+                        new_lines.append(stripped)
+                        continue
 
-                if entry.id == pattern_id and entry.category == "pattern":
-                    entry.verified_count += 1
-                    new_lines.append(entry.model_dump_json())
-                    found = True
-                else:
-                    new_lines.append(stripped)
+                    if entry.id == pattern_id and entry.category == "pattern":
+                        entry.verified_count += 1
+                        new_lines.append(entry.model_dump_json())
+                        found = True
+                    else:
+                        new_lines.append(stripped)
 
-            if found:
-                with file_lock(jsonl_file):
+                if found:
                     jsonl_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-                return True
+                    return True
 
         return False
 

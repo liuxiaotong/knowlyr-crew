@@ -851,7 +851,7 @@ async def _feishu_dispatch(
         _model_used = result.get("model", "?") if isinstance(result, dict) else "?"
         _in_tok = result.get("input_tokens", 0) if isinstance(result, dict) else 0
         _out_tok = result.get("output_tokens", 0) if isinstance(result, dict) else 0
-        logger.warning(
+        logger.info(
             "飞书回复 [%s] %.1fs model=%s in=%d out=%d msg=%s",
             _path_label,
             _elapsed,
