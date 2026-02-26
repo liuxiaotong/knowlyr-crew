@@ -2,8 +2,10 @@
 
 import logging
 import subprocess
+import time as _time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from crew.models import Employee, EmployeeOutput
 from crew.paths import resolve_project_dir
@@ -365,3 +367,220 @@ class CrewEngine:
                 parts.append(f"- 输出目录: {employee.output.dir}")
 
         return "\n".join(parts)
+
+    async def chat(
+        self,
+        *,
+        employee_id: str,
+        message: str,
+        channel: str,
+        sender_id: str,
+        max_visibility: str = "internal",
+        stream: bool = False,
+        context_only: bool = False,
+        message_history: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """统一对话接口 — prompt 构建 → LLM 调用 → 记忆写回全流程.
+
+        Args:
+            employee_id: AI 员工 slug（如 "moya"）
+            message: 用户输入文本
+            channel: 渠道标识（antgather_dm / lark / internal / webhook）
+            sender_id: 发送方 ID
+            max_visibility: 记忆可见性上限，默认 internal
+            stream: 是否 SSE 流式（Phase 1 暂不支持，忽略）
+            context_only: 仅返回 prompt+记忆不调 LLM（Claude Code 专用）
+            message_history: 历史消息列表，格式 [{"role": "user"/"assistant", "content": "..."}]
+            model: 覆盖员工配置中的模型
+
+        Returns:
+            非流式: {"reply": str, "employee_id": str, "memory_updated": bool,
+                     "tokens_used": int, "latency_ms": int}
+            context_only: {"prompt": str, "memories": list, "budget_remaining": int}
+        """
+        from crew.discovery import discover_employees
+        from crew.tool_schema import AGENT_TOOLS
+        from crew.webhook_feishu import _needs_tools
+
+        # ── 1. 参数校验 ──
+        if not employee_id:
+            raise ValueError("employee_id 不能为空")
+        if not message:
+            raise ValueError("message 不能为空")
+        if not channel:
+            raise ValueError("channel 不能为空")
+        if not sender_id:
+            raise ValueError("sender_id 不能为空")
+
+        # ── 2. 查找员工 ──
+        discovery = discover_employees(project_dir=self.project_dir)
+        emp = discovery.get(employee_id)
+        if emp is None:
+            from crew.exceptions import EmployeeNotFoundError
+
+            raise EmployeeNotFoundError(employee_id)
+
+        # ── 3. 记忆读取（缓存层）+ prompt 构建 ──
+        system_prompt = self.prompt(emp, max_visibility=max_visibility)
+
+        # ── 4. context_only 模式：直接返回 prompt + 记忆，不调 LLM ──
+        if context_only:
+            try:
+                from crew.memory import MemoryStore
+
+                mem_store = MemoryStore(project_dir=self.project_dir)
+                raw_memories = mem_store.query(
+                    employee_id,
+                    limit=10,
+                    max_visibility=max_visibility,
+                )
+                memories_list = [
+                    {
+                        "content": m.content,
+                        "category": m.category,
+                        "importance": m.importance,
+                        "tags": m.tags or [],
+                    }
+                    for m in raw_memories
+                ]
+            except Exception:
+                memories_list = []
+
+            # 粗估剩余预算（默认 4096 token）
+            prompt_tokens = len(system_prompt) // 2
+            budget_remaining = max(0, 4096 - prompt_tokens)
+
+            return {
+                "prompt": system_prompt,
+                "memories": memories_list,
+                "budget_remaining": budget_remaining,
+            }
+
+        # ── 5. fast/full 路由决策 ──
+        has_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
+        use_fast_path = has_tools and emp.fallback_model and not _needs_tools(message)
+
+        # ── 6. 构建 user_message（含历史上下文嵌入）──
+        if message_history:
+            history_text = "\n".join(
+                f"[{'assistant' if m.get('role') == 'assistant' else 'user'}]"
+                f" {m.get('content', '')}"
+                for m in message_history[-10:]  # 最多保留最近 10 条
+            )
+            full_user_message: str | list[dict[str, Any]] = (
+                f"[历史对话]\n{history_text}\n\n[当前消息]\n{message}"
+            )
+        else:
+            full_user_message = message
+
+        # ── 7. LLM 调用 ──
+        t0 = _time.monotonic()
+        memory_updated = False
+
+        try:
+            if use_fast_path:
+                # fast path：用 fallback_model（kimi 等低成本模型），不带工具
+                from crew.executor import aexecute_prompt
+
+                chat_model = emp.fallback_model
+                chat_api_key = emp.fallback_api_key or None
+                chat_base_url = emp.fallback_base_url or None
+
+                result = await aexecute_prompt(
+                    system_prompt=system_prompt,
+                    user_message=full_user_message
+                    if isinstance(full_user_message, str)
+                    else "请开始执行上述任务。",
+                    api_key=chat_api_key,
+                    model=chat_model,
+                    stream=False,
+                    base_url=chat_base_url,
+                )
+            else:
+                # full path：走标准执行路径
+                from crew.executor import aexecute_prompt
+
+                use_model = model or emp.model or "claude-sonnet-4-20250514"
+                result = await aexecute_prompt(
+                    system_prompt=system_prompt,
+                    user_message=full_user_message
+                    if isinstance(full_user_message, str)
+                    else "请开始执行上述任务。",
+                    api_key=emp.api_key or None,
+                    model=use_model,
+                    stream=False,
+                    base_url=emp.base_url or None,
+                    fallback_model=emp.fallback_model or None,
+                    fallback_api_key=emp.fallback_api_key or None,
+                    fallback_base_url=emp.fallback_base_url or None,
+                )
+
+        except (ValueError, ImportError) as e:
+            logger.warning("chat() LLM 调用失败 emp=%s: %s", employee_id, e)
+            result = None
+
+        elapsed_ms = int((_time.monotonic() - t0) * 1000)
+
+        if result is None:
+            return {
+                "reply": "",
+                "employee_id": employee_id,
+                "memory_updated": False,
+                "tokens_used": 0,
+                "latency_ms": elapsed_ms,
+            }
+
+        # ── 8. 输出清洗 ──
+        from crew.output_sanitizer import strip_internal_tags
+
+        reply_text = strip_internal_tags(result.content)  # type: ignore[union-attr]
+        tokens_used = (
+            result.input_tokens + result.output_tokens  # type: ignore[union-attr]
+        )
+
+        # ── 9. 记忆异步写回（fire-and-forget）──
+        try:
+            import asyncio
+
+            from crew.memory import MemoryStore
+
+            async def _write_memory() -> None:
+                nonlocal memory_updated
+                try:
+                    mem_store = MemoryStore(project_dir=self.project_dir)
+                    mem_store.add(
+                        employee_id,
+                        content=f"[{channel}] {sender_id}: {message[:200]}",
+                        category="observation",
+                        importance=2,
+                        tags=[channel, "chat"],
+                        visibility="internal",
+                    )
+                    memory_updated = True
+                    logger.debug("chat() 记忆写回成功: emp=%s", employee_id)
+                except Exception as _me:
+                    logger.debug("chat() 记忆写回失败: %s", _me)
+
+            _task = asyncio.create_task(_write_memory())
+            # 不等待，让它在后台执行
+            _ = _task  # 防止 GC
+        except Exception:
+            pass
+
+        logger.info(
+            "chat() 完成 [%s] emp=%s channel=%s latency=%dms tokens=%d",
+            "fast" if use_fast_path else "full",
+            employee_id,
+            channel,
+            elapsed_ms,
+            tokens_used,
+        )
+
+        return {
+            "reply": reply_text,
+            "employee_id": employee_id,
+            "memory_updated": memory_updated,
+            "tokens_used": tokens_used,
+            "latency_ms": elapsed_ms,
+        }

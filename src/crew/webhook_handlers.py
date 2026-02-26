@@ -1991,3 +1991,115 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
             },
         }
     )
+
+
+async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
+    """统一对话接口 — 供蚁聚、飞书、外部渠道统一调用.
+
+    POST /api/chat
+    {
+        "employee_id": "moya",
+        "message": "用户输入文本",
+        "channel": "antgather_dm",
+        "sender_id": "user_123",
+        "max_visibility": "internal",   // 可选，默认 internal
+        "stream": false,                // 可选，默认 false
+        "context_only": false           // 可选，仅返回 prompt+记忆
+    }
+    """
+    import json as _json
+
+    from starlette.responses import JSONResponse, StreamingResponse
+
+    # ── 解析请求体 ──
+    try:
+        payload: dict[str, Any] = (
+            await request.json()
+            if request.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
+    except Exception:
+        return JSONResponse({"ok": False, "error": "请求体 JSON 解析失败"}, status_code=400)
+
+    # ── 必填字段校验 ──
+    employee_id = payload.get("employee_id", "")
+    message = payload.get("message", "")
+    channel = payload.get("channel", "")
+    sender_id = payload.get("sender_id", "")
+
+    _required_fields = [
+        ("employee_id", employee_id),
+        ("message", message),
+        ("channel", channel),
+        ("sender_id", sender_id),
+    ]
+    missing = [f for f, v in _required_fields if not v]
+    if missing:
+        return JSONResponse(
+            {"ok": False, "error": f"缺少必填字段: {', '.join(missing)}"},
+            status_code=400,
+        )
+
+    # ── 可选字段 ──
+    max_visibility: str = payload.get("max_visibility", "internal")
+    stream: bool = bool(payload.get("stream", False))
+    context_only: bool = bool(payload.get("context_only", False))
+    message_history: list[dict[str, Any]] | None = payload.get("message_history")
+    model: str | None = payload.get("model")
+
+    # ── 调 CrewEngine.chat() ──
+    from crew.engine import CrewEngine
+    from crew.exceptions import EmployeeNotFoundError
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+
+    try:
+        result = await engine.chat(
+            employee_id=employee_id,
+            message=message,
+            channel=channel,
+            sender_id=sender_id,
+            max_visibility=max_visibility,
+            stream=stream,
+            context_only=context_only,
+            message_history=message_history,
+            model=model,
+        )
+    except EmployeeNotFoundError:
+        return JSONResponse(
+            {"ok": False, "error": f"员工不存在: {employee_id}"},
+            status_code=404,
+        )
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.exception("chat() 异常: emp=%s channel=%s", employee_id, channel)
+        return JSONResponse(
+            {"ok": False, "error": f"内部错误: {e}"},
+            status_code=500,
+        )
+
+    # ── 流式响应（SSE）──
+    if stream and not context_only:
+        reply_text: str = result.get("reply", "")
+
+        async def _sse_generator():
+            # Phase 1: 简单实现，将完整回复作为单个 SSE 事件推送
+            chunk_data = _json.dumps({"delta": reply_text, "done": False}, ensure_ascii=False)
+            yield f"data: {chunk_data}\n\n"
+            done_data = _json.dumps(
+                {
+                    "done": True,
+                    "employee_id": employee_id,
+                    "memory_updated": result.get("memory_updated", False),
+                    "tokens_used": result.get("tokens_used", 0),
+                    "latency_ms": result.get("latency_ms", 0),
+                },
+                ensure_ascii=False,
+            )
+            yield f"data: {done_data}\n\n"
+
+        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
+
+    # ── 非流式响应 ──
+    return JSONResponse(result)

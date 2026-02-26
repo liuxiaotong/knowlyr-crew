@@ -65,6 +65,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_agent_run,
     _handle_audit_trends,
     _handle_authority_restore,
+    _handle_chat,
     _handle_cost_summary,
     _handle_cron_status,
     _handle_employee_delete,
@@ -355,6 +356,11 @@ def create_webhook_app(
             "/api/audit/trends",
             endpoint=_make_handler(ctx, _handle_audit_trends),
             methods=["GET"],
+        ),
+        Route(
+            "/api/chat",
+            endpoint=_make_handler(ctx, _handle_chat),
+            methods=["POST"],
         ),
     ]
 
