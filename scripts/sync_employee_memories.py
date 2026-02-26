@@ -158,7 +158,11 @@ def fetch_active_employees() -> list[str]:
         with urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-        employees = data if isinstance(data, list) else data.get("employees", [])
+        employees = (
+            data
+            if isinstance(data, list)
+            else data.get("items", data.get("employees", []))
+        )
         slugs = []
         for emp in employees:
             if isinstance(emp, dict):
