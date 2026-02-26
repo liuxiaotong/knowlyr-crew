@@ -198,6 +198,85 @@ class TestMCPResources:
             )
 
 
+class TestMCPEmployeeContext:
+    """测试 MCP employee-context resource."""
+
+    def setup_method(self):
+        self.server = create_server()
+
+    def test_list_resources_includes_context(self):
+        """list_resources 应包含 employee-context 资源."""
+        handler = self.server.request_handlers[ListResourcesRequest]
+        result = _run(handler(ListResourcesRequest(method="resources/list")))
+        uris = [str(r.uri) for r in result.root.resources]
+        # code-reviewer 默认 active，应有 context 资源
+        assert "crew://employee-context/code-reviewer" in uris
+
+    def test_list_resources_context_only_active(self):
+        """employee-context 只列出 active 员工."""
+        handler = self.server.request_handlers[ListResourcesRequest]
+        result = _run(handler(ListResourcesRequest(method="resources/list")))
+        context_uris = [
+            str(r.uri) for r in result.root.resources if "employee-context/" in str(r.uri)
+        ]
+        # 所有 context 资源都应对应 active 员工
+        from crew.discovery import discover_employees
+
+        disc = discover_employees()
+        for uri in context_uris:
+            name = uri.split("employee-context/")[1]
+            emp = disc.get(name)
+            assert emp is not None, f"context resource 对应的员工 {name} 不存在"
+            assert emp.agent_status == "active", f"{name} 非 active 却出现在 context 中"
+
+    def test_read_employee_context(self):
+        """read_resource 应返回 Markdown 格式的运行时上下文."""
+        handler = self.server.request_handlers[ReadResourceRequest]
+        result = _run(
+            handler(
+                ReadResourceRequest(
+                    method="resources/read",
+                    params=ReadResourceRequestParams(uri="crew://employee-context/code-reviewer"),
+                )
+            )
+        )
+        contents = result.root.contents
+        assert len(contents) == 1
+        text = contents[0].text
+        assert "text/markdown" in contents[0].mimeType
+        # 应包含标题和状态行
+        assert "# " in text
+        assert "**状态**: active" in text
+
+    def test_read_employee_context_not_found(self):
+        """不存在的 employee-context 应报错."""
+        handler = self.server.request_handlers[ReadResourceRequest]
+        with pytest.raises(EmployeeNotFoundError, match="未找到"):
+            _run(
+                handler(
+                    ReadResourceRequest(
+                        method="resources/read",
+                        params=ReadResourceRequestParams(uri="crew://employee-context/nonexistent"),
+                    )
+                )
+            )
+
+    def test_read_employee_context_has_model(self):
+        """运行时上下文应包含模型信息."""
+        handler = self.server.request_handlers[ReadResourceRequest]
+        result = _run(
+            handler(
+                ReadResourceRequest(
+                    method="resources/read",
+                    params=ReadResourceRequestParams(uri="crew://employee-context/code-reviewer"),
+                )
+            )
+        )
+        text = result.root.contents[0].text
+        # 应包含模型信息（具体模型名由员工定义决定）
+        assert "**模型**:" in text
+
+
 class TestToolMetricsCollector:
     """测试 ToolMetricsCollector 单元逻辑."""
 

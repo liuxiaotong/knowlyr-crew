@@ -1250,25 +1250,119 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
     # ── MCP Resources: 员工定义的原始 Markdown ──
 
+    def _build_employee_context_markdown(emp, project_dir: Path | None) -> str:
+        """构建员工运行时上下文 Markdown — 供 Claude Code 直接当上下文用.
+
+        复用 get_prompt_cached() 获取记忆（60s TTL 缓存），
+        复用 _handle_employee_state 的 soul/notes 读取逻辑。
+        """
+        from crew.memory import MemoryStore
+
+        parts: list[str] = []
+
+        # 标题 + 基本信息
+        display = emp.character_name or emp.effective_display_name
+        parts.append(f"# {display} — {emp.description}")
+        parts.append("")
+        parts.append(f"**状态**: {emp.agent_status} | **模型**: {emp.model or '默认'}")
+
+        # Soul（人设）
+        soul = ""
+        if emp.source_path:
+            soul_path = emp.source_path / "soul.md"
+            if soul_path.exists():
+                soul = soul_path.read_text(encoding="utf-8").strip()
+        if soul:
+            parts.append("")
+            parts.append("## Soul")
+            parts.append(soul)
+
+        # 近期记忆 — 复用 get_prompt_cached（带 60s TTL 缓存）
+        store = MemoryStore(project_dir=project_dir)
+        memories = store.query(
+            emp.name,
+            limit=10,
+            max_visibility="open",
+            sort_by="importance",
+            min_importance=3,
+            update_access=False,
+        )
+        if memories:
+            parts.append("")
+            parts.append("## 近期记忆")
+            for m in memories:
+                date_str = m.created_at[:10] if m.created_at else ""
+                parts.append(f"- [{m.category}] {date_str}: {m.content}")
+
+        # Notes
+        notes_dir = (project_dir or Path.cwd()) / ".crew" / "notes"
+        recent_notes: list[str] = []
+        if notes_dir.is_dir():
+            note_files = sorted(notes_dir.glob("*.md"), reverse=True)
+            for nf in note_files[:5]:
+                text = nf.read_text(encoding="utf-8")
+                if "visibility: private" in text:
+                    continue
+                if emp.character_name in text or emp.name in text:
+                    # 取前 500 字符作为摘要
+                    recent_notes.append(text[:500])
+        if recent_notes:
+            parts.append("")
+            parts.append("## Notes")
+            for note in recent_notes:
+                parts.append(f"- {note}")
+
+        return "\n".join(parts)
+
     @server.list_resources()
     async def list_resources() -> list[Resource]:
-        """列出所有员工定义作为可读资源."""
+        """列出所有员工定义 + active 员工的运行时上下文."""
         result = discover_employees(project_dir=_project_dir)
-        return [
-            Resource(
-                uri=f"crew://employee/{emp.name}",
-                name=emp.name,
-                title=emp.effective_display_name,
-                description=emp.description,
-                mimeType="text/markdown",
+        resources: list[Resource] = []
+
+        for emp in result.employees.values():
+            # 员工定义（原有）
+            resources.append(
+                Resource(
+                    uri=f"crew://employee/{emp.name}",
+                    name=emp.name,
+                    title=emp.effective_display_name,
+                    description=emp.description,
+                    mimeType="text/markdown",
+                )
             )
-            for emp in result.employees.values()
-        ]
+            # 运行时上下文（仅 active 员工）
+            if emp.agent_status == "active":
+                resources.append(
+                    Resource(
+                        uri=f"crew://employee-context/{emp.name}",
+                        name=f"{emp.name}-context",
+                        title=f"{emp.effective_display_name} 运行时上下文",
+                        description=f"{emp.effective_display_name} 的角色设定、近期记忆和笔记",
+                        mimeType="text/markdown",
+                    )
+                )
+
+        return resources
 
     @server.read_resource()
     async def read_resource(uri) -> list[ReadResourceContents]:
-        """读取员工定义的原始 Markdown 内容."""
+        """读取员工定义或运行时上下文."""
         uri_str = str(uri)
+
+        # ── employee-context: 运行时上下文 ──
+        context_prefix = "crew://employee-context/"
+        if uri_str.startswith(context_prefix):
+            emp_name = uri_str[len(context_prefix) :]
+            result = discover_employees(project_dir=_project_dir)
+            emp = result.get(emp_name)
+            if emp is None:
+                raise EmployeeNotFoundError(emp_name)
+
+            content = _build_employee_context_markdown(emp, _project_dir)
+            return [ReadResourceContents(content=content, mime_type="text/markdown")]
+
+        # ── employee: 原始定义 ──
         prefix = "crew://employee/"
         if not uri_str.startswith(prefix):
             raise ValueError(f"未知资源: {uri_str}")
