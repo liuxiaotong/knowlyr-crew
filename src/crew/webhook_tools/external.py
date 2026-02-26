@@ -416,7 +416,9 @@ async def _tool_read_url(
 
     # 先解析 DNS，再校验 IP，防止 DNS rebinding 绕过
     try:
-        addr_infos = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        addr_infos = socket.getaddrinfo(
+            hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+        )
     except socket.gaierror:
         return f"DNS 解析失败: {hostname}"
     for family, _type, _proto, _canonname, sockaddr in addr_infos:

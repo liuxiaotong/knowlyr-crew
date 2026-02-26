@@ -557,9 +557,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     tags = payload.get("tags", [])
 
     if not employee or not category or not content:
-        return JSONResponse(
-            {"error": "employee, category, content are required"}, status_code=400
-        )
+        return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
 
     valid_categories = {"decision", "estimate", "finding", "correction", "pattern"}
     if category not in valid_categories:

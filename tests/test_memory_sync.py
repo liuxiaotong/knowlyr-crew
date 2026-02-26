@@ -118,7 +118,12 @@ class TestMemoryCache:
         """超过 800 token 的内容被截断."""
         # 写入大量记忆
         for i in range(50):
-            store.add("long", "finding", f"这是第{i}条非常长的记忆内容，用来测试截断功能" * 5, confidence=1.0)
+            store.add(
+                "long",
+                "finding",
+                f"这是第{i}条非常长的记忆内容，用来测试截断功能" * 5,
+                confidence=1.0,
+            )
 
         text = get_prompt_cached("long", store=store)
         # 粗略检查：800 token ≈ 1600 字符，允许一定误差

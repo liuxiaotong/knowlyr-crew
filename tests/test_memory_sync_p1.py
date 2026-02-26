@@ -126,9 +126,7 @@ class TestMemoryAddHandler:
         ctx.project_dir = tmp_path
 
         request = AsyncMock()
-        request.json = AsyncMock(
-            return_value={"employee": "test", "category": "decision"}
-        )
+        request.json = AsyncMock(return_value={"employee": "test", "category": "decision"})
 
         response = await _handle_memory_add(request, ctx)
         assert response.status_code == 400
