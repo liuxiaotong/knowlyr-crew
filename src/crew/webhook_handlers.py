@@ -811,6 +811,22 @@ async def _run_and_callback(
     except Exception:
         pass
 
+    # 回复后记忆写回（fire-and-forget）
+    if isinstance(result, dict) and result.get("output"):
+        try:
+            from crew.reply_postprocess import push_if_needed
+
+            _reply_text = result["output"].strip()
+            _turn_count = len(message_history) if message_history else 1
+            push_if_needed(
+                employee=name,
+                reply=_reply_text,
+                turn_count=_turn_count,
+                session_id=f"antgather-callback-{callback_channel_id}",
+            )
+        except Exception as _mem_err:
+            logger.debug("回复记忆写回失败（不影响回调）: %s", _mem_err)
+
     # 回调蚁聚：发频道消息
     from crew.output_sanitizer import strip_internal_tags
 
@@ -1027,6 +1043,22 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             args=args,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
+
+        # 回复后记忆写回（fire-and-forget）
+        if isinstance(result, dict) and result.get("output"):
+            try:
+                from crew.reply_postprocess import push_if_needed
+
+                _reply_text = result["output"].strip()
+                _turn_count = len(message_history) if message_history else 1
+                push_if_needed(
+                    employee=name,
+                    reply=_reply_text,
+                    turn_count=_turn_count,
+                    session_id=f"{channel}-sync-{name}",
+                )
+            except Exception as _mem_err:
+                logger.debug("回复记忆写回失败（不影响响应）: %s", _mem_err)
 
         return JSONResponse(result)
 

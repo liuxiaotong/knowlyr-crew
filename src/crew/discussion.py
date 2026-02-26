@@ -745,12 +745,31 @@ def _render_participant_prompt(
         parts.append(_INTERACTION_RULES[interaction])
     parts.append("")
 
-    # 历史经验（从持久化记忆注入）
+    # 历史经验（从持久化记忆注入，走缓存 + 语义匹配）
     try:
         from crew.memory import MemoryStore
+        from crew.memory_cache import get_prompt_cached
 
         memory_store = MemoryStore(project_dir=project_dir)
-        memory_text = memory_store.format_for_prompt(emp.name, limit=5)
+        # 获取同团队成员（用于注入队友记忆）
+        _team_members: list[str] | None = None
+        try:
+            from crew.organization import load_organization as _load_org
+
+            _org = _load_org(project_dir=project_dir)
+            _tid = _org.get_team(emp.name)
+            if _tid:
+                _team_members = _org.teams[_tid].members
+        except Exception:
+            pass
+        memory_text = get_prompt_cached(
+            emp.name,
+            query=topic,
+            store=memory_store,
+            employee_tags=emp.tags,
+            max_visibility="open",
+            team_members=_team_members,
+        )
         if memory_text:
             parts.extend(["---", "", "## 你的历史经验", "", memory_text, ""])
     except Exception as e:
