@@ -469,6 +469,16 @@ def serve_webhook(
     except ImportError:
         raise ImportError("uvicorn 未安装。请运行: pip install knowlyr-crew[webhook]")
 
+    # 确保 crew.* 模块的日志输出到 stderr（被 systemd/journalctl 采集）
+    _crew_logger = logging.getLogger("crew")
+    if not _crew_logger.handlers:
+        _handler = logging.StreamHandler()
+        _handler.setFormatter(
+            logging.Formatter("%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+        )
+        _crew_logger.addHandler(_handler)
+    _crew_logger.setLevel(logging.INFO)
+
     from crew.webhook_config import load_webhook_config
 
     config = load_webhook_config(project_dir)

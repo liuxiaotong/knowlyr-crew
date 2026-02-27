@@ -828,6 +828,7 @@ async def _feishu_dispatch(
                     project_dir=ctx.project_dir,
                     employee_name=employee_name,
                     chat_context=chat_context,
+                    message_history=message_history,
                 )
             except SGBridgeError as _sg_err:
                 logger.info("SG Bridge fallback: %s → 走 crew 引擎", _sg_err)

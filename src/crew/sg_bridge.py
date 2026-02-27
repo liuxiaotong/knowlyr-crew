@@ -476,6 +476,7 @@ async def sg_dispatch(
     project_dir: Path | None = None,
     employee_name: str | None = None,
     chat_context: str | None = None,
+    message_history: list[dict] | None = None,
 ) -> str:
     """SG 转发主入口 — 成功返回回复文本，失败抛出 SGBridgeError.
 
@@ -486,6 +487,7 @@ async def sg_dispatch(
         project_dir: 项目目录
         employee_name: 目标员工名称（用于上下文）
         chat_context: 飞书对话场景上下文
+        message_history: 飞书对话历史（最近几轮），每条 {"role": "user"|"assistant", "content": "..."}
 
     Returns:
         claude 的回复文本
@@ -513,6 +515,17 @@ async def sg_dispatch(
         full_message += chat_context + "\n\n"
     if employee_name:
         full_message += f"[员工: {employee_name}]\n"
+
+    # 拼入对话历史（最多 6 条，避免超过 claude -p 的 stdin 限制）
+    if message_history:
+        recent = message_history[-6:]
+        history_lines = []
+        for msg in recent:
+            role_label = "Kai" if msg.get("role") == "user" else (employee_name or "助手")
+            history_lines.append(f"{role_label}: {msg.get('content', '')}")
+        if history_lines:
+            full_message += "[最近对话]\n" + "\n".join(history_lines) + "\n[当前消息]\n"
+
     full_message += clean_message if clean_message else message
 
     logger.info(
