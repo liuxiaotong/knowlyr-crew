@@ -2152,3 +2152,142 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
 
     # ── 非流式响应 ──
     return JSONResponse(result)
+
+
+# ── KV 存储端点 ──────────────────────────────────────────────────
+
+# key 合法性正则：只允许字母数字、连字符、下划线、点、斜杠
+_KV_KEY_RE = _re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+
+
+def _validate_kv_key(key: str) -> str | None:
+    """校验 KV key，返回错误消息或 None（合法）."""
+    if not key:
+        return "key is required"
+    if ".." in key:
+        return "key must not contain '..'"
+    if key.startswith("/"):
+        return "key must not start with '/'"
+    if not _KV_KEY_RE.match(key):
+        return "key contains invalid characters (allowed: a-z A-Z 0-9 _ - . /)"
+    return None
+
+
+def _kv_base_dir(ctx: _AppContext) -> Path:
+    """返回 KV 存储的根目录."""
+    return (ctx.project_dir or Path(".")) / ".crew" / "kv"
+
+
+async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
+    """KV 写入 — PUT /api/kv/{key:path}.
+
+    支持两种 Content-Type:
+    - text/plain / application/octet-stream: body 就是文件内容
+    - application/json: {"content": "文件内容"}
+    """
+    from starlette.responses import JSONResponse
+
+    key = request.path_params.get("key", "")
+    err = _validate_kv_key(key)
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+
+    # 读取内容
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except (ValueError, TypeError):
+            return JSONResponse({"ok": False, "error": "Invalid JSON"}, status_code=400)
+        content = payload.get("content")
+        if content is None:
+            return JSONResponse(
+                {"ok": False, "error": "'content' field is required in JSON body"},
+                status_code=400,
+            )
+        raw_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    else:
+        raw_bytes = await request.body()
+        if not raw_bytes:
+            return JSONResponse(
+                {"ok": False, "error": "empty body"}, status_code=400
+            )
+
+    # 写入文件
+    base_dir = _kv_base_dir(ctx)
+    file_path = base_dir / key
+    # 二次校验 resolved path 确实在 base_dir 内
+    try:
+        file_path.resolve().relative_to(base_dir.resolve())
+    except ValueError:
+        return JSONResponse(
+            {"ok": False, "error": "path traversal detected"}, status_code=400
+        )
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(raw_bytes)
+
+    return JSONResponse({"ok": True, "key": key, "size": len(raw_bytes)})
+
+
+async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
+    """KV 读取 — GET /api/kv/{key:path}."""
+    from starlette.responses import JSONResponse, Response
+
+    key = request.path_params.get("key", "")
+    err = _validate_kv_key(key)
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+
+    base_dir = _kv_base_dir(ctx)
+    file_path = base_dir / key
+    try:
+        file_path.resolve().relative_to(base_dir.resolve())
+    except ValueError:
+        return JSONResponse(
+            {"ok": False, "error": "path traversal detected"}, status_code=400
+        )
+
+    if not file_path.is_file():
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+
+    content = file_path.read_bytes()
+    return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
+async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
+    """KV 列表 — GET /api/kv/ (可选 ?prefix=...)."""
+    from starlette.responses import JSONResponse
+
+    prefix = request.query_params.get("prefix", "")
+
+    # prefix 也做安全校验（但允许空字符串）
+    if prefix:
+        if ".." in prefix:
+            return JSONResponse(
+                {"ok": False, "error": "prefix must not contain '..'"}, status_code=400
+            )
+        if prefix.startswith("/"):
+            return JSONResponse(
+                {"ok": False, "error": "prefix must not start with '/'"}, status_code=400
+            )
+
+    base_dir = _kv_base_dir(ctx)
+    scan_dir = base_dir / prefix if prefix else base_dir
+
+    # 安全检查
+    try:
+        scan_dir.resolve().relative_to(base_dir.resolve())
+    except ValueError:
+        return JSONResponse(
+            {"ok": False, "error": "path traversal detected"}, status_code=400
+        )
+
+    keys: list[str] = []
+    if scan_dir.is_dir():
+        for p in sorted(scan_dir.rglob("*")):
+            if p.is_file():
+                rel = p.relative_to(base_dir)
+                keys.append(str(rel))
+
+    return JSONResponse({"ok": True, "keys": keys})

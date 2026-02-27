@@ -75,6 +75,9 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_employee_update,
     _handle_generic,
     _handle_github,
+    _handle_kv_get,
+    _handle_kv_list,
+    _handle_kv_put,
     _handle_memory_add,
     _handle_memory_ingest,
     _handle_memory_query,
@@ -367,6 +370,22 @@ def create_webhook_app(
             "/api/chat",
             endpoint=_make_handler(ctx, _handle_chat),
             methods=["POST"],
+        ),
+        # KV 存储端点
+        Route(
+            "/api/kv/",
+            endpoint=_make_handler(ctx, _handle_kv_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/kv/{key:path}",
+            endpoint=_make_handler(ctx, _handle_kv_put),
+            methods=["PUT"],
+        ),
+        Route(
+            "/api/kv/{key:path}",
+            endpoint=_make_handler(ctx, _handle_kv_get),
+            methods=["GET"],
         ),
     ]
 

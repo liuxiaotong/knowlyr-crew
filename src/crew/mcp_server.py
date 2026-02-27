@@ -87,6 +87,57 @@ async def _remote_memory_query(
         data = resp.json()
         return data.get("entries", [])
 
+
+# ── 远程 KV API 客户端 ──────────────────────────────────────────
+
+
+async def _remote_kv_put(base_url: str, token: str, *, key: str, content: str) -> dict:
+    """通过远程 API 写入 KV，返回响应 dict."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(
+            f"{base_url}/api/kv/{key}",
+            content=content.encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "text/plain; charset=utf-8",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_kv_get(base_url: str, token: str, *, key: str) -> str:
+    """通过远程 API 读取 KV，返回文件内容字符串. 不存在时抛 httpx.HTTPStatusError."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/kv/{key}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.text
+
+
+async def _remote_kv_list(base_url: str, token: str, *, prefix: str = "") -> list[str]:
+    """通过远程 API 列出 KV keys，返回 key 列表."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if prefix:
+        params["prefix"] = prefix
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/kv/",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("keys", [])
+
 try:
     from mcp.server import InitializationOptions, Server
     from mcp.server.lowlevel.helper_types import ReadResourceContents
@@ -741,6 +792,51 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     },
                 },
             ),
+            Tool(
+                name="put_config",
+                description="写入配置文件到 KV 存储（用于跨机器同步 CLAUDE.md / MEMORY.md 等）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "存储路径 key，如 config/knowlyr-crew/CLAUDE.md",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "文件内容",
+                        },
+                    },
+                    "required": ["key", "content"],
+                },
+            ),
+            Tool(
+                name="get_config",
+                description="从 KV 存储读取配置文件",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "存储路径 key，如 config/knowlyr-crew/CLAUDE.md",
+                        },
+                    },
+                    "required": ["key"],
+                },
+            ),
+            Tool(
+                name="list_configs",
+                description="列出 KV 存储中指定前缀下的所有 key",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "前缀过滤，如 config/（可选，不传则列出全部）",
+                        },
+                    },
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -1339,6 +1435,164 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     text=json.dumps(data, ensure_ascii=False, indent=2),
                 )
             ]
+
+        elif name == "put_config":
+            key = arguments["key"]
+            content = arguments["content"]
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                base_url, api_token = remote_cfg
+                try:
+                    result = await _remote_kv_put(
+                        base_url, api_token, key=key, content=content
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(result, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 KV put 失败: %s", exc)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"远程写入失败: {exc}", "remote_url": base_url},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+            else:
+                # 本地 fallback
+                import re as _re_kv
+
+                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+                if ".." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "invalid key"}, ensure_ascii=False))
+                    ]
+                base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
+                file_path = base_dir / key
+                try:
+                    file_path.resolve().relative_to(base_dir.resolve())
+                except ValueError:
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                    ]
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                raw_bytes = content.encode("utf-8")
+                file_path.write_bytes(raw_bytes)
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"ok": True, "key": key, "size": len(raw_bytes)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "get_config":
+            key = arguments["key"]
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                base_url, api_token = remote_cfg
+                try:
+                    text = await _remote_kv_get(base_url, api_token, key=key)
+                    return [TextContent(type="text", text=text)]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 KV get 失败: %s", exc)
+                    error_msg = str(exc)
+                    if "404" in error_msg:
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps({"error": "not found", "key": key}, ensure_ascii=False),
+                            )
+                        ]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"远程读取失败: {exc}", "remote_url": base_url},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+            else:
+                # 本地 fallback
+                import re as _re_kv
+
+                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+                if ".." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "invalid key"}, ensure_ascii=False))
+                    ]
+                base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
+                file_path = base_dir / key
+                try:
+                    file_path.resolve().relative_to(base_dir.resolve())
+                except ValueError:
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                    ]
+                if not file_path.is_file():
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "not found", "key": key}, ensure_ascii=False),
+                        )
+                    ]
+                return [TextContent(type="text", text=file_path.read_text(encoding="utf-8"))]
+
+        elif name == "list_configs":
+            prefix = arguments.get("prefix", "")
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                base_url, api_token = remote_cfg
+                try:
+                    keys = await _remote_kv_list(base_url, api_token, prefix=prefix)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"ok": True, "keys": keys}, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 KV list 失败: %s", exc)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"远程列表失败: {exc}", "remote_url": base_url},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+            else:
+                # 本地 fallback
+                if prefix and (".." in prefix or prefix.startswith("/")):
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "invalid prefix"}, ensure_ascii=False))
+                    ]
+                base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
+                scan_dir = base_dir / prefix if prefix else base_dir
+                try:
+                    scan_dir.resolve().relative_to(base_dir.resolve())
+                except ValueError:
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                    ]
+                keys: list[str] = []
+                if scan_dir.is_dir():
+                    for p in sorted(scan_dir.rglob("*")):
+                        if p.is_file():
+                            rel = p.relative_to(base_dir)
+                            keys.append(str(rel))
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"ok": True, "keys": keys}, ensure_ascii=False, indent=2),
+                    )
+                ]
 
         return [TextContent(type="text", text=f"未知工具: {name}")]
 
