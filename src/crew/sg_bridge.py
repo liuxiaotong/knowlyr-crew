@@ -215,7 +215,11 @@ def _get_employee_soul(
     employee_name: str,
     project_dir: Path | None = None,
 ) -> str:
-    """从 crew 发现层动态获取员工完整人设（带 TTL 缓存）.
+    """从 crew 发现层动态获取员工聊天人设（带 TTL 缓存）.
+
+    加载优先级：
+    1. chat-profile.md — 聊天专用精简人设（~1K 字符，省 90% token）
+    2. employee.body — 完整人设（fallback）
 
     crew 是唯一真相来源——不落文件、不硬编码。
     """
@@ -232,13 +236,30 @@ def _get_employee_soul(
         if employee is None:
             logger.warning("SG Bridge: 员工 %s 未找到，跳过 soul 注入", employee_name)
             return ""
-        soul = employee.body or ""
+
+        # 优先用 chat-profile.md（聊天精简版，省 token）
+        soul = ""
+        if employee.source_path:
+            chat_profile = employee.source_path / "chat-profile.md"
+            if chat_profile.exists():
+                soul = chat_profile.read_text(encoding="utf-8").strip()
+                logger.info(
+                    "SG Bridge: 员工 %s chat-profile 已加载（%d 字符，省 %d%%）",
+                    employee_name,
+                    len(soul),
+                    round((1 - len(soul) / max(len(employee.body or ""), 1)) * 100),
+                )
+
+        # fallback: 完整 body
+        if not soul:
+            soul = employee.body or ""
+            logger.info(
+                "SG Bridge: 员工 %s 完整 body 已加载（%d 字符，无 chat-profile）",
+                employee_name,
+                len(soul),
+            )
+
         _soul_cache[employee_name] = (soul, now)
-        logger.info(
-            "SG Bridge: 员工 %s soul 已加载（%d 字符）",
-            employee_name,
-            len(soul),
-        )
         return soul
     except Exception as e:
         logger.warning("SG Bridge: 加载员工 soul 失败: %s", e)

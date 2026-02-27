@@ -414,10 +414,33 @@ class TestEmployeeSoul:
         reset_soul_cache()
 
     @patch("crew.discovery.discover_employees")
-    def test_soul_loaded_from_crew(self, mock_discover):
-        """正常路径：从 crew 发现层拿到 soul."""
+    def test_chat_profile_preferred_over_body(self, mock_discover):
+        """有 chat-profile.md 时优先加载精简版."""
+        mock_emp = MagicMock()
+        mock_emp.body = "完整版 body 非常长" * 100
+        # 模拟 source_path 下有 chat-profile.md
+        mock_emp.source_path = Path(tmp_dir := "/tmp/_test_chat_profile")
+        Path(tmp_dir).mkdir(exist_ok=True)
+        (Path(tmp_dir) / "chat-profile.md").write_text(
+            "你是墨言，有猫叫阿灰。", encoding="utf-8"
+        )
+        mock_result = MagicMock()
+        mock_result.get.return_value = mock_emp
+        mock_discover.return_value = mock_result
+
+        soul = _get_employee_soul("ceo-assistant")
+        assert "阿灰" in soul
+        assert len(soul) < 100  # chat-profile 精简版
+        # 清理
+        (Path(tmp_dir) / "chat-profile.md").unlink()
+        Path(tmp_dir).rmdir()
+
+    @patch("crew.discovery.discover_employees")
+    def test_fallback_to_body_without_chat_profile(self, mock_discover):
+        """没有 chat-profile.md 时 fallback 到完整 body."""
         mock_emp = MagicMock()
         mock_emp.body = "你是姜墨言，有一只灰色英短叫阿灰。"
+        mock_emp.source_path = Path("/tmp/_nonexistent_dir")
         mock_result = MagicMock()
         mock_result.get.return_value = mock_emp
         mock_discover.return_value = mock_result
@@ -431,6 +454,7 @@ class TestEmployeeSoul:
         """第二次调用走缓存，不再调 discover."""
         mock_emp = MagicMock()
         mock_emp.body = "cached soul"
+        mock_emp.source_path = None
         mock_result = MagicMock()
         mock_result.get.return_value = mock_emp
         mock_discover.return_value = mock_result
@@ -464,6 +488,7 @@ class TestEmployeeSoul:
         # 第一次正常
         mock_emp = MagicMock()
         mock_emp.body = "stale soul"
+        mock_emp.source_path = None
         mock_result = MagicMock()
         mock_result.get.return_value = mock_emp
         mock_discover.return_value = mock_result
