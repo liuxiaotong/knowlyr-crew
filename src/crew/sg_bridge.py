@@ -387,6 +387,12 @@ class SGBridge:
             tools_str = ",".join(self.config.allowed_tools)
             claude_cmd_parts.extend(["--allowedTools", tools_str])
 
+        # 员工身份注入（--append-system-prompt 不覆盖默认 system prompt）
+        if employee_context:
+            # 转义双引号，用双引号包裹
+            escaped_ctx = employee_context.replace("\\", "\\\\").replace('"', '\\"')
+            claude_cmd_parts.extend(["--append-system-prompt", f'"{escaped_ctx}"'])
+
         # 不拼消息到命令行，走 stdin（避免 shell 多层转义问题）
         remote_cmd = env_prefix + " ".join(claude_cmd_parts)
 
@@ -524,12 +530,20 @@ async def sg_dispatch(
     clean_message = _strip_model_command(message)
     model_tier = select_model_tier(message, config)
 
-    # 组装发给 claude 的完整消息
-    full_message = ""
-    if chat_context:
-        full_message += chat_context + "\n\n"
+    # 组装 system prompt（员工身份 + 场景）
+    system_parts: list[str] = []
     if employee_name:
-        full_message += f"[员工: {employee_name}]\n"
+        system_parts.append(
+            f"你是{employee_name}，集识光年的 AI 员工。"
+            "直接回答问题，不要加任何前缀标记（如【墨言】）。"
+            "用中文自然对话。"
+        )
+    if chat_context:
+        system_parts.append(chat_context)
+    employee_ctx = "\n".join(system_parts) if system_parts else None
+
+    # 组装发给 claude 的用户消息
+    full_message = ""
 
     # 拼入对话历史（最多 6 条，避免超过 claude -p 的 stdin 限制）
     if message_history:
@@ -554,6 +568,7 @@ async def sg_dispatch(
         reply = await bridge.execute_claude(
             full_message,
             model_tier=model_tier,
+            employee_context=employee_ctx,
         )
         bridge.circuit_breaker.record_success()
         logger.info(
