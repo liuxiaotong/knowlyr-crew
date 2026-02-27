@@ -16,9 +16,11 @@ from crew.sg_bridge import (
     SGBridgeError,
     SGBridgeTimeout,
     SGBridgeUnavailable,
+    _get_employee_soul,
     _strip_model_command,
     load_sg_bridge_config,
     reset_sg_bridge,
+    reset_soul_cache,
     select_model_tier,
     sg_dispatch,
 )
@@ -399,6 +401,85 @@ def _get_bridge_for_test(mock_load):
     return _bridge_instance
 
 
+# ── Soul 动态加载 ──
+
+
+class TestEmployeeSoul:
+    """从 crew 发现层动态获取员工 soul."""
+
+    def setup_method(self):
+        reset_soul_cache()
+
+    def teardown_method(self):
+        reset_soul_cache()
+
+    @patch("crew.discovery.discover_employees")
+    def test_soul_loaded_from_crew(self, mock_discover):
+        """正常路径：从 crew 发现层拿到 soul."""
+        mock_emp = MagicMock()
+        mock_emp.body = "你是姜墨言，有一只灰色英短叫阿灰。"
+        mock_result = MagicMock()
+        mock_result.get.return_value = mock_emp
+        mock_discover.return_value = mock_result
+
+        soul = _get_employee_soul("ceo-assistant")
+        assert "阿灰" in soul
+        mock_discover.assert_called_once()
+
+    @patch("crew.discovery.discover_employees")
+    def test_soul_cached_with_ttl(self, mock_discover):
+        """第二次调用走缓存，不再调 discover."""
+        mock_emp = MagicMock()
+        mock_emp.body = "cached soul"
+        mock_result = MagicMock()
+        mock_result.get.return_value = mock_emp
+        mock_discover.return_value = mock_result
+
+        _get_employee_soul("ceo-assistant")
+        _get_employee_soul("ceo-assistant")
+        # 只调了一次 discover
+        assert mock_discover.call_count == 1
+
+    @patch("crew.discovery.discover_employees")
+    def test_soul_not_found_returns_empty(self, mock_discover):
+        """员工不存在时返回空字符串."""
+        mock_result = MagicMock()
+        mock_result.get.return_value = None
+        mock_discover.return_value = mock_result
+
+        soul = _get_employee_soul("nonexistent")
+        assert soul == ""
+
+    @patch("crew.discovery.discover_employees")
+    def test_soul_exception_returns_empty(self, mock_discover):
+        """discover 抛异常时优雅降级."""
+        mock_discover.side_effect = RuntimeError("boom")
+
+        soul = _get_employee_soul("ceo-assistant")
+        assert soul == ""
+
+    @patch("crew.discovery.discover_employees")
+    def test_soul_exception_uses_stale_cache(self, mock_discover):
+        """discover 抛异常但有旧缓存时，返回旧缓存."""
+        # 第一次正常
+        mock_emp = MagicMock()
+        mock_emp.body = "stale soul"
+        mock_result = MagicMock()
+        mock_result.get.return_value = mock_emp
+        mock_discover.return_value = mock_result
+        _get_employee_soul("ceo-assistant")
+
+        # 强制缓存过期
+        from crew.sg_bridge import _soul_cache
+        name, (body, _ts) = next(iter(_soul_cache.items()))
+        _soul_cache[name] = (body, 0)  # 过期
+
+        # 第二次 discover 失败
+        mock_discover.side_effect = RuntimeError("network error")
+        soul = _get_employee_soul("ceo-assistant")
+        assert soul == "stale soul"
+
+
 # ── webhook_feishu 集成 ──
 
 
@@ -419,9 +500,10 @@ class TestWebhookFeishuSGIntegration:
         with pytest.raises(SGBridgeError):
             _run(sg_dispatch("test"))
 
+    @patch("crew.sg_bridge._get_employee_soul", return_value="")
     @patch("crew.sg_bridge.asyncio.create_subprocess_exec")
     @patch("crew.sg_bridge.load_sg_bridge_config")
-    def test_sg_success_returns_reply(self, mock_load, mock_exec):
+    def test_sg_success_returns_reply(self, mock_load, mock_exec, _mock_soul):
         """SG 成功时返回回复."""
         mock_load.return_value = SGBridgeConfig(enabled=True)
 
@@ -432,3 +514,24 @@ class TestWebhookFeishuSGIntegration:
 
         reply = _run(sg_dispatch("你好", employee_name="ceo-assistant"))
         assert "SG reply" in reply
+
+    @patch("crew.sg_bridge._get_employee_soul", return_value="你是墨言，有一只猫叫阿灰。")
+    @patch("crew.sg_bridge.asyncio.create_subprocess_exec")
+    @patch("crew.sg_bridge.load_sg_bridge_config")
+    def test_sg_soul_injected_via_stdin(self, mock_load, mock_exec, _mock_soul):
+        """验证 soul 通过 stdin <identity> 块注入."""
+        mock_load.return_value = SGBridgeConfig(enabled=True)
+
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"meow", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        _run(sg_dispatch("你的猫叫什么", employee_name="ceo-assistant"))
+
+        # stdin 应包含 <identity> 块和 soul 内容
+        comm_kwargs = proc.communicate.call_args
+        stdin_data = comm_kwargs[1]["input"].decode("utf-8")
+        assert "<identity>" in stdin_data
+        assert "阿灰" in stdin_data
+        assert "你的猫叫什么" in stdin_data

@@ -27,6 +27,11 @@ from crew.paths import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
+# ── Soul 缓存（crew 是唯一真相来源） ──
+
+_soul_cache: dict[str, tuple[str, float]] = {}  # {employee_name: (body, fetched_at)}
+_SOUL_CACHE_TTL = 600  # 10 分钟
+
 
 # ── 异常 ──
 
@@ -204,6 +209,48 @@ def _clean_reply(text: str) -> str:
 def _strip_model_command(text: str) -> str:
     """从消息中移除 /model xxx 指令."""
     return re.sub(r"/model\s+(opus|sonnet|haiku)\b", "", text).strip()
+
+
+def _get_employee_soul(
+    employee_name: str,
+    project_dir: Path | None = None,
+) -> str:
+    """从 crew 发现层动态获取员工完整人设（带 TTL 缓存）.
+
+    crew 是唯一真相来源——不落文件、不硬编码。
+    """
+    now = time.monotonic()
+    cached = _soul_cache.get(employee_name)
+    if cached and (now - cached[1]) < _SOUL_CACHE_TTL:
+        return cached[0]
+
+    try:
+        from crew.discovery import discover_employees
+
+        result = discover_employees(project_dir=project_dir)
+        employee = result.get(employee_name)
+        if employee is None:
+            logger.warning("SG Bridge: 员工 %s 未找到，跳过 soul 注入", employee_name)
+            return ""
+        soul = employee.body or ""
+        _soul_cache[employee_name] = (soul, now)
+        logger.info(
+            "SG Bridge: 员工 %s soul 已加载（%d 字符）",
+            employee_name,
+            len(soul),
+        )
+        return soul
+    except Exception as e:
+        logger.warning("SG Bridge: 加载员工 soul 失败: %s", e)
+        # 缓存有旧数据则继续用
+        if cached:
+            return cached[0]
+        return ""
+
+
+def reset_soul_cache() -> None:
+    """重置 soul 缓存（测试用）."""
+    _soul_cache.clear()
 
 
 # ── Circuit Breaker ──
@@ -492,10 +539,11 @@ def get_sg_bridge(project_dir: Path | None = None) -> SGBridge | None:
 
 
 def reset_sg_bridge() -> None:
-    """重置单例（测试用）."""
+    """重置单例和缓存（测试用）."""
     global _bridge_instance, _bridge_config
     _bridge_instance = None
     _bridge_config = None
+    reset_soul_cache()
 
 
 # ── 高层 API ──
@@ -540,22 +588,31 @@ async def sg_dispatch(
     clean_message = _strip_model_command(message)
     model_tier = select_model_tier(message, config)
 
-    # 组装 system prompt（覆盖 CLAUDE.md 中不适合飞书聊天的指令）
+    # ── 从 crew 拉取员工 soul（crew 是唯一真相来源） ──
+    soul = ""
+    if employee_name:
+        soul = _get_employee_soul(employee_name, project_dir)
+
+    # 组装 --append-system-prompt（短规则，覆盖 CLAUDE.md 冲突指令）
     system_parts: list[str] = [
-        "【重要覆盖】这是飞书聊天消息，不是 CLI 对话。以下规则覆盖 CLAUDE.md 中的冲突指令：",
-        "1. 绝对不要加【墨言】或任何方括号前缀",
+        "【重要覆盖】这是即时聊天消息，以下规则覆盖 CLAUDE.md 中的冲突指令：",
+        "1. 不要加【墨言】或任何方括号前缀",
         "2. 不要输出 Sources/来源 引用块",
         "3. 不要使用 TodoWrite/TaskCreate 等工具",
-        "4. 直接用自然中文回复，像微信聊天一样",
+        "4. 直接用自然中文回复，像微信聊天一样简洁",
     ]
     if chat_context:
         system_parts.append(chat_context)
     employee_ctx = "\n".join(system_parts)
 
-    # 组装发给 claude 的用户消息
-    full_message = ""
+    # 组装 stdin 消息（soul + 对话历史 + 当前消息）
+    msg_parts: list[str] = []
 
-    # 拼入对话历史（最多 6 条，避免超过 claude -p 的 stdin 限制）
+    # soul 注入：通过 <identity> 块传递完整人设
+    if soul:
+        msg_parts.append(f"<identity>\n{soul}\n</identity>")
+
+    # 对话历史（最多 6 条）
     if message_history:
         recent = message_history[-6:]
         history_lines = []
@@ -563,9 +620,12 @@ async def sg_dispatch(
             role_label = "Kai" if msg.get("role") == "user" else (employee_name or "助手")
             history_lines.append(f"{role_label}: {msg.get('content', '')}")
         if history_lines:
-            full_message += "[最近对话]\n" + "\n".join(history_lines) + "\n[当前消息]\n"
+            msg_parts.append("[最近对话]\n" + "\n".join(history_lines))
 
-    full_message += clean_message if clean_message else message
+    # 当前消息
+    msg_parts.append(clean_message if clean_message else message)
+
+    full_message = "\n\n".join(msg_parts)
 
     logger.info(
         "SG dispatch: model=%s msg=%s cb=%s",
