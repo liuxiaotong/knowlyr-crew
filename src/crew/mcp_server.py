@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def _get_remote_memory_config() -> tuple[str, str] | None:
     """从环境变量获取远程 API 配置，返回 (base_url, token) 或 None."""
-    base_url = os.environ.get("CREW_API_URL", "").rstrip("/")
+    base_url = os.environ.get("CREW_API_URL", os.environ.get("CREW_REMOTE_URL", "")).rstrip("/")
     token = os.environ.get("CREW_API_TOKEN", "")
     if base_url and token:
         return (base_url, token)
