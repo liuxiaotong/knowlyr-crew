@@ -380,10 +380,9 @@ class SGBridge:
         # 使用 claude -p 非交互模式
         # 用 stdin pipe 传消息（避免多层 SSH 引号被吞）
 
-        # 构建远程命令
-        # cd /tmp: 脱离项目目录，避免读取 CLAUDE.md（里面有【墨言】前缀指令）
-        # source env.sh: SSH 非交互不加载 .profile，需手动 source 环境变量
-        env_prefix = f"cd /tmp && source {self.config.claude_env_file} && "
+        # 构建远程命令（SSH 非交互不加载 .profile，需手动 source 环境变量）
+        # 保留在 home 目录执行，让 claude 读取 CLAUDE.md 人设
+        env_prefix = f"source {self.config.claude_env_file} && "
         claude_cmd_parts = [self.config.claude_bin, "-p"]
 
         # 添加模型标识（如果不是默认 sonnet）
@@ -541,17 +540,17 @@ async def sg_dispatch(
     clean_message = _strip_model_command(message)
     model_tier = select_model_tier(message, config)
 
-    # 组装 system prompt（员工身份 + 场景）
-    system_parts: list[str] = []
-    if employee_name:
-        system_parts.append(
-            f"你是{employee_name}，集识光年的 AI 员工。"
-            "直接回答问题，不要加任何前缀标记（如【墨言】）。"
-            "用中文自然对话。"
-        )
+    # 组装 system prompt（覆盖 CLAUDE.md 中不适合飞书聊天的指令）
+    system_parts: list[str] = [
+        "【重要覆盖】这是飞书聊天消息，不是 CLI 对话。以下规则覆盖 CLAUDE.md 中的冲突指令：",
+        "1. 绝对不要加【墨言】或任何方括号前缀",
+        "2. 不要输出 Sources/来源 引用块",
+        "3. 不要使用 TodoWrite/TaskCreate 等工具",
+        "4. 直接用自然中文回复，像微信聊天一样",
+    ]
     if chat_context:
         system_parts.append(chat_context)
-    employee_ctx = "\n".join(system_parts) if system_parts else None
+    employee_ctx = "\n".join(system_parts)
 
     # 组装发给 claude 的用户消息
     full_message = ""
