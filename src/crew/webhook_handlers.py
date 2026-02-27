@@ -2096,37 +2096,63 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     message_history: list[dict[str, Any]] | None = payload.get("message_history")
     model: str | None = payload.get("model")
 
-    # ── 调 CrewEngine.chat() ──
-    from crew.engine import CrewEngine
-    from crew.exceptions import EmployeeNotFoundError
+    # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
+    _sg_reply: str | None = None
+    if not stream and not context_only:
+        try:
+            from crew.sg_bridge import SGBridgeError, sg_dispatch
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+            _sg_reply = await sg_dispatch(
+                message,
+                project_dir=ctx.project_dir,
+                employee_name=employee_id,
+                message_history=message_history,
+            )
+        except Exception as _sg_exc:
+            logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
+            _sg_reply = None
 
-    try:
-        result = await engine.chat(
-            employee_id=employee_id,
-            message=message,
-            channel=channel,
-            sender_id=sender_id,
-            max_visibility=max_visibility,
-            stream=stream,
-            context_only=context_only,
-            message_history=message_history,
-            model=model,
-        )
-    except EmployeeNotFoundError:
-        return JSONResponse(
-            {"ok": False, "error": f"员工不存在: {employee_id}"},
-            status_code=404,
-        )
-    except ValueError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-    except Exception as e:
-        logger.exception("chat() 异常: emp=%s channel=%s", employee_id, channel)
-        return JSONResponse(
-            {"ok": False, "error": f"内部错误: {e}"},
-            status_code=500,
-        )
+    if _sg_reply is not None:
+        result: dict[str, Any] = {
+            "ok": True,
+            "reply": _sg_reply,
+            "output": _sg_reply,
+            "tokens_used": 0,
+            "employee_id": employee_id,
+            "path": "sg",
+        }
+    else:
+        # ── Fallback: 调 CrewEngine.chat() ──
+        from crew.engine import CrewEngine
+        from crew.exceptions import EmployeeNotFoundError
+
+        engine = CrewEngine(project_dir=ctx.project_dir)
+
+        try:
+            result = await engine.chat(
+                employee_id=employee_id,
+                message=message,
+                channel=channel,
+                sender_id=sender_id,
+                max_visibility=max_visibility,
+                stream=stream,
+                context_only=context_only,
+                message_history=message_history,
+                model=model,
+            )
+        except EmployeeNotFoundError:
+            return JSONResponse(
+                {"ok": False, "error": f"员工不存在: {employee_id}"},
+                status_code=404,
+            )
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.exception("chat() 异常: emp=%s channel=%s", employee_id, channel)
+            return JSONResponse(
+                {"ok": False, "error": f"内部错误: {e}"},
+                status_code=500,
+            )
 
     # ── 流式响应（SSE）──
     if stream and not context_only:
