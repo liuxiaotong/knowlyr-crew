@@ -530,15 +530,20 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
-    """轻量记忆写入 — POST /api/memory/add.
+    """记忆写入 — POST /api/memory/add.
 
-    接受:
+    接受（与 MCP add_memory 工具入参对齐）:
         {
             "employee": "backend-engineer",
-            "category": "decision" | "finding" | "correction",
+            "category": "decision" | "estimate" | "finding" | "correction" | "pattern",
             "content": "记忆内容",
             "source_session": "claude-sess-xxx",
-            "tags": ["auto-push", "claude-code"]
+            "tags": ["auto-push", "claude-code"],
+            "ttl_days": 0,
+            "shared": false,
+            "trigger_condition": "",
+            "applicability": [],
+            "origin_employee": ""
         }
 
     幂等：同 employee + source_session + category 不重复写入。
@@ -557,6 +562,11 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     content = payload.get("content", "")
     source_session = payload.get("source_session", "")
     tags = payload.get("tags", [])
+    ttl_days = payload.get("ttl_days", 0)
+    shared = payload.get("shared", False)
+    trigger_condition = payload.get("trigger_condition", "")
+    applicability = payload.get("applicability", [])
+    origin_employee = payload.get("origin_employee", "")
 
     if not employee or not category or not content:
         return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
@@ -589,6 +599,11 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         content=content,
         source_session=source_session,
         tags=tags if isinstance(tags, list) else [],
+        ttl_days=int(ttl_days) if ttl_days else 0,
+        shared=bool(shared),
+        trigger_condition=str(trigger_condition),
+        applicability=applicability if isinstance(applicability, list) else [],
+        origin_employee=str(origin_employee),
     )
 
     # 写入后失效缓存
@@ -608,6 +623,38 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             "category": category,
         }
     )
+
+
+async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
+    """记忆查询 — GET /api/memory/query.
+
+    查询参数（与 MCP query_memory 工具入参对齐）:
+        employee (required): 员工名称
+        category (optional): 按类别过滤
+        limit (optional): 最大返回条数，默认 20
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    employee = request.query_params.get("employee", "")
+    category = request.query_params.get("category") or None
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+    except (ValueError, TypeError):
+        limit = 20
+
+    if not employee:
+        return JSONResponse({"error": "employee is required"}, status_code=400)
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+    entries = store.query(
+        employee=employee,
+        category=category,
+        limit=limit,
+    )
+    data = [e.model_dump() for e in entries]
+    return JSONResponse({"ok": True, "entries": data, "total": len(data)})
 
 
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:

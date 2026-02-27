@@ -2,12 +2,90 @@
 
 import json
 import logging
+import os
 import threading
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ── 远程 Memory API 客户端 ──────────────────────────────────────
+
+
+def _get_remote_memory_config() -> tuple[str, str] | None:
+    """从环境变量获取远程 API 配置，返回 (base_url, token) 或 None."""
+    base_url = os.environ.get("CREW_API_URL", "").rstrip("/")
+    token = os.environ.get("CREW_API_TOKEN", "")
+    if base_url and token:
+        return (base_url, token)
+    return None
+
+
+async def _remote_memory_add(
+    base_url: str,
+    token: str,
+    *,
+    employee: str,
+    category: str,
+    content: str,
+    source_session: str = "",
+    ttl_days: int = 0,
+    tags: list[str] | None = None,
+    shared: bool = False,
+    trigger_condition: str = "",
+    applicability: list[str] | None = None,
+    origin_employee: str = "",
+) -> dict:
+    """通过远程 API 写入记忆，返回响应 dict."""
+    import httpx
+
+    payload = {
+        "employee": employee,
+        "category": category,
+        "content": content,
+        "source_session": source_session,
+        "ttl_days": ttl_days,
+        "tags": tags or [],
+        "shared": shared,
+        "trigger_condition": trigger_condition,
+        "applicability": applicability or [],
+        "origin_employee": origin_employee,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{base_url}/api/memory/add",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_memory_query(
+    base_url: str,
+    token: str,
+    *,
+    employee: str,
+    category: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """通过远程 API 查询记忆，返回条目列表."""
+    import httpx
+
+    params: dict[str, str] = {"employee": employee, "limit": str(limit)}
+    if category:
+        params["category"] = category
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/memory/query",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("entries", [])
 
 try:
     from mcp.server import InitializationOptions, Server
@@ -954,44 +1032,113 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 return [TextContent(type="text", text=prompt)]
 
         elif name == "add_memory":
-            from crew.memory import MemoryStore
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                # 远程 API 路径
+                base_url, api_token = remote_cfg
+                try:
+                    result = await _remote_memory_add(
+                        base_url,
+                        api_token,
+                        employee=arguments["employee"],
+                        category=arguments["category"],
+                        content=arguments["content"],
+                        source_session=arguments.get("source_session", ""),
+                        ttl_days=arguments.get("ttl_days", 0),
+                        tags=arguments.get("tags"),
+                        shared=arguments.get("shared", False),
+                        trigger_condition=arguments.get("trigger_condition", ""),
+                        applicability=arguments.get("applicability"),
+                        origin_employee=arguments.get("origin_employee", ""),
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(result, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 memory add 失败: %s", exc)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"远程写入失败: {exc}", "remote_url": base_url},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+            else:
+                # 本地 fallback（未配置远程 API 时）
+                from crew.memory import MemoryStore
 
-            store = MemoryStore(project_dir=_project_dir)
-            entry = store.add(
-                employee=arguments["employee"],
-                category=arguments["category"],
-                content=arguments["content"],
-                source_session=arguments.get("source_session", ""),
-                ttl_days=arguments.get("ttl_days", 0),
-                tags=arguments.get("tags"),
-                shared=arguments.get("shared", False),
-                trigger_condition=arguments.get("trigger_condition", ""),
-                applicability=arguments.get("applicability"),
-                origin_employee=arguments.get("origin_employee", ""),
-            )
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps(entry.model_dump(), ensure_ascii=False, indent=2),
+                store = MemoryStore(project_dir=_project_dir)
+                entry = store.add(
+                    employee=arguments["employee"],
+                    category=arguments["category"],
+                    content=arguments["content"],
+                    source_session=arguments.get("source_session", ""),
+                    ttl_days=arguments.get("ttl_days", 0),
+                    tags=arguments.get("tags"),
+                    shared=arguments.get("shared", False),
+                    trigger_condition=arguments.get("trigger_condition", ""),
+                    applicability=arguments.get("applicability"),
+                    origin_employee=arguments.get("origin_employee", ""),
                 )
-            ]
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(entry.model_dump(), ensure_ascii=False, indent=2),
+                    )
+                ]
 
         elif name == "query_memory":
-            from crew.memory import MemoryStore
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                # 远程 API 路径
+                base_url, api_token = remote_cfg
+                try:
+                    entries_data = await _remote_memory_query(
+                        base_url,
+                        api_token,
+                        employee=arguments["employee"],
+                        category=arguments.get("category"),
+                        limit=arguments.get("limit", 20),
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(entries_data, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 memory query 失败: %s", exc)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"远程查询失败: {exc}", "remote_url": base_url},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+            else:
+                # 本地 fallback（未配置远程 API 时）
+                from crew.memory import MemoryStore
 
-            store = MemoryStore(project_dir=_project_dir)
-            entries = store.query(
-                employee=arguments["employee"],
-                category=arguments.get("category"),
-                limit=arguments.get("limit", 20),
-            )
-            data = [e.model_dump() for e in entries]
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps(data, ensure_ascii=False, indent=2),
+                store = MemoryStore(project_dir=_project_dir)
+                entries = store.query(
+                    employee=arguments["employee"],
+                    category=arguments.get("category"),
+                    limit=arguments.get("limit", 20),
                 )
-            ]
+                data = [e.model_dump() for e in entries]
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(data, ensure_ascii=False, indent=2),
+                    )
+                ]
 
         elif name == "track_decision":
             from crew.evaluation import EvaluationEngine
