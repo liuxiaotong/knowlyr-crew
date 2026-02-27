@@ -67,6 +67,7 @@ class SGBridgeConfig:
 
     # Claude CLI 配置
     claude_bin: str = "claude"  # SG 上的 claude 命令路径
+    claude_env_file: str = "/root/.claude/env.sh"  # SG 上的环境变量文件（SSH 非交互不加载 .profile）
     default_model: str = "sonnet"  # 默认模型标识
 
     # Circuit Breaker
@@ -363,7 +364,8 @@ class SGBridge:
         # 转义消息中的单引号
         escaped_message = message.replace("'", "'\\''")
 
-        # 构建远程命令
+        # 构建远程命令（SSH 非交互不加载 .profile，需手动 source 环境变量）
+        env_prefix = f"source {self.config.claude_env_file} && "
         claude_cmd_parts = [self.config.claude_bin, "-p"]
 
         # 添加模型标识（如果不是默认 sonnet）
@@ -374,7 +376,7 @@ class SGBridge:
         # sonnet 是默认，不需要额外参数
 
         claude_cmd_parts.append(f"'{escaped_message}'")
-        remote_cmd = " ".join(claude_cmd_parts)
+        remote_cmd = env_prefix + " ".join(claude_cmd_parts)
 
         # SSH 完整命令
         ssh_cmd = self._ssh_base_args() + [self._ssh_target(), remote_cmd]
