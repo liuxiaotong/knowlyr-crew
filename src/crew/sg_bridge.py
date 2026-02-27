@@ -58,7 +58,7 @@ class SGBridgeConfig:
 
     # 超时（秒）
     ssh_connect_timeout: int = 10
-    claude_timeout: int = 120  # claude -p 执行超时
+    claude_timeout: int = 180  # claude -p 执行超时（含工具调用）
     health_check_timeout: int = 5
 
     # SSH ControlMaster
@@ -69,6 +69,14 @@ class SGBridgeConfig:
     claude_bin: str = "claude"  # SG 上的 claude 命令路径
     claude_env_file: str = "/root/.claude/env.sh"  # SG 上的环境变量文件（SSH 非交互不加载 .profile）
     default_model: str = "sonnet"  # 默认模型标识
+    # -p 模式下允许的工具（root 不能用 --dangerously-skip-permissions）
+    allowed_tools: list[str] = field(
+        default_factory=lambda: [
+            "WebSearch", "WebFetch", "Read", "Grep", "Glob",
+            "mcp__crew__query_memory", "mcp__crew__list_employees",
+            "mcp__crew__get_work_log",
+        ]
+    )
 
     # Circuit Breaker
     cb_failure_threshold: int = 3  # 连续失败次数阈值
@@ -361,8 +369,7 @@ class SGBridge:
         """
         # 构建 claude 命令
         # 使用 claude -p 非交互模式
-        # 转义消息中的单引号
-        escaped_message = message.replace("'", "'\\''")
+        # 用 stdin pipe 传消息（避免多层 SSH 引号被吞）
 
         # 构建远程命令（SSH 非交互不加载 .profile，需手动 source 环境变量）
         env_prefix = f"source {self.config.claude_env_file} && "
@@ -375,7 +382,12 @@ class SGBridge:
             claude_cmd_parts.extend(["--model", "haiku"])
         # sonnet 是默认，不需要额外参数
 
-        claude_cmd_parts.append(f"'{escaped_message}'")
+        # 启用工具（root 不能用 --dangerously-skip-permissions，用 --allowedTools 代替）
+        if self.config.allowed_tools:
+            tools_str = ",".join(self.config.allowed_tools)
+            claude_cmd_parts.extend(["--allowedTools", tools_str])
+
+        # 不拼消息到命令行，走 stdin（避免 shell 多层转义问题）
         remote_cmd = env_prefix + " ".join(claude_cmd_parts)
 
         # SSH 完整命令
@@ -384,11 +396,12 @@ class SGBridge:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *ssh_cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
+                proc.communicate(input=message.encode("utf-8")),
                 timeout=self.config.claude_timeout,
             )
         except asyncio.TimeoutError:

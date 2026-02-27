@@ -39,7 +39,7 @@ class TestSGBridgeConfig:
         assert cfg.ssh_host == "43.106.24.105"
         assert cfg.ssh_user == "root"
         assert cfg.enabled is True
-        assert cfg.claude_timeout == 120
+        assert cfg.claude_timeout == 180
         assert cfg.cb_failure_threshold == 3
 
     def test_load_from_yaml(self, tmp_path):
@@ -283,8 +283,8 @@ class TestSGBridge:
         assert "opus" in cmd_str
 
     @patch("crew.sg_bridge.asyncio.create_subprocess_exec")
-    def test_execute_claude_escapes_quotes(self, mock_exec):
-        """验证消息中的单引号被正确转义."""
+    def test_execute_claude_uses_stdin(self, mock_exec):
+        """验证消息通过 stdin 传递（避免多层 SSH 引号问题）."""
         proc = AsyncMock()
         proc.communicate = AsyncMock(return_value=(b"ok", b""))
         proc.returncode = 0
@@ -293,9 +293,13 @@ class TestSGBridge:
         bridge = SGBridge(SGBridgeConfig())
         _run(bridge.execute_claude("what's up"))
 
-        call_args = mock_exec.call_args[0]
-        remote_cmd = call_args[-1]  # 最后一个参数是远程命令
-        assert "'\\''" in remote_cmd  # 转义后的单引号
+        # 消息通过 stdin 传递，不在远程命令中
+        call_args = mock_exec.call_args
+        remote_cmd = call_args[0][-1]  # 最后一个参数是远程命令
+        assert "what's up" not in remote_cmd  # 消息不在命令行
+        # communicate 收到 stdin input
+        comm_kwargs = proc.communicate.call_args
+        assert comm_kwargs[1]["input"] == b"what's up"
 
 
 # ── sg_dispatch 高层 API ──
