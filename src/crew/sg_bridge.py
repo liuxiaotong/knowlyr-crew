@@ -192,6 +192,15 @@ def select_model_tier(text: str, config: SGBridgeConfig) -> ModelTier:
     return ModelTier.SONNET
 
 
+def _clean_reply(text: str) -> str:
+    """清理 claude -p 回复中不适合聊天的内容."""
+    # 去掉【墨言】等前缀标记（CLAUDE.md 残留或模型习惯）
+    text = re.sub(r"^【[^】]+】\s*", "", text.strip())
+    # 去掉 Sources: 引用块（WebSearch 工具自动附加，聊天不需要）
+    text = re.sub(r"\n*Sources?:\s*\n[-–•*\s].*", "", text, flags=re.DOTALL).strip()
+    return text
+
+
 def _strip_model_command(text: str) -> str:
     """从消息中移除 /model xxx 指令."""
     return re.sub(r"/model\s+(opus|sonnet|haiku)\b", "", text).strip()
@@ -371,8 +380,10 @@ class SGBridge:
         # 使用 claude -p 非交互模式
         # 用 stdin pipe 传消息（避免多层 SSH 引号被吞）
 
-        # 构建远程命令（SSH 非交互不加载 .profile，需手动 source 环境变量）
-        env_prefix = f"source {self.config.claude_env_file} && "
+        # 构建远程命令
+        # cd /tmp: 脱离项目目录，避免读取 CLAUDE.md（里面有【墨言】前缀指令）
+        # source env.sh: SSH 非交互不加载 .profile，需手动 source 环境变量
+        env_prefix = f"cd /tmp && source {self.config.claude_env_file} && "
         claude_cmd_parts = [self.config.claude_bin, "-p"]
 
         # 添加模型标识（如果不是默认 sonnet）
@@ -437,7 +448,7 @@ class SGBridge:
         if not output:
             raise SGBridgeError("claude 返回空输出")
 
-        return output
+        return _clean_reply(output)
 
     async def close_control_master(self) -> None:
         """关闭 SSH ControlMaster 连接."""
