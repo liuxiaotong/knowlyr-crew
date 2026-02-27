@@ -73,6 +73,7 @@ echo ""
 echo "2/6 同步代码"
 
 # ⚠️ 不用 --delete，防止删除服务器独有文件（如 data/、运行时缓存）
+# ⚠️ 排除 private/：服务器上是符号链接 → private-repo/，rsync 会覆盖成真实目录
 rsync -avz \
     --exclude='.git' \
     --exclude='.venv' \
@@ -81,6 +82,7 @@ rsync -avz \
     --exclude='.claude' \
     --exclude='*.pyc' \
     --exclude='.env' \
+    --exclude='private' \
     "$LOCAL_DIR/" "$SERVER:$REMOTE_DIR/" \
     > /tmp/crew-rsync-output 2>&1
 
@@ -99,6 +101,10 @@ pass "organization.yaml → project/"
 
 ssh "$SERVER" "rsync -av $REMOTE_DIR/private/employees/ $PROJECT_DIR/private/employees/" > /dev/null 2>&1
 pass "employees/ → project/"
+
+# .crew/ 配置同步（sg_bridge.yaml 等）
+ssh "$SERVER" "mkdir -p $PROJECT_DIR/.crew && rsync -av $REMOTE_DIR/.crew/ $PROJECT_DIR/.crew/" > /dev/null 2>&1
+pass ".crew/ → project/"
 echo ""
 
 # ── 4. 重装包 ──
