@@ -818,27 +818,58 @@ async def _feishu_dispatch(
             else:
                 chat_message = task_text
 
-            from crew.engine import CrewEngine
+            # ── SG Bridge 主通道尝试 ──
+            _sg_reply: str | None = None
+            try:
+                from crew.sg_bridge import SGBridgeError, sg_dispatch
 
-            _engine = CrewEngine(project_dir=ctx.project_dir)
-            _sender_id = msg_event.sender_id or "kai"
-            result = await _engine.chat(
-                employee_id=employee_name,
-                message=chat_message,
-                channel="lark",
-                sender_id=_sender_id,
-                max_visibility=_visibility,
-                message_history=message_history,
-            )
-            _path_label = "fast" if result.get("tokens_used", 0) < 2000 else "full"
-            _elapsed = _time.monotonic() - _t0
-            _tokens = result.get("tokens_used", 0)
-            logger.info(
-                "飞书回复 [engine] %.1fs tokens=%d msg=%s",
-                _elapsed,
-                _tokens,
-                task_text[:40],
-            )
+                _sg_reply = await sg_dispatch(
+                    task_text,
+                    project_dir=ctx.project_dir,
+                    employee_name=employee_name,
+                    chat_context=chat_context,
+                )
+            except SGBridgeError as _sg_err:
+                logger.info("SG Bridge fallback: %s → 走 crew 引擎", _sg_err)
+                _sg_reply = None
+            except Exception as _sg_exc:
+                logger.warning("SG Bridge 意外异常: %s → 走 crew 引擎", _sg_exc)
+                _sg_reply = None
+
+            if _sg_reply is not None:
+                # SG 主通道成功
+                result = {"reply": _sg_reply, "output": _sg_reply, "tokens_used": 0}
+                _path_label = "sg"
+                _elapsed = _time.monotonic() - _t0
+                logger.info(
+                    "飞书回复 [SG] %.1fs reply_len=%d msg=%s",
+                    _elapsed,
+                    len(_sg_reply),
+                    task_text[:40],
+                )
+            else:
+                # ── Fallback: 现有 crew 引擎 ──
+                from crew.engine import CrewEngine
+
+                _engine = CrewEngine(project_dir=ctx.project_dir)
+                _sender_id = msg_event.sender_id or "kai"
+                result = await _engine.chat(
+                    employee_id=employee_name,
+                    message=chat_message,
+                    channel="lark",
+                    sender_id=_sender_id,
+                    max_visibility=_visibility,
+                    message_history=message_history,
+                )
+                _path_label = "fast" if result.get("tokens_used", 0) < 2000 else "full"
+                _elapsed = _time.monotonic() - _t0
+                _tokens = result.get("tokens_used", 0)
+                logger.info(
+                    "飞书回复 [engine] %.1fs tokens=%d msg=%s",
+                    _elapsed,
+                    _tokens,
+                    task_text[:40],
+                )
         else:
             # 图片路径：保留完整 agent loop（engine.chat 暂不支持多模态）
             import crew.webhook as _wh
