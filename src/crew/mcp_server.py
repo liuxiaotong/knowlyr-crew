@@ -88,6 +88,99 @@ async def _remote_memory_query(
         return data.get("entries", [])
 
 
+# ── Wiki Files API 客户端 ─────────────────────────────────────
+
+
+def _get_wiki_config() -> tuple[str, str] | None:
+    """从环境变量获取 Wiki API 配置，返回 (base_url, token) 或 None."""
+    base_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
+    token = os.environ.get("WIKI_API_TOKEN", "")
+    if base_url and token:
+        return (base_url, token)
+    return None
+
+
+async def _wiki_upload_file(
+    base_url: str,
+    token: str,
+    *,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str = "application/octet-stream",
+    space_slug: str = "",
+    doc_slug: str = "",
+) -> dict:
+    """上传文件到 Wiki，返回响应 dict."""
+    import httpx
+
+    files = {"file": (filename, file_bytes, content_type)}
+    data: dict[str, str] = {}
+    if space_slug:
+        data["space_slug"] = space_slug
+    if doc_slug:
+        data["doc_slug"] = doc_slug
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{base_url}/api/wiki/files/upload",
+            files=files,
+            data=data,
+            headers={"X-Wiki-Token": token},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _wiki_get_file(
+    base_url: str,
+    token: str,
+    *,
+    file_id: int,
+) -> dict:
+    """获取 Wiki 文件元数据 + 签名 URL + text_content."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/wiki/files/{file_id}",
+            headers={"X-Wiki-Token": token},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _wiki_list_files(
+    base_url: str,
+    token: str,
+    *,
+    space_slug: str = "",
+    doc_slug: str = "",
+    mime_type: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """列出 Wiki 文件."""
+    import httpx
+
+    params: dict[str, str] = {
+        "page": str(page),
+        "page_size": str(page_size),
+    }
+    if space_slug:
+        params["space_slug"] = space_slug
+    if doc_slug:
+        params["doc_slug"] = doc_slug
+    if mime_type:
+        params["mime_type"] = mime_type
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/wiki/files",
+            params=params,
+            headers={"X-Wiki-Token": token},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ── 远程 KV API 客户端 ──────────────────────────────────────────
 
 
@@ -833,6 +926,83 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         "prefix": {
                             "type": "string",
                             "description": "前缀过滤，如 config/（可选，不传则列出全部）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="wiki_upload",
+                description="上传文件到 Wiki — 支持本地文件路径或 base64 内容",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "本地文件路径（与 content+filename 二选一）",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "base64 编码的文件内容（与 file_path 二选一）",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "文件名（使用 content 时必填）",
+                        },
+                        "space_slug": {
+                            "type": "string",
+                            "description": "Wiki 空间 slug（可选）",
+                        },
+                        "doc_slug": {
+                            "type": "string",
+                            "description": "Wiki 文档 slug（可选）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="wiki_read_file",
+                description="读取 Wiki 文件 — 返回文本内容（如有）和签名 URL",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": ["string", "integer"],
+                            "description": "文件 ID（与 filename 二选一）",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "文件名模糊搜索（与 file_id 二选一）",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="wiki_list_files",
+                description="列出 Wiki 文件 — 支持按空间、文档、MIME 类型过滤",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "space_slug": {
+                            "type": "string",
+                            "description": "按 Wiki 空间 slug 过滤（可选）",
+                        },
+                        "doc_slug": {
+                            "type": "string",
+                            "description": "按 Wiki 文档 slug 过滤（可选）",
+                        },
+                        "mime_type": {
+                            "type": "string",
+                            "description": "按 MIME 类型过滤（可选）",
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "页码（默认 1）",
+                            "default": 1,
+                        },
+                        "page_size": {
+                            "type": "integer",
+                            "description": "每页条数（默认 20）",
+                            "default": 20,
                         },
                     },
                 },
@@ -1607,6 +1777,244 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps({"ok": True, "keys": keys}, ensure_ascii=False, indent=2),
+                    )
+                ]
+
+        elif name == "wiki_upload":
+            wiki_cfg = _get_wiki_config()
+            if not wiki_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, wiki_token = wiki_cfg
+            file_path_arg = arguments.get("file_path")
+            content_arg = arguments.get("content")
+            filename_arg = arguments.get("filename")
+            space_slug = arguments.get("space_slug", "")
+            doc_slug = arguments.get("doc_slug", "")
+
+            if file_path_arg:
+                # 从本地文件读取
+                fp = Path(file_path_arg).expanduser().resolve()
+                if not fp.is_file():
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"文件不存在: {file_path_arg}"}, ensure_ascii=False),
+                        )
+                    ]
+                file_bytes = fp.read_bytes()
+                filename = fp.name
+                # 猜测 MIME 类型
+                import mimetypes
+
+                ct, _ = mimetypes.guess_type(filename)
+                content_type = ct or "application/octet-stream"
+            elif content_arg and filename_arg:
+                # 从 base64 内容解码
+                import base64
+
+                try:
+                    file_bytes = base64.b64decode(content_arg)
+                except Exception:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "base64 解码失败"}, ensure_ascii=False),
+                        )
+                    ]
+                filename = filename_arg
+                import mimetypes
+
+                ct, _ = mimetypes.guess_type(filename)
+                content_type = ct or "application/octet-stream"
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "请提供 file_path 或 content+filename"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            try:
+                result = await _wiki_upload_file(
+                    base_url,
+                    wiki_token,
+                    file_bytes=file_bytes,
+                    filename=filename,
+                    content_type=content_type,
+                    space_slug=space_slug,
+                    doc_slug=doc_slug,
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"上传失败: {exc}"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+        elif name == "wiki_read_file":
+            wiki_cfg = _get_wiki_config()
+            if not wiki_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, wiki_token = wiki_cfg
+            file_id_arg = arguments.get("file_id")
+            filename_arg = arguments.get("filename")
+
+            if file_id_arg is not None:
+                # 直接按 ID 查
+                try:
+                    fid = int(file_id_arg)
+                except (ValueError, TypeError):
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False),
+                        )
+                    ]
+                try:
+                    result = await _wiki_get_file(base_url, wiki_token, file_id=fid)
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(result, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"获取文件失败: {exc}"}, ensure_ascii=False),
+                        )
+                    ]
+            elif filename_arg:
+                # 按文件名模糊搜索：先 list 再找匹配
+                try:
+                    list_result = await _wiki_list_files(
+                        base_url, wiki_token, page=1, page_size=50
+                    )
+                    files = list_result.get("files", list_result.get("items", []))
+                    # 模糊匹配：文件名包含搜索词（大小写不敏感）
+                    keyword = filename_arg.lower()
+                    matched = [
+                        f for f in files
+                        if keyword in f.get("filename", "").lower()
+                        or keyword in f.get("original_filename", "").lower()
+                    ]
+                    if not matched:
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps(
+                                    {"error": f"未找到匹配的文件: {filename_arg}", "total_files": len(files)},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ]
+                    if len(matched) == 1:
+                        # 只有一个匹配，直接获取详情
+                        fid = matched[0].get("id") or matched[0].get("file_id")
+                        result = await _wiki_get_file(base_url, wiki_token, file_id=int(fid))
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps(result, ensure_ascii=False, indent=2),
+                            )
+                        ]
+                    else:
+                        # 多个匹配，返回列表让用户选择
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps(
+                                    {
+                                        "message": f"找到 {len(matched)} 个匹配文件，请用 file_id 指定",
+                                        "matches": matched,
+                                    },
+                                    ensure_ascii=False,
+                                    indent=2,
+                                ),
+                            )
+                        ]
+                except Exception as exc:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"搜索文件失败: {exc}"}, ensure_ascii=False),
+                        )
+                    ]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "请提供 file_id 或 filename"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+        elif name == "wiki_list_files":
+            wiki_cfg = _get_wiki_config()
+            if not wiki_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, wiki_token = wiki_cfg
+            try:
+                result = await _wiki_list_files(
+                    base_url,
+                    wiki_token,
+                    space_slug=arguments.get("space_slug", ""),
+                    doc_slug=arguments.get("doc_slug", ""),
+                    mime_type=arguments.get("mime_type", ""),
+                    page=arguments.get("page", 1),
+                    page_size=arguments.get("page_size", 20),
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"列表失败: {exc}"}, ensure_ascii=False),
                     )
                 ]
 
