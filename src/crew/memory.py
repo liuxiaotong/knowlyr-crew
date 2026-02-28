@@ -861,8 +861,6 @@ class MemoryStore:
         Returns:
             True 如果删除成功，False 如果未找到
         """
-        from crew.file_lock import file_lock
-
         # 如果指定了员工，只在该员工文件中查找
         if employee:
             employees = [employee]
