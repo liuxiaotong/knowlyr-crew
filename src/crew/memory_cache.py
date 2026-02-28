@@ -138,9 +138,7 @@ def invalidate(employee: str) -> None:
     _CACHE.pop(employee, None)
     # 也尝试解析后的花名（以防传入的是 slug）
     try:
-        from crew.trajectory import resolve_character_name
-
-        resolved = resolve_character_name(employee)
+        resolved = MemoryStore()._resolve_to_character_name(employee)
         if resolved != employee:
             _CACHE.pop(resolved, None)
     except Exception:

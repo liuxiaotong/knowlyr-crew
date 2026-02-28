@@ -88,17 +88,24 @@ class MemoryStore:
     def _resolve_to_character_name(self, employee: str) -> str:
         """将 slug 或花名统一转换为花名（character_name）.
 
-        利用 trajectory.resolve_character_name()，它内部通过 DiscoveryResult.get()
-        查找员工，有 CJK 检测和进程级缓存。找不到时原样返回。
+        通过 DiscoveryResult.get() 查找员工，有 CJK 检测。找不到时原样返回。
+        不依赖 trajectory 模块的进程级缓存，避免测试 mock 泄漏。
         """
-        if not employee:
+        if not employee or not isinstance(employee, str):
+            return employee
+        # 已经是中文名（含 CJK 字符）则直接返回
+        if any("\u4e00" <= c <= "\u9fff" for c in employee):
             return employee
         try:
-            from crew.trajectory import resolve_character_name
+            from crew.discovery import discover_employees
 
-            return resolve_character_name(employee, project_dir=self._project_dir)
+            discovery = discover_employees(project_dir=self._project_dir)
+            emp = discovery.get(employee)
+            if emp and emp.character_name and isinstance(emp.character_name, str):
+                return emp.character_name
         except Exception:
-            return employee
+            pass
+        return employee
 
     def _load_config(self) -> MemoryConfig:
         """从 config.json 加载配置，不存在则返回默认值."""
@@ -921,7 +928,9 @@ class MemoryStore:
 
                 if found:
                     # 重写文件
-                    path.write_text("\n".join(new_lines) + "\n" if new_lines else "", encoding="utf-8")
+                    path.write_text(
+                        "\n".join(new_lines) + "\n" if new_lines else "", encoding="utf-8"
+                    )
                     self._auto_remove_index(entry_id)
                     return True
 
