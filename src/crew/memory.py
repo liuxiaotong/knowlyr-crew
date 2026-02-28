@@ -76,6 +76,7 @@ class MemoryStore:
         project_dir: Path | None = None,
         config: MemoryConfig | None = None,
     ):
+        self._project_dir = project_dir
         self.memory_dir = (
             memory_dir
             if memory_dir is not None
@@ -83,6 +84,21 @@ class MemoryStore:
         )
         self.config = config or self._load_config()
         self._semantic_index = None  # lazy
+
+    def _resolve_to_character_name(self, employee: str) -> str:
+        """将 slug 或花名统一转换为花名（character_name）.
+
+        利用 trajectory.resolve_character_name()，它内部通过 DiscoveryResult.get()
+        查找员工，有 CJK 检测和进程级缓存。找不到时原样返回。
+        """
+        if not employee:
+            return employee
+        try:
+            from crew.trajectory import resolve_character_name
+
+            return resolve_character_name(employee, project_dir=self._project_dir)
+        except Exception:
+            return employee
 
     def _load_config(self) -> MemoryConfig:
         """从 config.json 加载配置，不存在则返回默认值."""
@@ -246,6 +262,7 @@ class MemoryStore:
         origin_employee: str = "",
     ) -> MemoryEntry:
         """添加一条记忆."""
+        employee = self._resolve_to_character_name(employee)
         self._ensure_dir()
         effective_ttl = ttl_days if ttl_days > 0 else self.config.default_ttl_days
         entry = MemoryEntry(
@@ -314,6 +331,7 @@ class MemoryStore:
         Returns:
             记忆列表（按 sort_by 排序，置信度为衰减后的有效值）
         """
+        employee = self._resolve_to_character_name(employee)
         path = self._employee_file(employee)
         if not path.exists():
             return []
@@ -417,6 +435,7 @@ class MemoryStore:
         Returns:
             新创建的纠正记忆，如果旧记忆不存在返回 None
         """
+        employee = self._resolve_to_character_name(employee)
         path = self._employee_file(employee)
         if not path.exists():
             return None
@@ -495,6 +514,7 @@ class MemoryStore:
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
         """
+        employee = self._resolve_to_character_name(employee)
         parts: list[str] = []
 
         # 尝试语义搜索
@@ -641,6 +661,7 @@ class MemoryStore:
         Returns:
             共享记忆列表（最新在前）
         """
+        exclude_employee = self._resolve_to_character_name(exclude_employee)
         if not self.memory_dir.is_dir():
             return []
 
@@ -697,6 +718,8 @@ class MemoryStore:
             limit: 最大返回条数
             min_confidence: 最低有效置信度
         """
+        members = [self._resolve_to_character_name(m) for m in members]
+        exclude_employee = self._resolve_to_character_name(exclude_employee)
         if not self.memory_dir.is_dir():
             return []
 
@@ -826,6 +849,7 @@ class MemoryStore:
 
     def count(self, employee: str) -> int:
         """返回员工的有效记忆条数（排除已覆盖和已过期的），无需加载全部内容."""
+        employee = self._resolve_to_character_name(employee)
         path = self._employee_file(employee)
         if not path.exists():
             return 0
@@ -863,6 +887,7 @@ class MemoryStore:
         """
         # 如果指定了员工，只在该员工文件中查找
         if employee:
+            employee = self._resolve_to_character_name(employee)
             employees = [employee]
         else:
             # 否则遍历所有员工文件

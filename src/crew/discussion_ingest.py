@@ -87,10 +87,11 @@ class DiscussionIngestor:
         self.project_dir = resolve_project_dir(project_dir)
         self.store = MemoryStore(project_dir=project_dir)
         self._name_to_slug: dict[str, str] = {}
+        self._slug_to_name: dict[str, str] = {}
         self._load_name_map()
 
     def _load_name_map(self) -> None:
-        """从 global 员工目录构建 character_name → slug 映射."""
+        """从 global 员工目录构建 character_name <-> slug 双向映射."""
         global_dir = self.project_dir / ".crew" / "global"
         if not global_dir.is_dir():
             return
@@ -110,10 +111,27 @@ class DiscussionIngestor:
             character_name = config.get("character_name", "")
             if character_name and name:
                 self._name_to_slug[character_name] = name
+                self._slug_to_name[name] = character_name
 
     def resolve_slug(self, name: str) -> str:
-        """将角色名解析为 slug，找不到则原样返回."""
+        """将角色名解析为 slug，找不到则原样返回.
+
+        保留向后兼容，新代码请用 resolve_character_name()。
+        """
         return self._name_to_slug.get(name, name)
+
+    def resolve_character_name(self, name_or_slug: str) -> str:
+        """将 slug 或角色名统一解析为花名（character_name）.
+
+        如果输入已经是花名则直接返回；如果是 slug 则转为花名；找不到则原样返回。
+        """
+        # 已经是花名（在 _name_to_slug 的 key 中）
+        if name_or_slug in self._name_to_slug:
+            return name_or_slug
+        # 是 slug，转为花名
+        if name_or_slug in self._slug_to_name:
+            return self._slug_to_name[name_or_slug]
+        return name_or_slug
 
     def ingest(self, data: DiscussionInput) -> dict:
         """导入一次讨论，返回写入结果摘要."""
@@ -129,8 +147,8 @@ class DiscussionIngestor:
 
         # 为每位参与者写入本地记忆
         for p in data.participants:
-            slug = p.slug or self.resolve_slug(p.name)
-            if not slug:
+            char_name = self.resolve_character_name(p.slug or p.name)
+            if not char_name:
                 logger.warning("无法解析员工: %s，跳过", p.name)
                 continue
 
@@ -170,7 +188,7 @@ class DiscussionIngestor:
                 tags.append("proxied")
 
             self.store.add(
-                employee=slug,
+                employee=char_name,
                 category="finding",
                 content=content,
                 source_session=session_id,
@@ -178,7 +196,7 @@ class DiscussionIngestor:
                 shared=True,
             )
             results["memories_written"] += 1
-            results["participants"].append({"name": p.name, "slug": slug})
+            results["participants"].append({"name": p.name, "character_name": char_name})
 
         # 保存本地会议记录
         meetings_dir = self.project_dir / ".crew" / "meetings"
@@ -190,7 +208,7 @@ class DiscussionIngestor:
             "meeting_id": meeting_id,
             "name": f"external-{data.source}",
             "topic": data.topic,
-            "participants": [p.slug or self.resolve_slug(p.name) for p in data.participants],
+            "participants": [self.resolve_character_name(p.slug or p.name) for p in data.participants],
             "mode": "external-ingest",
             "rounds": 1,
             "output_format": "memory",

@@ -606,11 +606,11 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         origin_employee=str(origin_employee),
     )
 
-    # 写入后失效缓存
+    # 写入后失效缓存（用 entry.employee 即解析后的花名作为 cache key）
     try:
         from crew.memory_cache import invalidate
 
-        invalidate(employee)
+        invalidate(entry.employee)
     except Exception:
         pass
 
@@ -619,7 +619,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             "ok": True,
             "skipped": False,
             "entry_id": entry.id,
-            "employee": employee,
+            "employee": entry.employee,
             "category": category,
         }
     )

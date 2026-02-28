@@ -92,6 +92,9 @@ def get_prompt_cached(
     if store is None:
         store = MemoryStore()
 
+    # 统一用花名作为缓存 key（slug 自动转换）
+    employee = store._resolve_to_character_name(employee)
+
     now = time.monotonic()
     cached = _CACHE.get(employee)
 
@@ -131,7 +134,17 @@ def get_prompt_cached(
 
 def invalidate(employee: str) -> None:
     """手动失效指定员工的缓存（写入后调用）."""
+    # 兼容 slug 和花名：两个 key 都尝试清除
     _CACHE.pop(employee, None)
+    # 也尝试解析后的花名（以防传入的是 slug）
+    try:
+        from crew.trajectory import resolve_character_name
+
+        resolved = resolve_character_name(employee)
+        if resolved != employee:
+            _CACHE.pop(resolved, None)
+    except Exception:
+        pass
 
 
 def invalidate_all() -> None:
