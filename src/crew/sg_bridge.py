@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shlex
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -466,9 +467,8 @@ class SGBridge:
 
         # 员工身份注入（--append-system-prompt 不覆盖默认 system prompt）
         if employee_context:
-            # 转义双引号，用双引号包裹
-            escaped_ctx = employee_context.replace("\\", "\\\\").replace('"', '\\"')
-            claude_cmd_parts.extend(["--append-system-prompt", f'"{escaped_ctx}"'])
+            # 使用 shlex.quote() 防止命令注入
+            claude_cmd_parts.extend(["--append-system-prompt", shlex.quote(employee_context)])
 
         # 不拼消息到命令行，走 stdin（避免 shell 多层转义问题）
         remote_cmd = env_prefix + " ".join(claude_cmd_parts)

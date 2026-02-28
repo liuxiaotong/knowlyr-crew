@@ -1467,19 +1467,28 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 # 本地 fallback
                 import re as _re_kv
 
-                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
-                if ".." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
+                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/-]*$")
+                if ".." in key or "." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
                     return [
                         TextContent(type="text", text=json.dumps({"error": "invalid key"}, ensure_ascii=False))
                     ]
                 base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
-                file_path = base_dir / key
+                file_path = (base_dir / key).resolve()
+
+                # 先验证路径，再操作
                 try:
-                    file_path.resolve().relative_to(base_dir.resolve())
+                    file_path.relative_to(base_dir.resolve())
                 except ValueError:
                     return [
                         TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
                     ]
+
+                # 检查是否为符号链接
+                if file_path.is_symlink():
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": "symlink not allowed"}, ensure_ascii=False))
+                    ]
+
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 raw_bytes = content.encode("utf-8")
                 file_path.write_bytes(raw_bytes)

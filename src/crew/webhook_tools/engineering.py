@@ -1056,8 +1056,13 @@ async def _tool_run_python(
 ) -> str:
     """在沙箱中执行 Python 代码片段."""
     import asyncio
+    import os
     import sys
     import textwrap
+
+    # 环境变量开关，默认禁用
+    if not os.environ.get("CREW_ENABLE_CODE_EXEC"):
+        return "代码执行功能已禁用（安全限制）"
 
     code = (args.get("code") or "").strip()
     if not code:
