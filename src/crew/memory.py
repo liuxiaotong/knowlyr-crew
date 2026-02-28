@@ -141,7 +141,7 @@ class MemoryStore:
             logger.debug("自动索引失败（不影响写入）: %s", e)
 
     def _auto_remove_index(self, entry_id: str) -> None:
-        """从索引中删除条目（best-effort）."""
+        """从语义索引中删除条目（best-effort）."""
         if not self.config.auto_index:
             return
         try:
@@ -150,6 +150,42 @@ class MemoryStore:
                 idx.remove(entry_id)
         except Exception as e:
             logger.debug("自动删除索引失败（不影响操作）: %s", e)
+
+    def _auto_remove_fts_index(self, entry_id: str) -> None:
+        """从 FTS/PG 混合索引中删除条目（best-effort）.
+
+        MemorySearchIndex 的 entries 表使用 'memory:{id}' 格式的 key。
+        """
+        try:
+            from crew.memory_index import MemorySearchIndex
+
+            fts_id = f"memory:{entry_id}"
+            index = MemorySearchIndex(
+                memory_dir=self.memory_dir,
+                project_dir=self._project_dir,
+            )
+            if index._use_pg:
+                from crew.database import get_pg_connection
+
+                with get_pg_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM entries WHERE id = %s", (fts_id,))
+            else:
+                conn = index._connect_sqlite()
+                try:
+                    index._setup_tables_sqlite(conn)
+                    # 先删 FTS 虚拟表中的行
+                    conn.execute(
+                        "DELETE FROM entries_fts WHERE rowid IN "
+                        "(SELECT rowid FROM entries WHERE id = ?)",
+                        (fts_id,),
+                    )
+                    conn.execute("DELETE FROM entries WHERE id = ?", (fts_id,))
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.debug("自动删除 FTS 索引失败（不影响操作）: %s", e)
 
     def _load_employee_entries(self, employee: str) -> list[MemoryEntry]:
         """加载指定员工的全部记忆条目（不做过滤）。"""
@@ -932,6 +968,7 @@ class MemoryStore:
                         "\n".join(new_lines) + "\n" if new_lines else "", encoding="utf-8"
                     )
                     self._auto_remove_index(entry_id)
+                    self._auto_remove_fts_index(entry_id)
                     return True
 
         return False
