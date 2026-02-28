@@ -686,6 +686,46 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
+    """记忆删除 — DELETE /api/memory/{entry_id}.
+
+    路径参数:
+        entry_id: 记忆条目 ID
+
+    查询参数（可选）:
+        employee: 员工名（提供后只在该员工文件中查找，提高效率）
+
+    返回:
+        {"ok": true, "deleted": true} 或 {"ok": false, "error": "..."}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    # 从路径参数获取 entry_id
+    entry_id = request.path_params.get("entry_id", "")
+    if not entry_id:
+        return JSONResponse({"ok": False, "error": "entry_id is required"}, status_code=400)
+
+    # 从查询参数获取可选的 employee
+    employee = request.query_params.get("employee")
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+
+    try:
+        deleted = store.delete(entry_id, employee=employee)
+        if deleted:
+            return JSONResponse({"ok": True, "deleted": True, "entry_id": entry_id})
+        else:
+            return JSONResponse(
+                {"ok": False, "error": "Entry not found", "entry_id": entry_id},
+                status_code=404
+            )
+    except Exception as e:
+        logger.exception("记忆删除失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 async def _handle_github(request: Any, ctx: _AppContext) -> Any:
     """处理 GitHub webhook."""
     from starlette.responses import JSONResponse

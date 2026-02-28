@@ -850,3 +850,32 @@ class MemoryStore:
         if not self.memory_dir.is_dir():
             return []
         return sorted(f.stem for f in self.memory_dir.glob("*.jsonl"))
+
+    def delete(self, entry_id: str, employee: str | None = None) -> bool:
+        """删除指定的记忆条目.
+
+        Args:
+            entry_id: 记忆条目 ID
+            employee: 员工名（可选，提供后只在该员工文件中查找，提高效率）
+
+        Returns:
+            True 如果删除成功，False 如果未找到
+        """
+        # 如果指定了员工，只在该员工文件中查找
+        if employee:
+            employees = [employee]
+        else:
+            # 否则遍历所有员工文件
+            employees = self.list_employees()
+
+        for emp in employees:
+            entries = self._load_employee_entries(emp)
+            filtered = [e for e in entries if e.id != entry_id]
+
+            if len(filtered) < len(entries):
+                # 找到并删除了
+                self._write_employee_entries(emp, filtered)
+                self._auto_remove_index(entry_id)
+                return True
+
+        return False

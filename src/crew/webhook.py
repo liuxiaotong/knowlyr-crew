@@ -79,6 +79,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_kv_list,
     _handle_kv_put,
     _handle_memory_add,
+    _handle_memory_delete,
     _handle_memory_ingest,
     _handle_memory_query,
     _handle_model_tiers,
@@ -339,6 +340,11 @@ def create_webhook_app(
             "/api/memory/ingest",
             endpoint=_make_handler(ctx, _handle_memory_ingest),
             methods=["POST"],
+        ),
+        Route(
+            "/api/memory/{entry_id}",
+            endpoint=_make_handler(ctx, _handle_memory_delete),
+            methods=["DELETE"],
         ),
         Route(
             "/api/memory/org", endpoint=_make_handler(ctx, _handle_org_memories), methods=["GET"]
