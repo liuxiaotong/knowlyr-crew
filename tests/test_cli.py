@@ -92,7 +92,7 @@ class TestCLI:
         assert result.exit_code == 1
 
     def test_init(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             result = self.runner.invoke(main, ["init"], catch_exceptions=False)
             # init 在当前目录创建 private/employees/
             assert result.exit_code == 0
@@ -559,7 +559,7 @@ steps:
         mock_result.returncode = 0
 
         with patch("subprocess.run", return_value=mock_result) as mock_run:
-            result = self.runner.invoke(main, ["changelog-draft", "-n", "1"])
+            self.runner.invoke(main, ["changelog-draft", "-n", "1"])
             if mock_run.called:
                 _, kwargs = mock_run.call_args
                 assert "timeout" in kwargs, "subprocess.run 应设置 timeout"

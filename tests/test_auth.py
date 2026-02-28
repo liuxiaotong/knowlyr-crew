@@ -190,7 +190,7 @@ class TestRateLimiter:
             middleware._buckets[f"10.0.{i // 256}.{i % 256}"] = []
         assert len(middleware._buckets) >= 1100
 
-        client = TestClient(
+        TestClient(
             Starlette(
                 routes=[
                     Route(

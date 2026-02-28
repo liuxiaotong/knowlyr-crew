@@ -171,7 +171,6 @@ class TestEvaluationEngine:
 
     def test_evaluate_writes_to_memory(self, tmp_path):
         """评估后应将结论写入员工记忆."""
-        memory_dir = tmp_path / "memory"
         eval_dir = tmp_path / "eval"
 
         # Monkey-patch MemoryStore 的默认路径

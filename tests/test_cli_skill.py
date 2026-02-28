@@ -82,7 +82,7 @@ class TestListWithSkillLayer:
         """--layer skill 应只显示 skill 层员工."""
         runner = CliRunner()
         # 无 skill 层员工时应显示 "未找到"
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             result = runner.invoke(main, ["list", "--layer", "skill"])
             # 可能有也可能没有，取决于当前项目是否有 .claude/skills/
             assert result.exit_code == 0

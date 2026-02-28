@@ -377,7 +377,7 @@ class TestExecuteEmployeeWithTools:
 
             from crew.webhook import _execute_employee_with_tools
 
-            result = _run(_execute_employee_with_tools(_make_ctx(), "boss", {"task": "loop"}))
+            _run(_execute_employee_with_tools(_make_ctx(), "boss", {"task": "loop"}))
             assert mock_exec.call_count == 2
 
     def test_unknown_tool_returns_error(self):

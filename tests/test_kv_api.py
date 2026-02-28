@@ -321,7 +321,6 @@ class TestKVListEndpoint:
 mcp_mod = pytest.importorskip("mcp")
 
 from crew.mcp_server import (
-    _get_remote_memory_config,
     _remote_kv_get,
     _remote_kv_list,
     _remote_kv_put,

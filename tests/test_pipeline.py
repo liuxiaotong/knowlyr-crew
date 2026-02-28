@@ -355,7 +355,7 @@ class TestRunPipeline:
             ],
         )
         callback_results = []
-        result = run_pipeline(
+        run_pipeline(
             pl,
             smart_context=False,
             on_step_complete=lambda r, cp: callback_results.append(r.employee),
@@ -467,7 +467,7 @@ class TestAsyncPipelineCheckpoint:
         def on_complete(step_result, checkpoint):
             callbacks.append((step_result.employee, checkpoint))
 
-        result = _run(arun_pipeline(pl, smart_context=False, on_step_complete=on_complete))
+        _run(arun_pipeline(pl, smart_context=False, on_step_complete=on_complete))
         assert len(callbacks) == 2
         # 第一次回调的 checkpoint
         assert callbacks[0][1]["next_step_i"] == 1
@@ -732,7 +732,7 @@ class TestFailFast:
             return real_exec(step, index, engine, employees, *a, **kw)
 
         with patch.object(_pl_mod, "_execute_single_step", side_effect=_counting_exec):
-            result = run_pipeline(pl, smart_context=False, fail_fast=False)
+            run_pipeline(pl, smart_context=False, fail_fast=False)
 
         assert call_count[0] == 2  # 两步都执行了
 
@@ -766,7 +766,7 @@ class TestFailFast:
             return real_exec(step, index, engine, employees, *a, **kw)
 
         with patch.object(_pl_mod, "_execute_single_step", side_effect=_failing_exec):
-            result = run_pipeline(
+            run_pipeline(
                 pl,
                 smart_context=False,
                 fail_fast=True,
@@ -792,7 +792,7 @@ class TestSyncCheckpointCallback:
             ],
         )
         checkpoints = []
-        result = run_pipeline(
+        run_pipeline(
             pl,
             smart_context=False,
             on_step_complete=lambda r, cp: checkpoints.append((r.employee, cp)),

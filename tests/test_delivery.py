@@ -114,7 +114,7 @@ class TestDeliverWebhook:
         mock_client = _mock_httpx_client(status_code=200)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = _run(
+            _run(
                 _deliver_webhook(
                     target,
                     task_name="fail-task",

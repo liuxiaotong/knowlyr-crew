@@ -295,7 +295,7 @@ class TestTaskPersistence:
         path = tmp_path / "tasks.jsonl"
         path.write_text("not-valid-json\n")
         with caplog.at_level(logging.WARNING, logger="crew.task_registry"):
-            registry = TaskRegistry(persist_path=path)
+            TaskRegistry(persist_path=path)
         assert "跳过无效" in caplog.text
 
 

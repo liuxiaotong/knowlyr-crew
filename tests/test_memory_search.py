@@ -321,7 +321,7 @@ class TestCreateEmbedder:
             patch("crew.memory_search._GeminiEmbedder") as mock_cls,
         ):
             mock_cls.return_value = MagicMock(spec=_GeminiEmbedder)
-            embedder = _create_embedder()
+            _create_embedder()
         mock_cls.assert_called_once()
 
     def test_gemini_key_but_import_fails(self):
@@ -346,7 +346,7 @@ class TestCreateEmbedder:
             patch("crew.memory_search._GeminiEmbedder") as mock_gem,
         ):
             mock_oai.return_value = MagicMock()
-            embedder = _create_embedder()
+            _create_embedder()
         mock_oai.assert_called_once()
         mock_gem.assert_not_called()
 
@@ -401,7 +401,7 @@ class TestEmbeddingTimeout:
                     mock_pool.return_value.__exit__ = MagicMock(return_value=False)
                     mock_pool.return_value.submit.return_value = mock_future
 
-                    result = embedder.embed("test text")
+                    embedder.embed("test text")
                     mock_future.result.assert_called_once_with(timeout=5.0)
             except Exception:
                 pytest.skip("google-generativeai SDK not available")

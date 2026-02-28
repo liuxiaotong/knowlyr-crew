@@ -87,7 +87,7 @@ class TestDelegateAsync:
         ctx = _make_ctx(tmp_path)
 
         with patch("crew.webhook._execute_task", new_callable=AsyncMock):
-            result = await _tool_delegate_async(
+            await _tool_delegate_async(
                 {"employee_name": "doc-writer", "task": "写文档"},
                 ctx=ctx,
             )
@@ -378,7 +378,7 @@ class TestExecuteMeeting:
         mock_plan.synthesis_prompt = "综合 {previous_rounds}"
 
         with (
-            patch("crew.discussion.create_adhoc_discussion") as mock_create,
+            patch("crew.discussion.create_adhoc_discussion"),
             patch("crew.discussion.render_discussion_plan", return_value=mock_plan),
             patch(
                 "crew.executor.aexecute_prompt", new_callable=AsyncMock, return_value=mock_result

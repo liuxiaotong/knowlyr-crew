@@ -2140,7 +2140,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     _sg_reply: str | None = None
     if not stream and not context_only:
         try:
-            from crew.sg_bridge import SGBridgeError, sg_dispatch
+            from crew.sg_bridge import sg_dispatch
 
             _sg_reply = await sg_dispatch(
                 message,

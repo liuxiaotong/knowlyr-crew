@@ -108,7 +108,7 @@ class TestGenerateAvatar:
         mock_retrieve.side_effect = _fake_retrieve
 
         with patch("crew.avatar.time.sleep"):  # skip sleep
-            result = generate_avatar(display_name="Test", output_dir=tmp_path)
+            generate_avatar(display_name="Test", output_dir=tmp_path)
 
         assert mock_retrieve.called
         # Should try to save to avatar_raw.png

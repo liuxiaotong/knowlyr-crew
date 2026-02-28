@@ -387,7 +387,7 @@ class TestAuthorityDowngrade:
             )
 
             invalidate_cache()
-            org = load_organization(project_dir=project_dir)
+            load_organization(project_dir=project_dir)
 
             # 触发降级并持久化
             for _ in range(3):
