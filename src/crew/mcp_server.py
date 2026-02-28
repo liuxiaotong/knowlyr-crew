@@ -851,10 +851,17 @@ def create_server(project_dir: Path | None = None) -> "Server":
             return result
         except (KeyboardInterrupt, SystemExit):
             raise
-        except Exception as exc:
+        except (ValueError, TypeError, KeyError) as exc:
+            # 预期的业务错误
             success = False
             error_type = type(exc).__name__
-            logger.exception("tool_call_error: %s", name)
+            logger.warning("tool_call_error: %s - %s", name, exc)
+            return [TextContent(type="text", text=f"参数错误: {exc}")]
+        except Exception as exc:
+            # 未预期的系统错误
+            success = False
+            error_type = type(exc).__name__
+            logger.exception("tool_call_fatal: %s", name)
             return [TextContent(type="text", text=f"内部错误: {name}")]
         finally:
             try:

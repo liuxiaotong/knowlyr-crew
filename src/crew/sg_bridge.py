@@ -56,10 +56,10 @@ class SGBridgeConfig:
     """SG Bridge 配置."""
 
     # SSH 连接
-    ssh_host: str = "43.106.24.105"
+    ssh_host: str = ""  # 必须通过配置文件提供
     ssh_user: str = "root"
     ssh_port: int = 22
-    ssh_key_path: str = "~/.ssh/knowlyr-liukai.pem"
+    ssh_key_path: str = "~/.ssh/id_rsa"
 
     # 超时（秒）
     ssh_connect_timeout: int = 10
@@ -144,7 +144,12 @@ def load_sg_bridge_config(project_dir: Path | None = None) -> SGBridgeConfig:
         data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return SGBridgeConfig(enabled=False)
-        return SGBridgeConfig(**data)
+        config = SGBridgeConfig(**data)
+        # 验证必需的 SSH 配置
+        if not config.ssh_host:
+            logger.warning("SG Bridge 配置缺少 ssh_host，已禁用")
+            return SGBridgeConfig(enabled=False)
+        return config
     except Exception as e:
         logger.warning("SG Bridge 配置加载失败: %s", e)
         return SGBridgeConfig(enabled=False)

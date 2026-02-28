@@ -9,6 +9,7 @@ import logging
 import math
 import sqlite3
 import struct
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -72,8 +73,14 @@ class SemanticMemoryIndex:
         self._db_path = memory_dir / "embeddings.db"
         self._conn: sqlite3.Connection | None = None
         self._embedder: _Embedder | None = None
+        self._closed = False
 
     # ── SQLite 连接管理 ──
+
+    def _check_closed(self):
+        """检查索引是否已关闭."""
+        if self._closed:
+            raise ValueError("操作已关闭的索引")
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -417,15 +424,21 @@ class SemanticMemoryIndex:
         self.close()
 
     def __del__(self) -> None:
-        if getattr(self, "_conn", None) is not None:
-            logger.debug("SemanticMemoryIndex 未显式关闭，自动清理连接")
+        if not self._closed and getattr(self, "_conn", None) is not None:
+            warnings.warn(
+                "SemanticMemoryIndex 未显式关闭，可能导致资源泄漏。请使用 with 语句。",
+                ResourceWarning,
+                stacklevel=2
+            )
             self.close()
 
     def close(self) -> None:
         """关闭数据库连接."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        if not self._closed:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
+            self._closed = True
 
 
 # ── Embedding 抽象 ──

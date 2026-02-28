@@ -395,6 +395,13 @@ class MemorySearchIndex:
 
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+            # TODO: 性能优化 - ILIKE 全表扫描对大数据集性能差
+            # 建议方案：
+            # 1. 使用 pg_trgm 扩展 + GIN 索引：
+            #    CREATE EXTENSION pg_trgm;
+            #    CREATE INDEX idx_entries_content_trgm ON entries USING gin(content gin_trgm_ops);
+            #    CREATE INDEX idx_entries_title_trgm ON entries USING gin(title gin_trgm_ops);
+            # 2. 或使用 PostgreSQL 全文搜索（tsvector + GIN）
             sql = (
                 "SELECT id, employee, kind, source, title, content, "
                 "metadata, created_at "
