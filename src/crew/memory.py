@@ -861,6 +861,8 @@ class MemoryStore:
         Returns:
             True 如果删除成功，False 如果未找到
         """
+        from crew.file_lock import file_lock
+
         # 如果指定了员工，只在该员工文件中查找
         if employee:
             employees = [employee]
@@ -869,13 +871,35 @@ class MemoryStore:
             employees = self.list_employees()
 
         for emp in employees:
-            entries = self._load_employee_entries(emp)
-            filtered = [e for e in entries if e.id != entry_id]
+            path = self._employee_file(emp)
+            if not path.exists():
+                continue
 
-            if len(filtered) < len(entries):
-                # 找到并删除了
-                self._write_employee_entries(emp, filtered)
-                self._auto_remove_index(entry_id)
-                return True
+            with file_lock(path):
+                # 读取所有条目
+                lines = path.read_text(encoding="utf-8").splitlines()
+                found = False
+                new_lines: list[str] = []
+
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = MemoryEntry(**json.loads(line))
+                        if entry.id == entry_id:
+                            found = True
+                            # 跳过这条记录（删除）
+                            continue
+                        new_lines.append(line)
+                    except (json.JSONDecodeError, ValueError):
+                        # 保留损坏的行
+                        new_lines.append(line)
+
+                if found:
+                    # 重写文件
+                    path.write_text("\n".join(new_lines) + "\n" if new_lines else "", encoding="utf-8")
+                    self._auto_remove_index(entry_id)
+                    return True
 
         return False
