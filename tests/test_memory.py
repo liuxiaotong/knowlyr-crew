@@ -234,7 +234,7 @@ class TestMemoryConfig:
     def test_default_config(self):
         config = MemoryConfig()
         assert config.default_ttl_days == 0
-        assert config.max_entries_per_employee == 500
+        assert config.max_entries_per_employee == 0
         assert config.confidence_half_life_days == 90.0
         assert config.auto_index is True
 

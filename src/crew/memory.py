@@ -19,7 +19,7 @@ class MemoryConfig(BaseModel):
     """记忆系统配置."""
 
     default_ttl_days: int = Field(default=0, description="默认 TTL 天数 (0=永不过期)")
-    max_entries_per_employee: int = Field(default=500, description="每员工最大记忆条数 (0=不限)")
+    max_entries_per_employee: int = Field(default=0, description="每员工最大记忆条数 (0=不限)")
     confidence_half_life_days: float = Field(default=90.0, description="置信度衰减半衰期（天）")
     auto_index: bool = Field(default=True, description="写入时自动更新语义索引")
 
