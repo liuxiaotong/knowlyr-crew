@@ -363,7 +363,7 @@ class MemoryStore:
         else:
             entries.reverse()  # JSONL 按时间正序追加，reverse 即最新在前
 
-        result = entries[:limit]
+        result = entries if limit <= 0 else entries[:limit]
 
         # 更新 last_accessed（best-effort，不阻塞查询）
         if update_access and result:

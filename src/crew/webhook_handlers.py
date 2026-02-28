@@ -1567,20 +1567,25 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
-    """全组织记忆聚合 — GET /api/memory/org?days=7&category=pattern&limit=50."""
+    """全组织记忆聚合 — GET /api/memory/org?days=7&category=pattern&limit=0.
+
+    改进: 扫描 JSONL 文件发现所有员工（不依赖 discover_employees），
+    去掉默认截断（limit=0 表示不限）。
+    """
     from datetime import datetime, timedelta
 
     from starlette.responses import JSONResponse
 
-    from crew.discovery import discover_employees
     from crew.memory import MemoryStore
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
-    limit = _safe_int(request.query_params.get("limit", "50"), 50)
+    # limit=0 表示不限（向后兼容：客户端可传 limit=50 恢复旧行为）
+    limit = _safe_int(request.query_params.get("limit", "0"), 0)
 
-    result = discover_employees(ctx.project_dir)
     store = MemoryStore(project_dir=ctx.project_dir)
+    # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
+    employee_names = store.list_employees()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat() if days > 0 else ""
 
     all_memories: list[dict] = []
@@ -1592,8 +1597,9 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
         "pattern": 0,
     }
 
-    for emp_name in result.employees:
-        entries = store.query(emp_name, category=category, limit=200, max_visibility="open")
+    for emp_name in employee_names:
+        # limit=0 → 不截断每员工查询
+        entries = store.query(emp_name, category=category, limit=0, max_visibility="open")
         for m in entries:
             stats[m.category] = stats.get(m.category, 0) + 1
             if not cutoff or m.created_at >= cutoff:
@@ -1617,11 +1623,62 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
     return JSONResponse(
         {
-            "memories": all_memories[:limit],
+            "memories": all_memories if limit <= 0 else all_memories[:limit],
             "stats": stats,
             "total": sum(stats.values()),
         }
     )
+
+
+async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
+    """跨员工语义搜索 — GET /api/memory/search?q=关键词&limit=10&employee=xxx.
+
+    查询参数:
+        q (required): 搜索关键词
+        limit (optional): 最大返回条数，默认 10
+        employee (optional): 限定搜索某个员工（不传则跨全员工搜索）
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    query = request.query_params.get("q", "").strip()
+    if not query:
+        return JSONResponse({"error": "q is required"}, status_code=400)
+
+    limit = _safe_int(request.query_params.get("limit", "10"), 10)
+    if limit <= 0:
+        limit = 10
+    employee = request.query_params.get("employee", "").strip()
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+
+    try:
+        idx = store._get_semantic_index()
+        if idx is None:
+            return JSONResponse(
+                {"error": "semantic index not available"}, status_code=503
+            )
+
+        if employee:
+            # 指定员工搜索
+            results = idx.search(employee=employee, query=query, limit=limit)
+            entries = [
+                {"id": r[0], "employee": employee, "content": r[1], "score": round(r[2], 4)}
+                for r in results
+            ]
+        else:
+            # 跨员工搜索
+            results = idx.search_cross_employee(query=query, limit=limit)
+            entries = [
+                {"id": r[0], "employee": r[1], "content": r[2], "score": round(r[3], 4)}
+                for r in results
+            ]
+
+        return JSONResponse({"ok": True, "entries": entries, "total": len(entries)})
+    except Exception as e:
+        logger.exception("记忆搜索失败")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
