@@ -958,6 +958,86 @@ class TestStreamErrorHandling:
         assert "event: done" in resp.text
 
 
+class TestEmployeeGetEndpoint:
+    """GET /api/employees/{identifier} — 返回单个员工完整定义."""
+
+    @patch("crew.discovery.discover_employees")
+    def test_get_by_name(self, mock_discover):
+        """按 name 获取员工应返回完整定义（排除敏感字段）."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(
+            name="backend-engineer",
+            character_name="赵云帆",
+            display_name="后端工程师",
+            description="写后端代码",
+            body="test body",
+            agent_id="AI3050",
+            model="claude-sonnet-4-20250514",
+            api_key="secret-key",
+            fallback_api_key="secret-fallback",
+            fallback_base_url="https://secret.url",
+        )
+        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/backend-engineer",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "backend-engineer"
+        assert data["character_name"] == "赵云帆"
+        assert data["agent_id"] == "AI3050"
+        # 敏感字段不应出现
+        assert "api_key" not in data
+        assert "fallback_api_key" not in data
+        assert "fallback_base_url" not in data
+        assert "source_path" not in data
+
+    @patch("crew.discovery.discover_employees")
+    def test_get_by_agent_id(self, mock_discover):
+        """按 agent_id 获取员工."""
+        from crew.models import DiscoveryResult, Employee
+
+        emp = Employee(
+            name="backend-engineer",
+            description="写后端代码",
+            body="test body",
+            agent_id="AI3050",
+        )
+        mock_discover.return_value = DiscoveryResult(employees={emp.name: emp})
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/AI3050",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "backend-engineer"
+
+    @patch("crew.discovery.discover_employees")
+    def test_get_not_found(self, mock_discover):
+        """不存在的员工返回 404."""
+        from crew.models import DiscoveryResult
+
+        mock_discover.return_value = DiscoveryResult(employees={})
+
+        client = _make_client()
+        resp = client.get(
+            "/api/employees/nonexistent",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 404
+
+    def test_get_no_auth(self):
+        """未认证请求应返回 401."""
+        client = _make_client()
+        resp = client.get("/api/employees/backend-engineer")
+        assert resp.status_code == 401
+
+
 class TestEmployeeUpdatePUT:
     """PUT /api/employees/{identifier} — employee.yaml 唯一真相源."""
 

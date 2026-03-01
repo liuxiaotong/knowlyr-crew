@@ -74,6 +74,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_discussion_plan,
     _handle_discussion_prompt,
     _handle_employee_delete,
+    _handle_employee_get,
     _handle_employee_list,
     _handle_employee_prompt,
     _handle_employee_state,
@@ -320,6 +321,11 @@ def create_webhook_app(
         Route(
             "/api/employees/{identifier}/state",
             endpoint=_make_handler(ctx, _handle_employee_state),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/employees/{identifier}",
+            endpoint=_make_handler(ctx, _handle_employee_get),
             methods=["GET"],
         ),
         Route(

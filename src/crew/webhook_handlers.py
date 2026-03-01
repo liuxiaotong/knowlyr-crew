@@ -336,6 +336,31 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
     return JSONResponse(agents)
 
 
+async def _handle_employee_get(request: Any, ctx: _AppContext) -> Any:
+    """返回单个员工的完整定义（对应 MCP get_employee）."""
+    from starlette.responses import JSONResponse
+
+    from crew.discovery import discover_employees
+
+    identifier = request.path_params["identifier"]
+    result = discover_employees(ctx.project_dir)
+
+    employee = _find_employee(result, identifier)
+    if not employee:
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    data = employee.model_dump(
+        mode="json",
+        exclude={
+            "source_path",
+            "api_key",
+            "fallback_api_key",
+            "fallback_base_url",
+        },
+    )
+    return JSONResponse(data)
+
+
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
     from starlette.responses import JSONResponse
