@@ -17,6 +17,22 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
+      - name: Deploy SG API config
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            mkdir -p /opt/knowlyr-crew/project/.crew
+            cat > /opt/knowlyr-crew/project/.crew/sg_api.yaml << "EOF"
+# SG API Bridge 配置
+enabled: true
+api_key: "${{ secrets.CLAUDE_API_KEY }}"
+api_base_url: "https://api.anthropic.com"
+default_model: "claude-sonnet-4-20250514"
+max_tokens: 8192
+temperature: 1.0
+EOF
+            chmod 600 /opt/knowlyr-crew/project/.crew/sg_api.yaml
+          '
+
       - name: Update engine & restart
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
