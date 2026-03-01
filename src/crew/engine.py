@@ -559,6 +559,8 @@ class CrewEngine:
                 nonlocal memory_updated
                 try:
                     mem_store = MemoryStore(project_dir=self.project_dir)
+
+                    # 基础对话记录
                     mem_store.add(
                         employee_id,
                         content=f"[{channel}] {sender_id}: {message[:200]}",
@@ -567,6 +569,46 @@ class CrewEngine:
                         tags=[channel, "chat"],
                         visibility="internal",
                     )
+
+                    # 智能提取：分析回复内容，识别关键信息
+                    reply_lower = reply_text.lower()
+
+                    # 识别决策类内容
+                    if any(keyword in reply_lower for keyword in ["决定", "建议", "方案", "计划", "应该"]):
+                        if len(reply_text) > 50:  # 避免记录过短的内容
+                            mem_store.add(
+                                employee_id,
+                                content=f"[决策] {reply_text[:500]}",
+                                category="decision",
+                                importance=4,
+                                tags=[channel, "chat", "decision"],
+                                visibility="internal",
+                            )
+
+                    # 识别发现类内容
+                    if any(keyword in reply_lower for keyword in ["发现", "注意到", "观察到", "问题", "风险"]):
+                        if len(reply_text) > 50:
+                            mem_store.add(
+                                employee_id,
+                                content=f"[发现] {reply_text[:500]}",
+                                category="finding",
+                                importance=3,
+                                tags=[channel, "chat", "finding"],
+                                visibility="internal",
+                            )
+
+                    # 识别纠正类内容
+                    if any(keyword in reply_lower for keyword in ["错误", "修正", "纠正", "不对", "应该是"]):
+                        if len(reply_text) > 50:
+                            mem_store.add(
+                                employee_id,
+                                content=f"[纠正] {reply_text[:500]}",
+                                category="correction",
+                                importance=4,
+                                tags=[channel, "chat", "correction"],
+                                visibility="internal",
+                            )
+
                     memory_updated = True
                     logger.debug("chat() 记忆写回成功: emp=%s", employee_id)
                 except Exception as _me:
