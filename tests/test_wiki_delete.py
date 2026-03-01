@@ -1,6 +1,5 @@
 """测试 Wiki 文件删除 API."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
