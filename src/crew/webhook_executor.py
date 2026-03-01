@@ -818,7 +818,7 @@ async def _execute_employee_with_tools(
             tools=tool_schemas,
             api_key=match.api_key or None,
             model=use_model,
-            max_tokens=4096,
+            max_tokens=200000,
             base_url=match.base_url or None,
             fallback_model=match.fallback_model or None,
             fallback_api_key=match.fallback_api_key or None,
