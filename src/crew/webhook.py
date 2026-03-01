@@ -77,6 +77,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_discussion_plan,
     _handle_discussion_prompt,
     _handle_discussion_update,
+    _handle_employee_create,
     _handle_employee_delete,
     _handle_employee_get,
     _handle_employee_list,
