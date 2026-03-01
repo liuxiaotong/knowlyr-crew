@@ -181,6 +181,176 @@ async def _wiki_list_files(
         return resp.json()
 
 
+# ── Wiki Admin API 客户端（文档 CRUD）──────────────────────────
+
+
+def _get_wiki_admin_config() -> tuple[str, str] | None:
+    """从环境变量获取 Wiki Admin API 配置，返回 (base_url, token) 或 None.
+
+    base_url 复用 WIKI_API_URL（指向蚁聚后端）。
+    token 优先取 WIKI_ADMIN_TOKEN，fallback 到 ANTGATHER_API_TOKEN（即蚁聚 INTERNAL_SERVICE_TOKEN）。
+    """
+    base_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
+    token = os.environ.get("WIKI_ADMIN_TOKEN", "") or os.environ.get("ANTGATHER_API_TOKEN", "")
+    if base_url and token:
+        return (base_url, token)
+    return None
+
+
+async def _wiki_list_spaces(base_url: str, token: str) -> list[dict]:
+    """查询 Wiki 空间列表，返回 spaces 数组."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/admin/wiki/spaces",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("spaces", [])
+
+
+async def _wiki_resolve_space_id(base_url: str, token: str, space_slug: str) -> int | None:
+    """通过 slug 查找 space_id，未找到返回 None."""
+    spaces = await _wiki_list_spaces(base_url, token)
+    for s in spaces:
+        if s.get("slug") == space_slug:
+            return s["id"]
+    return None
+
+
+async def _wiki_create_doc(
+    base_url: str,
+    token: str,
+    *,
+    space_id: int,
+    title: str,
+    slug: str,
+    content: str = "",
+    ai_content: str = "",
+    content_type: str = "markdown",
+    excerpt: str = "",
+    visibility: str = "internal",
+    parent_id: int | None = None,
+    sort_order: int = 0,
+    is_pinned: bool = False,
+) -> dict:
+    """创建 Wiki 文档页，返回响应 dict."""
+    import httpx
+
+    body: dict = {
+        "space_id": space_id,
+        "title": title,
+        "slug": slug,
+    }
+    if content:
+        body["content"] = content
+    if ai_content:
+        body["ai_content"] = ai_content
+    if content_type != "markdown":
+        body["content_type"] = content_type
+    if excerpt:
+        body["excerpt"] = excerpt
+    if visibility != "internal":
+        body["visibility"] = visibility
+    if parent_id is not None:
+        body["parent_id"] = parent_id
+    if sort_order != 0:
+        body["sort_order"] = sort_order
+    if is_pinned:
+        body["is_pinned"] = is_pinned
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{base_url}/api/admin/wiki/docs",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _wiki_update_doc(
+    base_url: str,
+    token: str,
+    *,
+    doc_id: int,
+    title: str = "",
+    slug: str = "",
+    content: str | None = None,
+    ai_content: str | None = None,
+    content_type: str = "",
+    excerpt: str | None = None,
+    visibility: str = "",
+    parent_id: int | None = None,
+    sort_order: int | None = None,
+    is_pinned: bool | None = None,
+) -> dict:
+    """更新 Wiki 文档页（部分更新），返回响应 dict."""
+    import httpx
+
+    body: dict = {}
+    if title:
+        body["title"] = title
+    if slug:
+        body["slug"] = slug
+    if content is not None:
+        body["content"] = content
+    if ai_content is not None:
+        body["ai_content"] = ai_content
+    if content_type:
+        body["content_type"] = content_type
+    if excerpt is not None:
+        body["excerpt"] = excerpt
+    if visibility:
+        body["visibility"] = visibility
+    if parent_id is not None:
+        body["parent_id"] = parent_id
+    if sort_order is not None:
+        body["sort_order"] = sort_order
+    if is_pinned is not None:
+        body["is_pinned"] = is_pinned
+
+    if not body:
+        return {"ok": True, "message": "没有需要更新的字段"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.put(
+            f"{base_url}/api/admin/wiki/docs/{doc_id}",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _wiki_find_doc_by_slug(
+    base_url: str,
+    token: str,
+    *,
+    space_slug: str,
+    doc_slug: str,
+) -> dict | None:
+    """通过 space_slug + doc_slug 查找文档，返回 doc dict 或 None."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/admin/wiki/docs",
+            params={"space_slug": space_slug, "slug": doc_slug},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        docs = data.get("docs", [])
+        if docs:
+            return docs[0]
+        return None
+
+
 # ── 远程 KV API 客户端 ──────────────────────────────────────────
 
 
@@ -1306,6 +1476,116 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "integer",
                             "description": "每页条数（默认 20）",
                             "default": 20,
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="wiki_create_doc",
+                description="创建 Wiki 文档页 — 在指定空间下新建文档",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "space_slug": {
+                            "type": "string",
+                            "description": "Wiki 空间 slug（如 dev, company, internal, projects）",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "文档标题（1-200字）",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "文档 slug（1-200字，空间内唯一，用于 URL）",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "文档内容（Markdown，最大200000字，可选）",
+                        },
+                        "ai_content": {
+                            "type": "string",
+                            "description": "AI 版内容（信息密度更高，可选）",
+                        },
+                        "excerpt": {
+                            "type": "string",
+                            "description": "摘要（最多500字，可选）",
+                        },
+                        "visibility": {
+                            "type": "string",
+                            "description": "可见性：draft/internal/public/open（默认 internal）",
+                            "default": "internal",
+                        },
+                        "parent_id": {
+                            "type": "integer",
+                            "description": "父文档 ID（可选）",
+                        },
+                        "sort_order": {
+                            "type": "integer",
+                            "description": "排序序号（默认 0）",
+                            "default": 0,
+                        },
+                        "is_pinned": {
+                            "type": "boolean",
+                            "description": "是否置顶（默认 false）",
+                            "default": False,
+                        },
+                    },
+                    "required": ["space_slug", "title", "slug"],
+                },
+            ),
+            Tool(
+                name="wiki_update_doc",
+                description="更新已有 Wiki 文档页 — 支持按 doc_id 或 space_slug+slug 定位",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "doc_id": {
+                            "type": "integer",
+                            "description": "文档 ID（与 space_slug+slug 二选一）",
+                        },
+                        "space_slug": {
+                            "type": "string",
+                            "description": "Wiki 空间 slug（与 doc_id 二选一，需配合 slug 使用）",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "文档 slug（与 space_slug 配合定位文档）",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "新标题（可选）",
+                        },
+                        "new_slug": {
+                            "type": "string",
+                            "description": "新 slug（可选，用于重命名）",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "新内容（Markdown，可选）",
+                        },
+                        "ai_content": {
+                            "type": "string",
+                            "description": "新 AI 版内容（可选）",
+                        },
+                        "excerpt": {
+                            "type": "string",
+                            "description": "新摘要（可选）",
+                        },
+                        "visibility": {
+                            "type": "string",
+                            "description": "新可见性：draft/internal/public/open（可选）",
+                        },
+                        "parent_id": {
+                            "type": "integer",
+                            "description": "新父文档 ID（可选）",
+                        },
+                        "sort_order": {
+                            "type": "integer",
+                            "description": "新排序序号（可选）",
+                        },
+                        "is_pinned": {
+                            "type": "boolean",
+                            "description": "是否置顶（可选）",
                         },
                     },
                 },
@@ -2501,6 +2781,186 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps({"error": f"列表失败: {exc}"}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "wiki_create_doc":
+            admin_cfg = _get_wiki_admin_config()
+            if not admin_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, admin_token = admin_cfg
+            space_slug = arguments.get("space_slug", "")
+            title = arguments.get("title", "")
+            slug = arguments.get("slug", "")
+
+            if not space_slug or not title or not slug:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "缺少必填参数：space_slug, title, slug"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            # slug 转 space_id
+            try:
+                space_id = await _wiki_resolve_space_id(base_url, admin_token, space_slug)
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"查询空间列表失败: {exc}"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            if space_id is None:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"未找到空间: {space_slug}，可用空间请通过 wiki_list_files 查看"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            try:
+                result = await _wiki_create_doc(
+                    base_url,
+                    admin_token,
+                    space_id=space_id,
+                    title=title,
+                    slug=slug,
+                    content=arguments.get("content", ""),
+                    ai_content=arguments.get("ai_content", ""),
+                    excerpt=arguments.get("excerpt", ""),
+                    visibility=arguments.get("visibility", "internal"),
+                    parent_id=arguments.get("parent_id"),
+                    sort_order=arguments.get("sort_order", 0),
+                    is_pinned=arguments.get("is_pinned", False),
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                error_msg = str(exc)
+                if "409" in error_msg:
+                    error_msg = f"slug 冲突: '{slug}' 在空间 '{space_slug}' 中已存在"
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"创建文档失败: {error_msg}"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+        elif name == "wiki_update_doc":
+            admin_cfg = _get_wiki_admin_config()
+            if not admin_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, admin_token = admin_cfg
+            doc_id = arguments.get("doc_id")
+            space_slug = arguments.get("space_slug", "")
+            slug = arguments.get("slug", "")
+
+            # 定位文档：优先 doc_id，其次 space_slug + slug
+            if doc_id is not None:
+                try:
+                    doc_id = int(doc_id)
+                except (ValueError, TypeError):
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"无效的 doc_id: {doc_id}"}, ensure_ascii=False),
+                        )
+                    ]
+            elif space_slug and slug:
+                try:
+                    doc = await _wiki_find_doc_by_slug(base_url, admin_token, space_slug=space_slug, doc_slug=slug)
+                except Exception as exc:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"查找文档失败: {exc}"}, ensure_ascii=False),
+                        )
+                    ]
+                if doc is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"未找到文档: space='{space_slug}', slug='{slug}'"},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+                doc_id = doc["id"]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "请提供 doc_id 或 space_slug+slug 来定位文档"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            try:
+                result = await _wiki_update_doc(
+                    base_url,
+                    admin_token,
+                    doc_id=doc_id,
+                    title=arguments.get("title", ""),
+                    slug=arguments.get("new_slug", ""),
+                    content=arguments.get("content"),
+                    ai_content=arguments.get("ai_content"),
+                    excerpt=arguments.get("excerpt"),
+                    visibility=arguments.get("visibility", ""),
+                    parent_id=arguments.get("parent_id"),
+                    sort_order=arguments.get("sort_order"),
+                    is_pinned=arguments.get("is_pinned"),
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"更新文档失败: {exc}"},
+                            ensure_ascii=False,
+                        ),
                     )
                 ]
 

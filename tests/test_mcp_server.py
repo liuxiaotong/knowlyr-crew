@@ -639,3 +639,145 @@ class TestToolMetricsIntegration:
         snap = get_collector().snapshot()
         assert "events_summary" in snap
         assert isinstance(snap["events_summary"], list)
+
+
+class TestWikiDocTools:
+    """测试 Wiki 文档 CRUD 工具."""
+
+    def setup_method(self):
+        self.server = create_server()
+
+    def test_list_tools_includes_wiki_doc_tools(self):
+        """list_tools 应包含 wiki_create_doc 和 wiki_update_doc."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        tool_names = [t.name for t in result.root.tools]
+        assert "wiki_create_doc" in tool_names
+        assert "wiki_update_doc" in tool_names
+
+    def test_wiki_create_doc_missing_config(self):
+        """未配置环境变量时应返回错误信息."""
+        handler = self.server.request_handlers[CallToolRequest]
+        # 确保环境变量未设置
+        import os
+        old_url = os.environ.pop("WIKI_API_URL", None)
+        old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
+        old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
+        try:
+            result = _run(
+                handler(
+                    CallToolRequest(
+                        method="tools/call",
+                        params=CallToolRequestParams(
+                            name="wiki_create_doc",
+                            arguments={
+                                "space_slug": "dev",
+                                "title": "测试文档",
+                                "slug": "test-doc",
+                            },
+                        ),
+                    )
+                )
+            )
+            data = json.loads(result.root.content[0].text)
+            assert "error" in data
+            assert "未配置" in data["error"]
+        finally:
+            if old_url:
+                os.environ["WIKI_API_URL"] = old_url
+            if old_admin:
+                os.environ["WIKI_ADMIN_TOKEN"] = old_admin
+            if old_antgather:
+                os.environ["ANTGATHER_API_TOKEN"] = old_antgather
+
+    def test_wiki_create_doc_missing_required_params(self):
+        """缺少必填参数时 MCP SDK 应拒绝请求."""
+        import os
+        os.environ.setdefault("WIKI_API_URL", "https://example.com")
+        os.environ.setdefault("ANTGATHER_API_TOKEN", "test-token")
+        handler = self.server.request_handlers[CallToolRequest]
+        # MCP SDK 在 inputSchema 层面做 required 校验，返回纯文本错误
+        result = _run(
+            handler(
+                CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(
+                        name="wiki_create_doc",
+                        arguments={"space_slug": "dev"},  # 缺少 title 和 slug
+                    ),
+                )
+            )
+        )
+        text = result.root.content[0].text
+        assert "required" in text.lower() or "error" in text.lower()
+
+    def test_wiki_update_doc_missing_config(self):
+        """未配置环境变量时应返回错误信息."""
+        handler = self.server.request_handlers[CallToolRequest]
+        import os
+        old_url = os.environ.pop("WIKI_API_URL", None)
+        old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
+        old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
+        try:
+            result = _run(
+                handler(
+                    CallToolRequest(
+                        method="tools/call",
+                        params=CallToolRequestParams(
+                            name="wiki_update_doc",
+                            arguments={"doc_id": 1, "title": "新标题"},
+                        ),
+                    )
+                )
+            )
+            data = json.loads(result.root.content[0].text)
+            assert "error" in data
+            assert "未配置" in data["error"]
+        finally:
+            if old_url:
+                os.environ["WIKI_API_URL"] = old_url
+            if old_admin:
+                os.environ["WIKI_ADMIN_TOKEN"] = old_admin
+            if old_antgather:
+                os.environ["ANTGATHER_API_TOKEN"] = old_antgather
+
+    def test_wiki_update_doc_missing_locator(self):
+        """未提供 doc_id 也未提供 space_slug+slug 时应返回错误."""
+        import os
+        os.environ.setdefault("WIKI_API_URL", "https://example.com")
+        os.environ.setdefault("ANTGATHER_API_TOKEN", "test-token")
+        handler = self.server.request_handlers[CallToolRequest]
+        result = _run(
+            handler(
+                CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(
+                        name="wiki_update_doc",
+                        arguments={"title": "新标题"},  # 没有 doc_id 也没有 space_slug+slug
+                    ),
+                )
+            )
+        )
+        data = json.loads(result.root.content[0].text)
+        assert "error" in data
+        assert "doc_id" in data["error"] or "space_slug" in data["error"]
+
+    def test_wiki_create_doc_tool_schema(self):
+        """wiki_create_doc 工具定义应有正确的 required 字段."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        create_tool = next(t for t in result.root.tools if t.name == "wiki_create_doc")
+        assert "space_slug" in create_tool.inputSchema["required"]
+        assert "title" in create_tool.inputSchema["required"]
+        assert "slug" in create_tool.inputSchema["required"]
+
+    def test_wiki_update_doc_tool_schema(self):
+        """wiki_update_doc 工具定义应有 doc_id 和 space_slug 属性."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        update_tool = next(t for t in result.root.tools if t.name == "wiki_update_doc")
+        props = update_tool.inputSchema["properties"]
+        assert "doc_id" in props
+        assert "space_slug" in props
+        assert "slug" in props
+        assert "new_slug" in props
