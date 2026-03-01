@@ -45,16 +45,7 @@ jobs:
             scripts
             static
 
-      - name: Sync private repo (employee configs)
-        run: |
-          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} "
-            cd /opt/knowlyr-crew/private-repo &&
-            git remote set-url origin 'https://x-access-token:${PRIVATE_TOKEN}@github.com/liuxiaotong/knowlyr-crew-private.git' &&
-            git pull --ff-only origin main &&
-            git remote set-url origin 'https://github.com/liuxiaotong/knowlyr-crew-private.git'
-          "
-        env:
-          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      # 员工配置已迁移到 CREW 数据库（config_store.py），不再从 git 仓库同步
 
       - name: Deploy scripts
         run: |

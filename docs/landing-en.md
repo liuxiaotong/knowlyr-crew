@@ -705,8 +705,8 @@ knowlyr-id fetches employee prompt / model / temperature / team / authority / co
 </details>
 
 ```bash
-# One-click deployment (rsync -> restart -> sync knowlyr-id)
-make push
+# Deploy via CI (git push triggers GitHub Actions)
+make deploy
 ```
 
 ### Claude Code Skills Interoperability

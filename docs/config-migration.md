@@ -196,11 +196,11 @@ psql -d knowlyr_crew -c "SELECT COUNT(*) FROM pipelines;"
 
 ## 下一步建议
 
-### 1. 废弃本地 repo（可选）
-配置迁移到数据库后，knowlyr-crew-private 可以：
-- 保留作为备份（只读）
-- 定期从数据库导出备份
-- 逐步停止手动编辑文件
+### 1. 本地 repo 已废弃 ✅
+配置已完全迁移到 CREW 数据库，`knowlyr-crew-private` 仓库已废弃：
+- CREW PostgreSQL 是唯一真理源（Single Source of Truth）
+- 员工配置通过 MCP 工具 / API 在线管理
+- CI 部署流程已移除私有仓库同步步骤
 
 ### 2. 增强功能
 - 添加配置变更审计日志

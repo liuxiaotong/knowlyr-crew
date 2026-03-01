@@ -704,8 +704,8 @@ knowlyr-id 通过 `CREW_API_URL` 获取员工的 prompt / model / temperature / 
 </details>
 
 ```bash
-# 一键部署（rsync → 重启 → 同步 knowlyr-id）
-make push
+# 一键部署（git push 触发 GitHub Actions）
+make deploy
 ```
 
 ### Claude Code Skills 互操作 (Claude Code Skills Interoperability)

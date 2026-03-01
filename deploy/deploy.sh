@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# knowlyr-crew 部署脚本
-# 用法（从项目根目录执行）:
-#   bash deploy/deploy.sh              # 同步数据 + 重启 + ID同步
-#   bash deploy/deploy.sh sync         # 同步私有数据 + 重启 + ID同步
-#   bash deploy/deploy.sh engine       # 更新引擎 + 重启
+# knowlyr-crew 紧急运维脚本（非常规部署路径）
+#
+# 常规部署：git push main → GitHub Actions 自动执行
+# 本脚本仅用于 CI 不可用时的紧急操作
+#
+# 用法:
+#   bash deploy/deploy.sh engine       # 更新引擎代码 + 重启
 #   bash deploy/deploy.sh restart      # 只重启服务
-#   bash deploy/deploy.sh id-sync      # 只同步到 knowlyr-id
-#   bash deploy/deploy.sh all          # 引擎 + 数据 + 重启 + ID同步
+#   bash deploy/deploy.sh id-sync      # 同步员工到 knowlyr-id
+#   bash deploy/deploy.sh trajectory   # 升级轨迹组件 + 重启
+#   bash deploy/deploy.sh status       # 查看服务状态
 set -euo pipefail
 
 SERVER="knowlyr-web-1"
@@ -15,60 +18,7 @@ VENV="$REMOTE_DIR/venv"
 PROJECT="$REMOTE_DIR/project"
 ENGINE_REPO="git+https://github.com/liuxiaotong/knowlyr-crew.git"
 
-# 本地数据目录（相对于项目根）
-LOCAL_CREW=".crew"
-LOCAL_EMPLOYEES="private/employees"
-
-ACTION="${1:-sync}"
-
-sync_data() {
-    echo "=== 同步私有数据 ==="
-
-    # 员工: private/employees/ → server:private/employees/
-    if [ -d "$LOCAL_EMPLOYEES" ]; then
-        echo "  同步员工..."
-        rsync -av --delete \
-            "$LOCAL_EMPLOYEES/" \
-            "$SERVER:$PROJECT/private/employees/"
-    else
-        echo "  跳过员工（目录不存在: $LOCAL_EMPLOYEES）"
-    fi
-
-    # [废弃] 讨论会 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
-    # if [ -d "$LOCAL_CREW/discussions" ]; then
-    #     echo "  同步讨论会..."
-    #     rsync -av --delete \
-    #         --include="*.yaml" --exclude="*" \
-    #         "$LOCAL_CREW/discussions/" \
-    #         "$SERVER:$PROJECT/.crew/discussions/"
-    # else
-    #     echo "  跳过讨论会（目录不存在）"
-    # fi
-
-    # [废弃] 流水线 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
-    # if [ -d "$LOCAL_CREW/pipelines" ]; then
-    #     echo "  同步流水线..."
-    #     rsync -av --delete \
-    #         --include="*.yaml" --exclude="*" \
-    #         "$LOCAL_CREW/pipelines/" \
-    #         "$SERVER:$PROJECT/.crew/pipelines/"
-    # else
-    #     echo "  跳过流水线（目录不存在）"
-    # fi
-
-    # [废弃] 定时任务 — 已迁移到 private repo CI (private/.github/workflows/deploy.yml)
-    # if [ -f ".crew/cron.yaml" ]; then
-    #     echo "  同步定时任务..."
-    #     rsync -av .crew/cron.yaml "$SERVER:$PROJECT/.crew/cron.yaml"
-    # fi
-
-    # 服务器端 git 提交
-    echo "  记录版本..."
-    ssh "$SERVER" "cd $PROJECT && git add -A && \
-        git diff --cached --quiet || git commit -m 'sync: $(date +%Y%m%d-%H%M%S)'"
-
-    echo "    数据已同步"
-}
+ACTION="${1:-status}"
 
 sync_id() {
     echo "=== 同步到 knowlyr-id ==="
@@ -110,12 +60,16 @@ restart_service() {
     fi
 }
 
+show_status() {
+    echo "=== Crew 服务状态 ==="
+    ssh "$SERVER" "systemctl is-active knowlyr-crew && curl -s http://localhost:8765/health && echo ''"
+    echo "=== 引擎版本 ==="
+    ssh "$SERVER" "$VENV/bin/pip show knowlyr-crew 2>/dev/null | grep Version"
+    echo "=== 最近日志 ==="
+    ssh "$SERVER" "journalctl -u knowlyr-crew --no-pager -n 5"
+}
+
 case "$ACTION" in
-    sync)
-        sync_data
-        restart_service
-        sync_id
-        ;;
     engine)
         deploy_engine
         restart_service
@@ -130,17 +84,21 @@ case "$ACTION" in
         upgrade_trajectory
         restart_service
         ;;
-    all)
-        deploy_engine
-        upgrade_trajectory
-        sync_data
-        restart_service
-        sync_id
+    status)
+        show_status
         ;;
     *)
-        echo "用法: bash deploy/deploy.sh [sync|engine|restart|id-sync|trajectory|all]"
+        echo "用法: bash deploy/deploy.sh [engine|restart|id-sync|trajectory|status]"
+        echo ""
+        echo "  engine      更新引擎代码 + 重启（从 GitHub 安装最新）"
+        echo "  restart     只重启服务"
+        echo "  id-sync     同步员工信息到 knowlyr-id"
+        echo "  trajectory  升级轨迹组件 + 重启"
+        echo "  status      查看服务状态和版本"
+        echo ""
+        echo "注意: 员工配置通过 CREW API 在线管理（crew.knowlyr.com），不再需要 git 操作。"
         exit 1
         ;;
 esac
 
-echo "=== 部署完成 ==="
+echo "=== 完成 ==="

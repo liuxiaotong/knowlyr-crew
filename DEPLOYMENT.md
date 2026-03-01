@@ -1,86 +1,80 @@
 # knowlyr-crew 部署详情
 
-**所有涉及 crew 的部署必须走以下路径，禁止其他方式。**
+## 架构
+
+**CREW 服务（数据库 + API）是唯一真理源 (Single Source of Truth)**
+
+| 数据 | 存储位置 | 管理方式 |
+|------|---------|---------|
+| 引擎代码 | GitHub `knowlyr-crew` 仓库 | git push → CI 部署 |
+| 员工配置（soul / prompt / 参数） | CREW PostgreSQL (`employee_souls` 表) | MCP 工具 / API |
+| 讨论会定义 | CREW PostgreSQL (`discussions` 表) | MCP 工具 / API |
+| 流水线定义 | CREW PostgreSQL (`pipelines` 表) | MCP 工具 / API |
+| 组织架构 | CREW PostgreSQL + 服务器文件 | API |
+| 记忆 | CREW PostgreSQL (`entries` 表) | MCP 工具 (`add_memory` / `query_memory`) |
+
+> ⚠️ 旧版 `knowlyr-crew-private` 仓库已废弃。员工配置不再通过 git 管理，
+> 全部通过 CREW API 在线管理。服务器上 `/opt/knowlyr-crew/private-repo/` 是历史遗留。
 
 ## 部署路径
 
 | 场景 | 触发 | 流程 |
 |------|------|------|
-| 代码变更 | `git push main` (public) | CI: pip install → restart → 配置同步 → audit |
-| 员工配置变更 | `git push main` (private) | CI: SSH → git pull → sync project-dir → restart → sync knowlyr-id |
-| 紧急旁路 | `make push` (rsync) | 仅限紧急情况，事后必须补 git commit 到 private 仓库 |
+| 代码变更 | `make deploy`（= git pull + push） | CI: pip install → restart → health check → audit |
+| 员工配置变更 | CREW MCP 工具 / API | 直接写数据库，实时生效 |
+| 紧急旁路 | `make emergency-engine` | SSH: pip install → restart |
 
-## 仓库结构
-
-| 仓库 | 类型 | 内容 |
-|------|------|------|
-| `knowlyr-crew` | Public | 框架代码、builtin 员工、测试 |
-| `knowlyr-crew-private` | Private | 员工配置 (employee.yaml, prompt.md, soul.md)、组织架构 (organization.yaml) |
-
-## 数据流
+## CI 流程 (`deploy.yml`)
 
 ```
-private repo (GitHub)
-  ↓ CI: git pull --ff-only
-服务器 /opt/knowlyr-crew/private-repo/ (源头)
-  ↓ rsync
-服务器 /opt/knowlyr-crew/project/private/ (副本)
-  ↓ sync-all
-knowlyr-id (员工注册信息)
+git push main
+  → pip install knowlyr-crew 从 GitHub
+  → systemctl restart knowlyr-crew
+  → health check
+  → 部署 scripts/ 和 static/avatars/
+  → 员工配置审计
 ```
 
-**所有写操作先到 private 仓库，CI 自动同步到服务器。不直接写副本。**
+## 员工管理闭环（不再需要 git）
+
+```
+创建员工:  MCP run_employee / CREW API → 写入 employee_souls 表
+修改配置:  MCP get_employee → 修改 → update → 写入 employee_souls 表（自动版本管理）
+注册到 id: make register NAME=xxx 或 CREW API
+查看状态:  MCP get_employee / list_employees
+```
 
 ## 服务器信息
 
 - 主机: `knowlyr-web-1` (8.159.150.234)
 - 路径: `/opt/knowlyr-crew/`
-- Private 仓库 clone: `/opt/knowlyr-crew/private-repo/`
-- Project 目录: `/opt/knowlyr-crew/project/` (Makefile 中 `REMOTE_DIR`)
 - venv: `/opt/knowlyr-crew/venv/`
 - 端口: `8765`
 - 服务: `knowlyr-crew.service`
+- 数据库: PostgreSQL (`knowlyr_crew`)
 
-## 服务器端初始化（一次性）
+## Makefile 快捷命令
 
-```bash
-# 1. 创建 deploy key
-ssh-keygen -t ed25519 -f /opt/knowlyr-crew/.deploy-key -N "" -C "knowlyr-crew-private-deploy"
-# 将公钥添加到 GitHub 仓库 Settings → Deploy keys (只读)
-
-# 2. Clone private 仓库
-GIT_SSH_COMMAND="ssh -i /opt/knowlyr-crew/.deploy-key" \
-  git clone git@github.com:liuxiaotong/knowlyr-crew-private.git /opt/knowlyr-crew/private-repo
-
-# 3. 配置 git 使用 deploy key
-cd /opt/knowlyr-crew/private-repo
-git config core.sshCommand "ssh -i /opt/knowlyr-crew/.deploy-key"
-```
-
-## 本地开发环境
-
-```bash
-# private/ 是 symlink，指向 private 仓库的本地 clone
-# 开发体验不变，代码直接读 private/employees/
-ls -la private/  # → ../knowlyr-crew-private
-
-# 安装 git hooks（防止 private/ 文件误提交到 public 仓库）
-make install-hooks
-```
+| 命令 | 用途 |
+|------|------|
+| `make deploy` | 推送代码（自动 pull + push → CI 部署） |
+| `make status` | 查看服务器状态和版本 |
+| `make emergency-engine` | 紧急：跳过 CI 直接更新引擎 |
+| `make emergency-restart` | 紧急：只重启服务 |
+| `make register NAME=xxx` | 注册员工到 knowlyr-id |
+| `make test-employee NAME=xxx` | 测试员工（真实 webhook 链路） |
 
 ## 禁止操作（硬规则）
 
-- ❌ **禁止直接 SSH 到服务器改 project-dir** — project/private/ 是副本，手动改了下次部署会被覆盖
-- ❌ **禁止手动 pip install / systemctl restart** — 绕过流程会跳过配置同步和审计
-- ❌ **禁止 rsync --delete 从本地到服务器** — 会删除服务器独有文件（data/、运行时缓存）
-- ❌ **禁止 rsync 不排除 .env** — 服务器 .env 有完整凭据，本地只有 1 个变量
-- ❌ **禁止 private/ 进 public git** — 有 pre-commit hook 硬拦，`make install-hooks` 安装
-- ❌ **紧急旁路不补 commit** — 每次 `make push` 后必须在 private 仓库补一个 git commit
+- ❌ **禁止直接 SSH 改服务器 venv 代码** — 下次 CI 部署会被覆盖
+- ❌ **禁止本地 push 不先 pull** — SG 上的 Claude Code 可能已推新 commit
+- ❌ **禁止通过文件修改员工配置** — CREW 数据库是唯一真理源，改文件下次重启会被覆盖
+- ❌ **禁止 rsync 本地文件到服务器** — 本地可能落后远程
 
-## CI 所需 GitHub Secrets（private 仓库）
+## CI 所需 GitHub Secrets
 
 | Secret | 说明 |
 |--------|------|
-| `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（用于 CI 部署） |
-| `SSH_HOST` | 服务器地址 |
-| `SSH_USER` | SSH 用户名 |
+| `DEPLOY_SSH_KEY` | 服务器 SSH 私钥 |
+| `DEPLOY_HOST` | 服务器地址 |
+| `WEBSITE_DISPATCH_TOKEN` | 触发官网重建 |

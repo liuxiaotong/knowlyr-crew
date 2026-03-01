@@ -5,13 +5,13 @@
 
 用法（在生产服务器上）:
     # 预检（dry-run，不做任何修改）
-    python scripts/migrate_slug_memories.py --project-dir /home/deploy/knowlyr-crew-private
+    python scripts/migrate_slug_memories.py --project-dir /opt/knowlyr-crew/project
 
     # 执行迁移
-    python scripts/migrate_slug_memories.py --project-dir /home/deploy/knowlyr-crew-private --execute
+    python scripts/migrate_slug_memories.py --project-dir /opt/knowlyr-crew/project --execute
 
     # 迁移后重建索引
-    python scripts/migrate_slug_memories.py --project-dir /home/deploy/knowlyr-crew-private --rebuild-index
+    python scripts/migrate_slug_memories.py --project-dir /opt/knowlyr-crew/project --rebuild-index
 """
 
 import argparse
