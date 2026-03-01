@@ -2468,42 +2468,64 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
     _sg_reply: str | None = None
     if not stream and not context_only:
+        # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
         try:
-            from crew.sg_bridge import sg_dispatch
+            from crew.sg_api_bridge import sg_api_dispatch, SGAPIBridgeError
 
-            # 定义权限回调函数
-            async def permission_callback(operations: list[dict]) -> bool:
-                """请求用户权限确认."""
-                from crew.permission_request import PermissionManager
-
-                manager = PermissionManager()
-
-                # 构建权限请求参数
-                tool_names = [op["tool"] for op in operations]
-                tool_params = {
-                    "operations": operations,
-                    "message": message[:200],
-                }
-
-                # 请求权限（会推送事件到前端）
-                approved = await manager.request_permission(
-                    tool_name=f"SG执行: {', '.join(tool_names)}",
-                    tool_params=tool_params,
-                    timeout=60.0,
-                )
-
-                return approved
-
-            _sg_reply = await sg_dispatch(
+            _sg_reply = await sg_api_dispatch(
                 message,
+                ctx=ctx,
                 project_dir=ctx.project_dir,
                 employee_name=employee_id,
                 message_history=message_history,
-                permission_callback=permission_callback,
+                push_event_fn=None,  # TODO: 支持流式输出
             )
-        except Exception as _sg_exc:
-            logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
+            logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
+        except SGAPIBridgeError as _sg_api_err:
+            logger.info("SG API Bridge fallback: %s → 尝试 SSH Bridge", _sg_api_err)
             _sg_reply = None
+        except Exception as _sg_api_exc:
+            logger.warning("SG API Bridge 意外异常: %s → 尝试 SSH Bridge", _sg_api_exc)
+            _sg_reply = None
+
+        # Fallback: SSH Bridge（两阶段权限确认）
+        if _sg_reply is None:
+            try:
+                from crew.sg_bridge import sg_dispatch
+
+                # 定义权限回调函数
+                async def permission_callback(operations: list[dict]) -> bool:
+                    """请求用户权限确认."""
+                    from crew.permission_request import PermissionManager
+
+                    manager = PermissionManager()
+
+                    # 构建权限请求参数
+                    tool_names = [op["tool"] for op in operations]
+                    tool_params = {
+                        "operations": operations,
+                        "message": message[:200],
+                    }
+
+                    # 请求权限（会推送事件到前端）
+                    approved = await manager.request_permission(
+                        tool_name=f"SG执行: {', '.join(tool_names)}",
+                        tool_params=tool_params,
+                        timeout=60.0,
+                    )
+
+                    return approved
+
+                _sg_reply = await sg_dispatch(
+                    message,
+                    project_dir=ctx.project_dir,
+                    employee_name=employee_id,
+                    message_history=message_history,
+                    permission_callback=permission_callback,
+                )
+            except Exception as _sg_exc:
+                logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
+                _sg_reply = None
 
     if _sg_reply is not None:
         result: dict[str, Any] = {
