@@ -3391,35 +3391,3 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-# ============================================================
-# 权限确认 API
-# ============================================================
-
-
-async def _handle_permission_list(ctx: _AppContext) -> dict[str, Any]:
-    """GET /api/permissions - 获取待处理的权限请求"""
-    from crew.permission_request import PermissionManager
-
-    manager = PermissionManager()
-    requests = manager.get_pending_requests()
-
-    return {"ok": True, "requests": requests}
-
-
-async def _handle_permission_respond(ctx: _AppContext, payload: dict[str, Any]) -> dict[str, Any]:
-    """POST /api/permissions/respond - 响应权限请求"""
-    from crew.permission_request import PermissionManager
-
-    request_id = payload.get("request_id")
-    approved = payload.get("approved", False)
-
-    if not request_id:
-        return {"ok": False, "error": "缺少 request_id"}
-
-    manager = PermissionManager()
-    success = manager.respond(request_id, approved)
-
-    if success:
-        return {"ok": True}
-    else:
-        return {"ok": False, "error": "请求不存在或已过期"}
