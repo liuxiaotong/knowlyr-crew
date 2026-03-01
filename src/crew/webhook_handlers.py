@@ -2403,3 +2403,288 @@ async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
                 keys.append(str(rel))
 
     return JSONResponse({"ok": True, "keys": keys})
+
+
+# ── Pipeline / Discussion / Meeting / Decision / WorkLog / Permission API ──
+
+
+async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
+    """列出所有流水线 — GET /api/pipelines."""
+    from starlette.responses import JSONResponse
+
+    from crew.pipeline import discover_pipelines, load_pipeline
+
+    pipelines = discover_pipelines(project_dir=ctx.project_dir)
+    data = []
+    for pname, ppath in pipelines.items():
+        try:
+            pl = load_pipeline(ppath)
+            data.append({
+                "name": pname,
+                "description": pl.description,
+                "steps": len(pl.steps),
+            })
+        except Exception:
+            data.append({"name": pname, "error": "parse_failed"})
+    return JSONResponse({"items": data})
+
+
+async def _handle_discussion_list(request: Any, ctx: _AppContext) -> Any:
+    """列出所有讨论会 — GET /api/discussions."""
+    from starlette.responses import JSONResponse
+
+    from crew.discussion import discover_discussions, load_discussion
+
+    discussions = discover_discussions(project_dir=ctx.project_dir)
+    data = []
+    for dname, dpath in discussions.items():
+        try:
+            d = load_discussion(dpath)
+            rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
+            data.append({
+                "name": dname,
+                "description": d.description,
+                "participants": [p.employee for p in d.participants],
+                "rounds": rounds_count,
+            })
+        except Exception:
+            data.append({"name": dname, "error": "parse_failed"})
+    return JSONResponse({"items": data})
+
+
+async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
+    """获取编排模式讨论计划 — GET /api/discussions/{name}/plan."""
+    import json as _json
+
+    from starlette.responses import JSONResponse
+
+    from crew.discussion import (
+        discover_discussions,
+        load_discussion,
+        render_discussion_plan,
+        validate_discussion,
+    )
+
+    name = request.path_params["name"]
+    discussions = discover_discussions(project_dir=ctx.project_dir)
+    if name not in discussions:
+        return JSONResponse({"error": f"not found: {name}"}, status_code=404)
+
+    discussion = load_discussion(discussions[name])
+    errors = validate_discussion(discussion, project_dir=ctx.project_dir)
+    if errors:
+        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+
+    d_args: dict[str, str] = {}
+    args_raw = request.query_params.get("args")
+    if args_raw:
+        try:
+            d_args = _json.loads(args_raw)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "invalid args JSON"}, status_code=400)
+
+    agent_id = request.query_params.get("agent_id")
+    smart_context = request.query_params.get("smart_context", "true").lower() != "false"
+
+    try:
+        plan = render_discussion_plan(
+            discussion,
+            initial_args=d_args,
+            agent_id=agent_id,
+            smart_context=smart_context,
+            project_dir=ctx.project_dir,
+        )
+        return JSONResponse(_json.loads(plan.model_dump_json()))
+    except Exception as exc:
+        logger.exception("render_discussion_plan failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
+    """获取非编排模式讨论 prompt — GET /api/discussions/{name}/prompt."""
+    import json as _json
+
+    from starlette.responses import JSONResponse
+
+    from crew.discussion import (
+        discover_discussions,
+        load_discussion,
+        render_discussion,
+        validate_discussion,
+    )
+
+    name = request.path_params["name"]
+    discussions = discover_discussions(project_dir=ctx.project_dir)
+    if name not in discussions:
+        return JSONResponse({"error": f"not found: {name}"}, status_code=404)
+
+    discussion = load_discussion(discussions[name])
+    errors = validate_discussion(discussion, project_dir=ctx.project_dir)
+    if errors:
+        return JSONResponse({"error": "; ".join(errors)}, status_code=400)
+
+    d_args: dict[str, str] = {}
+    args_raw = request.query_params.get("args")
+    if args_raw:
+        try:
+            d_args = _json.loads(args_raw)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "invalid args JSON"}, status_code=400)
+
+    agent_id = request.query_params.get("agent_id")
+    smart_context = request.query_params.get("smart_context", "true").lower() != "false"
+
+    try:
+        prompt = render_discussion(
+            discussion,
+            initial_args=d_args,
+            agent_id=agent_id,
+            smart_context=smart_context,
+            project_dir=ctx.project_dir,
+        )
+        return JSONResponse({"prompt": prompt})
+    except Exception as exc:
+        logger.exception("render_discussion failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
+    """列出会议历史 — GET /api/meetings."""
+    from starlette.responses import JSONResponse
+
+    from crew.meeting_log import MeetingLogger
+
+    ml = MeetingLogger(project_dir=ctx.project_dir)
+    limit = _safe_int(request.query_params.get("limit"), default=20)
+    keyword = request.query_params.get("keyword") or None
+    records = ml.list(limit=limit, keyword=keyword)
+    return JSONResponse({"items": [r.model_dump() for r in records]})
+
+
+async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
+    """获取会议详情 — GET /api/meetings/{meeting_id}."""
+    from starlette.responses import JSONResponse
+
+    from crew.meeting_log import MeetingLogger
+
+    ml = MeetingLogger(project_dir=ctx.project_dir)
+    meeting_id = request.path_params["meeting_id"]
+    result = ml.get(meeting_id)
+    if result is None:
+        return JSONResponse({"error": f"not found: {meeting_id}"}, status_code=404)
+    record, content = result
+    data = {**record.model_dump(), "content": content}
+    return JSONResponse(data)
+
+
+async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
+    """追踪决策 — POST /api/decisions/track."""
+    from starlette.responses import JSONResponse
+
+    from crew.evaluation import EvaluationEngine
+
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    employee = payload.get("employee")
+    category = payload.get("category")
+    content = payload.get("content")
+    if not employee or not category or not content:
+        return JSONResponse(
+            {"error": "employee, category, content are required"}, status_code=400
+        )
+
+    engine = EvaluationEngine(project_dir=ctx.project_dir)
+    try:
+        decision = engine.track(
+            employee=employee,
+            category=category,
+            content=content,
+            expected_outcome=payload.get("expected_outcome", ""),
+            meeting_id=payload.get("meeting_id", ""),
+        )
+        return JSONResponse(decision.model_dump())
+    except Exception as exc:
+        logger.exception("decision track failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
+    """评估决策 — POST /api/decisions/{decision_id}/evaluate."""
+    from starlette.responses import JSONResponse
+
+    from crew.evaluation import EvaluationEngine
+
+    decision_id = request.path_params["decision_id"]
+
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    actual_outcome = payload.get("actual_outcome")
+    if not actual_outcome:
+        return JSONResponse({"error": "actual_outcome is required"}, status_code=400)
+
+    engine = EvaluationEngine(project_dir=ctx.project_dir)
+    try:
+        decision = engine.evaluate(
+            decision_id=decision_id,
+            actual_outcome=actual_outcome,
+            evaluation=payload.get("evaluation", ""),
+        )
+        if decision is None:
+            return JSONResponse({"error": f"not found: {decision_id}"}, status_code=404)
+        return JSONResponse(decision.model_dump())
+    except Exception as exc:
+        logger.exception("decision evaluate failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
+    """获取工作日志 — GET /api/work-log."""
+    from starlette.responses import JSONResponse
+
+    from crew.log import WorkLogger
+
+    wl = WorkLogger(project_dir=ctx.project_dir)
+    employee_name = request.query_params.get("employee_name") or None
+    limit = _safe_int(request.query_params.get("limit"), default=10)
+    sessions = wl.list_sessions(employee_name=employee_name, limit=limit)
+    return JSONResponse({"items": sessions})
+
+
+async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
+    """获取员工权限矩阵 — GET /api/permission-matrix."""
+    from starlette.responses import JSONResponse
+
+    from crew.discovery import discover_employees
+    from crew.tool_schema import resolve_effective_tools
+
+    result = discover_employees(project_dir=ctx.project_dir)
+    emp_name = request.query_params.get("employee") or None
+
+    employees = list(result.employees.values())
+    if emp_name:
+        emp = result.get(emp_name)
+        if emp is None:
+            return JSONResponse({"error": f"not found: {emp_name}"}, status_code=404)
+        employees = [emp]
+
+    matrix = []
+    for emp in employees:
+        effective = resolve_effective_tools(emp)
+        entry = {
+            "name": emp.name,
+            "display_name": emp.effective_display_name,
+            "tools_declared": len(emp.tools),
+            "tools_effective": len(effective),
+            "permissions": (
+                emp.permissions.model_dump(mode="json") if emp.permissions else None
+            ),
+            "effective_tools": sorted(effective),
+        }
+        matrix.append(entry)
+    return JSONResponse({"items": matrix})

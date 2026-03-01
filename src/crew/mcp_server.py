@@ -304,6 +304,236 @@ async def _remote_run_employee(
         return data.get("prompt", "")
 
 
+# ── 远程 Pipelines / Discussions / Decisions / Meetings / WorkLog / Permission API 客户端 ──
+
+
+async def _remote_list_pipelines(base_url: str, token: str) -> list[dict]:
+    """通过远程 API 列出流水线."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/pipelines",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+
+async def _remote_list_discussions(base_url: str, token: str) -> list[dict]:
+    """通过远程 API 列出讨论会."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/discussions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+
+async def _remote_run_discussion_prompt(
+    base_url: str,
+    token: str,
+    *,
+    name: str,
+    args: dict | None = None,
+    agent_id: str | None = None,
+    smart_context: bool = True,
+) -> str:
+    """通过远程 API 获取预定义讨论会 prompt（非编排模式）."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if args:
+        for k, v in args.items():
+            params[f"arg_{k}"] = v
+    if agent_id:
+        params["agent_id"] = agent_id
+    if not smart_context:
+        params["smart_context"] = "false"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/discussions/{name}/prompt",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("prompt", "")
+
+
+async def _remote_run_discussion_plan(
+    base_url: str,
+    token: str,
+    *,
+    name: str,
+    args: dict | None = None,
+    agent_id: str | None = None,
+    smart_context: bool = True,
+) -> dict:
+    """通过远程 API 获取预定义讨论会编排计划."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if args:
+        for k, v in args.items():
+            params[f"arg_{k}"] = v
+    if agent_id:
+        params["agent_id"] = agent_id
+    if not smart_context:
+        params["smart_context"] = "false"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/discussions/{name}/plan",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_track_decision(
+    base_url: str,
+    token: str,
+    *,
+    employee: str,
+    category: str,
+    content: str,
+    expected_outcome: str = "",
+    meeting_id: str = "",
+) -> dict:
+    """通过远程 API 记录决策."""
+    import httpx
+
+    payload = {
+        "employee": employee,
+        "category": category,
+        "content": content,
+        "expected_outcome": expected_outcome,
+        "meeting_id": meeting_id,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{base_url}/api/decisions/track",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_evaluate_decision(
+    base_url: str,
+    token: str,
+    *,
+    decision_id: str,
+    actual_outcome: str,
+    evaluation: str = "",
+) -> dict:
+    """通过远程 API 评估决策."""
+    import httpx
+
+    payload: dict[str, str] = {"actual_outcome": actual_outcome}
+    if evaluation:
+        payload["evaluation"] = evaluation
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{base_url}/api/decisions/{decision_id}/evaluate",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_list_meeting_history(
+    base_url: str,
+    token: str,
+    *,
+    limit: int = 20,
+    keyword: str | None = None,
+) -> list[dict]:
+    """通过远程 API 列出会议历史."""
+    import httpx
+
+    params: dict[str, str] = {"limit": str(limit)}
+    if keyword:
+        params["keyword"] = keyword
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/meetings",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+
+async def _remote_get_meeting_detail(
+    base_url: str,
+    token: str,
+    *,
+    meeting_id: str,
+) -> dict:
+    """通过远程 API 获取会议详情."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/meetings/{meeting_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_get_work_log(
+    base_url: str,
+    token: str,
+    *,
+    employee_name: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """通过远程 API 获取工作日志."""
+    import httpx
+
+    params: dict[str, str] = {"limit": str(limit)}
+    if employee_name:
+        params["employee_name"] = employee_name
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/work-log",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+
+async def _remote_get_permission_matrix(
+    base_url: str,
+    token: str,
+    *,
+    employee: str | None = None,
+) -> list[dict]:
+    """通过远程 API 获取权限矩阵."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if employee:
+        params["employee"] = employee
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/permission-matrix",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+
 try:
     from mcp.server import InitializationOptions, Server
     from mcp.server.lowlevel.helper_types import ReadResourceContents
@@ -1229,10 +1459,27 @@ def create_server(project_dir: Path | None = None) -> "Server":
             return [TextContent(type="text", text=prompt)]
 
         elif name == "get_work_log":
-            logger = WorkLogger(project_dir=_project_dir)
             emp_name = arguments.get("employee_name")
             limit = arguments.get("limit", 10)
-            sessions = logger.list_sessions(employee_name=emp_name, limit=limit)
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_get_work_log(
+                        remote_cfg[0], remote_cfg[1],
+                        employee_name=emp_name, limit=limit,
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(items, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 get_work_log 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
+            work_logger = WorkLogger(project_dir=_project_dir)
+            sessions = work_logger.list_sessions(employee_name=emp_name, limit=limit)
             return [
                 TextContent(
                     type="text",
@@ -1252,6 +1499,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         elif name == "list_pipelines":
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_list_pipelines(remote_cfg[0], remote_cfg[1])
+                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 list_pipelines 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             pipelines = discover_pipelines(project_dir=_project_dir)
 
             def _step_summary(s):
@@ -1327,6 +1583,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             return [TextContent(type="text", text=result.model_dump_json(indent=2))]
 
         elif name == "list_discussions":
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_list_discussions(remote_cfg[0], remote_cfg[1])
+                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 list_discussions 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             from crew.discussion import discover_discussions, load_discussion
 
             discussions = discover_discussions(project_dir=_project_dir)
@@ -1367,7 +1632,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             adhoc_topic = arguments.get("topic")
 
             if employees_list and adhoc_topic:
-                # 即席讨论模式
+                # 即席讨论模式 — 保持本地（不走远程）
                 discussion = create_adhoc_discussion(
                     employees=employees_list,
                     topic=adhoc_topic,
@@ -1377,7 +1642,34 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 )
             elif "name" in arguments:
                 d_name = arguments["name"]
-                # 查找讨论会
+                # 预定义讨论会 — 优先走远程 API
+                remote_cfg = _get_remote_memory_config()
+                if remote_cfg:
+                    try:
+                        if is_orchestrated:
+                            plan_data = await _remote_run_discussion_plan(
+                                remote_cfg[0], remote_cfg[1],
+                                name=d_name, args=d_args,
+                                agent_id=agent_id, smart_context=smart_context,
+                            )
+                            return [
+                                TextContent(
+                                    type="text",
+                                    text=json.dumps(plan_data, ensure_ascii=False, indent=2),
+                                )
+                            ]
+                        else:
+                            prompt = await _remote_run_discussion_prompt(
+                                remote_cfg[0], remote_cfg[1],
+                                name=d_name, args=d_args,
+                                agent_id=agent_id, smart_context=smart_context,
+                            )
+                            return [TextContent(type="text", text=prompt)]
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(
+                            "远程 run_discussion(%s) 失败，fallback 到本地: %s", d_name, exc,
+                        )
+                # fallback 到本地
                 d_path = Path(d_name)
                 if d_path.is_absolute() and not d_path.resolve().is_relative_to(_project_dir):
                     return [TextContent(type="text", text="路径不在项目目录范围内")]
@@ -1529,6 +1821,27 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 ]
 
         elif name == "track_decision":
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    result = await _remote_track_decision(
+                        remote_cfg[0], remote_cfg[1],
+                        employee=arguments["employee"],
+                        category=arguments["category"],
+                        content=arguments["content"],
+                        expected_outcome=arguments.get("expected_outcome", ""),
+                        meeting_id=arguments.get("meeting_id", ""),
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(result, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 track_decision 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             from crew.evaluation import EvaluationEngine
 
             engine = EvaluationEngine(project_dir=_project_dir)
@@ -1547,16 +1860,38 @@ def create_server(project_dir: Path | None = None) -> "Server":
             ]
 
         elif name == "evaluate_decision":
+            decision_id = arguments["decision_id"]
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    result = await _remote_evaluate_decision(
+                        remote_cfg[0], remote_cfg[1],
+                        decision_id=decision_id,
+                        actual_outcome=arguments["actual_outcome"],
+                        evaluation=arguments.get("evaluation", ""),
+                    )
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(result, ensure_ascii=False, indent=2),
+                        )
+                    ]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "远程 evaluate_decision(%s) 失败，fallback 到本地: %s", decision_id, exc,
+                    )
+            # fallback 到本地
             from crew.evaluation import EvaluationEngine
 
             engine = EvaluationEngine(project_dir=_project_dir)
             decision = engine.evaluate(
-                decision_id=arguments["decision_id"],
+                decision_id=decision_id,
                 actual_outcome=arguments["actual_outcome"],
                 evaluation=arguments.get("evaluation", ""),
             )
             if decision is None:
-                return [TextContent(type="text", text=f"未找到决策: {arguments['decision_id']}")]
+                return [TextContent(type="text", text=f"未找到决策: {decision_id}")]
             return [
                 TextContent(
                     type="text",
@@ -1565,23 +1900,48 @@ def create_server(project_dir: Path | None = None) -> "Server":
             ]
 
         elif name == "list_meeting_history":
+            limit = arguments.get("limit", 20)
+            keyword = arguments.get("keyword")
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_list_meeting_history(
+                        remote_cfg[0], remote_cfg[1],
+                        limit=limit, keyword=keyword,
+                    )
+                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 list_meeting_history 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             from crew.meeting_log import MeetingLogger
 
-            logger = MeetingLogger(project_dir=_project_dir)
-            records = logger.list(
-                limit=arguments.get("limit", 20),
-                keyword=arguments.get("keyword"),
-            )
+            meeting_logger = MeetingLogger(project_dir=_project_dir)
+            records = meeting_logger.list(limit=limit, keyword=keyword)
             data = [r.model_dump() for r in records]
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
         elif name == "get_meeting_detail":
+            meeting_id = arguments["meeting_id"]
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    data = await _remote_get_meeting_detail(
+                        remote_cfg[0], remote_cfg[1], meeting_id=meeting_id,
+                    )
+                    return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "远程 get_meeting_detail(%s) 失败，fallback 到本地: %s", meeting_id, exc,
+                    )
+            # fallback 到本地
             from crew.meeting_log import MeetingLogger
 
-            logger = MeetingLogger(project_dir=_project_dir)
-            result = logger.get(arguments["meeting_id"])
+            meeting_logger = MeetingLogger(project_dir=_project_dir)
+            result = meeting_logger.get(meeting_id)
             if result is None:
-                return [TextContent(type="text", text=f"未找到会议: {arguments['meeting_id']}")]
+                return [TextContent(type="text", text=f"未找到会议: {meeting_id}")]
             record, content = result
             data = {**record.model_dump(), "content": content}
             return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
@@ -1616,10 +1976,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
             ]
 
         elif name == "get_permission_matrix":
+            emp_name = arguments.get("employee")
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_get_permission_matrix(
+                        remote_cfg[0], remote_cfg[1], employee=emp_name,
+                    )
+                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("远程 get_permission_matrix 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             from crew.tool_schema import TOOL_ROLE_PRESETS, resolve_effective_tools
 
             result = discover_employees(project_dir=_project_dir)
-            emp_name = arguments.get("employee")
             employees = list(result.employees.values())
             if emp_name:
                 emp = result.get(emp_name)

@@ -68,6 +68,11 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_chat,
     _handle_cost_summary,
     _handle_cron_status,
+    _handle_decision_evaluate,
+    _handle_decision_track,
+    _handle_discussion_list,
+    _handle_discussion_plan,
+    _handle_discussion_prompt,
     _handle_employee_delete,
     _handle_employee_list,
     _handle_employee_prompt,
@@ -78,6 +83,8 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_kv_get,
     _handle_kv_list,
     _handle_kv_put,
+    _handle_meeting_detail,
+    _handle_meeting_list,
     _handle_memory_add,
     _handle_memory_delete,
     _handle_memory_ingest,
@@ -86,6 +93,8 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_model_tiers,
     _handle_openclaw,
     _handle_org_memories,
+    _handle_permission_matrix,
+    _handle_pipeline_list,
     _handle_project_status,
     _handle_run_employee,
     _handle_run_pipeline,
@@ -95,6 +104,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_task_status,
     _handle_team_agents,
     _handle_trajectory_report,
+    _handle_work_log,
     _health,
     _metrics,
 )
@@ -397,6 +407,57 @@ def create_webhook_app(
         Route(
             "/api/kv/{key:path}",
             endpoint=_make_handler(ctx, _handle_kv_get),
+            methods=["GET"],
+        ),
+        # Pipeline / Discussion / Meeting / Decision / WorkLog / Permission 端点
+        Route(
+            "/api/pipelines",
+            endpoint=_make_handler(ctx, _handle_pipeline_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/discussions",
+            endpoint=_make_handler(ctx, _handle_discussion_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/discussions/{name}/plan",
+            endpoint=_make_handler(ctx, _handle_discussion_plan),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/discussions/{name}/prompt",
+            endpoint=_make_handler(ctx, _handle_discussion_prompt),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/meetings",
+            endpoint=_make_handler(ctx, _handle_meeting_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/meetings/{meeting_id}",
+            endpoint=_make_handler(ctx, _handle_meeting_detail),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/decisions/track",
+            endpoint=_make_handler(ctx, _handle_decision_track),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/decisions/{decision_id}/evaluate",
+            endpoint=_make_handler(ctx, _handle_decision_evaluate),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/work-log",
+            endpoint=_make_handler(ctx, _handle_work_log),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/permission-matrix",
+            endpoint=_make_handler(ctx, _handle_permission_matrix),
             methods=["GET"],
         ),
     ]
