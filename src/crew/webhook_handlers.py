@@ -309,13 +309,12 @@ async def _generate_avatar_background(
         else:
             logger.error("头像压缩失败: %s", agent_id)
 
-    except Exception as e:
+    except Exception:
         logger.exception("头像生成异常: %s", agent_id)
 
 
 async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
     """创建新员工 — POST /api/employees."""
-    from starlette.responses import JSONResponse
 
     from crew.config_store import create_employee
 
@@ -678,7 +677,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
             elif source.is_file():
                 source.unlink()
                 deleted_items.append(f"file: {source}")
-        except OSError as e:
+        except OSError:
             logger.exception("删除员工文件失败: %s", identifier)
             # 继续删除其他资源，不中断
 
@@ -693,7 +692,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
                 )
                 if cur.rowcount > 0:
                     deleted_items.append(f"soul: {character_name}")
-        except Exception as e:
+        except Exception:
             logger.exception("删除员工 soul 失败: %s", character_name)
             # 继续删除其他资源
 
@@ -705,7 +704,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
             if avatar_path.exists():
                 avatar_path.unlink()
                 deleted_items.append(f"avatar: {employee.agent_id}.webp")
-        except OSError as e:
+        except OSError:
             logger.exception("删除头像失败: %s", employee.agent_id)
             # 继续
 

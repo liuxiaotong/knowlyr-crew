@@ -267,8 +267,9 @@ def _create_employee_files(
     soul_content: str,
 ) -> None:
     """创建员工的文件系统结构（employee.yaml + soul.md）."""
-    import yaml
     from pathlib import Path
+
+    import yaml
 
     # 确定员工目录
     emp_dir = Path(__file__).parent.parent.parent / "private" / "employees" / name
