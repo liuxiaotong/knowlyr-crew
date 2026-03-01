@@ -1841,7 +1841,7 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
 
     from crew.permission_request import PermissionManager
 
-    manager = PermissionManager.get_instance()
+    manager = PermissionManager()
     success = await manager.respond_to_request(request_id, approved)
 
     if success:
@@ -1860,7 +1860,7 @@ async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
 
     from crew.permission_request import PermissionManager
 
-    manager = PermissionManager.get_instance()
+    manager = PermissionManager()
     pending = manager.get_pending_requests()
 
     return JSONResponse({"ok": True, "requests": pending})
