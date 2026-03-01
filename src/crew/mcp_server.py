@@ -1622,6 +1622,130 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     },
                 },
             ),
+            Tool(
+                name="get_soul",
+                description="读取员工灵魂配置（soul.md）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee_name": {
+                            "type": "string",
+                            "description": "员工名称",
+                        },
+                    },
+                    "required": ["employee_name"],
+                },
+            ),
+            Tool(
+                name="update_soul",
+                description="更新员工灵魂配置（自动版本递增 + 历史记录）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "employee_name": {
+                            "type": "string",
+                            "description": "员工名称",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "soul.md 完整内容",
+                        },
+                        "updated_by": {
+                            "type": "string",
+                            "description": "更新者（可选）",
+                        },
+                    },
+                    "required": ["employee_name", "content"],
+                },
+            ),
+            Tool(
+                name="create_discussion",
+                description="创建讨论会配置",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "讨论会名称",
+                        },
+                        "yaml_content": {
+                            "type": "string",
+                            "description": "YAML 配置内容",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "描述（可选）",
+                        },
+                    },
+                    "required": ["name", "yaml_content"],
+                },
+            ),
+            Tool(
+                name="update_discussion",
+                description="更新讨论会配置",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "讨论会名称",
+                        },
+                        "yaml_content": {
+                            "type": "string",
+                            "description": "YAML 配置内容",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "描述（可选）",
+                        },
+                    },
+                    "required": ["name", "yaml_content"],
+                },
+            ),
+            Tool(
+                name="create_pipeline",
+                description="创建流水线配置",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "流水线名称",
+                        },
+                        "yaml_content": {
+                            "type": "string",
+                            "description": "YAML 配置内容",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "描述（可选）",
+                        },
+                    },
+                    "required": ["name", "yaml_content"],
+                },
+            ),
+            Tool(
+                name="update_pipeline",
+                description="更新流水线配置",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "流水线名称",
+                        },
+                        "yaml_content": {
+                            "type": "string",
+                            "description": "YAML 配置内容",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "描述（可选）",
+                        },
+                    },
+                    "required": ["name", "yaml_content"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -2975,6 +3099,237 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             {"error": f"创建文档失败: {error_msg}"},
                             ensure_ascii=False,
                         ),
+                    )
+                ]
+
+        elif name == "get_soul":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            employee_name = arguments["employee_name"]
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(
+                        f"{base_url}/api/souls/{employee_name}",
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    if resp.status_code == 404:
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps(
+                                    {"error": f"soul not found: {employee_name}"},
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        ]
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "update_soul":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            employee_name = arguments["employee_name"]
+            content = arguments["content"]
+            updated_by = arguments.get("updated_by", "")
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.put(
+                        f"{base_url}/api/souls/{employee_name}",
+                        json={"content": content, "updated_by": updated_by},
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "create_discussion":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(
+                        f"{base_url}/api/config/discussions",
+                        json={
+                            "name": arguments["name"],
+                            "yaml_content": arguments["yaml_content"],
+                            "description": arguments.get("description", ""),
+                        },
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "update_discussion":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.put(
+                        f"{base_url}/api/config/discussions/{arguments['name']}",
+                        json={
+                            "yaml_content": arguments["yaml_content"],
+                            "description": arguments.get("description"),
+                        },
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "create_pipeline":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(
+                        f"{base_url}/api/config/pipelines",
+                        json={
+                            "name": arguments["name"],
+                            "yaml_content": arguments["yaml_content"],
+                            "description": arguments.get("description", ""),
+                        },
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "update_pipeline":
+            remote_cfg = _get_remote_memory_config()
+            if not remote_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
+                    )
+                ]
+            base_url, api_token = remote_cfg
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.put(
+                        f"{base_url}/api/config/pipelines/{arguments['name']}",
+                        json={
+                            "yaml_content": arguments["yaml_content"],
+                            "description": arguments.get("description"),
+                        },
+                        headers={"Authorization": f"Bearer {api_token}"},
+                    )
+                    resp.raise_for_status()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                        )
+                    ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
                     )
                 ]
 

@@ -247,6 +247,14 @@ def init_db() -> None:
                 conn.rollback()
                 break
 
+    # 初始化配置存储表
+    try:
+        from crew.config_store import init_config_tables
+
+        init_config_tables()
+    except Exception as e:
+        logger.warning("配置存储表初始化失败（非致命）: %s", e)
+
     logger.info("PG init_db() 完成")
 
 

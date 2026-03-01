@@ -2764,3 +2764,243 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
     except Exception as exc:
         logger.exception("Wiki 文件删除失败: file_id=%s", file_id)
         return JSONResponse({"error": f"删除失败: {exc}"}, status_code=500)
+
+
+# ── 配置存储 API ──
+
+
+async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
+    """获取员工灵魂配置 — GET /api/souls/{employee_name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import get_soul
+
+    employee_name = request.path_params.get("employee_name", "")
+    if not employee_name:
+        return JSONResponse({"error": "employee_name is required"}, status_code=400)
+
+    result = get_soul(employee_name)
+    if not result:
+        return JSONResponse({"error": f"soul not found: {employee_name}"}, status_code=404)
+
+    return JSONResponse(result)
+
+
+async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
+    """更新员工灵魂配置 — PUT /api/souls/{employee_name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import update_soul
+
+    employee_name = request.path_params.get("employee_name", "")
+    if not employee_name:
+        return JSONResponse({"error": "employee_name is required"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    content = body.get("content", "")
+    if not content:
+        return JSONResponse({"error": "content is required"}, status_code=400)
+
+    updated_by = body.get("updated_by", "")
+    metadata = body.get("metadata")
+
+    try:
+        result = update_soul(employee_name, content, updated_by, metadata)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("更新 soul 失败: employee=%s", employee_name)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
+    """列出所有员工灵魂配置 — GET /api/souls."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import list_souls
+
+    try:
+        items = list_souls()
+        return JSONResponse({"items": items})
+    except Exception as exc:
+        logger.exception("列出 souls 失败")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_discussion_get(request: Any, ctx: _AppContext) -> Any:
+    """获取讨论会配置 — GET /api/config/discussions/{name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import get_discussion
+
+    name = request.path_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    result = get_discussion(name)
+    if not result:
+        return JSONResponse({"error": f"discussion not found: {name}"}, status_code=404)
+
+    return JSONResponse(result)
+
+
+async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
+    """创建讨论会配置 — POST /api/config/discussions."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import create_discussion
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    name = body.get("name", "")
+    yaml_content = body.get("yaml_content", "")
+    if not name or not yaml_content:
+        return JSONResponse({"error": "name and yaml_content are required"}, status_code=400)
+
+    description = body.get("description", "")
+    metadata = body.get("metadata")
+
+    try:
+        result = create_discussion(name, yaml_content, description, metadata)
+        return JSONResponse(result, status_code=201)
+    except Exception as exc:
+        logger.exception("创建 discussion 失败: name=%s", name)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
+    """更新讨论会配置 — PUT /api/config/discussions/{name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import update_discussion
+
+    name = request.path_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    yaml_content = body.get("yaml_content", "")
+    if not yaml_content:
+        return JSONResponse({"error": "yaml_content is required"}, status_code=400)
+
+    description = body.get("description")
+    metadata = body.get("metadata")
+
+    try:
+        result = update_discussion(name, yaml_content, description, metadata)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("更新 discussion 失败: name=%s", name)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
+    """列出所有讨论会配置 — GET /api/config/discussions."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import list_discussions
+
+    try:
+        items = list_discussions()
+        return JSONResponse({"items": items})
+    except Exception as exc:
+        logger.exception("列出 discussions 失败")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
+    """获取流水线配置 — GET /api/config/pipelines/{name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import get_pipeline
+
+    name = request.path_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    result = get_pipeline(name)
+    if not result:
+        return JSONResponse({"error": f"pipeline not found: {name}"}, status_code=404)
+
+    return JSONResponse(result)
+
+
+async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
+    """创建流水线配置 — POST /api/config/pipelines."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import create_pipeline
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    name = body.get("name", "")
+    yaml_content = body.get("yaml_content", "")
+    if not name or not yaml_content:
+        return JSONResponse({"error": "name and yaml_content are required"}, status_code=400)
+
+    description = body.get("description", "")
+    metadata = body.get("metadata")
+
+    try:
+        result = create_pipeline(name, yaml_content, description, metadata)
+        return JSONResponse(result, status_code=201)
+    except Exception as exc:
+        logger.exception("创建 pipeline 失败: name=%s", name)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
+    """更新流水线配置 — PUT /api/config/pipelines/{name}."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import update_pipeline
+
+    name = request.path_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    yaml_content = body.get("yaml_content", "")
+    if not yaml_content:
+        return JSONResponse({"error": "yaml_content is required"}, status_code=400)
+
+    description = body.get("description")
+    metadata = body.get("metadata")
+
+    try:
+        result = update_pipeline(name, yaml_content, description, metadata)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("更新 pipeline 失败: name=%s", name)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
+    """列出所有流水线配置 — GET /api/config/pipelines."""
+    from starlette.responses import JSONResponse
+
+    from crew.config_store import list_pipelines
+
+    try:
+        items = list_pipelines()
+        return JSONResponse({"items": items})
+    except Exception as exc:
+        logger.exception("列出 pipelines 失败")
+        return JSONResponse({"error": str(exc)}, status_code=500)
