@@ -10,9 +10,6 @@ import logging
 import sys
 from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from crew.database import get_connection, is_pg
 from crew.memory_store_db import init_memory_tables
 

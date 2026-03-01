@@ -348,6 +348,16 @@ class CrewEngine:
             ]
         )
 
+        # 全局行为指令（CLAUDE.md）— L1 层硬规则
+        try:
+            from crew.kv_store import get_kv_value
+
+            claude_md = get_kv_value("config/global/CLAUDE.md")
+            if claude_md:
+                parts.extend(["", "---", "", "## 全局行为指令", "", claude_md])
+        except Exception as e:
+            logger.debug("CLAUDE.md 加载失败: %s", e)
+
         parts.extend(["", "---", "", rendered])
 
         # 输出约束
