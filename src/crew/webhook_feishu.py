@@ -849,28 +849,58 @@ async def _feishu_dispatch(
                     task_text[:40],
                 )
             else:
-                # ── Fallback: 现有 crew 引擎 ──
-                from crew.engine import CrewEngine
+                # ── Fallback: 如果有工具，走带工具的执行路径 ──
+                if has_tools:
+                    import crew.webhook_executor as _wh_exec
 
-                _engine = CrewEngine(project_dir=ctx.project_dir)
-                _sender_id = msg_event.sender_id or "kai"
-                result = await _engine.chat(
-                    employee_id=employee_name,
-                    message=chat_message,
-                    channel="lark",
-                    sender_id=_sender_id,
-                    max_visibility=_visibility,
-                    message_history=message_history,
-                )
-                _path_label = "fast" if result.get("tokens_used", 0) < 2000 else "full"
-                _elapsed = _time.monotonic() - _t0
-                _tokens = result.get("tokens_used", 0)
-                logger.info(
-                    "飞书回复 [engine] %.1fs tokens=%d msg=%s",
-                    _elapsed,
-                    _tokens,
-                    task_text[:40],
-                )
+                    _sender_id = msg_event.sender_id or "kai"
+                    exec_result = await _wh_exec._execute_employee_with_tools(
+                        ctx,
+                        employee_name,
+                        {},  # args
+                        agent_id=None,
+                        model=None,
+                        user_message=chat_message,
+                        message_history=message_history,
+                        sender_id=_sender_id,
+                    )
+                    result = {
+                        "reply": exec_result.get("output", ""),
+                        "output": exec_result.get("output", ""),
+                        "tokens_used": exec_result.get("input_tokens", 0)
+                        + exec_result.get("output_tokens", 0),
+                    }
+                    _path_label = "tools"
+                    _elapsed = _time.monotonic() - _t0
+                    logger.info(
+                        "飞书回复 [tools] %.1fs tokens=%d msg=%s",
+                        _elapsed,
+                        result["tokens_used"],
+                        task_text[:40],
+                    )
+                else:
+                    # 无工具：走简单 chat 路径
+                    from crew.engine import CrewEngine
+
+                    _engine = CrewEngine(project_dir=ctx.project_dir)
+                    _sender_id = msg_event.sender_id or "kai"
+                    result = await _engine.chat(
+                        employee_id=employee_name,
+                        message=chat_message,
+                        channel="lark",
+                        sender_id=_sender_id,
+                        max_visibility=_visibility,
+                        message_history=message_history,
+                    )
+                    _path_label = "fast" if result.get("tokens_used", 0) < 2000 else "full"
+                    _elapsed = _time.monotonic() - _t0
+                    _tokens = result.get("tokens_used", 0)
+                    logger.info(
+                        "飞书回复 [engine] %.1fs tokens=%d msg=%s",
+                        _elapsed,
+                        _tokens,
+                        task_text[:40],
+                    )
         else:
             # 图片路径：保留完整 agent loop（engine.chat 暂不支持多模态）
             import crew.webhook as _wh
