@@ -476,7 +476,7 @@ class CrewEngine:
             history_text = "\n".join(
                 f"[{'assistant' if m.get('role') == 'assistant' else 'user'}]"
                 f" {m.get('content', '')}"
-                for m in message_history[-10:]  # 最多保留最近 10 条
+                for m in message_history[-50:]  # 最多保留最近 50 条（200K token 窗口）
             )
             full_user_message: str | list[dict[str, Any]] = (
                 f"[历史对话]\n{history_text}\n\n[当前消息]\n{message}"
