@@ -501,7 +501,7 @@ async def _remote_list_pipelines(base_url: str, token: str) -> list[dict]:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
-            f"{base_url}/api/pipelines",
+            f"{base_url}/api/config/pipelines",
             headers={"Authorization": f"Bearer {token}"},
         )
         resp.raise_for_status()
@@ -514,7 +514,7 @@ async def _remote_list_discussions(base_url: str, token: str) -> list[dict]:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
-            f"{base_url}/api/discussions",
+            f"{base_url}/api/config/discussions",
             headers={"Authorization": f"Bearer {token}"},
         )
         resp.raise_for_status()
