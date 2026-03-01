@@ -245,7 +245,17 @@ def _get_employee_soul(
         from crew.discovery import discover_employees
 
         result = discover_employees(project_dir=project_dir)
+
+        # 先尝试按 name (slug) 查找
         employee = result.get(employee_name)
+
+        # 如果没找到，尝试按 character_name 查找
+        if employee is None:
+            for emp in result.employees.values():
+                if emp.character_name == employee_name:
+                    employee = emp
+                    break
+
         if employee is None:
             logger.warning("SG Bridge: 员工 %s 未找到，跳过 soul 注入", employee_name)
             return ""
