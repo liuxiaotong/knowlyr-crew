@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
+
 async def _tool_create_feishu_event(
     args: dict,
     *,
@@ -90,7 +91,9 @@ async def _tool_create_feishu_event(
     else:
         return f"创建失败: {result.get('error', '未知错误')}"
 
+
 # ── 飞书日程查询/删除 ──
+
 
 async def _tool_read_feishu_calendar(
     args: dict,
@@ -172,6 +175,7 @@ async def _tool_read_feishu_calendar(
     except Exception as e:
         return f"查询失败: {e}"
 
+
 async def _tool_delete_feishu_event(
     args: dict,
     *,
@@ -210,7 +214,9 @@ async def _tool_delete_feishu_event(
     except Exception as e:
         return f"删除失败: {e}"
 
+
 # ── 飞书待办任务 ──
+
 
 async def _tool_create_feishu_task(
     args: dict,
@@ -265,6 +271,7 @@ async def _tool_create_feishu_task(
     except Exception as e:
         return f"创建失败: {e}"
 
+
 async def _tool_list_feishu_tasks(
     args: dict,
     *,
@@ -316,6 +323,7 @@ async def _tool_list_feishu_tasks(
     except Exception as e:
         return f"查询失败: {e}"
 
+
 async def _tool_complete_feishu_task(
     args: dict,
     *,
@@ -347,6 +355,7 @@ async def _tool_complete_feishu_task(
     except Exception as e:
         return f"操作失败: {e}"
 
+
 async def _tool_delete_feishu_task(
     args: dict,
     *,
@@ -377,6 +386,7 @@ async def _tool_delete_feishu_task(
         return f"删除失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"删除失败: {e}"
+
 
 async def _tool_update_feishu_task(
     args: dict,
@@ -445,6 +455,7 @@ async def _tool_update_feishu_task(
         return f"更新失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"更新失败: {e}"
+
 
 async def _tool_feishu_chat_history(
     args: dict,
@@ -527,6 +538,7 @@ async def _tool_feishu_chat_history(
     except Exception as e:
         return f"查询失败: {e}"
 
+
 # ── 天气工具 ──
 
 # 中国主要城市代码映射（中国气象局编码）
@@ -593,6 +605,7 @@ _CITY_CODES: dict[str, str] = {
     "扬州": "101190601",
 }
 
+
 async def _tool_search_feishu_docs(
     args: dict,
     *,
@@ -628,6 +641,7 @@ async def _tool_search_feishu_docs(
         lines.append(f"[{doc_type}] {title}\n{url}")
     return "\n---\n".join(lines)
 
+
 async def _tool_read_feishu_doc(
     args: dict,
     *,
@@ -656,6 +670,7 @@ async def _tool_read_feishu_doc(
     if len(content) > 9500:
         return content[:9500] + f"\n\n[内容已截断，共 {len(content)} 字符]"
     return content
+
 
 async def _tool_create_feishu_doc(
     args: dict,
@@ -707,7 +722,9 @@ async def _tool_create_feishu_doc(
     url = f"https://feishu.cn/docx/{doc_id}"
     return f"文档已创建：{title}\n{url}"
 
+
 _URL_RE = re.compile(r"https?://\S+")
+
 
 async def _fetch_og_meta(url: str) -> dict[str, str]:
     """抓取页面 Open Graph 元数据（title / description / image）."""
@@ -746,6 +763,7 @@ async def _fetch_og_meta(url: str) -> dict[str, str]:
     except Exception:
         pass
     return meta
+
 
 def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> dict:
     """根据链接和 OG 元数据构建飞书卡片."""
@@ -795,6 +813,7 @@ def _build_link_card(url: str, text: str, og: dict[str, str] | None = None) -> d
         "elements": elements,
     }
 
+
 async def _tool_send_feishu_group(
     args: dict,
     *,
@@ -830,6 +849,7 @@ async def _tool_send_feishu_group(
     if result.get("code") == 0 or result.get("ok"):
         return f"消息已发送到群 {chat_id}。"
     return f"发送失败: {result.get('msg') or result.get('error', '未知错误')}"
+
 
 async def _tool_send_feishu_file(
     args: dict,
@@ -891,6 +911,7 @@ async def _tool_send_feishu_file(
     except Exception as e:
         return f"发送文件失败: {e}"
 
+
 async def _tool_list_feishu_groups(
     args: dict,
     *,
@@ -925,6 +946,7 @@ async def _tool_list_feishu_groups(
         return "\n".join(lines)
     except Exception as e:
         return f"查询失败: {e}"
+
 
 async def _tool_send_feishu_dm(
     args: dict,
@@ -965,6 +987,7 @@ async def _tool_send_feishu_dm(
         return f"发送失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"发送失败: {e}"
+
 
 async def _tool_feishu_group_members(
     args: dict,
@@ -1008,7 +1031,9 @@ async def _tool_feishu_group_members(
     except Exception as e:
         return f"查询失败: {e}"
 
+
 # ── GitHub 工具 ──
+
 
 async def _tool_read_feishu_sheet(
     args: dict,
@@ -1072,6 +1097,7 @@ async def _tool_read_feishu_sheet(
         return result
     except Exception as e:
         return f"读取表格失败: {e}"
+
 
 async def _tool_update_feishu_sheet(
     args: dict,
@@ -1142,7 +1168,9 @@ async def _tool_update_feishu_sheet(
     except Exception as e:
         return f"写入表格失败: {e}"
 
+
 # ── 飞书审批工具 ──
+
 
 async def _tool_list_feishu_approvals(
     args: dict,
@@ -1210,9 +1238,7 @@ async def _tool_list_feishu_approvals(
                         from datetime import datetime, timedelta
                         from datetime import timezone as _tz
 
-                        ts = (
-                            int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
-                        )
+                        ts = int(start_time) // 1000 if len(start_time) > 10 else int(start_time)
                         dt = datetime.fromtimestamp(ts, _tz(timedelta(hours=8)))
                         ts_str = dt.strftime("%m-%d %H:%M")
                     except (ValueError, OSError):
@@ -1235,6 +1261,7 @@ async def _tool_list_feishu_approvals(
         return "\n".join(all_instances)
     except Exception as e:
         return f"获取审批失败: {e}"
+
 
 # ── 实用工具 ──
 
@@ -1292,6 +1319,7 @@ _UNIT_CONVERSIONS: dict[tuple[str, str], float | Any] = {  # noqa: F821
     ("kmh", "ms"): 1 / 3.6,
 }
 
+
 async def _tool_create_feishu_spreadsheet(
     args: dict,
     *,
@@ -1334,7 +1362,9 @@ async def _tool_create_feishu_spreadsheet(
     except Exception as e:
         return f"创建表格失败: {e}"
 
+
 # ── 飞书通讯录搜索 ──
+
 
 async def _tool_feishu_contacts(
     args: dict,
@@ -1388,7 +1418,9 @@ async def _tool_feishu_contacts(
     except Exception as e:
         return f"搜索通讯录失败: {e}"
 
+
 # ── 文本 & 开发工具 ──
+
 
 async def _tool_feishu_bitable(
     args: dict,
@@ -1445,6 +1477,7 @@ async def _tool_feishu_bitable(
     except Exception as e:
         return f"读取多维表格失败: {e}"
 
+
 async def _tool_feishu_wiki(
     args: dict,
     *,
@@ -1496,6 +1529,7 @@ async def _tool_feishu_wiki(
         return "\n".join(lines)
     except Exception as e:
         return f"搜索知识库失败: {e}"
+
 
 async def _tool_approve_feishu(
     args: dict,
@@ -1569,6 +1603,7 @@ async def _tool_approve_feishu(
         return f"审批操作失败: {data.get('msg', '未知错误')}"
     except Exception as e:
         return f"审批操作失败: {e}"
+
 
 HANDLERS: dict[str, object] = {
     "create_feishu_event": _tool_create_feishu_event,

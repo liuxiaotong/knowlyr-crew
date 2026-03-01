@@ -1792,9 +1792,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_list_employees(
-                        remote_cfg[0], remote_cfg[1], tag=tag,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        tag=tag,
                     )
-                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(items, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
                     logger.warning("远程 list_employees 失败，fallback 到本地: %s", exc)
             # fallback 到本地
@@ -1825,9 +1831,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     data = await _remote_get_employee(
-                        remote_cfg[0], remote_cfg[1], name=emp_name,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        name=emp_name,
                     )
-                    return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(data, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
                     logger.warning("远程 get_employee(%s) 失败，fallback 到本地: %s", emp_name, exc)
             # fallback 到本地
@@ -1855,8 +1867,11 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     prompt = await _remote_run_employee(
-                        remote_cfg[0], remote_cfg[1],
-                        name=emp_name, args=emp_args, agent_id=agent_id,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        name=emp_name,
+                        args=emp_args,
+                        agent_id=agent_id,
                     )
                     if prompt:
                         # 记录工作日志
@@ -1902,8 +1917,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_get_work_log(
-                        remote_cfg[0], remote_cfg[1],
-                        employee_name=emp_name, limit=limit,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        employee_name=emp_name,
+                        limit=limit,
                     )
                     return [
                         TextContent(
@@ -1912,7 +1929,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         )
                     ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 get_work_log 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 get_work_log 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             work_logger = WorkLogger(project_dir=_project_dir)
             sessions = work_logger.list_sessions(employee_name=emp_name, limit=limit)
@@ -1940,9 +1959,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_list_pipelines(remote_cfg[0], remote_cfg[1])
-                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(items, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 list_pipelines 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 list_pipelines 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             pipelines = discover_pipelines(project_dir=_project_dir)
 
@@ -2024,9 +2049,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_list_discussions(remote_cfg[0], remote_cfg[1])
-                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(items, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 list_discussions 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 list_discussions 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             from crew.discussion import discover_discussions, load_discussion
 
@@ -2084,9 +2115,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     try:
                         if is_orchestrated:
                             plan_data = await _remote_run_discussion_plan(
-                                remote_cfg[0], remote_cfg[1],
-                                name=d_name, args=d_args,
-                                agent_id=agent_id, smart_context=smart_context,
+                                remote_cfg[0],
+                                remote_cfg[1],
+                                name=d_name,
+                                args=d_args,
+                                agent_id=agent_id,
+                                smart_context=smart_context,
                             )
                             return [
                                 TextContent(
@@ -2096,14 +2130,19 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             ]
                         else:
                             prompt = await _remote_run_discussion_prompt(
-                                remote_cfg[0], remote_cfg[1],
-                                name=d_name, args=d_args,
-                                agent_id=agent_id, smart_context=smart_context,
+                                remote_cfg[0],
+                                remote_cfg[1],
+                                name=d_name,
+                                args=d_args,
+                                agent_id=agent_id,
+                                smart_context=smart_context,
                             )
                             return [TextContent(type="text", text=prompt)]
                     except Exception as exc:
                         logging.getLogger(__name__).warning(
-                            "远程 run_discussion(%s) 失败，fallback 到本地: %s", d_name, exc,
+                            "远程 run_discussion(%s) 失败，fallback 到本地: %s",
+                            d_name,
+                            exc,
                         )
                 # fallback 到本地
                 d_path = Path(d_name)
@@ -2262,7 +2301,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     result = await _remote_track_decision(
-                        remote_cfg[0], remote_cfg[1],
+                        remote_cfg[0],
+                        remote_cfg[1],
                         employee=arguments["employee"],
                         category=arguments["category"],
                         content=arguments["content"],
@@ -2276,7 +2316,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         )
                     ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 track_decision 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 track_decision 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             from crew.evaluation import EvaluationEngine
 
@@ -2302,7 +2344,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     result = await _remote_evaluate_decision(
-                        remote_cfg[0], remote_cfg[1],
+                        remote_cfg[0],
+                        remote_cfg[1],
                         decision_id=decision_id,
                         actual_outcome=arguments["actual_outcome"],
                         evaluation=arguments.get("evaluation", ""),
@@ -2315,7 +2358,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     ]
                 except Exception as exc:
                     logging.getLogger(__name__).warning(
-                        "远程 evaluate_decision(%s) 失败，fallback 到本地: %s", decision_id, exc,
+                        "远程 evaluate_decision(%s) 失败，fallback 到本地: %s",
+                        decision_id,
+                        exc,
                     )
             # fallback 到本地
             from crew.evaluation import EvaluationEngine
@@ -2343,12 +2388,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_list_meeting_history(
-                        remote_cfg[0], remote_cfg[1],
-                        limit=limit, keyword=keyword,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        limit=limit,
+                        keyword=keyword,
                     )
-                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(items, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 list_meeting_history 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 list_meeting_history 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             from crew.meeting_log import MeetingLogger
 
@@ -2364,12 +2417,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     data = await _remote_get_meeting_detail(
-                        remote_cfg[0], remote_cfg[1], meeting_id=meeting_id,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        meeting_id=meeting_id,
                     )
-                    return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(data, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
                     logging.getLogger(__name__).warning(
-                        "远程 get_meeting_detail(%s) 失败，fallback 到本地: %s", meeting_id, exc,
+                        "远程 get_meeting_detail(%s) 失败，fallback 到本地: %s",
+                        meeting_id,
+                        exc,
                     )
             # fallback 到本地
             from crew.meeting_log import MeetingLogger
@@ -2418,11 +2479,19 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 try:
                     items = await _remote_get_permission_matrix(
-                        remote_cfg[0], remote_cfg[1], employee=emp_name,
+                        remote_cfg[0],
+                        remote_cfg[1],
+                        employee=emp_name,
                     )
-                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                    return [
+                        TextContent(
+                            type="text", text=json.dumps(items, ensure_ascii=False, indent=2)
+                        )
+                    ]
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("远程 get_permission_matrix 失败，fallback 到本地: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "远程 get_permission_matrix 失败，fallback 到本地: %s", exc
+                    )
             # fallback 到本地
             from crew.tool_schema import TOOL_ROLE_PRESETS, resolve_effective_tools
 
@@ -2542,9 +2611,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 base_url, api_token = remote_cfg
                 try:
-                    result = await _remote_kv_put(
-                        base_url, api_token, key=key, content=content
-                    )
+                    result = await _remote_kv_put(base_url, api_token, key=key, content=content)
                     return [
                         TextContent(
                             type="text",
@@ -2569,7 +2636,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/-]*$")
                 if ".." in key or "." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "invalid key"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "invalid key"}, ensure_ascii=False),
+                        )
                     ]
                 base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
                 file_path = (base_dir / key).resolve()
@@ -2579,13 +2649,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     file_path.relative_to(base_dir.resolve())
                 except ValueError:
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": "path traversal detected"}, ensure_ascii=False
+                            ),
+                        )
                     ]
 
                 # 检查是否为符号链接
                 if file_path.is_symlink():
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "symlink not allowed"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "symlink not allowed"}, ensure_ascii=False),
+                        )
                     ]
 
                 file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2594,7 +2672,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 return [
                     TextContent(
                         type="text",
-                        text=json.dumps({"ok": True, "key": key, "size": len(raw_bytes)}, ensure_ascii=False),
+                        text=json.dumps(
+                            {"ok": True, "key": key, "size": len(raw_bytes)}, ensure_ascii=False
+                        ),
                     )
                 ]
 
@@ -2613,7 +2693,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         return [
                             TextContent(
                                 type="text",
-                                text=json.dumps({"error": "not found", "key": key}, ensure_ascii=False),
+                                text=json.dumps(
+                                    {"error": "not found", "key": key}, ensure_ascii=False
+                                ),
                             )
                         ]
                     return [
@@ -2632,7 +2714,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
                 if ".." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "invalid key"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "invalid key"}, ensure_ascii=False),
+                        )
                     ]
                 base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
                 file_path = base_dir / key
@@ -2640,7 +2725,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     file_path.resolve().relative_to(base_dir.resolve())
                 except ValueError:
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": "path traversal detected"}, ensure_ascii=False
+                            ),
+                        )
                     ]
                 if not file_path.is_file():
                     return [
@@ -2661,7 +2751,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     return [
                         TextContent(
                             type="text",
-                            text=json.dumps({"ok": True, "keys": keys}, ensure_ascii=False, indent=2),
+                            text=json.dumps(
+                                {"ok": True, "keys": keys}, ensure_ascii=False, indent=2
+                            ),
                         )
                     ]
                 except Exception as exc:
@@ -2679,7 +2771,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 # 本地 fallback
                 if prefix and (".." in prefix or prefix.startswith("/")):
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "invalid prefix"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "invalid prefix"}, ensure_ascii=False),
+                        )
                     ]
                 base_dir = (_project_dir or Path(".")) / ".crew" / "kv"
                 scan_dir = base_dir / prefix if prefix else base_dir
@@ -2687,7 +2782,12 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     scan_dir.resolve().relative_to(base_dir.resolve())
                 except ValueError:
                     return [
-                        TextContent(type="text", text=json.dumps({"error": "path traversal detected"}, ensure_ascii=False))
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": "path traversal detected"}, ensure_ascii=False
+                            ),
+                        )
                     ]
                 keys: list[str] = []
                 if scan_dir.is_dir():
@@ -2709,7 +2809,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            {
+                                "error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -2728,7 +2830,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     return [
                         TextContent(
                             type="text",
-                            text=json.dumps({"error": f"文件不存在: {file_path_arg}"}, ensure_ascii=False),
+                            text=json.dumps(
+                                {"error": f"文件不存在: {file_path_arg}"}, ensure_ascii=False
+                            ),
                         )
                     ]
                 file_bytes = fp.read_bytes()
@@ -2801,7 +2905,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            {
+                                "error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -2818,7 +2924,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     return [
                         TextContent(
                             type="text",
-                            text=json.dumps({"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False),
+                            text=json.dumps(
+                                {"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False
+                            ),
                         )
                     ]
                 try:
@@ -2839,14 +2947,13 @@ def create_server(project_dir: Path | None = None) -> "Server":
             elif filename_arg:
                 # 按文件名模糊搜索：先 list 再找匹配
                 try:
-                    list_result = await _wiki_list_files(
-                        base_url, wiki_token, page=1, page_size=50
-                    )
+                    list_result = await _wiki_list_files(base_url, wiki_token, page=1, page_size=50)
                     files = list_result.get("files", list_result.get("items", []))
                     # 模糊匹配：文件名包含搜索词（大小写不敏感）
                     keyword = filename_arg.lower()
                     matched = [
-                        f for f in files
+                        f
+                        for f in files
                         if keyword in f.get("filename", "").lower()
                         or keyword in f.get("original_filename", "").lower()
                     ]
@@ -2855,7 +2962,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             TextContent(
                                 type="text",
                                 text=json.dumps(
-                                    {"error": f"未找到匹配的文件: {filename_arg}", "total_files": len(files)},
+                                    {
+                                        "error": f"未找到匹配的文件: {filename_arg}",
+                                        "total_files": len(files),
+                                    },
                                     ensure_ascii=False,
                                 ),
                             )
@@ -2910,7 +3020,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            {
+                                "error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -2955,7 +3067,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 return [
                     TextContent(
                         type="text",
-                        text=json.dumps({"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False),
+                        text=json.dumps(
+                            {"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False
+                        ),
                     )
                 ]
 
@@ -2992,7 +3106,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            {
+                                "error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -3021,7 +3137,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+                            {
+                                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -3061,7 +3179,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": f"未找到空间: {space_slug}，可用空间请通过 wiki_list_files 查看"},
+                            {
+                                "error": f"未找到空间: {space_slug}，可用空间请通过 wiki_list_files 查看"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -3340,7 +3460,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+                            {
+                                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+                            },
                             ensure_ascii=False,
                         ),
                     )
@@ -3358,12 +3480,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     return [
                         TextContent(
                             type="text",
-                            text=json.dumps({"error": f"无效的 doc_id: {doc_id}"}, ensure_ascii=False),
+                            text=json.dumps(
+                                {"error": f"无效的 doc_id: {doc_id}"}, ensure_ascii=False
+                            ),
                         )
                     ]
             elif space_slug and slug:
                 try:
-                    doc = await _wiki_find_doc_by_slug(base_url, admin_token, space_slug=space_slug, doc_slug=slug)
+                    doc = await _wiki_find_doc_by_slug(
+                        base_url, admin_token, space_slug=space_slug, doc_slug=slug
+                    )
                 except Exception as exc:
                     return [
                         TextContent(

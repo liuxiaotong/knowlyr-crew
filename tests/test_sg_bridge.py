@@ -93,7 +93,10 @@ class TestModelSelection:
 
     def test_haiku_not_for_long_message(self):
         # 超过 haiku_max_length 的消息即使含闲聊关键词也不走 haiku
-        assert select_model_tier("你好，帮我看看这个项目的整体架构设计有没有问题", self.config) == ModelTier.OPUS
+        assert (
+            select_model_tier("你好，帮我看看这个项目的整体架构设计有没有问题", self.config)
+            == ModelTier.OPUS
+        )
 
     def test_empty_message(self):
         assert select_model_tier("", self.config) == ModelTier.SONNET
@@ -398,6 +401,7 @@ class TestSGDispatch:
 def _get_bridge_for_test(mock_load):
     """测试辅助：获取当前 bridge 单例."""
     from crew.sg_bridge import _bridge_instance
+
     return _bridge_instance
 
 
@@ -421,9 +425,7 @@ class TestEmployeeSoul:
         # 模拟 source_path 下有 chat-profile.md
         mock_emp.source_path = Path(tmp_dir := "/tmp/_test_chat_profile")
         Path(tmp_dir).mkdir(exist_ok=True)
-        (Path(tmp_dir) / "chat-profile.md").write_text(
-            "你是墨言，有猫叫阿灰。", encoding="utf-8"
-        )
+        (Path(tmp_dir) / "chat-profile.md").write_text("你是墨言，有猫叫阿灰。", encoding="utf-8")
         mock_result = MagicMock()
         mock_result.get.return_value = mock_emp
         mock_discover.return_value = mock_result
@@ -496,6 +498,7 @@ class TestEmployeeSoul:
 
         # 强制缓存过期
         from crew.sg_bridge import _soul_cache
+
         name, (body, _ts) = next(iter(_soul_cache.items()))
         _soul_cache[name] = (body, 0)  # 过期
 

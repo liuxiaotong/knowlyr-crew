@@ -2444,11 +2444,13 @@ async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
     for pname, ppath in pipelines.items():
         try:
             pl = load_pipeline(ppath)
-            data.append({
-                "name": pname,
-                "description": pl.description,
-                "steps": len(pl.steps),
-            })
+            data.append(
+                {
+                    "name": pname,
+                    "description": pl.description,
+                    "steps": len(pl.steps),
+                }
+            )
         except Exception:
             data.append({"name": pname, "error": "parse_failed"})
     return JSONResponse({"items": data})
@@ -2466,12 +2468,14 @@ async def _handle_discussion_list(request: Any, ctx: _AppContext) -> Any:
         try:
             d = load_discussion(dpath)
             rounds_count = d.rounds if isinstance(d.rounds, int) else len(d.rounds)
-            data.append({
-                "name": dname,
-                "description": d.description,
-                "participants": [p.employee for p in d.participants],
-                "rounds": rounds_count,
-            })
+            data.append(
+                {
+                    "name": dname,
+                    "description": d.description,
+                    "participants": [p.employee for p in d.participants],
+                    "rounds": rounds_count,
+                }
+            )
         except Exception:
             data.append({"name": dname, "error": "parse_failed"})
     return JSONResponse({"items": data})
@@ -2617,9 +2621,7 @@ async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
     category = payload.get("category")
     content = payload.get("content")
     if not employee or not category or not content:
-        return JSONResponse(
-            {"error": "employee, category, content are required"}, status_code=400
-        )
+        return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
 
     engine = EvaluationEngine(project_dir=ctx.project_dir)
     try:
@@ -2706,9 +2708,7 @@ async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
             "display_name": emp.effective_display_name,
             "tools_declared": len(emp.tools),
             "tools_effective": len(effective),
-            "permissions": (
-                emp.permissions.model_dump(mode="json") if emp.permissions else None
-            ),
+            "permissions": (emp.permissions.model_dump(mode="json") if emp.permissions else None),
             "effective_tools": sorted(effective),
         }
         matrix.append(entry)
@@ -2772,7 +2772,7 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
 def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
     """将 slug 或 agent_id 转换为中文名（用于配置查询）."""
     # 如果已经是中文名，直接返回
-    if any('\u4e00' <= c <= '\u9fff' for c in identifier):
+    if any("\u4e00" <= c <= "\u9fff" for c in identifier):
         return identifier
 
     # 尝试从组织架构查找

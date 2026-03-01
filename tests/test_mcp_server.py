@@ -660,6 +660,7 @@ class TestWikiDocTools:
         handler = self.server.request_handlers[CallToolRequest]
         # 确保环境变量未设置
         import os
+
         old_url = os.environ.pop("WIKI_API_URL", None)
         old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
         old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
@@ -693,6 +694,7 @@ class TestWikiDocTools:
     def test_wiki_create_doc_missing_required_params(self):
         """缺少必填参数时 MCP SDK 应拒绝请求."""
         import os
+
         os.environ.setdefault("WIKI_API_URL", "https://example.com")
         os.environ.setdefault("ANTGATHER_API_TOKEN", "test-token")
         handler = self.server.request_handlers[CallToolRequest]
@@ -715,6 +717,7 @@ class TestWikiDocTools:
         """未配置环境变量时应返回错误信息."""
         handler = self.server.request_handlers[CallToolRequest]
         import os
+
         old_url = os.environ.pop("WIKI_API_URL", None)
         old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
         old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
@@ -744,6 +747,7 @@ class TestWikiDocTools:
     def test_wiki_update_doc_missing_locator(self):
         """未提供 doc_id 也未提供 space_slug+slug 时应返回错误."""
         import os
+
         os.environ.setdefault("WIKI_API_URL", "https://example.com")
         os.environ.setdefault("ANTGATHER_API_TOKEN", "test-token")
         handler = self.server.request_handlers[CallToolRequest]

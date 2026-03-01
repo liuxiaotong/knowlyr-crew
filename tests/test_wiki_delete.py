@@ -39,10 +39,13 @@ class TestWikiFileDelete:
         mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
         mock_client_instance.__aexit__ = AsyncMock(return_value=None)
 
-        with patch.dict(
-            "os.environ",
-            {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
-        ), patch("httpx.AsyncClient", return_value=mock_client_instance):
+        with (
+            patch.dict(
+                "os.environ",
+                {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
+            ),
+            patch("httpx.AsyncClient", return_value=mock_client_instance),
+        ):
             client = _make_client()
             resp = client.delete(
                 "/api/wiki/files/42",
@@ -65,10 +68,13 @@ class TestWikiFileDelete:
         mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
         mock_client_instance.__aexit__ = AsyncMock(return_value=None)
 
-        with patch.dict(
-            "os.environ",
-            {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
-        ), patch("httpx.AsyncClient", return_value=mock_client_instance):
+        with (
+            patch.dict(
+                "os.environ",
+                {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
+            ),
+            patch("httpx.AsyncClient", return_value=mock_client_instance),
+        ):
             client = _make_client()
             resp = client.delete(
                 "/api/wiki/files/99999",

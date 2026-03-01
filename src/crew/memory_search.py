@@ -428,7 +428,7 @@ class SemanticMemoryIndex:
             warnings.warn(
                 "SemanticMemoryIndex 未显式关闭，可能导致资源泄漏。请使用 with 语句。",
                 ResourceWarning,
-                stacklevel=2
+                stacklevel=2,
             )
             self.close()
 

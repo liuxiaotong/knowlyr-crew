@@ -72,13 +72,20 @@ class SGBridgeConfig:
 
     # Claude CLI 配置
     claude_bin: str = "claude"  # SG 上的 claude 命令路径
-    claude_env_file: str = "/root/.claude/env.sh"  # SG 上的环境变量文件（SSH 非交互不加载 .profile）
+    claude_env_file: str = (
+        "/root/.claude/env.sh"  # SG 上的环境变量文件（SSH 非交互不加载 .profile）
+    )
     default_model: str = "sonnet"  # 默认模型标识
     # -p 模式下允许的工具（root 不能用 --dangerously-skip-permissions）
     allowed_tools: list[str] = field(
         default_factory=lambda: [
-            "WebSearch", "WebFetch", "Read", "Grep", "Glob",
-            "mcp__crew__query_memory", "mcp__crew__list_employees",
+            "WebSearch",
+            "WebFetch",
+            "Read",
+            "Grep",
+            "Glob",
+            "mcp__crew__query_memory",
+            "mcp__crew__list_employees",
             "mcp__crew__get_work_log",
         ]
     )
@@ -392,17 +399,27 @@ class SGBridge:
         key_path = str(Path(self.config.ssh_key_path).expanduser())
         return [
             "ssh",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", f"ConnectTimeout={self.config.ssh_connect_timeout}",
-            "-o", "ServerAliveInterval=30",
-            "-o", "ServerAliveCountMax=3",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            f"ConnectTimeout={self.config.ssh_connect_timeout}",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ServerAliveCountMax=3",
             # ControlMaster 长连接
-            "-o", f"ControlPath={self.config.control_path}",
-            "-o", "ControlMaster=auto",
-            "-o", f"ControlPersist={self.config.control_persist}",
-            "-i", key_path,
-            "-p", str(self.config.ssh_port),
+            "-o",
+            f"ControlPath={self.config.control_path}",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPersist={self.config.control_persist}",
+            "-i",
+            key_path,
+            "-p",
+            str(self.config.ssh_port),
         ]
 
     def _ssh_target(self) -> str:
@@ -498,9 +515,7 @@ class SGBridge:
                 proc.kill()  # type: ignore[union-attr]
             except ProcessLookupError:
                 pass
-            raise SGBridgeTimeout(
-                f"claude 执行超时（{self.config.claude_timeout}s）"
-            )
+            raise SGBridgeTimeout(f"claude 执行超时（{self.config.claude_timeout}s）")
         except OSError as e:
             raise SGBridgeUnavailable(f"SSH 连接失败: {e}")
 
@@ -511,9 +526,7 @@ class SGBridge:
                 raise SGBridgeUnavailable(f"SSH 连接被拒: {stderr_text[:200]}")
             if "Permission denied" in stderr_text:
                 raise SGBridgeUnavailable(f"SSH 认证失败: {stderr_text[:200]}")
-            raise SGBridgeError(
-                f"claude 执行失败 (rc={proc.returncode}): {stderr_text[:500]}"
-            )
+            raise SGBridgeError(f"claude 执行失败 (rc={proc.returncode}): {stderr_text[:500]}")
 
         output = stdout.decode("utf-8", errors="replace").strip()
         if not output:
@@ -526,8 +539,10 @@ class SGBridge:
         try:
             cmd = [
                 "ssh",
-                "-o", f"ControlPath={self.config.control_path}",
-                "-O", "exit",
+                "-o",
+                f"ControlPath={self.config.control_path}",
+                "-O",
+                "exit",
                 self._ssh_target(),
             ]
             proc = await asyncio.create_subprocess_exec(

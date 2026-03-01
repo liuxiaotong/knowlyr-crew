@@ -430,9 +430,7 @@ def list_pipelines() -> list[dict[str, Any]]:
 
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT name, description, created_at, updated_at FROM pipelines ORDER BY name"
-        )
+        cur.execute("SELECT name, description, created_at, updated_at FROM pipelines ORDER BY name")
         rows = cur.fetchall()
         return [
             {

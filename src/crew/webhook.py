@@ -627,7 +627,9 @@ def serve_webhook(
     if not _crew_logger.handlers:
         _handler = logging.StreamHandler()
         _handler.setFormatter(
-            logging.Formatter("%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+            logging.Formatter(
+                "%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+            )
         )
         _crew_logger.addHandler(_handler)
     _crew_logger.setLevel(logging.INFO)

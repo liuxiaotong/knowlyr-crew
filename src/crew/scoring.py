@@ -87,10 +87,10 @@ EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
 
 # 各域的参考步数默认值（用于 efficiency 计算）
 DOMAIN_REFERENCE_STEPS: dict[str, int] = {
-    "conversation": 3,   # 对话类：回复+偶尔查资料
-    "engineering": 15,    # 工程类：读代码+改代码+跑测试
-    "advisory": 5,        # 顾问类：分析+建议
-    "discussion": 3,      # 讨论类：发言
+    "conversation": 3,  # 对话类：回复+偶尔查资料
+    "engineering": 15,  # 工程类：读代码+改代码+跑测试
+    "advisory": 5,  # 顾问类：分析+建议
+    "discussion": 3,  # 讨论类：发言
 }
 
 EXEMPLAR_THRESHOLD = 0.7
@@ -201,7 +201,9 @@ def _get_domain(employee: str, *, project_dir: Path | None = None) -> str:
         emp = disc.get(employee)
         if emp:
             role = (emp.description or "").lower()
-            if any(k in role for k in ("工程", "engineer", "开发", "测试", "test", "运维", "devops")):
+            if any(
+                k in role for k in ("工程", "engineer", "开发", "测试", "test", "运维", "devops")
+            ):
                 return "engineering"
             if any(k in role for k in ("研究", "设计", "经理", "顾问", "法务", "财务", "HR", "hr")):
                 return "advisory"
@@ -442,13 +444,52 @@ _PHRASE_MAP: dict[str, list[str]] = {
 # 核心词性标记：动词和核心名词权重更高
 # 中文核心动词（在行为描述中出现时权重加倍）
 _CORE_VERBS: set[str] = {
-    "检查", "审查", "分析", "测试", "验证", "修复", "优化", "部署",
-    "创建", "删除", "配置", "处理", "建议", "评估", "实现", "设计",
-    "重构", "编写", "生成", "监控", "诊断", "排查", "解决",
-    "check", "review", "analyze", "test", "validate", "fix", "optimize",
-    "deploy", "create", "delete", "configure", "handle", "suggest",
-    "evaluate", "implement", "design", "refactor", "write", "generate",
-    "monitor", "diagnose", "debug", "resolve",
+    "检查",
+    "审查",
+    "分析",
+    "测试",
+    "验证",
+    "修复",
+    "优化",
+    "部署",
+    "创建",
+    "删除",
+    "配置",
+    "处理",
+    "建议",
+    "评估",
+    "实现",
+    "设计",
+    "重构",
+    "编写",
+    "生成",
+    "监控",
+    "诊断",
+    "排查",
+    "解决",
+    "check",
+    "review",
+    "analyze",
+    "test",
+    "validate",
+    "fix",
+    "optimize",
+    "deploy",
+    "create",
+    "delete",
+    "configure",
+    "handle",
+    "suggest",
+    "evaluate",
+    "implement",
+    "design",
+    "refactor",
+    "write",
+    "generate",
+    "monitor",
+    "diagnose",
+    "debug",
+    "resolve",
 }
 
 
