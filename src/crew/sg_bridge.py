@@ -777,16 +777,21 @@ async def sg_dispatch(
         raise SGBridgeError(f"SG Plan 阶段失败: {e}") from e
 
     # ── 阶段 2: 权限确认 ──
-    if permission_callback:
-        try:
-            approved = await permission_callback(sensitive_ops)
-            if not approved:
-                logger.info("SG dispatch: 用户拒绝执行")
-                return "用户拒绝了操作"
-        except Exception as e:
-            logger.warning("SG dispatch: 权限回调失败: %s", e)
-            # 权限回调失败，为安全起见拒绝执行
-            return f"权限确认失败: {e}"
+    if sensitive_ops:
+        if permission_callback:
+            try:
+                approved = await permission_callback(sensitive_ops)
+                if not approved:
+                    logger.info("SG dispatch: 用户拒绝执行")
+                    return "用户拒绝了操作"
+            except Exception as e:
+                logger.warning("SG dispatch: 权限回调失败: %s", e)
+                # 权限回调失败，为安全起见拒绝执行
+                return f"权限确认失败: {e}"
+        else:
+            # 没有权限回调但有敏感操作 → 返回 plan 结果，不执行
+            logger.info("SG dispatch: 检测到敏感操作但无权限回调，返回 plan 结果")
+            return plan_reply + "\n\n（检测到敏感操作，需要权限确认才能执行）"
 
     # ── 阶段 3: Execute Mode 执行 ──
     try:

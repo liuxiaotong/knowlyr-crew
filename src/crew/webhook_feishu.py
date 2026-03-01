@@ -823,12 +823,15 @@ async def _feishu_dispatch(
             try:
                 from crew.sg_bridge import SGBridgeError, sg_dispatch
 
+                # 飞书暂不启用权限确认（因为需要复杂的消息状态管理）
+                # TODO: 未来可通过飞书卡片交互实现
                 _sg_reply = await sg_dispatch(
                     task_text,
                     project_dir=ctx.project_dir,
                     employee_name=employee_name,
                     chat_context=chat_context,
                     message_history=message_history,
+                    permission_callback=None,  # 飞书暂不启用
                 )
             except SGBridgeError as _sg_err:
                 logger.info("SG Bridge fallback: %s → 走 crew 引擎", _sg_err)
