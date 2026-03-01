@@ -3104,10 +3104,24 @@ async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
     """列出所有讨论会配置 — GET /api/config/discussions."""
     from starlette.responses import JSONResponse
 
-    from crew.config_store import list_discussions
+    from crew.config_store import get_discussion, list_discussions
 
     try:
         items = list_discussions()
+        # 增强：添加 participants 和 rounds 信息
+        for item in items:
+            try:
+                full_config = get_discussion(item["name"])
+                if full_config and full_config.get("yaml_content"):
+                    import yaml
+                    parsed = yaml.safe_load(full_config["yaml_content"])
+                    if parsed:
+                        if "participants" in parsed:
+                            item["participants"] = parsed["participants"]
+                        if "rounds" in parsed:
+                            item["rounds"] = parsed["rounds"]
+            except Exception:
+                pass  # 解析失败不影响列表
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 discussions 失败")
@@ -3192,10 +3206,21 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
     """列出所有流水线配置 — GET /api/config/pipelines."""
     from starlette.responses import JSONResponse
 
-    from crew.config_store import list_pipelines
+    from crew.config_store import get_pipeline, list_pipelines
 
     try:
         items = list_pipelines()
+        # 增强：添加 steps 信息
+        for item in items:
+            try:
+                full_config = get_pipeline(item["name"])
+                if full_config and full_config.get("yaml_content"):
+                    import yaml
+                    parsed = yaml.safe_load(full_config["yaml_content"])
+                    if parsed and "steps" in parsed:
+                        item["steps"] = len(parsed["steps"])
+            except Exception:
+                pass  # 解析失败不影响列表
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 pipelines 失败")
