@@ -450,6 +450,7 @@ class SGBridge:
         *,
         model_tier: ModelTier = ModelTier.SONNET,
         employee_context: str | None = None,
+        permission_mode: str | None = None,
     ) -> str:
         """通过 SSH 在 SG 节点执行 claude -p 并返回回复文本.
 
@@ -457,6 +458,7 @@ class SGBridge:
             message: 用户消息
             model_tier: 模型分层（haiku/sonnet/opus）
             employee_context: 员工上下文提示（可选，会加入 system prompt 前缀）
+            permission_mode: 权限模式（plan/acceptEdits/default 等）
 
         Returns:
             claude 的回复文本
@@ -482,8 +484,13 @@ class SGBridge:
             claude_cmd_parts.extend(["--model", "haiku"])
         # sonnet 是默认，不需要额外参数
 
+        # 权限模式
+        if permission_mode:
+            claude_cmd_parts.extend(["--permission-mode", permission_mode])
+
         # 启用工具（root 不能用 --dangerously-skip-permissions，用 --allowedTools 代替）
-        if self.config.allowed_tools:
+        # Plan Mode 下不需要限制工具（因为不会实际执行）
+        if self.config.allowed_tools and permission_mode != "plan":
             tools_str = ",".join(self.config.allowed_tools)
             claude_cmd_parts.extend(["--allowedTools", tools_str])
 
@@ -589,6 +596,53 @@ def reset_sg_bridge() -> None:
 # ── 高层 API ──
 
 
+def _extract_sensitive_operations(plan_text: str) -> list[dict[str, str]]:
+    """从 Plan Mode 的输出中提取敏感操作.
+
+    Returns:
+        敏感操作列表，每项包含 {"tool": "工具名", "description": "操作描述"}
+    """
+    operations = []
+
+    # 常见的敏感操作关键词
+    sensitive_patterns = [
+        (r"(?:创建|写入|新建).*?文件", "Write", "写入文件"),
+        (r"(?:修改|编辑|更新).*?文件", "Edit", "修改文件"),
+        (r"(?:删除|移除).*?文件", "Delete", "删除文件"),
+        (r"(?:执行|运行).*?命令", "Bash", "执行命令"),
+        (r"(?:部署|发布|推送)", "Deploy", "部署操作"),
+        (r"git\s+(?:commit|push)", "Git", "Git 操作"),
+    ]
+
+    for pattern, tool, desc in sensitive_patterns:
+        if re.search(pattern, plan_text, re.IGNORECASE):
+            operations.append({"tool": tool, "description": desc})
+
+    # 去重
+    seen = set()
+    unique_ops = []
+    for op in operations:
+        key = op["tool"]
+        if key not in seen:
+            seen.add(key)
+            unique_ops.append(op)
+
+    return unique_ops
+
+
+def _is_read_only_query(message: str) -> bool:
+    """判断是否为纯查询请求（不需要执行阶段）."""
+    read_only_keywords = [
+        "什么", "哪", "如何", "怎么", "为什么", "是否", "有没有",
+        "查", "看", "搜", "找", "列出", "显示", "告诉",
+        "what", "which", "how", "why", "is", "are", "can",
+        "show", "list", "find", "search", "tell", "explain",
+    ]
+
+    message_lower = message.lower()
+    return any(kw in message_lower for kw in read_only_keywords)
+
+
 async def sg_dispatch(
     message: str,
     *,
@@ -596,10 +650,16 @@ async def sg_dispatch(
     employee_name: str | None = None,
     chat_context: str | None = None,
     message_history: list[dict] | None = None,
+    permission_callback: Any = None,
 ) -> str:
-    """SG 转发主入口 — 成功返回回复文本，失败抛出 SGBridgeError.
+    """SG 转发主入口（两阶段权限确认）— 成功返回回复文本，失败抛出 SGBridgeError.
 
     调用方应捕获 SGBridgeError 并 fallback 到现有 crew 引擎。
+
+    流程：
+    1. Plan Mode 分析（haiku 模型，快速且省钱）
+    2. 提取敏感操作，请求权限确认
+    3. 用户批准后，Execute Mode 执行（原始模型）
 
     Args:
         message: 用户消息文本
@@ -607,6 +667,7 @@ async def sg_dispatch(
         employee_name: 目标员工名称（用于上下文）
         chat_context: 飞书对话场景上下文
         message_history: 飞书对话历史（最近几轮），每条 {"role": "user"|"assistant", "content": "..."}
+        permission_callback: 权限回调函数 async (operations: list[dict]) -> bool
 
     Returns:
         claude 的回复文本
@@ -674,22 +735,88 @@ async def sg_dispatch(
         bridge.circuit_breaker.state.value,
     )
 
+    # ── 阶段 1: Plan Mode 分析（用 haiku 省钱） ──
+    plan_reply = None
+    sensitive_ops = []
+
     try:
-        reply = await bridge.execute_claude(
+        # 用 haiku 快速分析意图
+        plan_reply = await bridge.execute_claude(
             full_message,
-            model_tier=model_tier,
+            model_tier=ModelTier.HAIKU,
             employee_context=employee_ctx,
+            permission_mode="plan",
         )
-        bridge.circuit_breaker.record_success()
+
+        # 提取敏感操作
+        sensitive_ops = _extract_sensitive_operations(plan_reply)
+
         logger.info(
-            "SG dispatch 成功: model=%s reply_len=%d",
-            model_tier.value,
-            len(reply),
+            "SG Plan 阶段完成: 检测到 %d 个敏感操作: %s",
+            len(sensitive_ops),
+            [op["tool"] for op in sensitive_ops],
         )
-        return reply
+
+        # 如果是纯查询且没有敏感操作，直接返回 plan 结果
+        if not sensitive_ops and _is_read_only_query(message):
+            bridge.circuit_breaker.record_success()
+            logger.info("SG dispatch: 纯查询请求，直接返回 plan 结果")
+            return plan_reply
+
+        # 如果没有敏感操作，也直接返回（可能是闲聊）
+        if not sensitive_ops:
+            bridge.circuit_breaker.record_success()
+            logger.info("SG dispatch: 无敏感操作，直接返回 plan 结果")
+            return plan_reply
+
     except SGBridgeError:
         bridge.circuit_breaker.record_failure()
         raise
     except Exception as e:
         bridge.circuit_breaker.record_failure()
-        raise SGBridgeError(f"SG dispatch 未知错误: {e}") from e
+        raise SGBridgeError(f"SG Plan 阶段失败: {e}") from e
+
+    # ── 阶段 2: 权限确认 ──
+    if permission_callback:
+        try:
+            approved = await permission_callback(sensitive_ops)
+            if not approved:
+                logger.info("SG dispatch: 用户拒绝执行")
+                return "用户拒绝了操作"
+        except Exception as e:
+            logger.warning("SG dispatch: 权限回调失败: %s", e)
+            # 权限回调失败，为安全起见拒绝执行
+            return f"权限确认失败: {e}"
+
+    # ── 阶段 3: Execute Mode 执行 ──
+    try:
+        # 构建执行消息（包含 plan 上下文）
+        exec_message = f"""<plan_context>
+以下是你刚才在 Plan Mode 下的分析结果：
+
+{plan_reply}
+</plan_context>
+
+现在请执行上述计划。原始用户请求：{message}"""
+
+        exec_reply = await bridge.execute_claude(
+            exec_message,
+            model_tier=model_tier,
+            employee_context=employee_ctx,
+            permission_mode="acceptEdits",
+        )
+
+        bridge.circuit_breaker.record_success()
+        logger.info(
+            "SG dispatch 成功（两阶段）: plan_len=%d exec_len=%d",
+            len(plan_reply),
+            len(exec_reply),
+        )
+        return exec_reply
+
+    except SGBridgeError:
+        bridge.circuit_breaker.record_failure()
+        raise
+    except Exception as e:
+        bridge.circuit_breaker.record_failure()
+        raise SGBridgeError(f"SG Execute 阶段失败: {e}") from e

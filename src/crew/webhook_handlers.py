@@ -2471,11 +2471,35 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         try:
             from crew.sg_bridge import sg_dispatch
 
+            # 定义权限回调函数
+            async def permission_callback(operations: list[dict]) -> bool:
+                """请求用户权限确认."""
+                from crew.permission_request import PermissionManager
+
+                manager = PermissionManager()
+
+                # 构建权限请求参数
+                tool_names = [op["tool"] for op in operations]
+                tool_params = {
+                    "operations": operations,
+                    "message": message[:200],
+                }
+
+                # 请求权限（会推送事件到前端）
+                approved = await manager.request_permission(
+                    tool_name=f"SG执行: {', '.join(tool_names)}",
+                    tool_params=tool_params,
+                    timeout=60.0,
+                )
+
+                return approved
+
             _sg_reply = await sg_dispatch(
                 message,
                 project_dir=ctx.project_dir,
                 employee_name=employee_id,
                 message_history=message_history,
+                permission_callback=permission_callback,
             )
         except Exception as _sg_exc:
             logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
