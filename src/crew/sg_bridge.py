@@ -764,11 +764,8 @@ async def sg_dispatch(
             logger.info("SG dispatch: 纯查询请求，直接返回 plan 结果")
             return plan_reply
 
-        # 如果没有敏感操作，也直接返回（可能是闲聊）
-        if not sensitive_ops:
-            bridge.circuit_breaker.record_success()
-            logger.info("SG dispatch: 无敏感操作，直接返回 plan 结果")
-            return plan_reply
+        # 如果没有敏感操作但也不是查询，继续执行（可能是正则未匹配到）
+        # 只有明确的闲聊才跳过执行阶段
 
     except SGBridgeError:
         bridge.circuit_breaker.record_failure()
