@@ -2384,6 +2384,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     context_only: bool = bool(payload.get("context_only", False))
     message_history: list[dict[str, Any]] | None = payload.get("message_history")
     model: str | None = payload.get("model")
+    attachments: list[dict[str, Any]] | None = payload.get("attachments")
 
     # 异步回调参数（用于长任务）
     callback_channel_id: int | None = payload.get("callback_channel_id")
@@ -2479,6 +2480,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     user_message=message,
                     message_history=message_history,
                     sender_id=sender_id,
+                    attachments=attachments,
                 )
                 result = {
                     "reply": exec_result.get("output", ""),

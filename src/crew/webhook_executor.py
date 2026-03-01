@@ -712,6 +712,7 @@ async def _execute_employee_with_tools(
     user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
     sender_id: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
@@ -816,10 +817,39 @@ async def _execute_employee_with_tools(
     messages: list[dict[str, Any]] = []
     if message_history:
         for h in message_history:
-            messages.append({"role": h["role"], "content": h["content"]})
+            # 历史消息可能包含附件
+            hist_attachments = h.get("attachments")
+            if hist_attachments and any(att.get("type", "").startswith("image/") for att in hist_attachments):
+                # 转换为 content blocks 格式
+                content_blocks: list[dict[str, Any]] = [
+                    {"type": "text", "text": h["content"]}
+                ]
+                for att in hist_attachments:
+                    if att.get("type", "").startswith("image/"):
+                        content_blocks.append({
+                            "type": "image",
+                            "source": {"type": "url", "url": att["url"]}
+                        })
+                messages.append({"role": h["role"], "content": content_blocks})
+            else:
+                messages.append({"role": h["role"], "content": h["content"]})
 
     task_text = user_message or args.get("task", "请开始执行上述任务。")
-    messages.append({"role": "user", "content": task_text})
+
+    # 如果当前消息有附件，转换为 content blocks 格式
+    if attachments and any(att.get("type", "").startswith("image/") for att in attachments):
+        content_blocks: list[dict[str, Any]] = [
+            {"type": "text", "text": task_text if isinstance(task_text, str) else str(task_text)}
+        ]
+        for att in attachments:
+            if att.get("type", "").startswith("image/"):
+                content_blocks.append({
+                    "type": "image",
+                    "source": {"type": "url", "url": att["url"]}
+                })
+        messages.append({"role": "user", "content": content_blocks})
+    else:
+        messages.append({"role": "user", "content": task_text})
 
     total_input = 0
     total_output = 0
