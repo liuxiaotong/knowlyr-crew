@@ -2411,24 +2411,60 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             "path": "sg",
         }
     else:
-        # ── Fallback: 调 CrewEngine.chat() ──
+        # ── Fallback: 检查员工是否有工具，决定调用路径 ──
+        from crew.discovery import discover_employees
         from crew.engine import CrewEngine
         from crew.exceptions import EmployeeNotFoundError
+        from crew.tool_schema import AGENT_TOOLS
 
-        engine = CrewEngine(project_dir=ctx.project_dir)
+        discovery = discover_employees(project_dir=ctx.project_dir)
+        emp = discovery.get(employee_id)
+        if emp is None:
+            return JSONResponse(
+                {"ok": False, "error": f"员工不存在: {employee_id}"},
+                status_code=404,
+            )
+
+        # 如果员工有 agent tools，使用带工具的执行路径
+        has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
 
         try:
-            result = await engine.chat(
-                employee_id=employee_id,
-                message=message,
-                channel=channel,
-                sender_id=sender_id,
-                max_visibility=max_visibility,
-                stream=stream,
-                context_only=context_only,
-                message_history=message_history,
-                model=model,
-            )
+            if has_agent_tools and not context_only:
+                # 使用带工具的执行路径
+                import crew.webhook_executor as _wh_exec
+
+                exec_result = await _wh_exec._execute_employee_with_tools(
+                    ctx,
+                    employee_id,
+                    {},  # args
+                    agent_id=None,
+                    model=model,
+                    user_message=message,
+                    message_history=message_history,
+                    sender_id=sender_id,
+                )
+                result = {
+                    "reply": exec_result.get("output", ""),
+                    "employee_id": employee_id,
+                    "memory_updated": False,
+                    "tokens_used": exec_result.get("input_tokens", 0)
+                    + exec_result.get("output_tokens", 0),
+                    "latency_ms": 0,
+                }
+            else:
+                # 使用简单的 chat 路径（无工具）
+                engine = CrewEngine(project_dir=ctx.project_dir)
+                result = await engine.chat(
+                    employee_id=employee_id,
+                    message=message,
+                    channel=channel,
+                    sender_id=sender_id,
+                    max_visibility=max_visibility,
+                    stream=stream,
+                    context_only=context_only,
+                    message_history=message_history,
+                    model=model,
+                )
         except EmployeeNotFoundError:
             return JSONResponse(
                 {"ok": False, "error": f"员工不存在: {employee_id}"},

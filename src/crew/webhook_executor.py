@@ -711,6 +711,7 @@ async def _execute_employee_with_tools(
     model: str | None = None,
     user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
+    sender_id: str | None = None,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
@@ -779,7 +780,27 @@ async def _execute_employee_with_tools(
 
     from crew.permission import PermissionGuard
 
-    guard = PermissionGuard(match)
+    # 管理员（sender_id == "1"）跳过权限检查
+    if sender_id == "1":
+        # 管理员模式：允许所有工具
+        from crew.tool_schema import AGENT_TOOLS
+
+        class AdminGuard:
+            """管理员权限守卫 - 允许所有工具."""
+
+            def __init__(self):
+                self.employee_name = match.name
+                self.allowed = AGENT_TOOLS | {"submit", "finish", "load_tools"}
+
+            def check(self, tool_name: str) -> None:
+                pass  # 管理员不检查权限
+
+            def check_soft(self, tool_name: str) -> str | None:
+                return None  # 管理员不检查权限
+
+        guard = AdminGuard()
+    else:
+        guard = PermissionGuard(match)
 
     # 从 employee 的 tools 列表中筛选 agent tools
     agent_tool_names = [t for t in (match.tools or []) if t in AGENT_TOOLS]
