@@ -326,11 +326,6 @@ def create_webhook_app(
             methods=["GET"],
         ),
         Route(
-            "/api/employees",
-            endpoint=_make_handler(ctx, _handle_employee_create),
-            methods=["POST"],
-        ),
-        Route(
             "/api/employees/{identifier}/prompt",
             endpoint=_make_handler(ctx, _handle_employee_prompt),
             methods=["GET"],

@@ -1659,58 +1659,6 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="create_employee",
-                description="创建新的 AI 员工（含头像生成、文件系统创建）",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "员工标识（slug，仅 [a-z0-9-]）",
-                        },
-                        "character_name": {
-                            "type": "string",
-                            "description": "角色名/中文名",
-                        },
-                        "display_name": {
-                            "type": "string",
-                            "description": "显示名称（可选）",
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "职责描述",
-                        },
-                        "model": {
-                            "type": "string",
-                            "description": "使用的模型（默认 claude-sonnet-4-6）",
-                        },
-                        "model_tier": {
-                            "type": "string",
-                            "description": "模型档位（默认 claude）",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "标签列表",
-                        },
-                        "soul_content": {
-                            "type": "string",
-                            "description": "初始 soul 配置",
-                        },
-                        "avatar_prompt": {
-                            "type": "string",
-                            "description": "头像生成 prompt（可选）",
-                        },
-                        "agent_status": {
-                            "type": "string",
-                            "enum": ["active", "frozen", "inactive"],
-                            "description": "员工状态（默认 active）",
-                        },
-                    },
-                    "required": ["name", "character_name", "soul_content"],
-                },
-            ),
-            Tool(
                 name="create_discussion",
                 description="创建讨论会配置",
                 inputSchema={
@@ -3338,53 +3286,6 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     resp = await client.put(
                         f"{base_url}/api/souls/{employee_name}",
                         json={"content": content, "updated_by": updated_by},
-                        headers={"Authorization": f"Bearer {api_token}"},
-                    )
-                    resp.raise_for_status()
-                    return [
-                        TextContent(
-                            type="text",
-                            text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
-                        )
-                    ]
-            except Exception as exc:
-                return [
-                    TextContent(
-                        type="text",
-                        text=json.dumps({"error": str(exc)}, ensure_ascii=False),
-                    )
-                ]
-
-        elif name == "create_employee":
-            remote_cfg = _get_remote_memory_config()
-            if not remote_cfg:
-                return [
-                    TextContent(
-                        type="text",
-                        text=json.dumps({"error": "远程 API 未配置"}, ensure_ascii=False),
-                    )
-                ]
-            base_url, api_token = remote_cfg
-            try:
-                import httpx
-
-                payload = {
-                    "name": arguments["name"],
-                    "character_name": arguments["character_name"],
-                    "soul_content": arguments["soul_content"],
-                    "display_name": arguments.get("display_name", ""),
-                    "description": arguments.get("description", ""),
-                    "model": arguments.get("model", "claude-sonnet-4-6"),
-                    "model_tier": arguments.get("model_tier", "claude"),
-                    "tags": arguments.get("tags", []),
-                    "avatar_prompt": arguments.get("avatar_prompt", ""),
-                    "agent_status": arguments.get("agent_status", "active"),
-                }
-
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(
-                        f"{base_url}/api/employees",
-                        json=payload,
                         headers={"Authorization": f"Bearer {api_token}"},
                     )
                     resp.raise_for_status()
