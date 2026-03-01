@@ -181,6 +181,24 @@ async def _wiki_list_files(
         return resp.json()
 
 
+async def _wiki_delete_file(
+    base_url: str,
+    token: str,
+    *,
+    file_id: int,
+) -> dict:
+    """删除 Wiki 文件，返回响应 dict."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.delete(
+            f"{base_url}/api/wiki/files/{file_id}",
+            headers={"X-Wiki-Token": token},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ── Wiki Admin API 客户端（文档 CRUD）──────────────────────────
 
 
@@ -1478,6 +1496,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "default": 20,
                         },
                     },
+                },
+            ),
+            Tool(
+                name="wiki_delete_file",
+                description="删除 Wiki 文件 — 按 file_id 删除 OSS 文件和数据库记录",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": ["integer", "string"],
+                            "description": "文件 ID（必填）",
+                        },
+                    },
+                    "required": ["file_id"],
                 },
             ),
             Tool(
@@ -2781,6 +2813,80 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps({"error": f"列表失败: {exc}"}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "wiki_delete_file":
+            file_id_arg = arguments.get("file_id")
+            if file_id_arg is None:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": "缺少必填参数: file_id"}, ensure_ascii=False),
+                    )
+                ]
+            try:
+                fid = int(file_id_arg)
+            except (ValueError, TypeError):
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"无效的 file_id: {file_id_arg}"}, ensure_ascii=False),
+                    )
+                ]
+
+            # 优先走远程 Crew API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                import httpx
+
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        resp = await client.delete(
+                            f"{remote_cfg[0]}/api/wiki/files/{fid}",
+                            headers={"Authorization": f"Bearer {remote_cfg[1]}"},
+                        )
+                        resp.raise_for_status()
+                        return [
+                            TextContent(
+                                type="text",
+                                text=json.dumps(resp.json(), ensure_ascii=False, indent=2),
+                            )
+                        ]
+                except Exception as exc:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"删除文件失败: {exc}"}, ensure_ascii=False),
+                        )
+                    ]
+
+            # 本地: 直接调用 Wiki 后端
+            wiki_cfg = _get_wiki_config()
+            if not wiki_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, wiki_token = wiki_cfg
+            try:
+                result = await _wiki_delete_file(base_url, wiki_token, file_id=fid)
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"删除文件失败: {exc}"}, ensure_ascii=False),
                     )
                 ]
 

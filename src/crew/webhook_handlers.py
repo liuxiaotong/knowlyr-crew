@@ -2713,3 +2713,54 @@ async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
         }
         matrix.append(entry)
     return JSONResponse({"items": matrix})
+
+
+async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
+    """Wiki 文件删除 — DELETE /api/wiki/files/{file_id}.
+
+    路径参数:
+        file_id: Wiki 文件 ID
+
+    返回:
+        {"ok": true, "deleted_file_id": N} 或 404
+    """
+    from starlette.responses import JSONResponse
+
+    file_id_str = request.path_params.get("file_id", "")
+    if not file_id_str:
+        return JSONResponse({"error": "file_id is required"}, status_code=400)
+
+    try:
+        file_id = int(file_id_str)
+    except (ValueError, TypeError):
+        return JSONResponse({"error": f"invalid file_id: {file_id_str}"}, status_code=400)
+
+    # 调用 Wiki 后端删除文件
+    wiki_api_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
+    wiki_api_token = os.environ.get("WIKI_API_TOKEN", "")
+    if not wiki_api_url or not wiki_api_token:
+        return JSONResponse(
+            {"error": "Wiki API 未配置，请设置 WIKI_API_URL 和 WIKI_API_TOKEN 环境变量"},
+            status_code=500,
+        )
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(
+                f"{wiki_api_url}/api/wiki/files/{file_id}",
+                headers={"X-Wiki-Token": wiki_api_token},
+            )
+            if resp.status_code == 404:
+                return JSONResponse({"error": f"file not found: {file_id}"}, status_code=404)
+            resp.raise_for_status()
+            return JSONResponse({"ok": True, "deleted_file_id": file_id})
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return JSONResponse({"error": f"file not found: {file_id}"}, status_code=404)
+        logger.exception("Wiki 文件删除失败: file_id=%s", file_id)
+        return JSONResponse({"error": f"删除失败: {exc}"}, status_code=500)
+    except Exception as exc:
+        logger.exception("Wiki 文件删除失败: file_id=%s", file_id)
+        return JSONResponse({"error": f"删除失败: {exc}"}, status_code=500)

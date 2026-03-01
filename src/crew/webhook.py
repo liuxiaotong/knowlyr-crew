@@ -105,6 +105,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_task_status,
     _handle_team_agents,
     _handle_trajectory_report,
+    _handle_wiki_file_delete,
     _handle_work_log,
     _health,
     _metrics,
@@ -466,6 +467,12 @@ def create_webhook_app(
             endpoint=_make_handler(ctx, _handle_permission_matrix),
             methods=["GET"],
         ),
+        # Wiki 文件管理端点
+        Route(
+            "/api/wiki/files/{file_id:int}",
+            endpoint=_make_handler(ctx, _handle_wiki_file_delete),
+            methods=["DELETE"],
+        ),
     ]
 
     async def on_startup():
@@ -527,7 +534,7 @@ def create_webhook_app(
             CORSMiddleware,
             allow_origins=cors_origins,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["Content-Type", "Authorization"],
         )
 
