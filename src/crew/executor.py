@@ -151,7 +151,8 @@ async def _anthropic_aexecute(
     temperature: float | None,
     max_tokens: int | None,
     stream: bool,
-) -> ExecutionResult | AsyncIterator[str]:
+    full_events: bool = False,
+) -> ExecutionResult | AsyncIterator[str] | AsyncIterator[dict[str, Any]]:
     anthropic = _get_anthropic()
     if anthropic is None:
         raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
@@ -167,23 +168,84 @@ async def _anthropic_aexecute(
         kwargs["temperature"] = temperature
 
     if stream:
+        if full_events:
+            # 返回完整事件流
+            async def _event_stream() -> AsyncIterator[dict[str, Any]]:
+                collected_text: list[str] = []
+                async with client.messages.stream(**kwargs) as stream_resp:
+                    async for event in stream_resp:
+                        event_type = event.type
 
-        async def _stream() -> AsyncIterator[str]:
-            collected: list[str] = []
-            async with client.messages.stream(**kwargs) as resp:
-                async for text in resp.text_stream:
-                    collected.append(text)
-                    yield text
-                final = resp.get_final_message()
-            _stream.result = ExecutionResult(  # type: ignore[attr-defined]
-                content="".join(collected),
-                model=final.model,
-                input_tokens=final.usage.input_tokens,
-                output_tokens=final.usage.output_tokens,
-                stop_reason=final.stop_reason,
-            )
+                        if event_type == "content_block_start":
+                            block = event.content_block
+                            evt: dict[str, Any] = {
+                                "type": "content_block_start",
+                                "index": event.index,
+                                "content_type": block.type,
+                            }
+                            if block.type == "tool_use":
+                                evt["tool_name"] = block.name
+                                evt["tool_use_id"] = block.id
+                            yield evt
 
-        return _stream()
+                        elif event_type == "content_block_delta":
+                            delta = event.delta
+                            evt = {
+                                "type": "content_block_delta",
+                                "index": event.index,
+                            }
+                            if delta.type == "text_delta":
+                                collected_text.append(delta.text)
+                                evt["content_type"] = "text"
+                                evt["text"] = delta.text
+                            elif delta.type == "thinking_delta":
+                                evt["content_type"] = "thinking"
+                                evt["thinking"] = delta.thinking
+                            elif delta.type == "input_json_delta":
+                                evt["content_type"] = "tool_use"
+                                evt["tool_input"] = delta.partial_json
+                            yield evt
+
+                        elif event_type == "content_block_stop":
+                            yield {
+                                "type": "content_block_stop",
+                                "index": event.index,
+                            }
+
+                        elif event_type == "message_delta":
+                            evt = {"type": "message_delta"}
+                            if hasattr(event.delta, "stop_reason") and event.delta.stop_reason:
+                                evt["stop_reason"] = event.delta.stop_reason
+                            yield evt
+
+                    final = await stream_resp.get_final_message()
+                _event_stream.result = ExecutionResult(  # type: ignore[attr-defined]
+                    content="".join(collected_text),
+                    model=final.model,
+                    input_tokens=final.usage.input_tokens,
+                    output_tokens=final.usage.output_tokens,
+                    stop_reason=final.stop_reason,
+                )
+
+            return _event_stream()
+        else:
+            # 原有的 text_stream 逻辑（向后兼容）
+            async def _stream() -> AsyncIterator[str]:
+                collected: list[str] = []
+                async with client.messages.stream(**kwargs) as resp:
+                    async for text in resp.text_stream:
+                        collected.append(text)
+                        yield text
+                    final = resp.get_final_message()
+                _stream.result = ExecutionResult(  # type: ignore[attr-defined]
+                    content="".join(collected),
+                    model=final.model,
+                    input_tokens=final.usage.input_tokens,
+                    output_tokens=final.usage.output_tokens,
+                    stop_reason=final.stop_reason,
+                )
+
+            return _stream()
 
     resp = await client.messages.create(**kwargs)
     content = resp.content[0].text if resp.content else ""
@@ -685,16 +747,18 @@ async def aexecute_prompt(
     temperature: float | None = None,
     max_tokens: int | None = None,
     stream: bool = True,
+    full_events: bool = False,
     fallback_model: str | None = None,
     fallback_api_key: str | None = None,
     fallback_base_url: str | None = None,
     base_url: str | None = None,
-) -> ExecutionResult | AsyncIterator[str]:
+) -> ExecutionResult | AsyncIterator[str] | AsyncIterator[dict[str, Any]]:
     """execute_prompt 的异步版本.
 
     当 stream=True 时返回 AsyncIterator[str]（调用者需用 async for 消费），
     完成后可通过 .result 属性获取 ExecutionResult。
     当 stream=False 时直接返回 ExecutionResult。
+    当 full_events=True 时返回 AsyncIterator[dict[str, Any]]（完整事件流）。
     """
     provider = detect_provider(model)
     resolved_key = resolve_api_key(provider, api_key)
@@ -724,6 +788,7 @@ async def aexecute_prompt(
                     temperature,
                     max_tokens,
                     stream,
+                    full_events,
                 )
             elif provider == Provider.GEMINI:
                 result = await _gemini_aexecute(
@@ -787,6 +852,7 @@ async def aexecute_prompt(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
+                full_events=full_events,
                 base_url=fallback_base_url,
             )
         except Exception as e:

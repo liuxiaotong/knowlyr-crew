@@ -1251,6 +1251,7 @@ async def _stream_employee(
                     api_key=match.api_key or None,
                     model=use_model,
                     stream=True,
+                    full_events=True,  # 启用完整事件流
                     base_url=match.base_url or None,
                     fallback_model=match.fallback_model or None,
                     fallback_api_key=match.fallback_api_key or None,
@@ -1259,8 +1260,38 @@ async def _stream_employee(
                 timeout=300,
             )
 
-            async for chunk in stream_iter:
-                yield f"data: {_dumps({'token': chunk})}\n\n"
+            async for event in stream_iter:
+                # 判断是字符串（旧格式）还是字典（新格式）
+                if isinstance(event, str):
+                    # 向后兼容：纯文本流
+                    yield f"data: {_dumps({'token': event})}\n\n"
+                elif isinstance(event, dict):
+                    # 完整事件流
+                    event_type = event.get("type")
+                    if event_type == "content_block_start":
+                        content_type = event.get("content_type")
+                        if content_type == "thinking":
+                            yield f"event: thinking_start\ndata: {_dumps({'index': event.get('index', 0)})}\n\n"
+                        elif content_type == "tool_use":
+                            yield f"event: tool_use_start\ndata: {_dumps({'index': event.get('index', 0), 'tool_name': event.get('tool_name'), 'tool_use_id': event.get('tool_use_id')})}\n\n"
+                        elif content_type == "text":
+                            yield f"event: text_start\ndata: {_dumps({'index': event.get('index', 0)})}\n\n"
+
+                    elif event_type == "content_block_delta":
+                        content_type = event.get("content_type")
+                        if content_type == "thinking":
+                            yield f"event: thinking_delta\ndata: {_dumps({'thinking': event.get('thinking', '')})}\n\n"
+                        elif content_type == "tool_use":
+                            yield f"event: tool_input_delta\ndata: {_dumps({'tool_input': event.get('tool_input', '')})}\n\n"
+                        elif content_type == "text":
+                            yield f"event: text_delta\ndata: {_dumps({'text': event.get('text', '')})}\n\n"
+
+                    elif event_type == "content_block_stop":
+                        yield f"event: content_block_stop\ndata: {_dumps({'index': event.get('index', 0)})}\n\n"
+
+                    elif event_type == "message_delta":
+                        if "stop_reason" in event:
+                            yield f"event: message_delta\ndata: {_dumps({'stop_reason': event.get('stop_reason')})}\n\n"
 
             # 流结束后发送完整的 result
             result = getattr(stream_iter, "result", None)
