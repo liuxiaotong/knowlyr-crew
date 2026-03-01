@@ -2771,13 +2771,15 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
 
 def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
     """将 slug 或 agent_id 转换为中文名（用于配置查询）."""
+    from crew.discovery import discover_employees
+
     # 如果已经是中文名，直接返回
     if any("\u4e00" <= c <= "\u9fff" for c in identifier):
         return identifier
 
-    # 尝试从组织架构查找
-    if ctx.org:
-        result = ctx.org.load()
+    # 尝试从员工列表查找
+    if ctx.project_dir:
+        result = discover_employees(ctx.project_dir)
         emp = _find_employee(result, identifier)
         if emp:
             return emp.character_name
