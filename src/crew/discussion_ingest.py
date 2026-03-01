@@ -208,7 +208,9 @@ class DiscussionIngestor:
             "meeting_id": meeting_id,
             "name": f"external-{data.source}",
             "topic": data.topic,
-            "participants": [self.resolve_character_name(p.slug or p.name) for p in data.participants],
+            "participants": [
+                self.resolve_character_name(p.slug or p.name) for p in data.participants
+            ],
             "mode": "external-ingest",
             "rounds": 1,
             "output_format": "memory",

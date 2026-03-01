@@ -231,6 +231,79 @@ async def _remote_kv_list(base_url: str, token: str, *, prefix: str = "") -> lis
         data = resp.json()
         return data.get("keys", [])
 
+
+# ── 远程 Employee API 客户端 ──────────────────────────────────
+
+
+async def _remote_list_employees(
+    base_url: str,
+    token: str,
+    *,
+    tag: str | None = None,
+) -> list[dict]:
+    """通过远程 API 列出员工，返回员工列表."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if tag:
+        params["tag"] = tag
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/employees",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("items", [])
+
+
+async def _remote_get_employee(
+    base_url: str,
+    token: str,
+    *,
+    name: str,
+) -> dict:
+    """通过远程 API 获取单个员工详情，返回完整 dict."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/employees/{name}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _remote_run_employee(
+    base_url: str,
+    token: str,
+    *,
+    name: str,
+    args: dict | None = None,
+    agent_id: str | None = None,
+) -> str:
+    """通过远程 API 获取员工 prompt 文本."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if args:
+        for k, v in args.items():
+            params[f"arg_{k}"] = v
+    if agent_id:
+        params["agent_id"] = agent_id
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/employees/{name}/prompt",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("prompt", "")
+
+
 try:
     from mcp.server import InitializationOptions, Server
     from mcp.server.lowlevel.helper_types import ReadResourceContents
@@ -1047,9 +1120,20 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
     async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "list_employees":
+            tag = arguments.get("tag")
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    items = await _remote_list_employees(
+                        remote_cfg[0], remote_cfg[1], tag=tag,
+                    )
+                    return [TextContent(type="text", text=json.dumps(items, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logger.warning("远程 list_employees 失败，fallback 到本地: %s", exc)
+            # fallback 到本地
             result = discover_employees(project_dir=_project_dir)
             employees = list(result.employees.values())
-            tag = arguments.get("tag")
             if tag:
                 employees = [e for e in employees if tag in e.tags]
             data = [
@@ -1070,6 +1154,17 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "get_employee":
             emp_name = arguments["name"]
+            # 优先走远程 API
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    data = await _remote_get_employee(
+                        remote_cfg[0], remote_cfg[1], name=emp_name,
+                    )
+                    return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+                except Exception as exc:
+                    logger.warning("远程 get_employee(%s) 失败，fallback 到本地: %s", emp_name, exc)
+            # fallback 到本地
             result = discover_employees(project_dir=_project_dir)
             emp = result.get(emp_name)
             if emp is None:
@@ -1089,6 +1184,26 @@ def create_server(project_dir: Path | None = None) -> "Server":
             emp_name = arguments["name"]
             emp_args = arguments.get("args", {})
             agent_id = arguments.get("agent_id")
+            # 优先走远程 API 拿 prompt
+            remote_cfg = _get_remote_memory_config()
+            if remote_cfg:
+                try:
+                    prompt = await _remote_run_employee(
+                        remote_cfg[0], remote_cfg[1],
+                        name=emp_name, args=emp_args, agent_id=agent_id,
+                    )
+                    if prompt:
+                        # 记录工作日志
+                        try:
+                            log = WorkLogger(project_dir=_project_dir)
+                            sid = log.create_session(emp_name, args=emp_args, agent_id=agent_id)
+                            log.add_entry(sid, "prompt_generated", f"{len(prompt)} chars (remote)")
+                        except Exception:
+                            pass  # 日志失败不影响主流程
+                        return [TextContent(type="text", text=prompt)]
+                except Exception as exc:
+                    logger.warning("远程 run_employee(%s) 失败，fallback 到本地: %s", emp_name, exc)
+            # fallback 到本地
             result = discover_employees(project_dir=_project_dir)
             emp = result.get(emp_name)
             if emp is None:

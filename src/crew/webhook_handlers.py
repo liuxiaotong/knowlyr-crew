@@ -718,8 +718,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": True, "deleted": True, "entry_id": entry_id})
         else:
             return JSONResponse(
-                {"ok": False, "error": "Entry not found", "entry_id": entry_id},
-                status_code=404
+                {"ok": False, "error": "Entry not found", "entry_id": entry_id}, status_code=404
             )
     except Exception as e:
         logger.exception("记忆删除失败")
@@ -1656,9 +1655,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
     try:
         idx = store._get_semantic_index()
         if idx is None:
-            return JSONResponse(
-                {"error": "semantic index not available"}, status_code=503
-            )
+            return JSONResponse({"error": "semantic index not available"}, status_code=503)
 
         if employee:
             # 指定员工搜索
@@ -2332,9 +2329,7 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     else:
         raw_bytes = await request.body()
         if not raw_bytes:
-            return JSONResponse(
-                {"ok": False, "error": "empty body"}, status_code=400
-            )
+            return JSONResponse({"ok": False, "error": "empty body"}, status_code=400)
 
     # 写入文件
     base_dir = _kv_base_dir(ctx)
@@ -2343,9 +2338,7 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     try:
         file_path.resolve().relative_to(base_dir.resolve())
     except ValueError:
-        return JSONResponse(
-            {"ok": False, "error": "path traversal detected"}, status_code=400
-        )
+        return JSONResponse({"ok": False, "error": "path traversal detected"}, status_code=400)
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(raw_bytes)
@@ -2367,9 +2360,7 @@ async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
     try:
         file_path.resolve().relative_to(base_dir.resolve())
     except ValueError:
-        return JSONResponse(
-            {"ok": False, "error": "path traversal detected"}, status_code=400
-        )
+        return JSONResponse({"ok": False, "error": "path traversal detected"}, status_code=400)
 
     if not file_path.is_file():
         return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
@@ -2402,9 +2393,7 @@ async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
     try:
         scan_dir.resolve().relative_to(base_dir.resolve())
     except ValueError:
-        return JSONResponse(
-            {"ok": False, "error": "path traversal detected"}, status_code=400
-        )
+        return JSONResponse({"ok": False, "error": "path traversal detected"}, status_code=400)
 
     keys: list[str] = []
     if scan_dir.is_dir():
