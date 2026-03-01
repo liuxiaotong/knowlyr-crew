@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def compute_content_hash(dir_path: Path) -> str:
-    """计算目录内所有内容文件的组合 SHA256.
+    """计算目录内内容文件的 SHA256.
 
-    扫描 prompt.md + workflows/*.md + adaptors/*.md，按固定顺序拼接后取哈希。
+    只读 soul.md（员工唯一定义文件）。
 
     Args:
         dir_path: 员工目录路径
@@ -24,20 +24,9 @@ def compute_content_hash(dir_path: Path) -> str:
     """
     hasher = hashlib.sha256()
 
-    # 按固定顺序收集内容文件
-    content_files: list[Path] = []
-
-    prompt_path = dir_path / "prompt.md"
-    if prompt_path.exists():
-        content_files.append(prompt_path)
-
-    for subdir in ("workflows", "adaptors"):
-        sub_path = dir_path / subdir
-        if sub_path.is_dir():
-            content_files.extend(sorted(sub_path.glob("*.md")))
-
-    for f in content_files:
-        hasher.update(f.read_bytes())
+    soul_path = dir_path / "soul.md"
+    if soul_path.exists():
+        hasher.update(soul_path.read_bytes())
 
     return hasher.hexdigest()[:8]
 

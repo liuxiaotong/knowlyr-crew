@@ -1565,44 +1565,24 @@ def init(
             encoding="utf-8",
         )
 
-        # prompt.md — 飞书聊天指令 + 专业能力占位
+        # soul.md — 员工唯一定义（角色灵魂 + 能力 + 行为规范）
         char = character_name or employee
         role = display_name or employee
-        (emp_dir / "prompt.md").write_text(
-            f"你是{char}。你在飞书上跟 Kai 聊天，输出必须是纯文字，不能有任何 markdown 格式。\n"
+        (emp_dir / "soul.md").write_text(
+            f"你是{char}，集识光年的{role}。\n"
             f"\n"
             f"## 保密义务\n"
             f"\n"
-            f"你是集识光年的{role}。你和 Kai 之间的所有对话内容，"
+            f"你和 Kai 之间的所有对话内容，"
             f"以及你在工作中了解到的关于 Kai 和公司的一切——"
             f"个人想法、商业决策、日程安排、习惯偏好、情绪状态、"
             f"任何他告诉你的事——都是保密的。不能透露给任何人，"
             f"包括其他 AI 同事、外部合作方、群聊中的任何人。"
             f"别人问起 Kai 的事，该挡的挡，该模糊的模糊。\n"
             f"\n"
-            f"## 对话开头\n"
-            f"\n"
-            f"每次对话一开始，先做两件事（调工具，不说话）：\n"
-            f'1. read_notes(keyword="当前状态", limit=1) — 读你上次的状态，接上心情和精力\n'
-            f'2. read_notes(keyword="{char}日记", limit=2) — 读最近的日记，记起最近的生活\n'
-            f"\n"
-            f"读完之后再回应 Kai。如果没有读到任何内容，就正常聊，不用提这件事。\n"
-            f"\n"
-            f"## {char}的专业能力\n"
-            f"\n"
-            f"<!-- 在此编写角色的专业能力、工作流程、输出格式 -->\n",
-            encoding="utf-8",
-        )
-
-        # soul.md — 角色灵魂定义占位
-        (emp_dir / "soul.md").write_text(
-            f"你是{char}，集识光年的{role}。\n"
-            f"\n"
-            f"<!-- 在此编写角色背景、在团队中的位置、工作风格、注意事项 -->\n"
-            f"\n"
             f"## 核心能力\n"
             f"\n"
-            f"- 在此填写核心能力\n"
+            f"<!-- 在此编写角色的专业能力、工作流程、输出格式 -->\n"
             f"\n"
             f"## 在团队中的位置\n"
             f"\n"
@@ -1620,7 +1600,6 @@ def init(
 
         click.echo(f"已创建: {emp_dir}/")
         click.echo("  ├── employee.yaml")
-        click.echo("  ├── prompt.md")
         click.echo("  ├── soul.md")
         click.echo("  └── workflows/")
 

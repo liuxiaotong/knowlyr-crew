@@ -70,7 +70,7 @@ class TestCreate:
             "name: test-emp\ncharacter_name: 测试\nversion: '2.0'\nmodel: claude-sonnet\n",
             encoding="utf-8",
         )
-        (emp_dir / "prompt.md").write_text("# 系统 Prompt", encoding="utf-8")
+        (emp_dir / "soul.md").write_text("# 系统 Prompt", encoding="utf-8")
 
         version = sm.create("有员工")
         manifest_path = sm.snapshots_dir / version / "manifest.json"

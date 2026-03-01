@@ -133,8 +133,8 @@ class SnapshotManager:
             emp_dest = dest_dir / emp_dir.name
             emp_dest.mkdir(parents=True, exist_ok=True)
 
-            # 必拷: employee.yaml, prompt.md, soul.md
-            for fname in ["employee.yaml", "prompt.md", "soul.md"]:
+            # 必拷: employee.yaml, soul.md
+            for fname in ["employee.yaml", "soul.md"]:
                 src = emp_dir / fname
                 if src.exists():
                     shutil.copy2(src, emp_dest / fname)

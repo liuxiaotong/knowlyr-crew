@@ -89,8 +89,8 @@ class TestCheckAndBump:
         check_and_bump(emp_dir)
 
         # 修改内容
-        prompt = emp_dir / "prompt.md"
-        prompt.write_text(prompt.read_text() + "\n新增内容。\n")
+        soul = emp_dir / "soul.md"
+        soul.write_text(soul.read_text() + "\n新增内容。\n")
 
         # 应该再次 bump
         version, bumped = check_and_bump(emp_dir)

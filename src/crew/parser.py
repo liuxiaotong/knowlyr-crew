@@ -153,9 +153,7 @@ def parse_employee_dir(
 
     目录结构:
         employee.yaml   — 纯配置（等同原 frontmatter）
-        prompt.md       — 主提示词
-        workflows/*.md  — 可选：按 scope 拆分的工作流
-        adaptors/*.md   — 可选：按项目类型适配
+        soul.md         — 员工唯一定义（角色灵魂）
 
     Args:
         dir_path: 员工目录路径
@@ -165,12 +163,12 @@ def parse_employee_dir(
         ValueError: 缺少必要文件或必填字段
     """
     config_path = dir_path / "employee.yaml"
-    prompt_path = dir_path / "prompt.md"
+    soul_path = dir_path / "soul.md"
 
     if not config_path.exists():
         raise ValueError(f"缺少 employee.yaml: {dir_path}")
-    if not prompt_path.exists():
-        raise ValueError(f"缺少 prompt.md: {dir_path}")
+    if not soul_path.exists():
+        raise ValueError(f"缺少 soul.md: {dir_path}")
 
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
@@ -184,37 +182,11 @@ def parse_employee_dir(
     if not description:
         raise ValueError(f"缺少必填字段 description: {config_path}")
 
-    # 拼接 body: prompt.md + soul.md + workflows/*.md + adaptors/*.md
-    parts = [prompt_path.read_text(encoding="utf-8")]
-
-    soul_path = dir_path / "soul.md"
-    if soul_path.exists():
-        parts.append(soul_path.read_text(encoding="utf-8"))
-
-    # 共享模板目录：员工目录的父目录下的 _templates/
-    templates_dir = dir_path.parent / "_templates"
-
-    # 先收集 workflows 和 adaptors 中的本地文件，后出现的覆盖先前的
-    combined_files: dict[str, Path] = {}
-    for subdir in ("workflows", "adaptors"):
-        sub_path = dir_path / subdir
-        if sub_path.is_dir():
-            for md_file in sorted(sub_path.glob("*.md")):
-                combined_files[md_file.name] = md_file
-
-    # 公共模板只补缺失的文件（避免重复注入）
-    if templates_dir.is_dir():
-        for md_file in sorted(templates_dir.glob("*.md")):
-            if md_file.name not in combined_files:
-                combined_files[md_file.name] = md_file
-
-    for md_file in sorted(combined_files.values(), key=lambda p: p.name):
-        parts.append(md_file.read_text(encoding="utf-8"))
-
-    body = "\n\n".join(parts)
+    # body 只读 soul.md（员工唯一定义）
+    body = soul_path.read_text(encoding="utf-8")
 
     if not body.strip():
-        raise ValueError(f"prompt.md 正文不能为空: {dir_path}")
+        raise ValueError(f"soul.md 正文不能为空: {dir_path}")
 
     # 解析 args
     raw_args = config.get("args", [])

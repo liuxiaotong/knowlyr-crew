@@ -86,7 +86,7 @@ description: 自定义审查员
                 "name: my-worker\ndescription: 目录格式员工\nversion: '1.0'\n",
                 encoding="utf-8",
             )
-            (crew_dir / "prompt.md").write_text(
+            (crew_dir / "soul.md").write_text(
                 "# 测试\n\n这是目录格式员工。\n",
                 encoding="utf-8",
             )
@@ -116,7 +116,7 @@ description: 自定义审查员
                 "name: dup-worker\ndescription: 目录版\nversion: '1.0'\n",
                 encoding="utf-8",
             )
-            (dir_emp / "prompt.md").write_text("目录内容。\n", encoding="utf-8")
+            (dir_emp / "soul.md").write_text("目录内容。\n", encoding="utf-8")
 
             result = discover_employees(project_dir=Path(tmpdir))
             emp = result.employees["dup-worker"]
@@ -142,7 +142,7 @@ description: 自定义审查员
                 "name: dir-worker\ndescription: 目录员工\nversion: '1.0'\n",
                 encoding="utf-8",
             )
-            (dir_emp / "prompt.md").write_text("目录内容。\n", encoding="utf-8")
+            (dir_emp / "soul.md").write_text("目录内容。\n", encoding="utf-8")
 
             result = discover_employees(project_dir=Path(tmpdir))
             assert "file-worker" in result.employees

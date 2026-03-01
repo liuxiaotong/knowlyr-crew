@@ -169,20 +169,12 @@ class TestParseEmployeeDir:
         assert emp.source_path == FIXTURES / "valid_employee_dir"
 
     def test_parse_dir_with_extras(self):
-        """带 workflows/ 和 adaptors/ 的目录应拼接到 body."""
+        """soul.md 应包含完整的员工定义."""
         emp = parse_employee_dir(FIXTURES / "employee_with_extras")
         assert emp.name == "extras-worker"
         assert "核心提示词" in emp.body
         assert "分析工作流" in emp.body
         assert "Python 适配" in emp.body
-
-    def test_parse_dir_body_order(self):
-        """body 应按 prompt.md → workflows → adaptors 顺序拼接."""
-        emp = parse_employee_dir(FIXTURES / "employee_with_extras")
-        prompt_pos = emp.body.index("核心提示词")
-        workflow_pos = emp.body.index("分析工作流")
-        adaptor_pos = emp.body.index("Python 适配")
-        assert prompt_pos < workflow_pos < adaptor_pos
 
     def test_parse_dir_source_layer(self):
         emp = parse_employee_dir(FIXTURES / "valid_employee_dir", source_layer="global")
@@ -192,16 +184,16 @@ class TestParseEmployeeDir:
         """缺少 employee.yaml 应报错."""
         emp_dir = tmp_path / "broken"
         emp_dir.mkdir()
-        (emp_dir / "prompt.md").write_text("内容")
+        (emp_dir / "soul.md").write_text("内容")
         with pytest.raises(ValueError, match="employee.yaml"):
             parse_employee_dir(emp_dir)
 
-    def test_parse_dir_missing_prompt(self, tmp_path):
-        """缺少 prompt.md 应报错."""
+    def test_parse_dir_missing_soul(self, tmp_path):
+        """缺少 soul.md 应报错."""
         emp_dir = tmp_path / "broken"
         emp_dir.mkdir()
         (emp_dir / "employee.yaml").write_text("name: x\ndescription: y\n")
-        with pytest.raises(ValueError, match="prompt.md"):
+        with pytest.raises(ValueError, match="soul.md"):
             parse_employee_dir(emp_dir)
 
     def test_parse_dir_missing_name(self, tmp_path):
@@ -209,7 +201,7 @@ class TestParseEmployeeDir:
         emp_dir = tmp_path / "broken"
         emp_dir.mkdir()
         (emp_dir / "employee.yaml").write_text("description: y\n")
-        (emp_dir / "prompt.md").write_text("内容")
+        (emp_dir / "soul.md").write_text("内容")
         with pytest.raises(ValueError, match="name"):
             parse_employee_dir(emp_dir)
 
@@ -225,7 +217,7 @@ class TestParseEmployeeDir:
         (emp_dir / "employee.yaml").write_text(
             "name: test-agent\ndescription: test\nagent_id: AI3050\n"
         )
-        (emp_dir / "prompt.md").write_text("内容")
+        (emp_dir / "soul.md").write_text("内容")
         emp = parse_employee_dir(emp_dir)
         assert emp.agent_id == "AI3050"
 

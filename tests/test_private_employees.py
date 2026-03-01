@@ -58,30 +58,12 @@ class TestEmployeeValidation:
         errors = validate_employee(emp)
         assert errors == [], f"{emp.name} 校验失败: {'; '.join(errors)}"
 
-    def test_template_dedup_logic(self, tmp_path):
-        """模板去重回归测试: 共享模板不应在 body 中出现两次."""
-        # 构造: 员工目录 + _templates 目录 + workflows(空)
-        templates = tmp_path / "_templates"
-        templates.mkdir()
-        (templates / "shared.md").write_text("## 共享模板内容\n\n这是共享模板。")
-
-        emp_dir = tmp_path / "test-worker"
-        emp_dir.mkdir()
-        (emp_dir / "employee.yaml").write_text("name: test-worker\ndescription: 模板去重测试\n")
-        (emp_dir / "prompt.md").write_text("# 测试员工\n\n你是测试员工。")
-        (emp_dir / "workflows").mkdir()
-        (emp_dir / "adaptors").mkdir()
-
-        emp = parse_employee_dir(emp_dir, source_layer="project")
-        count = emp.body.count("## 共享模板内容")
-        assert count == 1, f"共享模板在 body 中出现了 {count} 次，应为 1 次"
-
     def test_required_fields_check(self, tmp_path):
         """缺少必填字段应报错."""
         emp_dir = tmp_path / "bad-worker"
         emp_dir.mkdir()
         (emp_dir / "employee.yaml").write_text("name: bad-worker\n")
-        (emp_dir / "prompt.md").write_text("# Bad\n\ntest")
+        (emp_dir / "soul.md").write_text("# Bad\n\ntest")
 
         with pytest.raises(Exception):
             # description 缺失应报错
@@ -252,11 +234,11 @@ class TestPrivateRequiredFields:
 class TestPrivateFileIntegrity:
     """员工目录文件完整性审计."""
 
-    REQUIRED_FILES = ["employee.yaml", "prompt.md", "soul.md"]
+    REQUIRED_FILES = ["employee.yaml", "soul.md"]
 
     @pytest.mark.parametrize("emp_dir", PRIVATE_DIRS, ids=lambda d: d.name)
     def test_required_files_exist(self, emp_dir):
-        """每个员工必须有 employee.yaml、prompt.md、soul.md."""
+        """每个员工必须有 employee.yaml、soul.md."""
         for fname in self.REQUIRED_FILES:
             assert (emp_dir / fname).is_file(), f"{emp_dir.name} 缺少必要文件: {fname}"
 
