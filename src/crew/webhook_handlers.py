@@ -2385,6 +2385,43 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     message_history: list[dict[str, Any]] | None = payload.get("message_history")
     model: str | None = payload.get("model")
 
+    # 异步回调参数（用于长任务）
+    callback_channel_id: int | None = payload.get("callback_channel_id")
+    callback_sender_id: str | None = payload.get("callback_sender_id")
+    async_mode: bool = bool(payload.get("async", False))
+
+    # 如果指定了异步模式，立即返回并在后台执行
+    if async_mode and callback_channel_id:
+        import asyncio
+
+        # 启动后台任务
+        asyncio.create_task(
+            _run_and_callback(
+                ctx=ctx,
+                name=employee_id,
+                args={},
+                agent_id=None,
+                model=model,
+                user_message=message,
+                message_history=message_history,
+                extra_context=None,
+                sender_name=sender_id,
+                channel=channel,
+                callback_channel_id=callback_channel_id,
+                callback_sender_id=callback_sender_id,
+                callback_parent_id=None,
+            )
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "reply": "正在处理您的请求，完成后会通知您...",
+                "async": True,
+                "employee_id": employee_id,
+            }
+        )
+
     # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
     _sg_reply: str | None = None
     if not stream and not context_only:
