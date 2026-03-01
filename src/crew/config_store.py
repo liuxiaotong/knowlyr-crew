@@ -62,10 +62,38 @@ CREATE TABLE IF NOT EXISTS employee_soul_history (
 )
 """
 
+_PG_CREATE_MEMORIES = """\
+CREATE TABLE IF NOT EXISTS memories (
+    id VARCHAR(12) PRIMARY KEY,
+    employee VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    category VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    source_session VARCHAR(255) DEFAULT '',
+    confidence FLOAT DEFAULT 1.0,
+    superseded_by VARCHAR(12) DEFAULT '',
+    ttl_days INTEGER DEFAULT 0,
+    importance INTEGER DEFAULT 3,
+    last_accessed TIMESTAMP,
+    tags TEXT[],
+    shared BOOLEAN DEFAULT FALSE,
+    visibility VARCHAR(20) DEFAULT 'open',
+    trigger_condition TEXT DEFAULT '',
+    applicability TEXT[],
+    origin_employee VARCHAR(255) DEFAULT '',
+    verified_count INTEGER DEFAULT 0
+)
+"""
+
 _PG_CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_soul_history_employee ON employee_soul_history(employee_name)",
     "CREATE INDEX IF NOT EXISTS idx_discussions_updated ON discussions(updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_pipelines_updated ON pipelines(updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_employee ON memories(employee)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_shared ON memories(shared)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags)",
 ]
 
 
@@ -81,6 +109,7 @@ def init_config_tables() -> None:
         cur.execute(_PG_CREATE_DISCUSSIONS)
         cur.execute(_PG_CREATE_PIPELINES)
         cur.execute(_PG_CREATE_SOUL_HISTORY)
+        cur.execute(_PG_CREATE_MEMORIES)
         for sql in _PG_CREATE_INDEXES:
             cur.execute(sql)
 
