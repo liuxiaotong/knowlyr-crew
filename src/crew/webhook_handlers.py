@@ -1842,7 +1842,7 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
     from crew.permission_request import PermissionManager
 
     manager = PermissionManager()
-    success = await manager.respond_to_request(request_id, approved)
+    success = manager.respond(request_id, approved)
 
     if success:
         logger.info("权限响应: request_id=%s, approved=%s", request_id, approved)
