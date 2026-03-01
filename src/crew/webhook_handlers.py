@@ -2776,10 +2776,11 @@ def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
         return identifier
 
     # 尝试从组织架构查找
-    result = ctx.org.load()
-    emp = _find_employee(result, identifier)
-    if emp:
-        return emp.character_name
+    if ctx.org:
+        result = ctx.org.load()
+        emp = _find_employee(result, identifier)
+        if emp:
+            return emp.character_name
 
     # 找不到，返回原值
     return identifier
