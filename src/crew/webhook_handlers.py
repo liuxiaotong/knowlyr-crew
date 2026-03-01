@@ -2769,19 +2769,38 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
 # ── 配置存储 API ──
 
 
+def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
+    """将 slug 或 agent_id 转换为中文名（用于配置查询）."""
+    # 如果已经是中文名，直接返回
+    if any('\u4e00' <= c <= '\u9fff' for c in identifier):
+        return identifier
+
+    # 尝试从组织架构查找
+    result = ctx.org.load()
+    emp = _find_employee(result, identifier)
+    if emp:
+        return emp.character_name
+
+    # 找不到，返回原值
+    return identifier
+
+
 async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
     """获取员工灵魂配置 — GET /api/souls/{employee_name}."""
     from starlette.responses import JSONResponse
 
     from crew.config_store import get_soul
 
-    employee_name = request.path_params.get("employee_name", "")
-    if not employee_name:
+    identifier = request.path_params.get("employee_name", "")
+    if not identifier:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
+
+    # 将 slug 转换为中文名
+    employee_name = _resolve_employee_name(identifier, ctx)
 
     result = get_soul(employee_name)
     if not result:
-        return JSONResponse({"error": f"soul not found: {employee_name}"}, status_code=404)
+        return JSONResponse({"error": f"soul not found: {identifier}"}, status_code=404)
 
     return JSONResponse(result)
 
@@ -2792,9 +2811,12 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
 
     from crew.config_store import update_soul
 
-    employee_name = request.path_params.get("employee_name", "")
-    if not employee_name:
+    identifier = request.path_params.get("employee_name", "")
+    if not identifier:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
+
+    # 将 slug 转换为中文名
+    employee_name = _resolve_employee_name(identifier, ctx)
 
     try:
         body = await request.json()
