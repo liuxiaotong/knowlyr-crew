@@ -650,7 +650,7 @@ async def sg_dispatch(
     employee_name: str | None = None,
     chat_context: str | None = None,
     message_history: list[dict] | None = None,
-    permission_callback: Any = None,
+    permission_callback: Any | None = None,
 ) -> str:
     """SG 转发主入口（两阶段权限确认）— 成功返回回复文本，失败抛出 SGBridgeError.
 

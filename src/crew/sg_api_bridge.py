@@ -16,13 +16,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import yaml
+
+from crew.paths import resolve_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +49,6 @@ class SGAPIConfig:
 
 def load_sg_api_config(project_dir: Path | None = None) -> SGAPIConfig:
     """从 .crew/sg_api.yaml 加载配置."""
-    from crew.paths import resolve_project_dir
-    import yaml
-
     base = resolve_project_dir(project_dir)
     config_path = base / ".crew" / "sg_api.yaml"
 
@@ -332,17 +332,9 @@ async def _execute_tool(
 
 def _load_available_tools(project_dir: Path | None) -> list[dict]:
     """加载可用工具定义（Anthropic API 格式）."""
-    try:
-        from crew.tool_schema import employee_tools_to_schemas
-
-        # 获取所有可用工具
-        # TODO: 这里应该根据员工配置加载工具
-        # 暂时返回空列表，让 Claude 自己决定需要什么工具
-        return []
-
-    except Exception as e:
-        logger.warning("加载工具失败: %s", e)
-        return []
+    # TODO: 这里应该根据员工配置加载工具
+    # 暂时返回空列表，让 Claude 自己决定需要什么工具
+    return []
 
 
 def _convert_event_to_frontend(event: Any) -> dict | None:

@@ -2470,7 +2470,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     if not stream and not context_only:
         # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
         try:
-            from crew.sg_api_bridge import sg_api_dispatch, SGAPIBridgeError
+            from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
 
             _sg_reply = await sg_api_dispatch(
                 message,
