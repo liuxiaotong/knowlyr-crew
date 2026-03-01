@@ -249,13 +249,6 @@ def _get_employee_soul(
         # 先尝试按 name (slug) 查找
         employee = result.get(employee_name)
 
-        # 如果没找到，尝试按 character_name 查找
-        if employee is None:
-            for emp in result.employees.values():
-                if emp.character_name == employee_name:
-                    employee = emp
-                    break
-
         if employee is None:
             logger.warning("SG Bridge: 员工 %s 未找到，跳过 soul 注入", employee_name)
             return ""
@@ -643,6 +636,20 @@ def _extract_sensitive_operations(plan_text: str) -> list[dict[str, str]]:
 
 def _is_read_only_query(message: str) -> bool:
     """判断是否为纯查询请求（不需要执行阶段）."""
+    message_lower = message.lower()
+
+    # 先检查是否包含动作词（如果包含，直接返回 False）
+    action_keywords = [
+        "删除", "移除", "修改", "更新", "创建", "新建", "写入", "执行", "运行",
+        "部署", "发布", "推送", "提交", "改", "加", "减", "清空", "覆盖",
+        "delete", "remove", "modify", "update", "create", "write", "execute", "run",
+        "deploy", "publish", "push", "commit", "change", "add", "clear", "overwrite",
+    ]
+
+    if any(kw in message_lower for kw in action_keywords):
+        return False
+
+    # 然后检查查询关键词
     read_only_keywords = [
         "什么", "哪", "如何", "怎么", "为什么", "是否", "有没有",
         "查", "看", "搜", "找", "列出", "显示", "告诉",
@@ -650,7 +657,6 @@ def _is_read_only_query(message: str) -> bool:
         "show", "list", "find", "search", "tell", "explain",
     ]
 
-    message_lower = message.lower()
     return any(kw in message_lower for kw in read_only_keywords)
 
 

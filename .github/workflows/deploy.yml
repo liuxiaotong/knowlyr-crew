@@ -23,9 +23,9 @@ jobs:
             mkdir -p /opt/knowlyr-crew/project/.crew
             cat > /opt/knowlyr-crew/project/.crew/sg_api.yaml <<'EOFCONFIG'
           enabled: true
-          api_key: \"${{ secrets.CLAUDE_API_KEY }}\"
-          api_base_url: \"https://api.anthropic.com\"
-          default_model: \"claude-sonnet-4-20250514\"
+          api_key: ${{ secrets.CLAUDE_API_KEY }}
+          api_base_url: https://api.anthropic.com
+          default_model: claude-sonnet-4-20250514
           max_tokens: 8192
           temperature: 1.0
           EOFCONFIG
