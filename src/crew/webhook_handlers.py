@@ -640,38 +640,87 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
-    """删除员工（本地文件 + 远端标记为 inactive）."""
+    """删除员工（本地文件 + 数据库 soul + 头像）."""
     import shutil
+    from pathlib import Path
 
     from starlette.responses import JSONResponse
 
+    from crew.config_store import get_soul
+    from crew.database import get_connection, is_pg
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir, cache_ttl=0)
 
     employee = _find_employee(result, identifier)
-    if not employee:
-        return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    if not employee.source_path:
-        return JSONResponse({"error": "Employee source path unknown"}, status_code=400)
+    # 如果员工发现机制找不到，尝试直接从数据库查询
+    character_name = None
+    if employee:
+        character_name = employee.character_name
+    else:
+        # 尝试用 identifier 作为 character_name 查询数据库
+        if get_soul(identifier):
+            character_name = identifier
+        else:
+            return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    # 删除本地文件
-    source = employee.source_path
-    try:
-        if source.is_dir():
-            shutil.rmtree(source)
-        elif source.is_file():
-            source.unlink()
-    except OSError as e:
-        logger.exception("删除员工文件失败: %s", identifier)
-        return JSONResponse({"error": f"Delete failed: {e}"}, status_code=500)
+    deleted_items = []
+
+    # 1. 删除本地文件（如果存在）
+    if employee and employee.source_path:
+        source = employee.source_path
+        try:
+            if source.is_dir():
+                shutil.rmtree(source)
+                deleted_items.append(f"directory: {source}")
+            elif source.is_file():
+                source.unlink()
+                deleted_items.append(f"file: {source}")
+        except OSError as e:
+            logger.exception("删除员工文件失败: %s", identifier)
+            # 继续删除其他资源，不中断
+
+    # 2. 删除数据库 soul 记录
+    if character_name and is_pg():
+        try:
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM employee_souls WHERE employee_name = %s",
+                    (character_name,),
+                )
+                if cur.rowcount > 0:
+                    deleted_items.append(f"soul: {character_name}")
+        except Exception as e:
+            logger.exception("删除员工 soul 失败: %s", character_name)
+            # 继续删除其他资源
+
+    # 3. 删除头像文件（如果存在）
+    if employee and employee.agent_id:
+        try:
+            static_dir = Path(__file__).parent.parent.parent / "static" / "avatars"
+            avatar_path = static_dir / f"{employee.agent_id}.webp"
+            if avatar_path.exists():
+                avatar_path.unlink()
+                deleted_items.append(f"avatar: {employee.agent_id}.webp")
+        except OSError as e:
+            logger.exception("删除头像失败: %s", employee.agent_id)
+            # 继续
+
+    if not deleted_items:
+        return JSONResponse(
+            {"error": "No resources deleted (employee may not exist)"},
+            status_code=404,
+        )
 
     return JSONResponse(
         {
             "ok": True,
-            "deleted": employee.name,
+            "deleted": employee.name if employee else identifier,
+            "character_name": character_name,
+            "deleted_items": deleted_items,
         }
     )
 
