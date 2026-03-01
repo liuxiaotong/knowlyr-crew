@@ -1824,6 +1824,48 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
+    """POST /api/permissions/respond — 响应权限请求."""
+    from starlette.responses import JSONResponse
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "请求体 JSON 解析失败"}, status_code=400)
+
+    request_id = payload.get("request_id", "")
+    approved = payload.get("approved", False)
+
+    if not request_id:
+        return JSONResponse({"ok": False, "error": "缺少 request_id 参数"}, status_code=400)
+
+    from crew.permission_request import PermissionManager
+
+    manager = PermissionManager.get_instance()
+    success = await manager.respond_to_request(request_id, approved)
+
+    if success:
+        logger.info("权限响应: request_id=%s, approved=%s", request_id, approved)
+        return JSONResponse({"ok": True})
+    else:
+        return JSONResponse(
+            {"ok": False, "error": "请求不存在或已过期"},
+            status_code=404,
+        )
+
+
+async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
+    """GET /api/permissions — 获取待处理的权限请求列表."""
+    from starlette.responses import JSONResponse
+
+    from crew.permission_request import PermissionManager
+
+    manager = PermissionManager.get_instance()
+    pending = manager.get_pending_requests()
+
+    return JSONResponse({"ok": True, "requests": pending})
+
+
 async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
     """跨员工语义搜索 — GET /api/memory/search?q=关键词&limit=10&employee=xxx.
 
@@ -3301,3 +3343,37 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
     except Exception as exc:
         logger.exception("列出 pipelines 失败")
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+# ============================================================
+# 权限确认 API
+# ============================================================
+
+
+async def _handle_permission_list(ctx: _AppContext) -> dict[str, Any]:
+    """GET /api/permissions - 获取待处理的权限请求"""
+    from crew.permission_request import PermissionManager
+
+    manager = PermissionManager()
+    requests = manager.get_pending_requests()
+
+    return {"ok": True, "requests": requests}
+
+
+async def _handle_permission_respond(ctx: _AppContext, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/permissions/respond - 响应权限请求"""
+    from crew.permission_request import PermissionManager
+
+    request_id = payload.get("request_id")
+    approved = payload.get("approved", False)
+
+    if not request_id:
+        return {"ok": False, "error": "缺少 request_id"}
+
+    manager = PermissionManager()
+    success = manager.respond(request_id, approved)
+
+    if success:
+        return {"ok": True}
+    else:
+        return {"ok": False, "error": "请求不存在或已过期"}

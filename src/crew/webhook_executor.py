@@ -924,6 +924,7 @@ async def _execute_employee_with_tools(
                     effective_agent_id,
                     guard=guard,
                     max_visibility=max_visibility,
+                    push_event_fn=None,
                 )
                 if tool_output is None:
                     # finish tool
@@ -990,6 +991,7 @@ async def _execute_employee_with_tools(
                     effective_agent_id,
                     guard=guard,
                     max_visibility=max_visibility,
+                    push_event_fn=None,
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
@@ -1057,6 +1059,7 @@ async def _handle_tool_call(
     agent_id: str | None,
     guard: Any | None = None,
     max_visibility: str = "open",
+    push_event_fn: Any = None,
 ) -> str | None:
     """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
     from crew.tool_schema import is_finish_tool
@@ -1070,6 +1073,23 @@ async def _handle_tool_call(
         if denied_msg:
             logger.warning("权限拒绝: %s.%s", employee_name, tool_name)
             return f"[权限拒绝] {denied_msg}"
+
+    # 敏感工具权限确认（仅在非管理员模式下）
+    # 管理员模式下 guard 是 AdminGuard，跳过权限确认
+    if guard is not None and guard.__class__.__name__ != "AdminGuard":
+        from crew.permission_request import SENSITIVE_TOOLS, PermissionManager
+
+        if tool_name in SENSITIVE_TOOLS:
+            logger.info("检测到敏感工具: %s.%s，请求用户确认", employee_name, tool_name)
+            manager = PermissionManager()
+            approved = await manager.request_permission(
+                tool_name=tool_name,
+                tool_params=arguments,
+                push_event_fn=push_event_fn,
+            )
+            if not approved:
+                logger.warning("用户拒绝执行: %s.%s", employee_name, tool_name)
+                return f"[用户拒绝] 您拒绝了执行 {tool_name} 操作"
 
     if tool_name == "add_memory":
         from crew.memory import MemoryStore

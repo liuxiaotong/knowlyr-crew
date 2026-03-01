@@ -99,7 +99,9 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_model_tiers,
     _handle_openclaw,
     _handle_org_memories,
+    _handle_permission_list,
     _handle_permission_matrix,
+    _handle_permission_respond,
     _handle_pipeline_create_config,
     _handle_pipeline_get_config,
     _handle_pipeline_list,
@@ -372,6 +374,16 @@ def create_webhook_app(
             methods=["GET"],
         ),
         Route(
+            "/api/permissions",
+            endpoint=_make_handler(ctx, _handle_permission_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/permissions/respond",
+            endpoint=_make_handler(ctx, _handle_permission_respond),
+            methods=["POST"],
+        ),
+        Route(
             "/api/memory/ingest",
             endpoint=_make_handler(ctx, _handle_memory_ingest),
             methods=["POST"],
@@ -483,6 +495,16 @@ def create_webhook_app(
             "/api/permission-matrix",
             endpoint=_make_handler(ctx, _handle_permission_matrix),
             methods=["GET"],
+        ),
+        Route(
+            "/api/permissions",
+            endpoint=_make_handler(ctx, _handle_permission_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/permissions/respond",
+            endpoint=_make_handler(ctx, _handle_permission_respond),
+            methods=["POST"],
         ),
         # Wiki 文件管理端点
         Route(
