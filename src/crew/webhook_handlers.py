@@ -3113,6 +3113,7 @@ async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
                 full_config = get_discussion(item["name"])
                 if full_config and full_config.get("yaml_content"):
                     import yaml
+
                     parsed = yaml.safe_load(full_config["yaml_content"])
                     if parsed:
                         if "participants" in parsed:
@@ -3215,6 +3216,7 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
                 full_config = get_pipeline(item["name"])
                 if full_config and full_config.get("yaml_content"):
                     import yaml
+
                     parsed = yaml.safe_load(full_config["yaml_content"])
                     if parsed and "steps" in parsed:
                         item["steps"] = len(parsed["steps"])

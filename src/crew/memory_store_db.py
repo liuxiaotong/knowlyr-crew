@@ -156,10 +156,24 @@ class MemoryStoreDB:
                 )
                 """,
                 (
-                    entry_id, employee, created_at, category, content,
-                    source_session, confidence, "", ttl_days,
-                    3, None, tags_list, shared, visibility,
-                    trigger_condition, applicability_list, origin_emp, 0
+                    entry_id,
+                    employee,
+                    created_at,
+                    category,
+                    content,
+                    source_session,
+                    confidence,
+                    "",
+                    ttl_days,
+                    3,
+                    None,
+                    tags_list,
+                    shared,
+                    visibility,
+                    trigger_condition,
+                    applicability_list,
+                    origin_emp,
+                    0,
                 ),
             )
 
@@ -256,7 +270,7 @@ class MemoryStoreDB:
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count
                 FROM memories
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 ORDER BY {order_by}
                 LIMIT %s
             """
@@ -346,9 +360,7 @@ class MemoryStoreDB:
             params.append(min_confidence)
 
         # 过滤过期记忆
-        conditions.append(
-            "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())"
-        )
+        conditions.append("(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())")
 
         # 标签过滤（任一匹配）
         if tags:
@@ -363,7 +375,7 @@ class MemoryStoreDB:
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count
                 FROM memories
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 ORDER BY created_at DESC
                 LIMIT %s
             """
@@ -373,26 +385,28 @@ class MemoryStoreDB:
 
         results = []
         for row in rows:
-            results.append({
-                "id": row[0],
-                "employee": row[1],
-                "created_at": row[2].isoformat() if row[2] else None,
-                "category": row[3],
-                "content": row[4],
-                "source_session": row[5],
-                "confidence": row[6],
-                "superseded_by": row[7],
-                "ttl_days": row[8],
-                "importance": row[9],
-                "last_accessed": row[10].isoformat() if row[10] else None,
-                "tags": row[11] or [],
-                "shared": row[12],
-                "visibility": row[13],
-                "trigger_condition": row[14],
-                "applicability": row[15] or [],
-                "origin_employee": row[16],
-                "verified_count": row[17],
-            })
+            results.append(
+                {
+                    "id": row[0],
+                    "employee": row[1],
+                    "created_at": row[2].isoformat() if row[2] else None,
+                    "category": row[3],
+                    "content": row[4],
+                    "source_session": row[5],
+                    "confidence": row[6],
+                    "superseded_by": row[7],
+                    "ttl_days": row[8],
+                    "importance": row[9],
+                    "last_accessed": row[10].isoformat() if row[10] else None,
+                    "tags": row[11] or [],
+                    "shared": row[12],
+                    "visibility": row[13],
+                    "trigger_condition": row[14],
+                    "applicability": row[15] or [],
+                    "origin_employee": row[16],
+                    "verified_count": row[17],
+                }
+            )
 
         return results
 
@@ -427,9 +441,7 @@ class MemoryStoreDB:
             params.append(min_confidence)
 
         # 过滤过期记忆
-        conditions.append(
-            "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())"
-        )
+        conditions.append("(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())")
 
         # 适用范围过滤
         if applicability:
@@ -444,7 +456,7 @@ class MemoryStoreDB:
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count
                 FROM memories
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 ORDER BY verified_count DESC, created_at DESC
                 LIMIT %s
             """
@@ -454,26 +466,28 @@ class MemoryStoreDB:
 
         results = []
         for row in rows:
-            results.append({
-                "id": row[0],
-                "employee": row[1],
-                "created_at": row[2].isoformat() if row[2] else None,
-                "category": row[3],
-                "content": row[4],
-                "source_session": row[5],
-                "confidence": row[6],
-                "superseded_by": row[7],
-                "ttl_days": row[8],
-                "importance": row[9],
-                "last_accessed": row[10].isoformat() if row[10] else None,
-                "tags": row[11] or [],
-                "shared": row[12],
-                "visibility": row[13],
-                "trigger_condition": row[14],
-                "applicability": row[15] or [],
-                "origin_employee": row[16],
-                "verified_count": row[17],
-            })
+            results.append(
+                {
+                    "id": row[0],
+                    "employee": row[1],
+                    "created_at": row[2].isoformat() if row[2] else None,
+                    "category": row[3],
+                    "content": row[4],
+                    "source_session": row[5],
+                    "confidence": row[6],
+                    "superseded_by": row[7],
+                    "ttl_days": row[8],
+                    "importance": row[9],
+                    "last_accessed": row[10].isoformat() if row[10] else None,
+                    "tags": row[11] or [],
+                    "shared": row[12],
+                    "visibility": row[13],
+                    "trigger_condition": row[14],
+                    "applicability": row[15] or [],
+                    "origin_employee": row[16],
+                    "verified_count": row[17],
+                }
+            )
 
         return results
 
