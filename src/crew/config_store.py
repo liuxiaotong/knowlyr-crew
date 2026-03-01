@@ -211,6 +211,142 @@ def list_souls() -> list[dict[str, Any]]:
         ]
 
 
+def _generate_unique_agent_id() -> str:
+    """生成唯一的 agent_id（AI + 4位随机数字）."""
+    import random
+    from pathlib import Path
+
+    # 确定头像目录
+    static_dir = Path(__file__).parent.parent.parent / "static" / "avatars"
+    static_dir.mkdir(parents=True, exist_ok=True)
+
+    # 尝试生成唯一 ID
+    for _ in range(100):
+        num = random.randint(1000, 9999)
+        agent_id = f"AI{num}"
+        avatar_path = static_dir / f"{agent_id}.webp"
+        if not avatar_path.exists():
+            return agent_id
+
+    raise RuntimeError("无法生成唯一的 agent_id（100 次尝试后仍冲突）")
+
+
+def _create_employee_files(
+    name: str,
+    character_name: str,
+    metadata: dict[str, Any],
+    soul_content: str,
+) -> None:
+    """创建员工的文件系统结构（employee.yaml + soul.md）."""
+    import yaml
+    from pathlib import Path
+
+    # 确定员工目录
+    emp_dir = Path(__file__).parent.parent.parent / "private" / "employees" / name
+    emp_dir.mkdir(parents=True, exist_ok=True)
+
+    # 创建 employee.yaml
+    yaml_content = {
+        "name": name,
+        "character_name": character_name,
+        "display_name": metadata.get("display_name", ""),
+        "description": metadata.get("description", ""),
+        "model": metadata.get("model", "claude-sonnet-4-6"),
+        "model_tier": metadata.get("model_tier", "claude"),
+        "tags": metadata.get("tags", []),
+        "agent_id": metadata.get("agent_id"),
+        "agent_status": metadata.get("agent_status", "active"),
+        "avatar_prompt": metadata.get("avatar_prompt", ""),
+    }
+
+    yaml_path = emp_dir / "employee.yaml"
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(yaml_content, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+    # 创建 soul.md
+    soul_path = emp_dir / "soul.md"
+    with open(soul_path, "w", encoding="utf-8") as f:
+        f.write(soul_content)
+
+    logger.info("已创建员工文件: %s", emp_dir)
+
+
+def create_employee(
+    name: str,
+    character_name: str,
+    display_name: str = "",
+    description: str = "",
+    model: str = "claude-sonnet-4-6",
+    model_tier: str = "claude",
+    tags: list[str] | None = None,
+    soul_content: str = "",
+    agent_status: str = "active",
+    avatar_prompt: str = "",
+) -> dict[str, Any]:
+    """创建新员工（数据库 + 文件系统）.
+
+    Args:
+        name: 员工标识（slug，仅 [a-z0-9-]）
+        character_name: 角色名/中文名
+        display_name: 显示名称（可选）
+        description: 职责描述
+        model: 使用的模型
+        model_tier: 模型档位
+        tags: 标签列表
+        soul_content: 初始 soul 配置
+        agent_status: 员工状态（active/frozen/inactive）
+        avatar_prompt: 头像生成 prompt（可选）
+
+    Returns:
+        创建结果字典（包含 agent_id, employee_name, version, created_at）
+
+    Raises:
+        ValueError: 员工已存在
+        RuntimeError: agent_id 生成失败或配置存储不可用
+    """
+    if not is_pg():
+        raise RuntimeError("配置存储仅支持 PG 模式")
+
+    # 1. 检查员工是否已存在
+    if get_soul(character_name):
+        raise ValueError(f"employee already exists: {character_name}")
+
+    # 2. 生成唯一的 agent_id
+    agent_id = _generate_unique_agent_id()
+
+    # 3. 准备元数据
+    metadata = {
+        "name": name,
+        "agent_id": agent_id,
+        "display_name": display_name,
+        "description": description,
+        "model": model,
+        "model_tier": model_tier,
+        "tags": tags or [],
+        "agent_status": agent_status,
+        "avatar_prompt": avatar_prompt,
+    }
+
+    # 4. 写入数据库
+    result = update_soul(
+        employee_name=character_name,
+        content=soul_content,
+        updated_by="create_employee",
+        metadata=metadata,
+    )
+
+    # 5. 创建文件系统
+    try:
+        _create_employee_files(name, character_name, metadata, soul_content)
+    except Exception as e:
+        logger.error("创建员工文件失败: %s", e, exc_info=True)
+        # 不抛出异常，因为数据库已写入
+
+    # 6. 返回结果（添加 agent_id）
+    result["agent_id"] = agent_id
+    return result
+
+
 # ── Discussion 操作 ──
 
 
