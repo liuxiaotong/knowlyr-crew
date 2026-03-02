@@ -27,7 +27,7 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     GET /wecom/event/{app_id}?msg_signature=...&timestamp=...&nonce=...&echostr=...
     POST /wecom/event/{app_id} (XML body with encrypted message)
     """
-    from starlette.responses import PlainTextResponse, Response
+    from starlette.responses import PlainTextResponse
 
     wecom_ctx = ctx.wecom_ctx
     if wecom_ctx is None:
@@ -160,12 +160,10 @@ async def _wecom_dispatch(
             )
             return
 
-        emp = discovery.get(employee_name)
-
         # ── SG Bridge 主通道尝试 ──
         _sg_reply: str | None = None
         try:
-            from crew.sg_bridge import SGBridgeError, sg_dispatch
+            from crew.sg_bridge import sg_dispatch
 
             _sg_reply = await sg_dispatch(
                 task_text,

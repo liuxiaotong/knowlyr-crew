@@ -5,11 +5,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import json as _json
 import logging
 import os
 import re
-import socket
 import struct
 import threading
 import time
@@ -125,8 +123,10 @@ class WecomCrypto:
         cipher = AES.new(self._key, AES.MODE_CBC, iv=self._key[:16])
         encrypted_bytes = base64.b64decode(encrypted_text)
         decrypted = cipher.decrypt(encrypted_bytes)
-        # PKCS#7 去填充
+        # PKCS#7 去填充（验证 pad 值范围）
         pad_len = decrypted[-1]
+        if pad_len < 1 or pad_len > 32:
+            raise ValueError(f"PKCS#7 pad 值无效: {pad_len}（应为 1-32）")
         content = decrypted[:-pad_len]
         # 解析: random(16) + msg_len(4) + msg + corp_id
         msg_len = struct.unpack("!I", content[16:20])[0]
@@ -164,9 +164,11 @@ def verify_wecom_signature(
 
     SHA1(sort(token, timestamp, nonce, msg_encrypt)) == signature
     """
+    import hmac as _hmac
+
     parts = sorted([token, timestamp, nonce, msg_encrypt])
     digest = hashlib.sha1("".join(parts).encode("utf-8")).hexdigest()
-    return digest == signature
+    return _hmac.compare_digest(digest, signature)
 
 
 def generate_wecom_signature(
