@@ -60,6 +60,11 @@ from crew.webhook_feishu import (  # noqa: F401
     _handle_feishu_event,
 )
 
+# ── re-export: 企微处理 ──
+from crew.webhook_wecom import (  # noqa: F401
+    handle_wecom_event,
+)
+
 # ── re-export: HTTP handler ──
 from crew.webhook_handlers import (  # noqa: F401
     _handle_agent_run,
@@ -173,6 +178,7 @@ def create_webhook_app(
     cors_origins: list[str] | None = None,
     feishu_config: FeishuConfig | None = None,  # noqa: F821
     feishu_bots: list | None = None,
+    wecom_config: WecomConfig | None = None,  # noqa: F821
 ) -> Starlette:
     """创建 webhook Starlette 应用."""
     if not HAS_STARLETTE:
@@ -232,6 +238,24 @@ def create_webhook_app(
 
         chat_store_dir = (project_dir or Path(".")) / ".crew" / "feishu-chats"
         ctx.feishu_chat_store = FeishuChatStore(chat_store_dir)
+
+    # 初始化企业微信
+    if wecom_config and wecom_config.corp_id and wecom_config.secret:
+        from crew.feishu import EventDeduplicator
+        from crew.wecom import WecomCrypto, WecomTokenManager
+
+        ctx.wecom_ctx = {
+            "config": wecom_config,
+            "crypto": WecomCrypto(wecom_config.encoding_aes_key, wecom_config.corp_id),
+            "token_mgr": WecomTokenManager(wecom_config.corp_id, wecom_config.secret),
+            "dedup": EventDeduplicator(),
+        }
+        logger.info(
+            "企微 Bot 已启用: corp_id=%s agent_id=%d default=%s",
+            wecom_config.corp_id,
+            wecom_config.agent_id,
+            wecom_config.default_employee,
+        )
 
     # 初始化 cron 调度器
     scheduler = None
@@ -318,6 +342,12 @@ def create_webhook_app(
             )
             for bot_id in ctx.feishu_bots
         ],
+        # 企业微信: GET 验证 + POST 消息接收
+        Route(
+            "/wecom/event/{app_id}",
+            endpoint=_make_handler(ctx, handle_wecom_event),
+            methods=["GET", "POST"],
+        ),
         Route(
             "/api/team/agents",
             endpoint=_make_handler(ctx, _handle_team_agents),
@@ -613,6 +643,7 @@ def create_webhook_app(
             "/health",
             "/webhook/github",
             "/feishu/event",
+            "/wecom/event",
             "/api/team/agents",
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
@@ -680,6 +711,16 @@ def serve_webhook(
     except Exception:
         pass
 
+    _wecom_config = None
+    try:
+        from crew.wecom import load_wecom_config
+
+        _wecom_config = load_wecom_config(project_dir)
+        if not (_wecom_config.corp_id and _wecom_config.secret):
+            _wecom_config = None
+    except Exception:
+        pass
+
     app = create_webhook_app(
         project_dir=project_dir,
         token=token,
@@ -687,6 +728,7 @@ def serve_webhook(
         cron_config=cron_config,
         cors_origins=cors_origins,
         feishu_bots=feishu_bots,
+        wecom_config=_wecom_config,
     )
 
     logger.info("启动 Webhook 服务器: %s:%d", host, port)
