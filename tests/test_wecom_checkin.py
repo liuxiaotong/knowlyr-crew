@@ -1,4 +1,4 @@
-"""企业微信打卡通报测试 -- classify / format / rules / run_checkin_report."""
+"""企业微信打卡通报测试 -- classify / format / rules / leave / run_checkin_report."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class TestClassifyCheckin:
         from crew.wecom_checkin import classify_checkin
 
         result = classify_checkin([], [])
-        assert result == {"normal": [], "late": [], "absent": []}
+        assert result == {"normal": [], "late": [], "on_leave": [], "absent": []}
 
     def test_with_rules_per_user_threshold(self):
         """每个人使用自己的 work_sec + flex_time 判断迟到."""
@@ -147,6 +147,47 @@ class TestClassifyCheckin:
         assert len(result["normal"]) == 1
         assert result["normal"][0]["checkin_time"] == "08:30"
 
+    def test_on_leave_user(self):
+        """请假的人归入 on_leave，不出现在 absent."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["Alice", "Bob", "Charlie"])
+        records = self._make_records([("uid_0", "09:00")])
+
+        leave_users = {"uid_1"}  # Bob 请假
+
+        result = classify_checkin(users, records, leave_users=leave_users)
+        assert len(result["normal"]) == 1
+        assert result["normal"][0]["name"] == "Alice"
+        assert len(result["on_leave"]) == 1
+        assert result["on_leave"][0]["name"] == "Bob"
+        assert len(result["absent"]) == 1
+        assert result["absent"][0]["name"] == "Charlie"
+
+    def test_on_leave_overrides_checkin(self):
+        """即使请假的人有打卡记录，也归入 on_leave."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["Alice"])
+        records = self._make_records([("uid_0", "09:00")])
+        leave_users = {"uid_0"}
+
+        result = classify_checkin(users, records, leave_users=leave_users)
+        assert len(result["on_leave"]) == 1
+        assert len(result["normal"]) == 0
+
+    def test_no_leave_users_backward_compat(self):
+        """不传 leave_users 时，行为和之前完全一致（返回含 on_leave 空列表）."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["Alice"])
+        records = self._make_records([("uid_0", "09:00")])
+
+        result = classify_checkin(users, records)
+        assert "on_leave" in result
+        assert len(result["on_leave"]) == 0
+        assert len(result["normal"]) == 1
+
 
 # ── 格式化测试 ──
 
@@ -165,6 +206,7 @@ class TestFormatCheckinReport:
             "late": [
                 {"name": "Charlie", "userid": "u3", "checkin_time": "09:45"},
             ],
+            "on_leave": [],
             "absent": [
                 {"name": "David", "userid": "u4"},
             ],
@@ -178,6 +220,7 @@ class TestFormatCheckinReport:
         assert "Alice 08:55" in report
         assert "迟到（1人）" in report
         assert "Charlie 09:45" in report
+        assert "请假（0人）" in report
         assert "未打卡（1人）" in report
         assert "David" in report
 
@@ -226,6 +269,47 @@ class TestFormatCheckinReport:
         assert "WangYao" not in report
         assert "ZhangSan" not in report
         assert "LiSi" not in report
+
+    def test_with_on_leave(self):
+        """请假区域在迟到和未打卡之间."""
+        from crew.wecom_checkin import format_checkin_report
+
+        classified = {
+            "normal": [
+                {"name": "Alice", "userid": "u1", "checkin_time": "09:00"},
+            ],
+            "late": [],
+            "on_leave": [
+                {"name": "王瑶", "userid": "WangYao"},
+                {"name": "张三", "userid": "ZhangSan"},
+            ],
+            "absent": [
+                {"name": "李四", "userid": "LiSi"},
+            ],
+        }
+
+        report = format_checkin_report(classified)
+        assert "请假（2人）" in report
+        assert "王瑶" in report
+        assert "张三" in report
+        # 请假区域在迟到之后、未打卡之前
+        late_pos = report.index("迟到")
+        leave_pos = report.index("请假")
+        absent_pos = report.index("未打卡")
+        assert late_pos < leave_pos < absent_pos
+
+    def test_on_leave_without_key_backward_compat(self):
+        """旧格式（没有 on_leave key）也能正常渲染."""
+        from crew.wecom_checkin import format_checkin_report
+
+        classified = {
+            "normal": [{"name": "Alice", "userid": "u1", "checkin_time": "09:00"}],
+            "late": [],
+            "absent": [],
+        }
+
+        report = format_checkin_report(classified)
+        assert "请假（0人）" in report
 
 
 # ── API 调用测试 ──
@@ -545,10 +629,12 @@ class TestRunCheckinReport:
             patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
             patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
             patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
+            patch("crew.wecom_checkin.get_leave_users", new_callable=AsyncMock) as mock_leave,
         ):
             mock_users.return_value = users
             mock_rules.return_value = rules
             mock_checkin.return_value = checkin_records
+            mock_leave.return_value = set()
 
             report = await run_checkin_report(
                 corp_id="test_corp",
@@ -594,10 +680,12 @@ class TestRunCheckinReport:
             patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
             patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
             patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
+            patch("crew.wecom_checkin.get_leave_users", new_callable=AsyncMock) as mock_leave,
         ):
             mock_users.return_value = users
             mock_rules.return_value = {}  # 规则获取失败
             mock_checkin.return_value = checkin_records
+            mock_leave.return_value = set()
 
             report = await run_checkin_report(
                 corp_id="test_corp",
@@ -633,11 +721,13 @@ class TestRunCheckinReport:
             patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
             patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
             patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
+            patch("crew.wecom_checkin.get_leave_users", new_callable=AsyncMock) as mock_leave,
             patch("crew.wecom.send_wecom_group_text", new_callable=AsyncMock) as mock_send,
         ):
             mock_users.return_value = users
             mock_rules.return_value = rules
             mock_checkin.return_value = checkin_records
+            mock_leave.return_value = set()
             mock_send.return_value = {"errcode": 0, "errmsg": "ok"}
 
             report = await run_checkin_report(
@@ -681,3 +771,237 @@ class TestRunCheckinReport:
 
             with pytest.raises(RuntimeError, match="CorpID 或 Secret 未配置"):
                 await run_checkin_report()
+
+    @pytest.mark.asyncio
+    async def test_full_flow_with_leave(self):
+        """有请假人员时，报告中显示请假而非未打卡."""
+        from crew.wecom_checkin import run_checkin_report
+
+        today = datetime.now(_CST).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        mock_token_mgr = AsyncMock()
+        mock_token_mgr.get_token = AsyncMock(return_value="test_token")
+
+        users = [
+            {"userid": "u1", "name": "王瑶", "department": [1]},
+            {"userid": "u2", "name": "张三", "department": [1]},
+            {"userid": "u3", "name": "李四", "department": [1]},
+        ]
+
+        rules = {
+            "u1": {"work_sec": 34200, "flex_time": 0, "groupname": "上海"},
+            "u2": {"work_sec": 34200, "flex_time": 0, "groupname": "上海"},
+            "u3": {"work_sec": 34200, "flex_time": 0, "groupname": "上海"},
+        }
+
+        checkin_records = [
+            # 张三正常打卡
+            {"userid": "u2", "checkin_time": int(today.replace(hour=9, minute=0).timestamp())},
+            # 王瑶和李四没有打卡记录
+        ]
+
+        with (
+            patch("crew.wecom.WecomTokenManager", return_value=mock_token_mgr),
+            patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
+            patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
+            patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
+            patch("crew.wecom_checkin.get_leave_users", new_callable=AsyncMock) as mock_leave,
+        ):
+            mock_users.return_value = users
+            mock_rules.return_value = rules
+            mock_checkin.return_value = checkin_records
+            mock_leave.return_value = {"u1"}  # 王瑶请假
+
+            report = await run_checkin_report(
+                corp_id="test_corp",
+                secret="test_secret",
+                dry_run=True,
+            )
+
+        # 张三正常
+        assert "正常打卡（1人）" in report
+        assert "张三 09:00" in report
+        # 王瑶请假（不是未打卡）
+        assert "请假（1人）" in report
+        assert "王瑶" in report
+        # 李四未打卡
+        assert "未打卡（1人）" in report
+        assert "李四" in report
+
+
+# ── 请假审批 API 测试 ──
+
+
+class TestGetLeaveUsers:
+    """get_leave_users 审批 API 调用."""
+
+    @pytest.mark.asyncio
+    async def test_success_with_leave(self):
+        """正常获取请假人员."""
+        from crew.wecom_checkin import get_leave_users
+
+        # getapprovalinfo 返回 2 个审批单
+        approval_info_resp = MagicMock()
+        approval_info_resp.json.return_value = {
+            "errcode": 0,
+            "sp_no_list": ["202503020001", "202503020002"],
+            "new_next_cursor": 0,
+        }
+
+        # getapprovaldetail 返回：第一个是请假，第二个是报销
+        detail_resp_leave = MagicMock()
+        detail_resp_leave.json.return_value = {
+            "errcode": 0,
+            "info": {
+                "sp_no": "202503020001",
+                "sp_name": "请假",
+                "sp_status": 2,
+                "applyer": {"userid": "WangYao"},
+            },
+        }
+
+        detail_resp_expense = MagicMock()
+        detail_resp_expense.json.return_value = {
+            "errcode": 0,
+            "info": {
+                "sp_no": "202503020002",
+                "sp_name": "报销",
+                "sp_status": 2,
+                "applyer": {"userid": "ZhangSan"},
+            },
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[approval_info_resp, detail_resp_leave, detail_resp_expense]
+        )
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 1709280000, 1709366400)
+
+        assert result == {"WangYao"}
+
+    @pytest.mark.asyncio
+    async def test_pagination(self):
+        """审批单分页获取."""
+        from crew.wecom_checkin import get_leave_users
+
+        # 第一页
+        page1_resp = MagicMock()
+        page1_resp.json.return_value = {
+            "errcode": 0,
+            "sp_no_list": ["sp001"],
+            "new_next_cursor": 5,
+        }
+
+        # 第二页
+        page2_resp = MagicMock()
+        page2_resp.json.return_value = {
+            "errcode": 0,
+            "sp_no_list": ["sp002"],
+            "new_next_cursor": 0,
+        }
+
+        # 两个审批详情都是请假
+        detail1 = MagicMock()
+        detail1.json.return_value = {
+            "errcode": 0,
+            "info": {"sp_name": "请假", "sp_status": 2, "applyer": {"userid": "u1"}},
+        }
+        detail2 = MagicMock()
+        detail2.json.return_value = {
+            "errcode": 0,
+            "info": {"sp_name": "请假", "sp_status": 2, "applyer": {"userid": "u2"}},
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[page1_resp, page2_resp, detail1, detail2]
+        )
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 100, 200)
+
+        assert result == {"u1", "u2"}
+        # 4 次 POST：2 次 getapprovalinfo + 2 次 getapprovaldetail
+        assert mock_client.post.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_empty_approval_list(self):
+        """没有审批单时返回空 set."""
+        from crew.wecom_checkin import get_leave_users
+
+        resp = MagicMock()
+        resp.json.return_value = {
+            "errcode": 0,
+            "sp_no_list": [],
+            "new_next_cursor": 0,
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 100, 200)
+
+        assert result == set()
+
+    @pytest.mark.asyncio
+    async def test_approval_info_api_error(self):
+        """getapprovalinfo API 错误时返回空 set."""
+        from crew.wecom_checkin import get_leave_users
+
+        resp = MagicMock()
+        resp.json.return_value = {"errcode": 40001, "errmsg": "invalid credential"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 100, 200)
+
+        assert result == set()
+
+    @pytest.mark.asyncio
+    async def test_approval_detail_error_skips(self):
+        """单个 getapprovaldetail 失败时跳过，不阻断其他."""
+        from crew.wecom_checkin import get_leave_users
+
+        info_resp = MagicMock()
+        info_resp.json.return_value = {
+            "errcode": 0,
+            "sp_no_list": ["sp001", "sp002"],
+            "new_next_cursor": 0,
+        }
+
+        # 第一个详情失败
+        detail_err = MagicMock()
+        detail_err.json.return_value = {"errcode": 40001, "errmsg": "invalid"}
+
+        # 第二个详情成功（请假）
+        detail_ok = MagicMock()
+        detail_ok.json.return_value = {
+            "errcode": 0,
+            "info": {"sp_name": "请假", "sp_status": 2, "applyer": {"userid": "u2"}},
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=[info_resp, detail_err, detail_ok])
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 100, 200)
+
+        assert result == {"u2"}
+
+    @pytest.mark.asyncio
+    async def test_network_exception_returns_empty(self):
+        """网络异常时返回空 set."""
+        from crew.wecom_checkin import get_leave_users
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_leave_users("token", 100, 200)
+
+        assert result == set()

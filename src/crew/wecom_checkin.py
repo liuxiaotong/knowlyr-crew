@@ -199,12 +199,114 @@ async def get_checkin_rules(
     return rules
 
 
+async def get_leave_users(
+    token: str,
+    start_time: int,
+    end_time: int,
+) -> set[str]:
+    """获取当天请假（已审批通过）的用户 userid 集合.
+
+    依次调用 getapprovalinfo（分页获取审批单号）和 getapprovaldetail（逐个获取详情），
+    筛选 sp_name == "请假" 且 sp_status == 2（已同意）的审批单。
+
+    API 失败时不阻断流程，返回空 set 并记录 warning。
+
+    Args:
+        token: access_token
+        start_time: 开始时间戳
+        end_time: 结束时间戳
+
+    Returns:
+        当天请假的 userid 集合
+    """
+    from crew.wecom import get_wecom_client
+
+    client = get_wecom_client()
+    leave_user_ids: set[str] = set()
+
+    # ── 第 1 步：获取审批单号列表（分页） ──
+    sp_no_list: list[str] = []
+    cursor = 0
+
+    try:
+        while True:
+            url = f"{WECOM_API_BASE}/oa/getapprovalinfo"
+            params = {"access_token": token}
+            body = {
+                "starttime": str(start_time),
+                "endtime": str(end_time),
+                "cursor": cursor,
+                "size": 100,
+                "filters": [{"key": "sp_status", "value": "2"}],
+            }
+
+            resp = await client.post(url, json=body, params=params)
+            data = resp.json()
+
+            errcode = data.get("errcode", -1)
+            if errcode != 0:
+                errmsg = data.get("errmsg", "unknown")
+                logger.warning("获取审批单列表失败: %s (errcode=%d)", errmsg, errcode)
+                return set()
+
+            sp_no_list.extend(data.get("sp_no_list", []))
+
+            new_cursor = data.get("new_next_cursor")
+            if not new_cursor or new_cursor == cursor:
+                break
+            cursor = new_cursor
+
+    except Exception:
+        logger.exception("获取审批单列表请求异常")
+        return set()
+
+    if not sp_no_list:
+        return set()
+
+    logger.info("获取到 %d 个已审批通过的审批单", len(sp_no_list))
+
+    # ── 第 2 步：逐个获取审批详情，筛选请假单 ──
+    for sp_no in sp_no_list:
+        try:
+            url = f"{WECOM_API_BASE}/oa/getapprovaldetail"
+            params = {"access_token": token}
+            body = {"sp_no": sp_no}
+
+            resp = await client.post(url, json=body, params=params)
+            data = resp.json()
+
+            errcode = data.get("errcode", -1)
+            if errcode != 0:
+                errmsg = data.get("errmsg", "unknown")
+                logger.warning(
+                    "获取审批详情失败 sp_no=%s: %s (errcode=%d)", sp_no, errmsg, errcode
+                )
+                continue
+
+            info = data.get("info", {})
+            sp_name = info.get("sp_name", "")
+            sp_status = info.get("sp_status", 0)
+
+            if sp_name == "请假" and sp_status == 2:
+                applyer = info.get("applyer", {})
+                userid = applyer.get("userid", "")
+                if userid:
+                    leave_user_ids.add(userid)
+
+        except Exception:
+            logger.exception("获取审批详情请求异常 sp_no=%s", sp_no)
+            continue
+
+    return leave_user_ids
+
+
 def classify_checkin(
     users: list[dict[str, Any]],
     checkin_records: list[dict[str, Any]],
     rules: dict[str, dict[str, Any]] | None = None,
+    leave_users: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """将打卡记录分类为正常、迟到、未打卡.
+    """将打卡记录分类为正常、迟到、请假、未打卡.
 
     Args:
         users: 用户列表（含 userid, name）
@@ -212,9 +314,11 @@ def classify_checkin(
         rules: 打卡规则 {userid: {"work_sec", "flex_time", ...}}。
                如果提供，每个人用自己的 work_sec + flex_time 判断迟到。
                如果为 None，回退到全局 fallback (09:30)。
+        leave_users: 当天请假的 userid 集合。
+                     如果为 None 或空集，不影响分类逻辑。
 
     Returns:
-        {"normal": [...], "late": [...], "absent": [...]}
+        {"normal": [...], "late": [...], "on_leave": [...], "absent": [...]}
         每项包含 name, userid, checkin_time(可选)
     """
     # 构建 userid -> 最早上班打卡时间
@@ -229,11 +333,19 @@ def classify_checkin(
 
     normal: list[dict[str, Any]] = []
     late: list[dict[str, Any]] = []
+    on_leave: list[dict[str, Any]] = []
     absent: list[dict[str, Any]] = []
+
+    _leave_set = leave_users or set()
 
     for user in users:
         uid = user["userid"]
         name = user.get("name", uid)
+
+        # 请假的人直接归入 on_leave，不再判断打卡
+        if uid in _leave_set:
+            on_leave.append({"name": name, "userid": uid})
+            continue
 
         # 每个人的迟到阈值
         if rules is not None and uid in rules:
@@ -257,7 +369,7 @@ def classify_checkin(
         else:
             normal.append({"name": name, "userid": uid, "checkin_time": time_str})
 
-    return {"normal": normal, "late": late, "absent": absent}
+    return {"normal": normal, "late": late, "on_leave": on_leave, "absent": absent}
 
 
 def format_checkin_report(
@@ -280,6 +392,7 @@ def format_checkin_report(
 
     normal = classified["normal"]
     late = classified["late"]
+    on_leave = classified.get("on_leave", [])
     absent = classified["absent"]
 
     lines: list[str] = []
@@ -306,6 +419,17 @@ def format_checkin_report(
             lines.append(" | ".join(items[i : i + 4]))
     else:
         lines.append("迟到（0人）")
+
+    lines.append("")
+
+    # 请假
+    if on_leave:
+        lines.append(f"请假（{len(on_leave)}人）")
+        items = [p["name"] for p in on_leave]
+        for i in range(0, len(items), 6):
+            lines.append(" | ".join(items[i : i + 6]))
+    else:
+        lines.append("请假（0人）")
 
     lines.append("")
 
@@ -404,14 +528,22 @@ async def run_checkin_report(
     )
     logger.info("获取到 %d 条打卡记录", len(checkin_records))
 
+    # 获取请假人员
+    logger.info("获取请假审批数据...")
+    leave_users = await get_leave_users(token, start_ts, end_ts)
+    logger.info("当天请假 %d 人", len(leave_users))
+
     # 分类
-    classified = classify_checkin(filtered_users, checkin_records, rules=rules)
+    classified = classify_checkin(
+        filtered_users, checkin_records, rules=rules, leave_users=leave_users
+    )
     report = format_checkin_report(classified, report_date=now)
 
     logger.info(
-        "考勤统计: 正常=%d 迟到=%d 未打卡=%d",
+        "考勤统计: 正常=%d 迟到=%d 请假=%d 未打卡=%d",
         len(classified["normal"]),
         len(classified["late"]),
+        len(classified["on_leave"]),
         len(classified["absent"]),
     )
 
