@@ -347,3 +347,135 @@ class TestWecomEventHandler:
 
         resp = await handle_wecom_event(request, ctx)
         assert resp.status_code == 403
+
+
+# ── dispatch 派遣逻辑测试 ──
+
+
+class TestWecomDispatch:
+    """_wecom_dispatch 核心派遣逻辑."""
+
+    def _make_ctx(self):
+        from crew.wecom import WecomCrypto
+
+        ctx = MagicMock()
+        ctx.project_dir = None
+        ctx.wecom_ctx = {
+            "config": MagicMock(
+                token="test_token",
+                agent_id=1000017,
+                default_employee="test_emp",
+                corp_id="ww_test",
+                encoding_aes_key="qm7mzclOzyeB7Ee6rrKzzbPZAgVixfzHLi3fs20Xruz",
+            ),
+            "crypto": WecomCrypto("qm7mzclOzyeB7Ee6rrKzzbPZAgVixfzHLi3fs20Xruz", "ww_test"),
+            "token_mgr": MagicMock(),
+            "dedup": MagicMock(is_duplicate=MagicMock(return_value=False)),
+        }
+        ctx.registry = MagicMock()
+        ctx.registry.create.return_value = MagicMock(task_id="task_001")
+        return ctx
+
+    def _make_post_request(self, ctx, msg_type="text", content="hello"):
+        """构造 POST 请求，返回加密的 XML body."""
+        from crew.wecom import generate_wecom_signature
+
+        crypto = ctx.wecom_ctx["crypto"]
+        token = ctx.wecom_ctx["config"].token
+
+        plain_xml = (
+            "<xml>"
+            f"<ToUserName><![CDATA[ww_test]]></ToUserName>"
+            f"<FromUserName><![CDATA[user001]]></FromUserName>"
+            f"<CreateTime>1234567890</CreateTime>"
+            f"<MsgType><![CDATA[{msg_type}]]></MsgType>"
+            f"<Content><![CDATA[{content}]]></Content>"
+            f"<MsgId>msg_001</MsgId>"
+            f"<AgentID>1000017</AgentID>"
+            "</xml>"
+        )
+        encrypted = crypto.encrypt(plain_xml)
+
+        timestamp = "1234567890"
+        nonce = "random_nonce"
+        sig = generate_wecom_signature(token, timestamp, nonce, encrypted)
+
+        body_xml = (
+            "<xml>"
+            f"<ToUserName><![CDATA[ww_test]]></ToUserName>"
+            f"<Encrypt><![CDATA[{encrypted}]]></Encrypt>"
+            "</xml>"
+        )
+
+        request = MagicMock()
+        request.method = "POST"
+        request.path_params = {"app_id": "default"}
+        request.query_params = {
+            "msg_signature": sig,
+            "timestamp": timestamp,
+            "nonce": nonce,
+        }
+        request.body = AsyncMock(return_value=body_xml.encode("utf-8"))
+        return request
+
+    @pytest.mark.asyncio
+    async def test_text_message_dispatches_via_sg(self):
+        """POST 文本消息正常派遣: mock sg_dispatch -> 验证 send_wecom_text 被调用."""
+        from crew.webhook_wecom import handle_wecom_event
+
+        ctx = self._make_ctx()
+        request = self._make_post_request(ctx, msg_type="text", content="test task")
+
+        with (
+            patch("crew.webhook_wecom._wecom_dispatch") as mock_dispatch,
+        ):
+            mock_dispatch.return_value = None  # 后台 task，不影响响应
+
+            resp = await handle_wecom_event(request, ctx)
+
+            assert resp.status_code == 200
+            assert resp.body.decode("utf-8") == "success"
+
+    @pytest.mark.asyncio
+    async def test_text_message_full_dispatch(self):
+        """POST 文本消息完整 dispatch 流程: sg_dispatch -> send_wecom_text."""
+        from crew.webhook_wecom import _wecom_dispatch
+
+        ctx = self._make_ctx()
+        token_mgr = ctx.wecom_ctx["token_mgr"]
+
+        with (
+            patch("crew.webhook_wecom.discover_employees", create=True) as mock_discover,
+            patch("crew.webhook_wecom.resolve_employee_from_mention", create=True) as mock_resolve,
+            patch("crew.webhook_wecom.sg_dispatch", create=True) as mock_sg,
+            patch("crew.webhook_wecom.send_wecom_text", create=True) as mock_send,
+            patch("crew.webhook_wecom.strip_internal_tags", side_effect=lambda x: x, create=True),
+            patch("crew.discovery.discover_employees") as mock_disc2,
+            patch("crew.feishu.resolve_employee_from_mention") as mock_res2,
+            patch("crew.sg_bridge.sg_dispatch", new_callable=AsyncMock) as mock_sg2,
+            patch("crew.wecom.send_wecom_text", new_callable=AsyncMock) as mock_send2,
+            patch("crew.output_sanitizer.strip_internal_tags", side_effect=lambda x: x),
+        ):
+            mock_disc2.return_value = {"test_emp": {}}
+            mock_res2.return_value = ("test_emp", "test task")
+            mock_sg2.return_value = "reply from sg"
+            mock_send2.return_value = {"errcode": 0}
+
+            await _wecom_dispatch(ctx, "user001", "test task", 1000017, token_mgr)
+
+            mock_sg2.assert_called_once()
+            mock_send2.assert_called_once_with(token_mgr, "user001", 1000017, "reply from sg")
+
+    @pytest.mark.asyncio
+    async def test_non_text_message_no_dispatch(self):
+        """非文本消息类型 -> 返回 success，不触发派遣."""
+        from crew.webhook_wecom import handle_wecom_event
+
+        ctx = self._make_ctx()
+        request = self._make_post_request(ctx, msg_type="image", content="")
+
+        # 不 patch _wecom_dispatch -- 如果被意外调用会抛错
+        resp = await handle_wecom_event(request, ctx)
+
+        assert resp.status_code == 200
+        assert resp.body.decode("utf-8") == "success"

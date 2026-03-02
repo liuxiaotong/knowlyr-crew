@@ -145,7 +145,9 @@ class WecomCrypto:
         random_bytes = os.urandom(16)
         msg_len = struct.pack("!I", len(msg_bytes))
         content = random_bytes + msg_len + msg_bytes + corp_bytes
-        # PKCS#7 填充到 AES block size (32)
+        # PKCS#7 填充到 AES block size
+        # 企微回调协议要求 block_size=32（非标准 AES-128 的 16 字节），
+        # 与 EncodingAESKey 解码后的 32 字节密钥长度一致。
         block_size = 32
         pad_len = block_size - (len(content) % block_size)
         content += bytes([pad_len]) * pad_len

@@ -622,6 +622,10 @@ def create_webhook_app(
     async def on_shutdown():
         if scheduler:
             await scheduler.stop()
+        # 关闭企微 httpx 连接池
+        from crew.wecom import close_wecom_client
+
+        await close_wecom_client()
 
     app = Starlette(routes=routes, on_startup=[on_startup], on_shutdown=[on_shutdown])
 

@@ -29,6 +29,10 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     """
     from starlette.responses import PlainTextResponse
 
+    # 解析路由参数 app_id（多应用预留）
+    app_id = request.path_params.get("app_id", "default")
+    logger.info("企微事件: app_id=%s method=%s", app_id, request.method)
+
     wecom_ctx = ctx.wecom_ctx
     if wecom_ctx is None:
         return PlainTextResponse("wecom not configured", status_code=501)
