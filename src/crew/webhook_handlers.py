@@ -1267,6 +1267,79 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         channel = payload.get("channel", "api")
         sender_name = payload.get("sender_name") or _parse_sender_name(extra_context) or "Kai"
 
+        # ── Skills 自动触发（必须在 callback 分支之前执行）──
+        from crew.discovery import discover_employees
+
+        discovery = discover_employees(project_dir=ctx.project_dir)
+        emp = discovery.get(name)
+
+        enhanced_context = {}
+        employee_name = None
+        if emp is not None and isinstance(user_message, str):
+            try:
+                from crew.memory import MemoryStore
+                from crew.skills import SkillStore
+                from crew.skills_engine import SkillsEngine
+
+                skill_store = SkillStore(project_dir=ctx.project_dir)
+                memory_store = MemoryStore(project_dir=ctx.project_dir)
+                engine = SkillsEngine(skill_store, memory_store)
+
+                employee_name = emp.character_name or name
+
+                # 检查触发
+                triggered = engine.check_triggers(employee_name, user_message, args)
+                if triggered:
+                    logger.info(
+                        "Skills 触发: employee=%s task=%s triggered=%d",
+                        employee_name,
+                        user_message[:50],
+                        len(triggered),
+                    )
+                    # 执行触发的 skills（按优先级排序）
+                    for skill, score in triggered[:3]:
+                        try:
+                            result = engine.execute_skill(skill, employee_name, {"task": user_message, **args})
+                            if result.get("enhanced_context"):
+                                for key, value in result["enhanced_context"].items():
+                                    if key in enhanced_context:
+                                        if isinstance(enhanced_context[key], list) and isinstance(value, list):
+                                            enhanced_context[key].extend(value)
+                                        else:
+                                            enhanced_context[key] = value
+                                    else:
+                                        enhanced_context[key] = value
+                            engine.record_trigger(
+                                skill=skill,
+                                employee=employee_name,
+                                task=user_message,
+                                match_score=score,
+                                execution_result=result,
+                            )
+                        except Exception as skill_exec_error:
+                            logger.warning("Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error)
+            except Exception as skills_error:
+                logger.warning("Skills 检查失败: %s", skills_error)
+
+        # 将 enhanced_context 注入到 extra_context
+        if enhanced_context:
+            memories = enhanced_context.get("memories", [])
+            if memories:
+                memory_text = "【相关历史记忆】\n" + "\n".join(
+                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
+                )
+                if extra_context:
+                    extra_context = memory_text + "\n\n" + extra_context
+                else:
+                    extra_context = memory_text
+
+                logger.info(
+                    "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
+                    employee_name or name,
+                    len(memories),
+                    len(extra_context)
+                )
+
         # ── 异步回调模式（频道 @mention）──
         callback_channel_id = payload.get("callback_channel_id")
         if callback_channel_id is not None:
@@ -1333,12 +1406,10 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         # 和飞书相同逻辑：闲聊走 fast path，工作消息走 full path
         import time as _time
 
-        from crew.discovery import discover_employees
         from crew.tool_schema import AGENT_TOOLS
         from crew.webhook_feishu import _needs_tools
 
-        discovery = discover_employees(project_dir=ctx.project_dir)
-        emp = discovery.get(name)
+        # emp 已经在 Skills 代码块中获取
         has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
         use_fast_path = (
             has_tools
@@ -1347,85 +1418,6 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             and isinstance(user_message, str)
             and not _needs_tools(user_message)
         )
-
-        # ── Skills 自动触发 ──
-        enhanced_context = {}
-        employee_name = None  # 初始化，避免作用域问题
-        if emp is not None and isinstance(user_message, str):
-            try:
-                from crew.memory import MemoryStore
-                from crew.skills import SkillStore
-                from crew.skills_engine import SkillsEngine
-
-                skill_store = SkillStore(project_dir=ctx.project_dir)
-                memory_store = MemoryStore(project_dir=ctx.project_dir)
-                engine = SkillsEngine(skill_store, memory_store)
-
-                # 使用员工的 character_name（中文名）而不是 slug
-                employee_name = emp.character_name or name
-
-                # 检查触发
-                triggered = engine.check_triggers(employee_name, user_message, args)
-                if triggered:
-                    logger.info(
-                        "Skills 触发: employee=%s task=%s triggered=%d",
-                        employee_name,
-                        user_message[:50],
-                        len(triggered),
-                    )
-                    # 执行触发的 skills（按优先级排序）
-                    for skill, score in triggered[:3]:  # 最多执行前 3 个
-                        try:
-                            result = engine.execute_skill(skill, employee_name, {"task": user_message, **args})
-                            # 合并 enhanced_context
-                            if result.get("enhanced_context"):
-                                for key, value in result["enhanced_context"].items():
-                                    if key in enhanced_context:
-                                        # 合并列表
-                                        if isinstance(enhanced_context[key], list) and isinstance(
-                                            value, list
-                                        ):
-                                            enhanced_context[key].extend(value)
-                                        else:
-                                            enhanced_context[key] = value
-                                    else:
-                                        enhanced_context[key] = value
-                            # 记录触发历史
-                            engine.record_trigger(
-                                skill=skill,
-                                employee=employee_name,
-                                task=user_message,
-                                match_score=score,
-                                execution_result=result,
-                            )
-                        except Exception as skill_exec_error:
-                            logger.warning(
-                                "Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error
-                            )
-            except Exception as skills_error:
-                logger.warning("Skills 检查失败: %s", skills_error)
-
-        # 将 enhanced_context 注入到 extra_context
-        if enhanced_context:
-            # 将记忆添加到 extra_context
-            memories = enhanced_context.get("memories", [])
-            if memories:
-                memory_text = "【相关历史记忆】\n" + "\n".join(
-                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
-                )
-                # 合并到 extra_context
-                if extra_context:
-                    extra_context = memory_text + "\n\n" + extra_context
-                else:
-                    extra_context = memory_text
-
-                # 添加调试日志
-                logger.info(
-                    "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
-                    employee_name or name,
-                    len(memories),
-                    len(extra_context)
-                )
 
         # 添加路径选择日志
         logger.info(
