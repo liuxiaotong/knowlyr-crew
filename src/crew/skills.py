@@ -116,6 +116,11 @@ class SkillStore:
         self.triggers_dir = self.skills_dir / "triggers"
         self.triggers_dir.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def project_dir(self) -> Path:
+        """获取项目目录."""
+        return resolve_project_dir(self._project_dir)
+
     def create_skill(self, skill: Skill) -> Skill:
         """创建 Skill."""
         employee_dir = self.skills_dir / skill.employee

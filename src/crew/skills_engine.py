@@ -176,15 +176,68 @@ class SkillsEngine:
     def _execute_load_checklist(
         self, action: SkillAction, employee: str, context: dict[str, Any]
     ) -> dict[str, Any]:
-        """执行 load_checklist 动作."""
+        """执行 load_checklist 动作 - 从员工 soul 中提取检查清单."""
         params = action.params
-        section = params.get("section", "")
+        section = params.get("section", "工作检查清单")
 
-        # TODO: 从 soul.md 中提取检查清单
-        # 暂时返回空列表
-        logger.warning(f"load_checklist not fully implemented for section: {section}")
+        try:
+            # 使用 config_store 获取 soul
+            from crew.config_store import get_soul
 
-        return {"items": [], "section": section}
+            soul_data = get_soul(employee)
+            if not soul_data:
+                logger.warning(f"Soul not found for {employee}")
+                return {"items": [], "section": section}
+
+            soul_content = soul_data.get("content", "")
+
+            if not soul_content or len(soul_content) < 100:
+                logger.warning(f"Empty or invalid soul content for {employee}")
+                return {"items": [], "section": section}
+
+            # 解析 Markdown 提取检查清单
+            items = self._parse_checklist_from_markdown(soul_content, section)
+
+            return {"items": items, "section": section, "count": len(items)}
+
+        except Exception as e:
+            logger.warning(f"load_checklist failed: {e}")
+            return {"items": [], "section": section}
+
+    def _parse_checklist_from_markdown(self, content: str, section: str) -> list[str]:
+        """从 Markdown 内容中提取检查清单."""
+        lines = content.split("\n")
+        items = []
+        in_section = False
+        current_subsection = ""
+
+        for line in lines:
+            # 检测章节标题（## 开头，不是 ###）
+            if line.startswith("## ") and section in line:
+                in_section = True
+                continue
+
+            # 遇到下一个同级标题（## 开头，不是 ###），退出
+            if in_section and line.startswith("## ") and section not in line:
+                break
+
+            # 在目标章节内
+            if in_section:
+                # 检测子章节（### 开头）
+                if line.startswith("### "):
+                    current_subsection = line.strip("# ").strip()
+                    continue
+
+                # 提取检查项（- [ ] 格式）
+                stripped = line.strip()
+                if stripped.startswith("- [ ]"):
+                    item_text = stripped[5:].strip()
+                    if current_subsection:
+                        items.append(f"[{current_subsection}] {item_text}")
+                    else:
+                        items.append(item_text)
+
+        return items
 
     def _execute_read_wiki(
         self, action: SkillAction, employee: str, context: dict[str, Any]
