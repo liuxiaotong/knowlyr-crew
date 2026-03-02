@@ -3669,7 +3669,7 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     try:
         import json as _json
         import uuid
-        from datetime import date as dt_date
+        from datetime import date as dt_date, datetime
 
         # ── 独立轨迹存储（不使用 TrajectoryCollector，避免写入 .crew/trajectories） ──
         trajectory_id = f"traj_{uuid.uuid4().hex[:12]}"
