@@ -260,6 +260,29 @@ class TrajectoryCollector:
         self._steps.append(self._pending)
         self._pending = None
 
+    # ── 临时文件存储（2026-03-02 记忆系统优化）──
+
+    def _write_temp_file(self) -> None:
+        """将工具调用序列写入临时文件 /data/trajectory_temp/{date}/session-{id}.jsonl."""
+        try:
+            from datetime import date as dt_date
+
+            temp_base = Path("/data/trajectory_temp")
+            date_str = dt_date.today().isoformat()
+            date_dir = temp_base / date_str
+            date_dir.mkdir(parents=True, exist_ok=True)
+
+            session_id = f"{self.employee_name}-{uuid.uuid4().hex[:8]}"
+            temp_file = date_dir / f"session-{session_id}.jsonl"
+
+            with open(temp_file, "w", encoding="utf-8") as f:
+                for step in self._steps:
+                    f.write(json.dumps(step, ensure_ascii=False) + "\n")
+
+            logger.debug("临时轨迹已写入: %s (%d 步)", temp_file, len(self._steps))
+        except Exception as e:
+            logger.warning("写入临时轨迹文件失败: %s", e)
+
     # ── 完整步骤一次性录制 ──
 
     def add_tool_step(
@@ -305,6 +328,9 @@ class TrajectoryCollector:
         if not self._steps:
             logger.debug("无步骤数据，跳过轨迹录制")
             return None
+
+        # 写入临时文件（2026-03-02 记忆系统优化）
+        self._write_temp_file()
 
         total_tokens = sum(s.get("token_count", 0) or 0 for s in self._steps)
 

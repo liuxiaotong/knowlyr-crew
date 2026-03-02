@@ -772,6 +772,19 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             {"error": f"category must be one of {valid_categories}"}, status_code=400
         )
 
+    # 拦截 trajectory 标签写入（2026-03-02 记忆系统优化）
+    if isinstance(tags, list) and "trajectory" in tags:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Intercepted trajectory memory: employee={employee}, session={source_session}")
+        return JSONResponse(
+            {
+                "ok": True,
+                "skipped": True,
+                "reason": "trajectory tag intercepted",
+            }
+        )
+
     store = MemoryStore(project_dir=ctx.project_dir)
 
     # 幂等检查：同 employee + source_session + category 不重复写入

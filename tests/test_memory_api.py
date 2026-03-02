@@ -175,6 +175,31 @@ class TestMemoryAddEndpoint:
         )
         assert resp.status_code == 400
 
+    @patch("crew.memory.MemoryStore.add")
+    @patch("crew.memory.MemoryStore.query")
+    def test_add_trajectory_tag_intercepted(self, mock_query, mock_add):
+        """带 trajectory 标签的记忆被拦截，不写入数据库."""
+        mock_query.return_value = []
+
+        client = _make_client()
+        resp = client.post(
+            "/api/memory/add",
+            json={
+                "employee": "backend-engineer",
+                "category": "finding",
+                "content": "工具调用轨迹",
+                "tags": ["trajectory", "auto-generated"],
+            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["skipped"] is True
+        assert data["reason"] == "trajectory tag intercepted"
+        # 验证没有调用 store.add
+        mock_add.assert_not_called()
+
 
 class TestMemoryQueryEndpoint:
     """GET /api/memory/query — 记忆查询端点."""
