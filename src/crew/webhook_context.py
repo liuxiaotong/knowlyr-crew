@@ -63,3 +63,5 @@ class _AppContext:
         self.feishu_chat_store = None  # FeishuChatStore, set by create_webhook_app
         # 飞书 — 多 bot
         self.feishu_bots: dict[str, FeishuBotContext] = {}  # bot_id -> context
+        # 企业微信
+        self.wecom_ctx: dict[str, Any] | None = None  # {config, crypto, token_mgr, dedup}
