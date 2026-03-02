@@ -326,13 +326,39 @@ def _sanitize_wecom_text(text: str) -> str:
     return cleaned
 
 
+def strip_wecom_at_prefix(content: str, app_name: str = "") -> str:
+    """从企微群聊消息中去除 @应用名 前缀，返回纯净的用户文本.
+
+    企微群聊中 @应用 发送消息时，Content 格式为 "@应用名 消息内容" 或 "@应用名\\n消息内容"。
+    此函数去除开头的 @xxx 前缀（无论是否匹配 app_name）。
+
+    Args:
+        content: 原始消息内容
+        app_name: 应用名称（可选，用于精确匹配）
+
+    Returns:
+        去除 @前缀 后的消息文本
+    """
+    if not content:
+        return content
+
+    # 匹配开头的 @xxx 前缀（可能带空格或换行）
+    # 格式: "@应用名 后续消息" 或 "@应用名\n后续消息"
+    match = re.match(r"@\S+[\s]*", content)
+    if match:
+        remaining = content[match.end():].strip()
+        return remaining if remaining else content
+
+    return content
+
+
 async def send_wecom_text(
     token_manager: WecomTokenManager,
     user_id: str,
     agent_id: int,
     text: str,
 ) -> dict[str, Any]:
-    """发送文本消息给企微用户.
+    """发送文本消息给企微用户（单聊）.
 
     通过 /cgi-bin/message/send 主动推送。
     """
@@ -355,5 +381,50 @@ async def send_wecom_text(
     if errcode != 0:
         errmsg = data.get("errmsg", "unknown")
         logger.warning("企微消息发送失败: %s (errcode=%d)", errmsg, errcode)
+
+    return data
+
+
+async def send_wecom_group_text(
+    token_manager: WecomTokenManager,
+    chat_id: str,
+    text: str,
+) -> dict[str, Any]:
+    """发送文本消息到企微群聊.
+
+    通过 /cgi-bin/appchat/send 推送到群聊。
+
+    注意限制：
+    - 应用的可见范围必须是根部门（通讯录根目录）
+    - 只能发送到由该应用创建的群聊
+    - 每企业消息发送量不可超过 2 万人次/分
+    - 如果限制不满足，调用方应降级为 send_wecom_text 单聊回复发送者
+
+    Args:
+        token_manager: token 管理器
+        chat_id: 群聊 ID
+        text: 消息内容
+
+    Returns:
+        API 返回结果
+    """
+    text = _sanitize_wecom_text(text)
+    token = await token_manager.get_token()
+    url = f"{WECOM_API_BASE}/appchat/send"
+    params = {"access_token": token}
+    body = {
+        "chatid": chat_id,
+        "msgtype": "text",
+        "text": {"content": text},
+    }
+
+    client = get_wecom_client()
+    resp = await client.post(url, json=body, params=params)
+    data = resp.json()
+
+    errcode = data.get("errcode", -1)
+    if errcode != 0:
+        errmsg = data.get("errmsg", "unknown")
+        logger.warning("企微群聊消息发送失败: %s (errcode=%d)", errmsg, errcode)
 
     return data

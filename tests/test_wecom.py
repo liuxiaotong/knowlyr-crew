@@ -479,3 +479,256 @@ class TestWecomDispatch:
 
         assert resp.status_code == 200
         assert resp.body.decode("utf-8") == "success"
+
+    @pytest.mark.asyncio
+    async def test_group_message_dispatches_with_at_prefix(self):
+        """群聊消息: @应用名 开头 -> 识别为群聊，去除 @前缀 后派遣."""
+        from crew.webhook_wecom import handle_wecom_event
+
+        ctx = self._make_ctx()
+        # 模拟群聊消息: "@叶心蕾 你好"
+        request = self._make_post_request(ctx, msg_type="text", content="@叶心蕾 你好")
+
+        with (
+            patch("crew.webhook_wecom._wecom_dispatch") as mock_dispatch,
+        ):
+            mock_dispatch.return_value = None
+
+            resp = await handle_wecom_event(request, ctx)
+
+            assert resp.status_code == 200
+            assert resp.body.decode("utf-8") == "success"
+            # 验证 dispatch 被调用，且 is_group=True, content 已去除 @前缀
+            mock_dispatch.assert_called_once()
+            call_args = mock_dispatch.call_args
+            # 位置参数: (ctx, from_user, content, agent_id, token_mgr)
+            assert call_args[0][2] == "你好"  # content 去除了 @叶心蕾
+            assert call_args[1]["is_group"] is True
+
+    @pytest.mark.asyncio
+    async def test_group_message_full_dispatch_fallback_to_dm(self):
+        """群聊消息完整 dispatch: 无 chat_id -> 降级为单聊回复发送者."""
+        from crew.webhook_wecom import _wecom_dispatch
+
+        ctx = self._make_ctx()
+        token_mgr = ctx.wecom_ctx["token_mgr"]
+
+        with (
+            patch("crew.discovery.discover_employees") as mock_disc,
+            patch("crew.feishu.resolve_employee_from_mention") as mock_res,
+            patch("crew.sg_bridge.sg_dispatch", new_callable=AsyncMock) as mock_sg,
+            patch("crew.wecom.send_wecom_text", new_callable=AsyncMock) as mock_send,
+            patch("crew.output_sanitizer.strip_internal_tags", side_effect=lambda x: x),
+        ):
+            mock_disc.return_value = {"test_emp": {}}
+            mock_res.return_value = ("test_emp", "你好")
+            mock_sg.return_value = "group reply"
+            mock_send.return_value = {"errcode": 0}
+
+            await _wecom_dispatch(
+                ctx, "user001", "你好", 1000017, token_mgr,
+                chat_id="", is_group=True,
+            )
+
+            # 无 chat_id -> 降级为单聊回复
+            mock_send.assert_called_once_with(
+                token_mgr, "user001", 1000017, "group reply"
+            )
+
+    @pytest.mark.asyncio
+    async def test_group_message_with_chat_id_tries_group_api(self):
+        """群聊消息: 有 chat_id -> 先尝试群聊 API，成功则不走单聊."""
+        from crew.webhook_wecom import _wecom_dispatch
+
+        ctx = self._make_ctx()
+        token_mgr = ctx.wecom_ctx["token_mgr"]
+
+        with (
+            patch("crew.discovery.discover_employees") as mock_disc,
+            patch("crew.feishu.resolve_employee_from_mention") as mock_res,
+            patch("crew.sg_bridge.sg_dispatch", new_callable=AsyncMock) as mock_sg,
+            patch("crew.wecom.send_wecom_text", new_callable=AsyncMock) as mock_send_dm,
+            patch("crew.wecom.send_wecom_group_text", new_callable=AsyncMock) as mock_send_group,
+            patch("crew.output_sanitizer.strip_internal_tags", side_effect=lambda x: x),
+        ):
+            mock_disc.return_value = {"test_emp": {}}
+            mock_res.return_value = ("test_emp", "你好")
+            mock_sg.return_value = "group reply"
+            mock_send_group.return_value = {"errcode": 0}
+
+            await _wecom_dispatch(
+                ctx, "user001", "你好", 1000017, token_mgr,
+                chat_id="group_chat_001", is_group=True,
+            )
+
+            # 群聊 API 成功 -> 不走单聊
+            mock_send_group.assert_called_once_with(
+                token_mgr, "group_chat_001", "group reply"
+            )
+            mock_send_dm.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_group_message_chat_id_fallback_on_error(self):
+        """群聊消息: 有 chat_id 但群聊 API 失败 -> 降级为单聊."""
+        from crew.webhook_wecom import _wecom_dispatch
+
+        ctx = self._make_ctx()
+        token_mgr = ctx.wecom_ctx["token_mgr"]
+
+        with (
+            patch("crew.discovery.discover_employees") as mock_disc,
+            patch("crew.feishu.resolve_employee_from_mention") as mock_res,
+            patch("crew.sg_bridge.sg_dispatch", new_callable=AsyncMock) as mock_sg,
+            patch("crew.wecom.send_wecom_text", new_callable=AsyncMock) as mock_send_dm,
+            patch("crew.wecom.send_wecom_group_text", new_callable=AsyncMock) as mock_send_group,
+            patch("crew.output_sanitizer.strip_internal_tags", side_effect=lambda x: x),
+        ):
+            mock_disc.return_value = {"test_emp": {}}
+            mock_res.return_value = ("test_emp", "你好")
+            mock_sg.return_value = "group reply"
+            # 群聊 API 返回错误（权限不足等）
+            mock_send_group.return_value = {"errcode": 60011, "errmsg": "no privilege"}
+            mock_send_dm.return_value = {"errcode": 0}
+
+            await _wecom_dispatch(
+                ctx, "user001", "你好", 1000017, token_mgr,
+                chat_id="group_chat_001", is_group=True,
+            )
+
+            # 群聊 API 失败 -> 降级为单聊
+            mock_send_group.assert_called_once()
+            mock_send_dm.assert_called_once_with(
+                token_mgr, "user001", 1000017, "group reply"
+            )
+
+    @pytest.mark.asyncio
+    async def test_group_dispatch_records_trigger_wecom_group(self):
+        """群聊消息: registry trigger 应为 wecom_group."""
+        from crew.webhook_wecom import _wecom_dispatch
+
+        ctx = self._make_ctx()
+        token_mgr = ctx.wecom_ctx["token_mgr"]
+
+        with (
+            patch("crew.discovery.discover_employees") as mock_disc,
+            patch("crew.feishu.resolve_employee_from_mention") as mock_res,
+            patch("crew.sg_bridge.sg_dispatch", new_callable=AsyncMock) as mock_sg,
+            patch("crew.wecom.send_wecom_text", new_callable=AsyncMock) as mock_send,
+            patch("crew.output_sanitizer.strip_internal_tags", side_effect=lambda x: x),
+        ):
+            mock_disc.return_value = {"test_emp": {}}
+            mock_res.return_value = ("test_emp", "你好")
+            mock_sg.return_value = "reply"
+            mock_send.return_value = {"errcode": 0}
+
+            await _wecom_dispatch(
+                ctx, "user001", "你好", 1000017, token_mgr,
+                is_group=True,
+            )
+
+            ctx.registry.create.assert_called_once_with(
+                trigger="wecom_group",
+                target_type="employee",
+                target_name="test_emp",
+                args={"task": "你好"},
+            )
+
+
+# ── @前缀去除测试 ──
+
+
+class TestStripWecomAtPrefix:
+    """strip_wecom_at_prefix 去除群聊 @应用名 前缀."""
+
+    def test_strip_at_prefix_with_space(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("@叶心蕾 你好") == "你好"
+
+    def test_strip_at_prefix_with_newline(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("@叶心蕾\n你好世界") == "你好世界"
+
+    def test_strip_at_prefix_with_multiple_spaces(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("@叶心蕾  请帮我查一下") == "请帮我查一下"
+
+    def test_strip_at_prefix_no_content_after(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        # 只有 @应用名 没有后续内容 -> 返回原文
+        assert strip_wecom_at_prefix("@叶心蕾") == "@叶心蕾"
+
+    def test_strip_at_prefix_no_at(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("普通消息") == "普通消息"
+
+    def test_strip_at_prefix_empty(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("") == ""
+
+    def test_strip_at_prefix_english_name(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        assert strip_wecom_at_prefix("@TestBot hello world") == "hello world"
+
+    def test_strip_at_prefix_preserves_at_in_middle(self):
+        from crew.wecom import strip_wecom_at_prefix
+
+        # @不在开头 -> 不去除
+        assert strip_wecom_at_prefix("hello @叶心蕾 你好") == "hello @叶心蕾 你好"
+
+
+# ── 群聊消息发送测试 ──
+
+
+class TestSendWecomGroupText:
+    """send_wecom_group_text 群聊消息发送."""
+
+    @pytest.mark.asyncio
+    async def test_send_group_text_success(self):
+        from crew.wecom import WecomTokenManager, send_wecom_group_text
+
+        mgr = WecomTokenManager("corp_id", "secret")
+        mgr._token = "cached_token"
+        mgr._expire_at = 9999999999.0
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"errcode": 0, "errmsg": "ok"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await send_wecom_group_text(mgr, "chat_001", "hello group")
+
+        assert result["errcode"] == 0
+        # 验证 API 调用参数
+        call_args = mock_client.post.call_args
+        body = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
+        assert body["chatid"] == "chat_001"
+        assert body["msgtype"] == "text"
+        assert body["text"]["content"] == "hello group"
+
+    @pytest.mark.asyncio
+    async def test_send_group_text_error(self):
+        from crew.wecom import WecomTokenManager, send_wecom_group_text
+
+        mgr = WecomTokenManager("corp_id", "secret")
+        mgr._token = "cached_token"
+        mgr._expire_at = 9999999999.0
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"errcode": 60011, "errmsg": "no privilege"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await send_wecom_group_text(mgr, "chat_001", "hello")
+
+        assert result["errcode"] == 60011

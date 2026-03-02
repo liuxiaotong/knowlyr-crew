@@ -1,4 +1,14 @@
-"""企业微信事件处理 -- 接收企微回调、消息路由、员工执行、回复."""
+"""企业微信事件处理 -- 接收企微回调、消息路由、员工执行、回复.
+
+支持单聊和群聊两种模式:
+- 单聊: 用户直接给应用发消息，回复走 /cgi-bin/message/send
+- 群聊: 用户在群里 @应用 发消息，回复走单聊（降级方案）或群聊 API
+
+群聊降级说明:
+  企微 /cgi-bin/appchat/send 要求应用可见范围为根部门且只能发到应用自建群，
+  限制过严。默认用 /cgi-bin/message/send 单聊回复发送者，确保可用性。
+  如果配置了 group_reply_mode="group" 且满足权限条件，可尝试群聊回复。
+"""
 
 from __future__ import annotations
 
@@ -98,10 +108,19 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     from_user = msg.get("FromUserName", "")
     content = msg.get("Content", "").strip()
 
+    # 群聊判断：企微自建应用的群聊回调 XML 中没有标准 chatid 字段，
+    # 但消息内容会以 "@应用名" 开头。这里同时检查可能存在的扩展字段。
+    chat_id = msg.get("ChatId", "")
+    # 部分企微版本/配置下 ToUserName 为 corpid 不带群信息，
+    # 判断群聊的最可靠方式是检查 Content 是否以 @应用名 开头
+    is_group = bool(chat_id) or content.startswith("@")
+
     logger.info(
-        "企微消息: type=%s from=%s content=%s",
+        "企微消息: type=%s from=%s group=%s chat_id=%s content=%s",
         msg_type,
         from_user,
+        is_group,
+        chat_id or "(none)",
         content[:50] if content else "(empty)",
     )
 
@@ -113,6 +132,14 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     if not content:
         return PlainTextResponse("success")
 
+    # 群聊消息：去除 @应用名 前缀，提取纯净文本
+    if is_group:
+        from crew.wecom import strip_wecom_at_prefix
+
+        content = strip_wecom_at_prefix(content)
+        if not content:
+            return PlainTextResponse("success")
+
     # 去重
     if msg_id and dedup.is_duplicate(msg_id):
         logger.warning("企微消息去重: %s", msg_id)
@@ -120,7 +147,11 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
 
     # 后台处理（企微要求快速返回 "success"）
     task = asyncio.create_task(
-        _wecom_dispatch(ctx, from_user, content, config.agent_id, token_mgr)
+        _wecom_dispatch(
+            ctx, from_user, content, config.agent_id, token_mgr,
+            chat_id=chat_id if is_group else "",
+            is_group=is_group,
+        )
     )
     _background_tasks.add(task)
     task.add_done_callback(_task_done_callback)
@@ -134,37 +165,74 @@ async def _wecom_dispatch(
     text: str,
     agent_id: int,
     token_mgr: Any,
+    *,
+    chat_id: str = "",
+    is_group: bool = False,
 ) -> None:
-    """后台处理企微消息：路由到员工 -> 执行 -> 主动推送回复."""
+    """后台处理企微消息：路由到员工 -> 执行 -> 主动推送回复.
+
+    Args:
+        ctx: 应用上下文
+        from_user: 发送者 userid
+        text: 消息文本（群聊已去除 @前缀）
+        agent_id: 应用 AgentId
+        token_mgr: token 管理器
+        chat_id: 群聊 ID（群聊时可能有值，自建应用通常为空）
+        is_group: 是否群聊消息
+    """
     from crew.discovery import discover_employees
     from crew.feishu import resolve_employee_from_mention
-    from crew.wecom import send_wecom_text
+    from crew.wecom import send_wecom_group_text, send_wecom_text
+
+    async def _reply(reply_text: str) -> None:
+        """根据消息来源选择回复方式.
+
+        群聊回复策略（按优先级）:
+        1. 如果有 chat_id 且配置了 group_reply_mode="group"，尝试群聊 API
+        2. 降级为单聊回复发送者（默认方案，最稳定）
+        """
+        if is_group and chat_id:
+            # 有 chat_id 时尝试群聊回复
+            # 注意: appchat/send 需要应用可见范围为根部门且群必须是应用创建的
+            try:
+                result = await send_wecom_group_text(token_mgr, chat_id, reply_text)
+                if result.get("errcode", -1) == 0:
+                    return
+                logger.info(
+                    "群聊 API 回复失败 (errcode=%d)，降级为单聊回复",
+                    result.get("errcode", -1),
+                )
+            except Exception as exc:
+                logger.info("群聊 API 回复异常: %s，降级为单聊回复", exc)
+
+        # 默认/降级: 单聊回复发送者
+        await send_wecom_text(token_mgr, from_user, agent_id, reply_text)
 
     try:
         discovery = discover_employees(project_dir=ctx.project_dir)
 
-        # 企微单聊：用 default_employee
         wecom_config = ctx.wecom_ctx["config"]
         default_emp = wecom_config.default_employee
 
-        # 企微没有 @mention 机制，用文本前缀匹配 + default
+        # 文本前缀匹配 + default_employee
         employee_name, task_text = resolve_employee_from_mention(
-            [],  # 无 mentions
+            [],  # 企微无结构化 mentions
             text,
             discovery,
             default_employee=default_emp,
         )
 
         if employee_name is None:
-            await send_wecom_text(
-                token_mgr,
-                from_user,
-                agent_id,
-                "未能识别目标员工，请用员工名开头发送消息。",
-            )
+            await _reply("未能识别目标员工，请用员工名开头发送消息。")
             return
 
         # ── SG Bridge 主通道尝试 ──
+        chat_context = (
+            "这是企业微信群聊，用户 @你 提问。像平时一样自然回复。"
+            if is_group
+            else "这是企业微信实时聊天。像平时一样自然回复。"
+        )
+
         _sg_reply: str | None = None
         try:
             from crew.sg_bridge import sg_dispatch
@@ -173,7 +241,7 @@ async def _wecom_dispatch(
                 task_text,
                 project_dir=ctx.project_dir,
                 employee_name=employee_name,
-                chat_context="这是企业微信实时聊天。像平时一样自然回复。",
+                chat_context=chat_context,
                 message_history=None,
                 permission_callback=None,
             )
@@ -204,11 +272,12 @@ async def _wecom_dispatch(
         output_text = strip_internal_tags(output_text)
 
         # 发送回复
-        await send_wecom_text(token_mgr, from_user, agent_id, output_text)
+        await _reply(output_text)
 
         # 记录任务
+        trigger = "wecom_group" if is_group else "wecom"
         record = ctx.registry.create(
-            trigger="wecom",
+            trigger=trigger,
             target_type="employee",
             target_name=employee_name,
             args={"task": task_text},
@@ -218,11 +287,6 @@ async def _wecom_dispatch(
     except Exception as e:
         logger.exception("企微消息处理失败: %s", e)
         try:
-            await send_wecom_text(
-                token_mgr,
-                from_user,
-                agent_id,
-                "处理时出了点问题，请稍后再试。",
-            )
+            await _reply("处理时出了点问题，请稍后再试。")
         except Exception:
             logger.warning("企微错误回复发送失败", exc_info=True)
