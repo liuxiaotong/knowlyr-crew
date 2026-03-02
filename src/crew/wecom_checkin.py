@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 # 北京时间
 _CST = timezone(timedelta(hours=8))
 
-# 上班时间基准（09:30 视为迟到）
-_LATE_THRESHOLD_HOUR = 9
-_LATE_THRESHOLD_MINUTE = 30
+# 上班时间 fallback（getcheckinoption 失败时回退）
+_FALLBACK_WORK_SEC = 9 * 3600 + 30 * 60  # 09:30
+_FALLBACK_FLEX_TIME = 0
 
 WECOM_API_BASE = "https://qyapi.weixin.qq.com/cgi-bin"
 
@@ -116,27 +116,107 @@ async def get_checkin_data(
     return all_records
 
 
+async def get_checkin_rules(
+    token: str,
+    user_ids: list[str],
+    dt: int,
+) -> dict[str, dict[str, Any]]:
+    """获取打卡规则（上班时间、弹性时间等）.
+
+    调用 /cgi-bin/checkin/getcheckinoption 接口。
+    没有返回的 userid 表示该员工不需要打卡。
+
+    Args:
+        token: access_token
+        user_ids: 用户 userid 列表
+        dt: 时间戳（用于查询当天的打卡规则）
+
+    Returns:
+        {userid: {"work_sec": int, "flex_time": int, "groupname": str}}
+        API 调用失败时返回空 dict（调用方应回退到 fallback）
+    """
+    from crew.wecom import get_wecom_client
+
+    client = get_wecom_client()
+    url = f"{WECOM_API_BASE}/checkin/getcheckinoption"
+    params = {"access_token": token}
+
+    rules: dict[str, dict[str, Any]] = {}
+
+    batch_size = 100
+    for i in range(0, len(user_ids), batch_size):
+        batch = user_ids[i : i + batch_size]
+        body = {
+            "datetime": dt,
+            "useridlist": batch,
+        }
+
+        try:
+            resp = await client.post(url, json=body, params=params)
+            data = resp.json()
+        except Exception:
+            logger.exception("获取打卡规则请求异常")
+            return {}
+
+        errcode = data.get("errcode", -1)
+        if errcode != 0:
+            errmsg = data.get("errmsg", "unknown")
+            logger.warning("获取打卡规则失败: %s (errcode=%d)，将使用 fallback", errmsg, errcode)
+            return {}
+
+        for info in data.get("info", []):
+            uid = info.get("userid", "")
+            if not uid:
+                continue
+            group = info.get("group", {})
+            groupname = group.get("groupname", "")
+
+            # 取第一个 checkindate（当天的规则）
+            checkindate_list = group.get("checkindate", [])
+            if not checkindate_list:
+                continue
+
+            checkindate = checkindate_list[0]
+            checkintime_list = checkindate.get("checkintime", [])
+            if not checkintime_list:
+                continue
+
+            work_sec = checkintime_list[0].get("work_sec", _FALLBACK_WORK_SEC)
+
+            # 弹性时间
+            flex_time = 0
+            allow_flex = checkindate.get("allow_flex", False)
+            if allow_flex:
+                late_rule = checkindate.get("late_rule", {})
+                flex_time = late_rule.get("onwork_flex_time", 0)
+
+            rules[uid] = {
+                "work_sec": work_sec,
+                "flex_time": flex_time,
+                "groupname": groupname,
+            }
+
+    return rules
+
+
 def classify_checkin(
     users: list[dict[str, Any]],
     checkin_records: list[dict[str, Any]],
-    late_hour: int = _LATE_THRESHOLD_HOUR,
-    late_minute: int = _LATE_THRESHOLD_MINUTE,
+    rules: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """将打卡记录分类为正常、迟到、未打卡.
 
     Args:
         users: 用户列表（含 userid, name）
         checkin_records: 打卡记录
-        late_hour: 迟到阈值（小时）
-        late_minute: 迟到阈值（分钟）
+        rules: 打卡规则 {userid: {"work_sec", "flex_time", ...}}。
+               如果提供，每个人用自己的 work_sec + flex_time 判断迟到。
+               如果为 None，回退到全局 fallback (09:30)。
 
     Returns:
         {"normal": [...], "late": [...], "absent": [...]}
         每项包含 name, userid, checkin_time(可选)
     """
-    # 构建 userid -> name 映射
-    user_map = {u["userid"]: u.get("name", u["userid"]) for u in users}
-
     # 构建 userid -> 最早上班打卡时间
     # 打卡记录可能有多条（补卡等），取最早的一条
     checkin_map: dict[str, int] = {}
@@ -147,8 +227,6 @@ def classify_checkin(
             if uid not in checkin_map or checkin_time < checkin_map[uid]:
                 checkin_map[uid] = checkin_time
 
-    late_threshold = late_hour * 3600 + late_minute * 60  # 秒（当天零点偏移）
-
     normal: list[dict[str, Any]] = []
     late: list[dict[str, Any]] = []
     absent: list[dict[str, Any]] = []
@@ -156,6 +234,13 @@ def classify_checkin(
     for user in users:
         uid = user["userid"]
         name = user.get("name", uid)
+
+        # 每个人的迟到阈值
+        if rules is not None and uid in rules:
+            rule = rules[uid]
+            late_threshold = rule["work_sec"] + rule["flex_time"]
+        else:
+            late_threshold = _FALLBACK_WORK_SEC + _FALLBACK_FLEX_TIME
 
         if uid not in checkin_map:
             absent.append({"name": name, "userid": uid})
@@ -275,7 +360,7 @@ async def run_checkin_report(
     token_mgr = WecomTokenManager(corp_id, secret)
     token = await token_mgr.get_token()
 
-    # 获取全员列表
+    # 获取全员列表（含 userid -> name 映射）
     logger.info("获取全员列表...")
     users = await get_department_users(token, department_id=1, fetch_child=True)
     if not users:
@@ -291,15 +376,36 @@ async def run_checkin_report(
     start_ts = int(today_start.timestamp())
     end_ts = int(now.timestamp())
 
+    # 获取打卡规则（用于判断谁需要打卡 + 个人迟到阈值）
+    logger.info("获取打卡规则...")
+    rules = await get_checkin_rules(token, user_ids, start_ts)
+
+    if rules:
+        # 只统计有打卡规则的人（没有规则 = 不需要打卡）
+        rule_user_ids = set(rules.keys())
+        filtered_users = [u for u in users if u["userid"] in rule_user_ids]
+        filtered_user_ids = [u["userid"] for u in filtered_users]
+        logger.info(
+            "有打卡规则 %d 人（排除 %d 人）",
+            len(filtered_users),
+            len(users) - len(filtered_users),
+        )
+    else:
+        # fallback：规则获取失败，用全员 + 默认阈值
+        logger.warning("打卡规则获取失败，回退到全员 + 默认 09:30 阈值")
+        filtered_users = users
+        filtered_user_ids = user_ids
+        rules = None  # 传 None 让 classify_checkin 用 fallback
+
     # 获取上班打卡数据
     logger.info("获取打卡数据: %s ~ %s", today_start.strftime("%Y-%m-%d %H:%M"), now.strftime("%H:%M"))
     checkin_records = await get_checkin_data(
-        token, user_ids, start_ts, end_ts, checkin_type=1
+        token, filtered_user_ids, start_ts, end_ts, checkin_type=1
     )
     logger.info("获取到 %d 条打卡记录", len(checkin_records))
 
     # 分类
-    classified = classify_checkin(users, checkin_records)
+    classified = classify_checkin(filtered_users, checkin_records, rules=rules)
     report = format_checkin_report(classified, report_date=now)
 
     logger.info(

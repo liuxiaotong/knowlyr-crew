@@ -1,4 +1,4 @@
-"""企业微信打卡通报测试 -- classify / format / run_checkin_report."""
+"""企业微信打卡通报测试 -- classify / format / rules / run_checkin_report."""
 
 from __future__ import annotations
 
@@ -32,7 +32,8 @@ class TestClassifyCheckin:
             })
         return records
 
-    def test_all_normal(self):
+    def test_all_normal_fallback(self):
+        """无 rules 时回退到 09:30 阈值."""
         from crew.wecom_checkin import classify_checkin
 
         users = self._make_users(["Alice", "Bob"])
@@ -43,7 +44,8 @@ class TestClassifyCheckin:
         assert len(result["late"]) == 0
         assert len(result["absent"]) == 0
 
-    def test_late_detection(self):
+    def test_late_detection_fallback(self):
+        """无 rules 时用 09:30 fallback 判断迟到."""
         from crew.wecom_checkin import classify_checkin
 
         users = self._make_users(["Alice", "Bob"])
@@ -74,19 +76,60 @@ class TestClassifyCheckin:
         result = classify_checkin([], [])
         assert result == {"normal": [], "late": [], "absent": []}
 
-    def test_custom_threshold(self):
+    def test_with_rules_per_user_threshold(self):
+        """每个人使用自己的 work_sec + flex_time 判断迟到."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["Alice", "Bob"])
+        # Alice 09:35, Bob 09:35
+        records = self._make_records([("uid_0", "09:35"), ("uid_1", "09:35")])
+
+        rules = {
+            # Alice: 09:00 上班 + 1h 弹性 = 10:00 阈值 -> 09:35 正常
+            "uid_0": {"work_sec": 9 * 3600, "flex_time": 3600, "groupname": "上海"},
+            # Bob: 09:30 上班 + 0 弹性 = 09:30 阈值 -> 09:35 迟到
+            "uid_1": {"work_sec": 9 * 3600 + 1800, "flex_time": 0, "groupname": "北京"},
+        }
+
+        result = classify_checkin(users, records, rules=rules)
+        assert len(result["normal"]) == 1
+        assert result["normal"][0]["name"] == "Alice"
+        assert len(result["late"]) == 1
+        assert result["late"][0]["name"] == "Bob"
+
+    def test_with_rules_flex_time(self):
+        """弹性时间内不算迟到."""
         from crew.wecom_checkin import classify_checkin
 
         users = self._make_users(["Alice"])
-        records = self._make_records([("uid_0", "09:05")])
+        # Alice 10:25 打卡
+        records = self._make_records([("uid_0", "10:25")])
 
-        # 阈值设为 09:00 -> 09:05 算迟到
-        result = classify_checkin(users, records, late_hour=9, late_minute=0)
-        assert len(result["late"]) == 1
+        rules = {
+            # 09:30 + 1h弹性 = 10:30 阈值 -> 10:25 正常
+            "uid_0": {"work_sec": 34200, "flex_time": 3600, "groupname": "上海"},
+        }
 
-        # 阈值设为 09:10 -> 09:05 算正常
-        result = classify_checkin(users, records, late_hour=9, late_minute=10)
+        result = classify_checkin(users, records, rules=rules)
         assert len(result["normal"]) == 1
+        assert len(result["late"]) == 0
+
+    def test_with_rules_beyond_flex(self):
+        """超过弹性时间算迟到."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["Alice"])
+        # Alice 10:35 打卡
+        records = self._make_records([("uid_0", "10:35")])
+
+        rules = {
+            # 09:30 + 1h弹性 = 10:30 阈值 -> 10:35 迟到
+            "uid_0": {"work_sec": 34200, "flex_time": 3600, "groupname": "上海"},
+        }
+
+        result = classify_checkin(users, records, rules=rules)
+        assert len(result["normal"]) == 0
+        assert len(result["late"]) == 1
 
     def test_multiple_records_takes_earliest(self):
         """同一用户多条打卡记录（补卡等），取最早的."""
@@ -158,6 +201,31 @@ class TestFormatCheckinReport:
         classified = {"normal": [], "late": [], "absent": []}
         report = format_checkin_report(classified)
         assert "考勤通报" in report
+
+    def test_chinese_names(self):
+        """通报中显示中文名."""
+        from crew.wecom_checkin import format_checkin_report
+
+        classified = {
+            "normal": [
+                {"name": "王瑶", "userid": "WangYao", "checkin_time": "09:00"},
+            ],
+            "late": [
+                {"name": "张三", "userid": "ZhangSan", "checkin_time": "10:05"},
+            ],
+            "absent": [
+                {"name": "李四", "userid": "LiSi"},
+            ],
+        }
+
+        report = format_checkin_report(classified)
+        assert "王瑶 09:00" in report
+        assert "张三 10:05" in report
+        assert "李四" in report
+        # 不应出现 userid
+        assert "WangYao" not in report
+        assert "ZhangSan" not in report
+        assert "LiSi" not in report
 
 
 # ── API 调用测试 ──
@@ -275,6 +343,167 @@ class TestGetCheckinData:
                 await get_checkin_data("token", ["u1"], 100, 200)
 
 
+# ── 打卡规则测试 ──
+
+
+class TestGetCheckinRules:
+    """get_checkin_rules 接口调用."""
+
+    def _mock_option_response(self, info: list[dict]) -> MagicMock:
+        resp = MagicMock()
+        resp.json.return_value = {"errcode": 0, "errmsg": "ok", "info": info}
+        return resp
+
+    @pytest.mark.asyncio
+    async def test_success_basic(self):
+        from crew.wecom_checkin import get_checkin_rules
+
+        info = [
+            {
+                "userid": "WangYao",
+                "group": {
+                    "groupname": "上海职场",
+                    "checkindate": [
+                        {
+                            "workdays": [1, 2, 3, 4, 5],
+                            "checkintime": [
+                                {"work_sec": 34200, "off_work_sec": 66600}
+                            ],
+                            "late_rule": {"onwork_flex_time": 3600},
+                            "allow_flex": True,
+                        }
+                    ],
+                },
+            }
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=self._mock_option_response(info))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["WangYao"], 1709280000)
+
+        assert "WangYao" in rules
+        assert rules["WangYao"]["work_sec"] == 34200
+        assert rules["WangYao"]["flex_time"] == 3600
+        assert rules["WangYao"]["groupname"] == "上海职场"
+
+    @pytest.mark.asyncio
+    async def test_no_flex(self):
+        """allow_flex=False 时 flex_time 应为 0."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        info = [
+            {
+                "userid": "u1",
+                "group": {
+                    "groupname": "北京",
+                    "checkindate": [
+                        {
+                            "checkintime": [{"work_sec": 32400}],
+                            "allow_flex": False,
+                        }
+                    ],
+                },
+            }
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=self._mock_option_response(info))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["u1"], 1709280000)
+
+        assert rules["u1"]["flex_time"] == 0
+
+    @pytest.mark.asyncio
+    async def test_missing_user_excluded(self):
+        """API 不返回的人 = 不需要打卡."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        # 只返回 u1，不返回 u2
+        info = [
+            {
+                "userid": "u1",
+                "group": {
+                    "groupname": "上海",
+                    "checkindate": [
+                        {
+                            "checkintime": [{"work_sec": 34200}],
+                            "allow_flex": False,
+                        }
+                    ],
+                },
+            }
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=self._mock_option_response(info))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["u1", "u2"], 1709280000)
+
+        assert "u1" in rules
+        assert "u2" not in rules
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_empty(self):
+        """API 返回错误码时返回空 dict."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"errcode": 301023, "errmsg": "not checkin app"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["u1"], 1709280000)
+
+        assert rules == {}
+
+    @pytest.mark.asyncio
+    async def test_request_exception_returns_empty(self):
+        """网络异常时返回空 dict."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["u1"], 1709280000)
+
+        assert rules == {}
+
+    @pytest.mark.asyncio
+    async def test_batch_split(self):
+        """超过 100 人时自动分批."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        info = [
+            {
+                "userid": "u0",
+                "group": {
+                    "groupname": "G",
+                    "checkindate": [
+                        {"checkintime": [{"work_sec": 34200}], "allow_flex": False}
+                    ],
+                },
+            }
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=self._mock_option_response(info))
+
+        user_ids = [f"u{i}" for i in range(150)]
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", user_ids, 1709280000)
+
+        # 150 人 -> 2 批
+        assert mock_client.post.call_count == 2
+
+
 # ── 完整流程测试 ──
 
 
@@ -282,7 +511,65 @@ class TestRunCheckinReport:
     """run_checkin_report 端到端流程."""
 
     @pytest.mark.asyncio
-    async def test_full_flow_dry_run(self):
+    async def test_full_flow_with_rules(self):
+        """有打卡规则时，排除无规则的人，按个人阈值判断."""
+        from crew.wecom_checkin import run_checkin_report
+
+        today = datetime.now(_CST).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        mock_token_mgr = AsyncMock()
+        mock_token_mgr.get_token = AsyncMock(return_value="test_token")
+
+        # 3 个人，u3 (LiuKai) 没有打卡规则
+        users = [
+            {"userid": "u1", "name": "王瑶", "department": [1]},
+            {"userid": "u2", "name": "张三", "department": [1]},
+            {"userid": "u3", "name": "刘凯", "department": [1]},
+        ]
+
+        # 打卡规则：只返回 u1, u2（u3 不需要打卡）
+        rules = {
+            "u1": {"work_sec": 34200, "flex_time": 3600, "groupname": "上海"},
+            "u2": {"work_sec": 34200, "flex_time": 0, "groupname": "北京"},
+        }
+
+        checkin_records = [
+            # 王瑶 09:35 -> work_sec=34200 + flex=3600 = 10:30 阈值 -> 正常
+            {"userid": "u1", "checkin_time": int(today.replace(hour=9, minute=35).timestamp())},
+            # 张三 09:35 -> work_sec=34200 + flex=0 = 09:30 阈值 -> 迟到
+            {"userid": "u2", "checkin_time": int(today.replace(hour=9, minute=35).timestamp())},
+        ]
+
+        with (
+            patch("crew.wecom.WecomTokenManager", return_value=mock_token_mgr),
+            patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
+            patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
+            patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
+        ):
+            mock_users.return_value = users
+            mock_rules.return_value = rules
+            mock_checkin.return_value = checkin_records
+
+            report = await run_checkin_report(
+                corp_id="test_corp",
+                secret="test_secret",
+                dry_run=True,
+            )
+
+        # 王瑶正常（弹性范围内）
+        assert "正常打卡（1人）" in report
+        assert "王瑶 09:35" in report
+        # 张三迟到（无弹性）
+        assert "迟到（1人）" in report
+        assert "张三 09:35" in report
+        # 刘凯不应出现（无打卡规则）
+        assert "刘凯" not in report
+        # 未打卡应为 0 人
+        assert "未打卡（0人）" in report
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_rules_fail(self):
+        """打卡规则获取失败时，回退到全员 + 09:30 阈值."""
         from crew.wecom_checkin import run_checkin_report
 
         today = datetime.now(_CST).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -305,9 +592,11 @@ class TestRunCheckinReport:
         with (
             patch("crew.wecom.WecomTokenManager", return_value=mock_token_mgr),
             patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
+            patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
             patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
         ):
             mock_users.return_value = users
+            mock_rules.return_value = {}  # 规则获取失败
             mock_checkin.return_value = checkin_records
 
             report = await run_checkin_report(
@@ -316,6 +605,7 @@ class TestRunCheckinReport:
                 dry_run=True,
             )
 
+        # 回退到全员 + 09:30 阈值
         assert "正常打卡（1人）" in report
         assert "Alice 08:55" in report
         assert "迟到（1人）" in report
@@ -333,6 +623,7 @@ class TestRunCheckinReport:
         mock_token_mgr.get_token = AsyncMock(return_value="test_token")
 
         users = [{"userid": "u1", "name": "Alice", "department": [1]}]
+        rules = {"u1": {"work_sec": 34200, "flex_time": 0, "groupname": "上海"}}
         checkin_records = [
             {"userid": "u1", "checkin_time": int(today.replace(hour=9, minute=0).timestamp())},
         ]
@@ -340,10 +631,12 @@ class TestRunCheckinReport:
         with (
             patch("crew.wecom.WecomTokenManager", return_value=mock_token_mgr),
             patch("crew.wecom_checkin.get_department_users", new_callable=AsyncMock) as mock_users,
+            patch("crew.wecom_checkin.get_checkin_rules", new_callable=AsyncMock) as mock_rules,
             patch("crew.wecom_checkin.get_checkin_data", new_callable=AsyncMock) as mock_checkin,
             patch("crew.wecom.send_wecom_group_text", new_callable=AsyncMock) as mock_send,
         ):
             mock_users.return_value = users
+            mock_rules.return_value = rules
             mock_checkin.return_value = checkin_records
             mock_send.return_value = {"errcode": 0, "errmsg": "ok"}
 
