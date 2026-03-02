@@ -144,6 +144,19 @@ from crew.webhook_tools.feishu import (  # noqa: F401
 )
 
 # ── re-export: 工具函数（测试和外部代码仍从 crew.webhook import）──
+# ── re-export: Skills handlers ──
+from crew.webhook_skills import (  # noqa: F401
+    _handle_skill_create,
+    _handle_skill_delete,
+    _handle_skill_get,
+    _handle_skill_list,
+    _handle_skill_update,
+    _handle_skills_check_triggers,
+    _handle_skills_execute,
+    _handle_skills_stats,
+    _handle_skills_trigger_history,
+)
+
 from crew.webhook_tools.orchestration import (  # noqa: F401
     _tool_agent_file_grep,
     _tool_agent_file_read,
@@ -458,6 +471,52 @@ def create_webhook_app(
             "/api/chat",
             endpoint=_make_handler(ctx, _handle_chat),
             methods=["POST"],
+        ),
+        # Skills API 端点
+        Route(
+            "/api/employees/{employee_name}/skills",
+            endpoint=_make_handler(ctx, _handle_skill_create),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/employees/{employee_name}/skills",
+            endpoint=_make_handler(ctx, _handle_skill_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/employees/{employee_name}/skills/{skill_name}",
+            endpoint=_make_handler(ctx, _handle_skill_get),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/employees/{employee_name}/skills/{skill_name}",
+            endpoint=_make_handler(ctx, _handle_skill_update),
+            methods=["PUT"],
+        ),
+        Route(
+            "/api/employees/{employee_name}/skills/{skill_name}",
+            endpoint=_make_handler(ctx, _handle_skill_delete),
+            methods=["DELETE"],
+        ),
+        Route(
+            "/api/skills/check-triggers",
+            endpoint=_make_handler(ctx, _handle_skills_check_triggers),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/skills/execute",
+            endpoint=_make_handler(ctx, _handle_skills_execute),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/skills/stats",
+            endpoint=_make_handler(ctx, _handle_skills_stats),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/skills/trigger-history",
+            endpoint=_make_handler(ctx, _handle_skills_trigger_history),
+            methods=["GET"],
         ),
         # KV 存储端点
         Route(

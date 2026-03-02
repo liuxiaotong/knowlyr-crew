@@ -1348,6 +1348,70 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             and not _needs_tools(user_message)
         )
 
+        # ── Skills 自动触发 ──
+        enhanced_context = {}
+        if emp is not None and isinstance(user_message, str):
+            try:
+                from crew.memory import MemoryStore
+                from crew.skills import SkillStore
+                from crew.skills_engine import SkillsEngine
+
+                skill_store = SkillStore(project_dir=ctx.project_dir)
+                memory_store = MemoryStore(project_dir=ctx.project_dir)
+                engine = SkillsEngine(skill_store, memory_store)
+
+                # 检查触发
+                triggered = engine.check_triggers(name, user_message, args)
+                if triggered:
+                    logger.info(
+                        "Skills 触发: employee=%s task=%s triggered=%d",
+                        name,
+                        user_message[:50],
+                        len(triggered),
+                    )
+                    # 执行触发的 skills（按优先级排序）
+                    for skill, score in triggered[:3]:  # 最多执行前 3 个
+                        try:
+                            result = engine.execute_skill(skill, name, {"task": user_message, **args})
+                            # 合并 enhanced_context
+                            if result.get("enhanced_context"):
+                                for key, value in result["enhanced_context"].items():
+                                    if key in enhanced_context:
+                                        # 合并列表
+                                        if isinstance(enhanced_context[key], list) and isinstance(
+                                            value, list
+                                        ):
+                                            enhanced_context[key].extend(value)
+                                        else:
+                                            enhanced_context[key] = value
+                                    else:
+                                        enhanced_context[key] = value
+                            # 记录触发历史
+                            engine.record_trigger(
+                                skill=skill,
+                                employee=name,
+                                task=user_message,
+                                match_score=score,
+                                execution_result=result,
+                            )
+                        except Exception as skill_exec_error:
+                            logger.warning(
+                                "Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error
+                            )
+            except Exception as skills_error:
+                logger.warning("Skills 检查失败: %s", skills_error)
+
+        # 将 enhanced_context 注入到 args
+        if enhanced_context:
+            # 将记忆添加到 task 前缀
+            memories = enhanced_context.get("memories", [])
+            if memories:
+                memory_text = "\n\n【相关历史记忆】\n" + "\n".join(
+                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
+                )
+                task = args.get("task", "")
+                args["task"] = (memory_text + "\n\n" + task) if task else memory_text
+
         _t0 = _time.monotonic()
         if use_fast_path:
             from crew.webhook_feishu import _feishu_fast_reply
