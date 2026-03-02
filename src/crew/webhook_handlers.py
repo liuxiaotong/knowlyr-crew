@@ -811,6 +811,44 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             }
         )
 
+    # 相似度检测（2026-03-02 记忆去重）
+    from crew.memory_similarity import find_similar_memories
+
+    # 检查是否强制写入
+    force = request.query_params.get("force") == "true"
+
+    if not force:
+        similar_memories = await find_similar_memories(
+            employee=employee,
+            content=content,
+            category=category,
+            threshold=0.85,
+            project_dir=ctx.project_dir,
+        )
+
+        if similar_memories:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "warning": "similar_memories_found",
+                    "similar_memories": [
+                        {
+                            "id": mem["id"],
+                            "content": mem["content"][:200],
+                            "similarity": round(score, 2),
+                            "created_at": mem["created_at"],
+                            "category": mem["category"],
+                        }
+                        for mem, score in similar_memories
+                    ],
+                    "suggestions": [
+                        "如果是相同内容，考虑更新已有记忆而非新增",
+                        "如果是补充信息，可以在原记忆基础上扩展",
+                        "如果确实是新的独立经验，添加 ?force=true 参数重新提交",
+                    ],
+                }
+            )
+
     store = MemoryStore(project_dir=ctx.project_dir)
 
     # 幂等检查：同 employee + source_session + category 不重复写入
@@ -890,6 +928,139 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     )
     data = [e.model_dump() for e in entries]
     return JSONResponse({"ok": True, "entries": data, "total": len(data)})
+
+
+async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
+    """更新已有记忆 — PUT /api/memory/{entry_id}.
+
+    接受（JSON body）:
+        {
+            "entry_id": "abc123",
+            "employee": "backend-engineer",
+            "content": "更新后的内容",
+            "tags": ["tag1", "tag2"],  # 可选
+            "updated_by": "姜墨言",  # 可选，记录谁更新的
+        }
+
+    返回:
+        {
+            "ok": true,
+            "entry_id": "abc123",
+            "updated": true
+        }
+    """
+    import json
+    from datetime import datetime
+
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    entry_id = payload.get("entry_id", "")
+    employee = payload.get("employee", "")
+    content = payload.get("content", "")
+    tags = payload.get("tags")
+    updated_by = payload.get("updated_by", "")
+
+    if not entry_id or not employee or not content:
+        return JSONResponse(
+            {"error": "entry_id, employee, content are required"}, status_code=400
+        )
+
+    store = MemoryStore(project_dir=ctx.project_dir)
+
+    # 查找原记忆
+    employee = store._resolve_to_character_name(employee)
+    path = store._employee_file(employee)
+
+    if not path.exists():
+        return JSONResponse({"error": "Employee not found"}, status_code=404)
+
+    from crew.paths import file_lock
+
+    found = False
+    with file_lock(path):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        new_lines: list[str] = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            try:
+                from crew.memory import MemoryEntry
+
+                entry = MemoryEntry(**json.loads(stripped))
+
+                if entry.id == entry_id:
+                    found = True
+
+                    # 更新内容
+                    entry.content = content
+
+                    # 更新标签（如果提供）
+                    if tags is not None and isinstance(tags, list):
+                        from crew.memory_tags import normalize_tags
+
+                        entry.tags = normalize_tags(tags)
+
+                    # 记录更新历史（添加到 tags）
+                    update_tag = f"updated-by:{updated_by or 'unknown'}"
+                    update_time_tag = f"updated-at:{datetime.now().strftime('%Y-%m-%d')}"
+
+                    if update_tag not in entry.tags:
+                        entry.tags.append(update_tag)
+                    if update_time_tag not in entry.tags:
+                        entry.tags.append(update_time_tag)
+
+                    new_lines.append(entry.model_dump_json())
+                else:
+                    new_lines.append(stripped)
+
+            except (json.JSONDecodeError, ValueError):
+                new_lines.append(stripped)
+
+        if not found:
+            return JSONResponse({"error": "Memory entry not found"}, status_code=404)
+
+        # 重写文件
+        path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # 失效缓存
+    try:
+        from crew.memory_cache import invalidate
+
+        invalidate(employee)
+    except Exception:
+        pass
+
+    # 更新 embedding 缓存
+    try:
+        from crew.memory_similarity import get_embedding, _get_embedding_cache_path, _load_embedding_cache, _save_embedding_cache
+
+        new_embedding = await get_embedding(content)
+        if new_embedding is not None:
+            cache = _load_embedding_cache(store.memory_dir, employee)
+            cache[entry_id] = new_embedding
+            _save_embedding_cache(store.memory_dir, employee, cache)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"更新 embedding 缓存失败: {e}")
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "entry_id": entry_id,
+            "updated": True,
+        }
+    )
 
 
 async def _handle_memory_tags_list(request: Any, ctx: _AppContext) -> Any:
@@ -1025,6 +1196,1347 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
             )
     except Exception as e:
         logger.exception("记忆删除失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
+    """列出记忆草稿 — GET /api/memory/drafts.
+
+    查询参数（可选）:
+        status: 按状态过滤（pending/approved/rejected）
+        employee: 按员工过滤
+        limit: 最大返回数量，默认 100
+
+    返回:
+        {
+            "ok": true,
+            "drafts": [...],
+            "total": 10,
+            "counts": {"pending": 5, "approved": 3, "rejected": 2}
+        }
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_drafts import MemoryDraftStore
+
+    status = request.query_params.get("status")
+    employee = request.query_params.get("employee")
+    try:
+        limit = int(request.query_params.get("limit", "100"))
+    except (ValueError, TypeError):
+        limit = 100
+
+    try:
+        store = MemoryDraftStore()
+        drafts = store.list_drafts(status=status, employee=employee, limit=limit)
+        counts = store.count_by_status()
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "drafts": [d.model_dump() for d in drafts],
+                "total": len(drafts),
+                "counts": counts,
+            }
+        )
+    except Exception as e:
+        logger.exception("列出草稿失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
+    """查看草稿详情 — GET /api/memory/drafts/{draft_id}.
+
+    路径参数:
+        draft_id: 草稿 ID
+
+    返回:
+        {"ok": true, "draft": {...}} 或 {"ok": false, "error": "..."}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_drafts import MemoryDraftStore
+
+    draft_id = request.path_params.get("draft_id", "")
+    if not draft_id:
+        return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
+
+    try:
+        store = MemoryDraftStore()
+        draft = store.get_draft(draft_id)
+
+        if draft is None:
+            return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
+
+        return JSONResponse({"ok": True, "draft": draft.model_dump()})
+    except Exception as e:
+        logger.exception("获取草稿失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
+    """批准草稿 — POST /api/memory/drafts/{draft_id}/approve.
+
+    路径参数:
+        draft_id: 草稿 ID
+
+    JSON body（可选）:
+        {
+            "reviewed_by": "姜墨言"
+        }
+
+    返回:
+        {"ok": true, "draft": {...}, "memory_id": "..."} 或 {"ok": false, "error": "..."}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+    from crew.memory_drafts import MemoryDraftStore
+
+    draft_id = request.path_params.get("draft_id", "")
+    if not draft_id:
+        return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+    reviewed_by = payload.get("reviewed_by", "system")
+
+    try:
+        draft_store = MemoryDraftStore()
+        draft = draft_store.approve_draft(draft_id, reviewed_by=reviewed_by)
+
+        if draft is None:
+            return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
+
+        # 写入正式记忆
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        entry = memory_store.add(
+            employee=draft.employee,
+            category=draft.category,
+            content=draft.content,
+            tags=draft.tags,
+            confidence=draft.confidence,
+            source_session=draft.source_trajectory_id,
+        )
+
+        logger.info(
+            "批准草稿并写入记忆: draft_id=%s memory_id=%s employee=%s",
+            draft_id,
+            entry.id,
+            draft.employee,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "draft": draft.model_dump(),
+                "memory_id": entry.id,
+            }
+        )
+    except Exception as e:
+        logger.exception("批准草稿失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
+    """拒绝草稿 — POST /api/memory/drafts/{draft_id}/reject.
+
+    路径参数:
+        draft_id: 草稿 ID
+
+    JSON body（可选）:
+        {
+            "reason": "内容不够具体",
+            "reviewed_by": "姜墨言"
+        }
+
+    返回:
+        {"ok": true, "draft": {...}} 或 {"ok": false, "error": "..."}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_drafts import MemoryDraftStore
+
+    draft_id = request.path_params.get("draft_id", "")
+    if not draft_id:
+        return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+    reason = payload.get("reason", "")
+    reviewed_by = payload.get("reviewed_by", "system")
+
+    try:
+        store = MemoryDraftStore()
+        draft = store.reject_draft(draft_id, reason=reason, reviewed_by=reviewed_by)
+
+        if draft is None:
+            return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
+
+        logger.info("拒绝草稿: draft_id=%s reason=%s", draft_id, reason)
+
+        return JSONResponse({"ok": True, "draft": draft.model_dump()})
+    except Exception as e:
+        logger.exception("拒绝草稿失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
+    """查询归档记忆 — GET /api/memory/archive.
+
+    查询参数:
+        employee (required): 员工名称
+        start_date (optional): 起始日期 ISO 8601
+        end_date (optional): 结束日期 ISO 8601
+        category (optional): 按类别过滤
+        limit (optional): 最大返回数量，默认 100
+
+    返回:
+        {"ok": true, "entries": [...], "total": 10}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+    from crew.memory_archive import MemoryArchive
+
+    employee = request.query_params.get("employee", "")
+    if not employee:
+        return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
+
+    start_date_str = request.query_params.get("start_date")
+    end_date_str = request.query_params.get("end_date")
+    category = request.query_params.get("category")
+
+    try:
+        limit = int(request.query_params.get("limit", "100"))
+    except (ValueError, TypeError):
+        limit = 100
+
+    try:
+        from datetime import datetime
+
+        start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
+        end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
+
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        archive = MemoryArchive(memory_store=memory_store)
+
+        entries = archive.query_archive(
+            employee=employee,
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            limit=limit,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "entries": [e.model_dump() for e in entries],
+                "total": len(entries),
+            }
+        )
+    except Exception as e:
+        logger.exception("查询归档记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
+    """恢复归档记忆 — POST /api/memory/archive/restore.
+
+    JSON body:
+        {
+            "employee": "赵云帆",
+            "entry_ids": ["id1", "id2", ...]
+        }
+
+    返回:
+        {"ok": true, "restored": 2, "not_found": 0}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+    from crew.memory_archive import MemoryArchive
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    employee = payload.get("employee", "")
+    entry_ids = payload.get("entry_ids", [])
+
+    if not employee:
+        return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
+
+    if not entry_ids or not isinstance(entry_ids, list):
+        return JSONResponse({"ok": False, "error": "entry_ids is required"}, status_code=400)
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        archive = MemoryArchive(memory_store=memory_store)
+
+        stats = archive.restore_from_archive(employee, entry_ids)
+
+        logger.info(
+            "恢复归档记忆: employee=%s restored=%d not_found=%d",
+            employee,
+            stats["restored"],
+            stats["not_found"],
+        )
+
+        return JSONResponse({"ok": True, **stats})
+    except Exception as e:
+        logger.exception("恢复归档记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
+    """获取归档统计 — GET /api/memory/archive/stats.
+
+    查询参数:
+        employee (required): 员工名称
+
+    返回:
+        {"ok": true, "total": 100, "by_year": {"2026": 50, "2025": 50}}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+    from crew.memory_archive import MemoryArchive
+
+    employee = request.query_params.get("employee", "")
+    if not employee:
+        return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        archive = MemoryArchive(memory_store=memory_store)
+
+        stats = archive.get_archive_stats(employee)
+
+        return JSONResponse({"ok": True, **stats})
+    except Exception as e:
+        logger.exception("获取归档统计失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
+    """列出共享记忆 — GET /api/memory/shared.
+
+    查询参数:
+        tags (optional): 按标签过滤（逗号分隔）
+        category (optional): 按类别过滤
+        exclude_employee (optional): 排除指定员工
+        limit (optional): 最大返回数量，默认 20
+
+    返回:
+        {"ok": true, "entries": [...], "total": 10}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    tags_str = request.query_params.get("tags", "")
+    tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
+    category = request.query_params.get("category")
+    exclude_employee = request.query_params.get("exclude_employee", "")
+
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+    except (ValueError, TypeError):
+        limit = 20
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        entries = memory_store.query_shared(
+            tags=tags,
+            exclude_employee=exclude_employee,
+            limit=limit,
+        )
+
+        # 按类别过滤（query_shared 不支持 category 参数）
+        if category:
+            entries = [e for e in entries if e.category == category]
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "entries": [e.model_dump() for e in entries],
+                "total": len(entries),
+            }
+        )
+    except Exception as e:
+        logger.exception("列出共享记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> Any:
+    """记录共享记忆使用 — POST /api/memory/shared/usage.
+
+    JSON body:
+        {
+            "memory_id": "abc123",
+            "memory_owner": "赵云帆",
+            "used_by": "卫子昂",
+            "context": "实现前端组件时参考"
+        }
+
+    返回:
+        {"ok": true}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_shared_stats import SharedMemoryStats
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    memory_id = payload.get("memory_id", "")
+    memory_owner = payload.get("memory_owner", "")
+    used_by = payload.get("used_by", "")
+    context = payload.get("context", "")
+
+    if not memory_id or not memory_owner or not used_by:
+        return JSONResponse(
+            {"ok": False, "error": "memory_id, memory_owner, used_by are required"},
+            status_code=400,
+        )
+
+    try:
+        stats = SharedMemoryStats()
+        stats.record_usage(memory_id, memory_owner, used_by, context)
+
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        logger.exception("记录共享记忆使用失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
+    """获取共享记忆统计 — GET /api/memory/shared/stats.
+
+    查询参数:
+        memory_id (optional): 获取指定记忆的使用统计
+        owner (optional): 获取指定所有者的共享统计
+        user (optional): 获取指定用户的使用记录
+        popular (optional): 获取热门记忆（值为 true）
+
+    返回:
+        根据查询参数返回不同的统计信息
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_shared_stats import SharedMemoryStats
+
+    memory_id = request.query_params.get("memory_id")
+    owner = request.query_params.get("owner")
+    user = request.query_params.get("user")
+    popular = request.query_params.get("popular") == "true"
+
+    try:
+        stats_manager = SharedMemoryStats()
+
+        if memory_id:
+            # 获取指定记忆的使用统计
+            stats = stats_manager.get_usage_stats(memory_id)
+            return JSONResponse({"ok": True, "memory_id": memory_id, **stats})
+
+        elif owner:
+            # 获取所有者的共享统计
+            stats = stats_manager.get_memory_owner_stats(owner)
+            return JSONResponse({"ok": True, "owner": owner, **stats})
+
+        elif user:
+            # 获取用户的使用记录
+            usages = stats_manager.get_user_shared_usage(user, limit=50)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "user": user,
+                    "usages": [u.model_dump() for u in usages],
+                    "total": len(usages),
+                }
+            )
+
+        elif popular:
+            # 获取热门记忆
+            memories = stats_manager.get_popular_memories(min_uses=2, limit=20)
+            return JSONResponse({"ok": True, "popular_memories": memories})
+
+        else:
+            return JSONResponse(
+                {"ok": False, "error": "请提供 memory_id、owner、user 或 popular 参数"},
+                status_code=400,
+            )
+
+    except Exception as e:
+        logger.exception("获取共享记忆统计失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
+    """记忆管理仪表板数据 — GET /api/memory/dashboard.
+
+    查询参数:
+        employee (optional): 指定员工，不指定则返回全局统计
+
+    返回:
+        {
+            "ok": true,
+            "total_memories": 总记忆数,
+            "by_category": {"finding": 10, "correction": 5, ...},
+            "by_employee": {"赵云帆": 20, "卫子昂": 15, ...},
+            "quality_distribution": {"high": 50, "medium": 30, "low": 20},
+            "top_tags": [{"tag": "api", "count": 15}, ...]
+        }
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    employee = request.query_params.get("employee")
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+
+        if employee:
+            # 单个员工的统计
+            entries = memory_store.query(employee, limit=1000)
+            total = len(entries)
+
+            by_category = {}
+            tag_counts = {}
+            quality_dist = {"high": 0, "medium": 0, "low": 0}
+
+            for entry in entries:
+                # 类别统计
+                by_category[entry.category] = by_category.get(entry.category, 0) + 1
+
+                # 标签统计
+                for tag in entry.tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+                # 质量分布（基于置信度）
+                if entry.confidence >= 0.8:
+                    quality_dist["high"] += 1
+                elif entry.confidence >= 0.5:
+                    quality_dist["medium"] += 1
+                else:
+                    quality_dist["low"] += 1
+
+            top_tags = sorted(
+                [{"tag": tag, "count": count} for tag, count in tag_counts.items()],
+                key=lambda x: x["count"],
+                reverse=True,
+            )[:20]
+
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "employee": employee,
+                    "total_memories": total,
+                    "by_category": by_category,
+                    "quality_distribution": quality_dist,
+                    "top_tags": top_tags,
+                }
+            )
+
+        else:
+            # 全局统计
+            employees = memory_store.list_employees()
+            total = 0
+            by_category = {}
+            by_employee = {}
+            tag_counts = {}
+            quality_dist = {"high": 0, "medium": 0, "low": 0}
+
+            for emp in employees:
+                entries = memory_store.query(emp, limit=1000)
+                emp_count = len(entries)
+                by_employee[emp] = emp_count
+                total += emp_count
+
+                for entry in entries:
+                    by_category[entry.category] = by_category.get(entry.category, 0) + 1
+
+                    for tag in entry.tags:
+                        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+                    if entry.confidence >= 0.8:
+                        quality_dist["high"] += 1
+                    elif entry.confidence >= 0.5:
+                        quality_dist["medium"] += 1
+                    else:
+                        quality_dist["low"] += 1
+
+            top_tags = sorted(
+                [{"tag": tag, "count": count} for tag, count in tag_counts.items()],
+                key=lambda x: x["count"],
+                reverse=True,
+            )[:20]
+
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "total_memories": total,
+                    "by_category": by_category,
+                    "by_employee": by_employee,
+                    "quality_distribution": quality_dist,
+                    "top_tags": top_tags,
+                }
+            )
+
+    except Exception as e:
+        logger.exception("获取仪表板数据失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
+    """批量更新记忆 — POST /api/memory/batch/update.
+
+    JSON body:
+        {
+            "employee": "赵云帆",
+            "entry_ids": ["id1", "id2", ...],
+            "updates": {
+                "tags": ["new-tag"],  // 添加标签
+                "remove_tags": ["old-tag"],  // 移除标签
+                "confidence": 0.9  // 更新置信度
+            }
+        }
+
+    返回:
+        {"ok": true, "updated": 2, "failed": 0}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    employee = payload.get("employee", "")
+    entry_ids = payload.get("entry_ids", [])
+    updates = payload.get("updates", {})
+
+    if not employee or not entry_ids:
+        return JSONResponse(
+            {"ok": False, "error": "employee and entry_ids are required"},
+            status_code=400,
+        )
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        path = memory_store._employee_file(employee)
+
+        if not path.exists():
+            return JSONResponse({"ok": False, "error": "Employee not found"}, status_code=404)
+
+        from crew.memory import MemoryEntry
+        from crew.paths import file_lock
+
+        id_set = set(entry_ids)
+        updated_count = 0
+        failed_count = 0
+
+        with file_lock(path):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            new_lines = []
+
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                try:
+                    entry = MemoryEntry(**json.loads(stripped))
+
+                    if entry.id in id_set:
+                        # 应用更新
+                        if "tags" in updates:
+                            entry.tags = list(set(entry.tags + updates["tags"]))
+
+                        if "remove_tags" in updates:
+                            for tag in updates["remove_tags"]:
+                                if tag in entry.tags:
+                                    entry.tags.remove(tag)
+
+                        if "confidence" in updates:
+                            entry.confidence = float(updates["confidence"])
+
+                        new_lines.append(entry.model_dump_json())
+                        updated_count += 1
+                    else:
+                        new_lines.append(stripped)
+
+                except (json.JSONDecodeError, ValueError):
+                    new_lines.append(stripped)
+                    failed_count += 1
+
+            path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+        logger.info(
+            "批量更新记忆: employee=%s updated=%d failed=%d",
+            employee,
+            updated_count,
+            failed_count,
+        )
+
+        return JSONResponse({"ok": True, "updated": updated_count, "failed": failed_count})
+
+    except Exception as e:
+        logger.exception("批量更新记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
+    """批量删除记忆 — POST /api/memory/batch/delete.
+
+    JSON body:
+        {
+            "employee": "赵云帆",
+            "entry_ids": ["id1", "id2", ...]
+        }
+
+    返回:
+        {"ok": true, "deleted": 2}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory import MemoryStore
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    employee = payload.get("employee", "")
+    entry_ids = payload.get("entry_ids", [])
+
+    if not employee or not entry_ids:
+        return JSONResponse(
+            {"ok": False, "error": "employee and entry_ids are required"},
+            status_code=400,
+        )
+
+    try:
+        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        deleted_count = 0
+
+        for entry_id in entry_ids:
+            if memory_store.delete(entry_id, employee=employee):
+                deleted_count += 1
+
+        logger.info("批量删除记忆: employee=%s deleted=%d", employee, deleted_count)
+
+        return JSONResponse({"ok": True, "deleted": deleted_count})
+
+    except Exception as e:
+        logger.exception("批量删除记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
+    """导出轨迹数据集 — POST /api/trajectory/export.
+
+    JSON body:
+        {
+            "employee": "赵云帆",  // 可选
+            "start_date": "2026-03-01T00:00:00",  // 可选
+            "end_date": "2026-03-02T23:59:59",  // 可选
+            "min_quality": 0.7,  // 可选，最低质量分数
+            "max_samples": 1000,  // 可选，最大样本数
+            "output_file": "/tmp/dataset.jsonl"  // 可选，默认自动生成
+        }
+
+    返回:
+        {"ok": true, "total": 100, "exported": 95, "output_file": "..."}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.trajectory_export import TrajectoryExporter
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    employee = payload.get("employee")
+    start_date_str = payload.get("start_date")
+    end_date_str = payload.get("end_date")
+    min_quality = payload.get("min_quality", 0.0)
+    max_samples = payload.get("max_samples", 0)
+    output_file_str = payload.get("output_file")
+
+    try:
+        from datetime import datetime
+        from pathlib import Path
+
+        start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
+        end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
+
+        # 生成输出文件名
+        if output_file_str:
+            output_file = Path(output_file_str)
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = Path(f"/tmp/trajectory_dataset_{timestamp}.jsonl")
+
+        exporter = TrajectoryExporter()
+        stats = exporter.export_dataset(
+            output_file=output_file,
+            employee=employee,
+            start_date=start_date,
+            end_date=end_date,
+            min_quality=min_quality,
+            max_samples=max_samples,
+        )
+
+        logger.info(
+            "导出轨迹数据集: file=%s total=%d exported=%d",
+            output_file,
+            stats["total"],
+            stats["exported"],
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "output_file": str(output_file),
+                **stats,
+            }
+        )
+
+    except Exception as e:
+        logger.exception("导出轨迹数据集失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> Any:
+    """添加轨迹标注 — POST /api/trajectory/annotations.
+
+    JSON body:
+        {
+            "trajectory_id": "traj-123",
+            "quality_score": 0.85,
+            "annotator": "姜墨言",
+            "notes": "高质量轨迹，推理清晰"
+        }
+
+    返回:
+        {"ok": true, "annotation": {...}}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.trajectory_export import TrajectoryExporter
+
+    payload = (
+        await request.json() if request.headers.get("content-type") == "application/json" else {}
+    )
+
+    trajectory_id = payload.get("trajectory_id", "")
+    quality_score = payload.get("quality_score")
+    annotator = payload.get("annotator", "")
+    notes = payload.get("notes", "")
+
+    if not trajectory_id or quality_score is None or not annotator:
+        return JSONResponse(
+            {"ok": False, "error": "trajectory_id, quality_score, annotator are required"},
+            status_code=400,
+        )
+
+    try:
+        quality_score = float(quality_score)
+        if not 0 <= quality_score <= 1:
+            return JSONResponse(
+                {"ok": False, "error": "quality_score must be between 0 and 1"},
+                status_code=400,
+            )
+
+        exporter = TrajectoryExporter()
+        annotation = exporter.add_annotation(
+            trajectory_id=trajectory_id,
+            quality_score=quality_score,
+            annotator=annotator,
+            notes=notes,
+        )
+
+        return JSONResponse({"ok": True, "annotation": annotation.model_dump()})
+
+    except Exception as e:
+        logger.exception("添加轨迹标注失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> Any:
+    """列出轨迹标注 — GET /api/trajectory/annotations.
+
+    查询参数:
+        min_quality (optional): 最低质量分数
+        annotator (optional): 按标注人过滤
+
+    返回:
+        {"ok": true, "annotations": [...], "total": 10}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.trajectory_export import TrajectoryExporter
+
+    min_quality_str = request.query_params.get("min_quality", "0.0")
+    annotator = request.query_params.get("annotator")
+
+    try:
+        min_quality = float(min_quality_str)
+
+        exporter = TrajectoryExporter()
+        annotations = exporter.list_annotations(
+            min_quality=min_quality,
+            annotator=annotator,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "annotations": [a.model_dump() for a in annotations],
+                "total": len(annotations),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("列出轨迹标注失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
+    """语义搜索记忆 — POST /api/memory/semantic/search.
+
+    请求体:
+        {
+            "query": "搜索查询",
+            "employee": "员工名（可选）",
+            "category": "类别（可选）",
+            "min_confidence": 0.0,
+            "limit": 10
+        }
+
+    返回:
+        {"ok": true, "results": [...], "total": 5}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_semantic import SemanticSearchEngine
+
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        employee = body.get("employee")
+        category = body.get("category")
+        min_confidence = body.get("min_confidence", 0.0)
+        limit = body.get("limit", 10)
+
+        if not query:
+            return JSONResponse({"ok": False, "error": "query 参数必填"}, status_code=400)
+
+        engine = SemanticSearchEngine()
+        results = engine.search(
+            query=query,
+            employee=employee,
+            category=category,
+            min_confidence=min_confidence,
+            limit=limit,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "results": [r.model_dump() for r in results],
+                "total": len(results),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("语义搜索失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
+    """为任务推荐记忆 — POST /api/memory/semantic/recommend.
+
+    请求体:
+        {
+            "task_description": "任务描述",
+            "employee": "员工名",
+            "limit": 5
+        }
+
+    返回:
+        {"ok": true, "recommendations": [...], "total": 3}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_semantic import SemanticSearchEngine
+
+    try:
+        body = await request.json()
+        task_description = body.get("task_description", "")
+        employee = body.get("employee", "")
+        limit = body.get("limit", 5)
+
+        if not task_description or not employee:
+            return JSONResponse(
+                {"ok": False, "error": "task_description 和 employee 参数必填"},
+                status_code=400,
+            )
+
+        engine = SemanticSearchEngine()
+        recommendations = engine.recommend_for_task(
+            task_description=task_description,
+            employee=employee,
+            limit=limit,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "recommendations": [r.model_dump() for r in recommendations],
+                "total": len(recommendations),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("推荐记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
+    """查找相似记忆 — GET /api/memory/semantic/similar/{memory_id}.
+
+    路径参数:
+        memory_id: 记忆 ID
+
+    查询参数:
+        limit (optional): 最大返回数量，默认 5
+
+    返回:
+        {"ok": true, "similar": [...], "total": 3}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_semantic import SemanticSearchEngine
+
+    try:
+        # 从路径中提取 memory_id
+        path = request.url.path
+        memory_id = path.split("/")[-1]
+
+        limit_str = request.query_params.get("limit", "5")
+        limit = int(limit_str)
+
+        engine = SemanticSearchEngine()
+        similar = engine.find_similar_memories(
+            memory_id=memory_id,
+            limit=limit,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "similar": [s.model_dump() for s in similar],
+                "total": len(similar),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("查找相似记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
+    """提交记忆反馈 — POST /api/memory/feedback.
+
+    请求体:
+        {
+            "memory_id": "记忆 ID",
+            "employee": "员工名",
+            "feedback_type": "helpful|not_helpful|outdated|incorrect",
+            "submitted_by": "提交人",
+            "context": "使用场景（可选）",
+            "comment": "反馈评论（可选）"
+        }
+
+    返回:
+        {"ok": true, "feedback": {...}}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        body = await request.json()
+        memory_id = body.get("memory_id", "")
+        employee = body.get("employee", "")
+        feedback_type = body.get("feedback_type", "")
+        submitted_by = body.get("submitted_by", "")
+        context = body.get("context", "")
+        comment = body.get("comment", "")
+
+        if not memory_id or not employee or not feedback_type or not submitted_by:
+            return JSONResponse(
+                {"ok": False, "error": "memory_id, employee, feedback_type, submitted_by 参数必填"},
+                status_code=400,
+            )
+
+        if feedback_type not in ["helpful", "not_helpful", "outdated", "incorrect"]:
+            return JSONResponse(
+                {"ok": False, "error": "feedback_type 必须是 helpful/not_helpful/outdated/incorrect"},
+                status_code=400,
+            )
+
+        manager = MemoryFeedbackManager()
+        feedback = manager.submit_feedback(
+            memory_id=memory_id,
+            employee=employee,
+            feedback_type=feedback_type,
+            submitted_by=submitted_by,
+            context=context,
+            comment=comment,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "feedback": feedback.model_dump(),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("提交反馈失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
+    """获取记忆反馈 — GET /api/memory/feedback/{memory_id}.
+
+    路径参数:
+        memory_id: 记忆 ID
+
+    返回:
+        {"ok": true, "feedback": [...], "total": 5}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        # 从路径中提取 memory_id
+        path = request.url.path
+        memory_id = path.split("/")[-1]
+
+        manager = MemoryFeedbackManager()
+        feedback = manager.get_feedback(memory_id)
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "feedback": [f.model_dump() for f in feedback],
+                "total": len(feedback),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("获取反馈失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
+    """获取记忆使用统计 — GET /api/memory/usage/stats/{memory_id}.
+
+    路径参数:
+        memory_id: 记忆 ID
+
+    返回:
+        {"ok": true, "stats": {...}}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        # 从路径中提取 memory_id
+        path = request.url.path
+        memory_id = path.split("/")[-1]
+
+        manager = MemoryFeedbackManager()
+        stats = manager.get_stats(memory_id)
+
+        if stats is None:
+            return JSONResponse(
+                {"ok": False, "error": "统计不存在"},
+                status_code=404,
+            )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "stats": stats.model_dump(),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("获取统计失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
+    """记录记忆使用 — POST /api/memory/usage/record.
+
+    请求体:
+        {
+            "memory_id": "记忆 ID",
+            "employee": "员工名",
+            "relevance_score": 0.85
+        }
+
+    返回:
+        {"ok": true}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        body = await request.json()
+        memory_id = body.get("memory_id", "")
+        employee = body.get("employee", "")
+        relevance_score = body.get("relevance_score", 0.0)
+
+        if not memory_id or not employee:
+            return JSONResponse(
+                {"ok": False, "error": "memory_id 和 employee 参数必填"},
+                status_code=400,
+            )
+
+        manager = MemoryFeedbackManager()
+        manager.record_usage(
+            memory_id=memory_id,
+            employee=employee,
+            relevance_score=relevance_score,
+        )
+
+        return JSONResponse({"ok": True})
+
+    except Exception as e:
+        logger.exception("记录使用失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
+    """获取低质量记忆 — GET /api/memory/usage/low-quality.
+
+    查询参数:
+        employee (optional): 按员工过滤
+        min_uses (optional): 最少使用次数，默认 5
+        max_helpful_ratio (optional): 最大有帮助比例，默认 0.3
+
+    返回:
+        {"ok": true, "memories": [...], "total": 3}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        employee = request.query_params.get("employee")
+        min_uses = int(request.query_params.get("min_uses", "5"))
+        max_helpful_ratio = float(request.query_params.get("max_helpful_ratio", "0.3"))
+
+        manager = MemoryFeedbackManager()
+        memories = manager.get_low_quality_memories(
+            employee=employee,
+            min_uses=min_uses,
+            max_helpful_ratio=max_helpful_ratio,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "memories": [m.model_dump() for m in memories],
+                "total": len(memories),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("获取低质量记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
+    """获取热门记忆 — GET /api/memory/usage/popular.
+
+    查询参数:
+        employee (optional): 按员工过滤
+        limit (optional): 最大返回数量，默认 10
+
+    返回:
+        {"ok": true, "memories": [...], "total": 10}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        employee = request.query_params.get("employee")
+        limit = int(request.query_params.get("limit", "10"))
+
+        manager = MemoryFeedbackManager()
+        memories = manager.get_popular_memories(
+            employee=employee,
+            limit=limit,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "memories": [m.model_dump() for m in memories],
+                "total": len(memories),
+            }
+        )
+
+    except Exception as e:
+        logger.exception("获取热门记忆失败")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any:
+    """获取反馈汇总 — GET /api/memory/feedback/summary.
+
+    查询参数:
+        employee (optional): 按员工过滤
+
+    返回:
+        {"ok": true, "summary": {...}}
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_feedback import MemoryFeedbackManager
+
+    try:
+        employee = request.query_params.get("employee")
+
+        manager = MemoryFeedbackManager()
+        summary = manager.get_feedback_summary(employee=employee)
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "summary": summary,
+            }
+        )
+
+    except Exception as e:
+        logger.exception("获取反馈汇总失败")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
@@ -2169,59 +3681,85 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         # 文件名：{employee}-{short_uuid}.jsonl
         trajectory_file = date_dir / f"{employee_name}-{uuid.uuid4().hex[:8]}.jsonl"
 
-        # ── 写入轨迹文件（每个 step 一行 JSON） ──
+        # ── 处理步骤数据 ──
         processed_steps = []
-        with open(trajectory_file, "w", encoding="utf-8") as f:
-            for s in steps:
-                # tool_name 必须存在，否则标记为 unknown
-                tool_name = s.get("tool_name") or "unknown"
+        for s in steps:
+            # tool_name 必须存在，否则标记为 unknown
+            tool_name = s.get("tool_name") or "unknown"
 
-                # tool_params 规范化：尽量保留原始结构
-                raw_params = s.get("tool_params", {})
-                if not isinstance(raw_params, dict):
-                    if isinstance(raw_params, str):
-                        # 尝试 JSON 解析
-                        try:
-                            parsed = _json.loads(raw_params)
-                            if isinstance(parsed, dict):
-                                raw_params = parsed
-                            elif isinstance(parsed, list):
-                                raw_params = {"_list": parsed, "_type": "list"}
-                            else:
-                                raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
-                        except (ValueError, TypeError):
+            # tool_params 规范化：尽量保留原始结构
+            raw_params = s.get("tool_params", {})
+            if not isinstance(raw_params, dict):
+                if isinstance(raw_params, str):
+                    # 尝试 JSON 解析
+                    try:
+                        parsed = _json.loads(raw_params)
+                        if isinstance(parsed, dict):
+                            raw_params = parsed
+                        elif isinstance(parsed, list):
+                            raw_params = {"_list": parsed, "_type": "list"}
+                        else:
                             raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
-                    elif isinstance(raw_params, list):
-                        raw_params = {"_list": raw_params, "_type": "list"}
-                    else:
-                        raw_params = {
-                            "_raw": str(raw_params)[:8000],
-                            "_type": type(raw_params).__name__,
-                        }
+                    except (ValueError, TypeError):
+                        raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
+                elif isinstance(raw_params, list):
+                    raw_params = {"_list": raw_params, "_type": "list"}
+                else:
+                    raw_params = {
+                        "_raw": str(raw_params)[:8000],
+                        "_type": type(raw_params).__name__,
+                    }
 
-                # 截断 thought / tool_output（8000 字符上限）
-                thought_raw = str(s.get("thought", ""))
-                if len(thought_raw) > 8000:
-                    thought_raw = thought_raw[:8000]
-                    if "thought" not in truncated_fields:
-                        truncated_fields.append("thought")
-                tool_output_raw = str(s.get("tool_output", ""))
-                if len(tool_output_raw) > 8000:
-                    tool_output_raw = tool_output_raw[:8000]
-                    if "tool_output" not in truncated_fields:
-                        truncated_fields.append("tool_output")
+            # 截断 thought / tool_output（8000 字符上限）
+            thought_raw = str(s.get("thought", ""))
+            if len(thought_raw) > 8000:
+                thought_raw = thought_raw[:8000]
+                if "thought" not in truncated_fields:
+                    truncated_fields.append("thought")
+            tool_output_raw = str(s.get("tool_output", ""))
+            if len(tool_output_raw) > 8000:
+                tool_output_raw = tool_output_raw[:8000]
+                if "tool_output" not in truncated_fields:
+                    truncated_fields.append("tool_output")
 
-                step_data = {
-                    "step_id": s.get("step_id", len(processed_steps) + 1),
-                    "thought": thought_raw,
-                    "tool_name": tool_name,
-                    "tool_params": raw_params,
-                    "tool_output": tool_output_raw,
-                    "tool_exit_code": s.get("tool_exit_code", 0),
-                    "timestamp": s.get("timestamp", ""),
-                }
-                f.write(_json.dumps(step_data, ensure_ascii=False) + "\n")
-                processed_steps.append(step_data)
+            step_data = {
+                "step": s.get("step_id", len(processed_steps) + 1),
+                "observation": "",  # 可选，当前状态描述
+                "thought": thought_raw,
+                "action": {
+                    "tool": tool_name,
+                    "parameters": raw_params,
+                },
+                "result": tool_output_raw,
+                "success": s.get("tool_exit_code", 0) == 0,
+                "timestamp": s.get("timestamp", ""),
+            }
+            processed_steps.append(step_data)
+
+        # ── 写入完整轨迹对象（行业标准格式）──
+        total_steps = len(processed_steps)
+        total_tokens = payload.get("total_tokens", 0)
+        duration_ms = payload.get("duration_ms", 0)
+
+        trajectory_data = {
+            "trajectory_id": trajectory_id,
+            "employee": employee_name,
+            "task": task_description,
+            "model": model,
+            "channel": channel,
+            "created_at": datetime.now().isoformat(),
+            "success": success,
+            "metadata": {
+                "total_steps": total_steps,
+                "total_tokens": total_tokens,
+                "duration_ms": duration_ms,
+                "truncated_fields": truncated_fields,
+            },
+            "trajectory": processed_steps,
+        }
+
+        with open(trajectory_file, "w", encoding="utf-8") as f:
+            f.write(_json.dumps(trajectory_data, ensure_ascii=False) + "\n")
 
         total_steps = len(processed_steps)
 
