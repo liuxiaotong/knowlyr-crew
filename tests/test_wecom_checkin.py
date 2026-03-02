@@ -188,6 +188,23 @@ class TestClassifyCheckin:
         assert len(result["on_leave"]) == 0
         assert len(result["normal"]) == 1
 
+    def test_haikou_flex_0946_is_normal(self):
+        """海口职场 flex_time=1800: 09:46 打卡应为正常（阈值 09:30+1800s=10:00）."""
+        from crew.wecom_checkin import classify_checkin
+
+        users = self._make_users(["吴宜莹"])
+        records = self._make_records([("uid_0", "09:46")])
+
+        rules = {
+            # 海口职场：09:30 上班 + 1800s 弹性 = 10:00 阈值
+            "uid_0": {"work_sec": 34200, "flex_time": 1800, "groupname": "海口职场"},
+        }
+
+        result = classify_checkin(users, records, rules=rules)
+        assert len(result["normal"]) == 1
+        assert result["normal"][0]["name"] == "吴宜莹"
+        assert len(result["late"]) == 0
+
 
 # ── 格式化测试 ──
 
@@ -586,6 +603,47 @@ class TestGetCheckinRules:
 
         # 150 人 -> 2 批
         assert mock_client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_max_allow_arrive_late(self):
+        """海口职场：onwork_flex_time=0 但 max_allow_arrive_late=1800，flex_time 应为 1800."""
+        from crew.wecom_checkin import get_checkin_rules
+
+        info = [
+            {
+                "userid": "WuYiYing",
+                "group": {
+                    "groupname": "海口职场",
+                    "checkindate": [
+                        {
+                            "workdays": [1, 2, 3, 4, 5],
+                            "checkintime": [
+                                {"work_sec": 34200, "off_work_sec": 66600}
+                            ],
+                            "allow_flex": True,
+                            "max_allow_arrive_early": 1800,
+                            "max_allow_arrive_late": 1800,
+                            "late_rule": {
+                                "onwork_flex_time": 0,
+                                "timerules": [
+                                    {"offwork_after_time": 0, "onwork_flex_time": 0}
+                                ],
+                            },
+                        }
+                    ],
+                },
+            }
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=self._mock_option_response(info))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            rules = await get_checkin_rules("token", ["WuYiYing"], 1709280000)
+
+        assert "WuYiYing" in rules
+        assert rules["WuYiYing"]["flex_time"] == 1800
+        assert rules["WuYiYing"]["groupname"] == "海口职场"
 
 
 # ── 完整流程测试 ──

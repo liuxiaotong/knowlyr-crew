@@ -184,11 +184,17 @@ async def get_checkin_rules(
             work_sec = checkintime_list[0].get("work_sec", _FALLBACK_WORK_SEC)
 
             # 弹性时间
+            # 企微有两种弹性模式：
+            # 1. 允许晚到晚走：弹性时间在 late_rule.onwork_flex_time
+            # 2. 早到早走/晚到晚走：弹性时间在 max_allow_arrive_late
+            # 取两者的 max 以覆盖两种模式
             flex_time = 0
             allow_flex = checkindate.get("allow_flex", False)
             if allow_flex:
                 late_rule = checkindate.get("late_rule", {})
-                flex_time = late_rule.get("onwork_flex_time", 0)
+                onwork_flex = late_rule.get("onwork_flex_time", 0)
+                max_arrive_late = checkindate.get("max_allow_arrive_late", 0)
+                flex_time = max(onwork_flex, max_arrive_late)
 
             rules[uid] = {
                 "work_sec": work_sec,
