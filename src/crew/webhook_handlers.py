@@ -1360,19 +1360,22 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 memory_store = MemoryStore(project_dir=ctx.project_dir)
                 engine = SkillsEngine(skill_store, memory_store)
 
+                # 使用员工的 character_name（中文名）而不是 slug
+                employee_name = emp.character_name or name
+
                 # 检查触发
-                triggered = engine.check_triggers(name, user_message, args)
+                triggered = engine.check_triggers(employee_name, user_message, args)
                 if triggered:
                     logger.info(
                         "Skills 触发: employee=%s task=%s triggered=%d",
-                        name,
+                        employee_name,
                         user_message[:50],
                         len(triggered),
                     )
                     # 执行触发的 skills（按优先级排序）
                     for skill, score in triggered[:3]:  # 最多执行前 3 个
                         try:
-                            result = engine.execute_skill(skill, name, {"task": user_message, **args})
+                            result = engine.execute_skill(skill, employee_name, {"task": user_message, **args})
                             # 合并 enhanced_context
                             if result.get("enhanced_context"):
                                 for key, value in result["enhanced_context"].items():
@@ -1389,7 +1392,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                             # 记录触发历史
                             engine.record_trigger(
                                 skill=skill,
-                                employee=name,
+                                employee=employee_name,
                                 task=user_message,
                                 match_score=score,
                                 execution_result=result,
