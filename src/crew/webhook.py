@@ -309,6 +309,41 @@ def create_webhook_app(
         scheduler = CronScheduler(config=cron_config, execute_fn=_cron_execute)
         ctx.scheduler = scheduler
 
+    # ── 打卡通报 cron 循环 ──
+    async def _run_checkin_cron() -> None:
+        """每天 10:30（北京时间）执行打卡通报."""
+        try:
+            from croniter import croniter
+        except ImportError:
+            logger.error("croniter 未安装，打卡通报定时任务无法启动")
+            return
+
+        from datetime import datetime as _dt
+
+        cron = croniter("30 10 * * *", _dt.now())
+        logger.info("打卡通报定时任务已注册: 30 10 * * * (每天 10:30)")
+
+        while True:
+            try:
+                import time as _time
+
+                next_time = cron.get_next(float)
+                delay = next_time - _time.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(0)
+
+                logger.info("触发打卡通报定时任务")
+                from crew.wecom_checkin import cron_checkin_report
+
+                await cron_checkin_report()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("打卡通报定时任务异常，60s 后重试")
+                await asyncio.sleep(60)
+
     routes = [
         Route("/health", endpoint=_health, methods=["GET"]),
         Route("/metrics", endpoint=_metrics, methods=["GET"]),
@@ -677,6 +712,14 @@ def create_webhook_app(
         _task = asyncio.create_task(_resume_incomplete_pipelines(ctx))
         _startup_tasks.add(_task)
         _task.add_done_callback(_startup_tasks.discard)
+
+        # ── 打卡通报定时任务（每天 10:30 北京时间）──
+        if ctx.wecom_ctx:
+            _checkin_task = asyncio.create_task(
+                _run_checkin_cron(), name="cron-wecom-checkin"
+            )
+            _startup_tasks.add(_checkin_task)
+            _checkin_task.add_done_callback(_startup_tasks.discard)
 
     async def on_shutdown():
         if scheduler:
