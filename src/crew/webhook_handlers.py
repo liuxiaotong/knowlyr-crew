@@ -1350,6 +1350,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
         # ── Skills 自动触发 ──
         enhanced_context = {}
+        employee_name = None  # 初始化，避免作用域问题
         if emp is not None and isinstance(user_message, str):
             try:
                 from crew.memory import MemoryStore
@@ -1421,7 +1422,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 # 添加调试日志
                 logger.info(
                     "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
-                    employee_name,
+                    employee_name or name,
                     len(memories),
                     len(extra_context)
                 )
