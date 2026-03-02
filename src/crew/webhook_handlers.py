@@ -1404,16 +1404,19 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             except Exception as skills_error:
                 logger.warning("Skills 检查失败: %s", skills_error)
 
-        # 将 enhanced_context 注入到 args
+        # 将 enhanced_context 注入到 extra_context
         if enhanced_context:
-            # 将记忆添加到 task 前缀
+            # 将记忆添加到 extra_context
             memories = enhanced_context.get("memories", [])
             if memories:
-                memory_text = "\n\n【相关历史记忆】\n" + "\n".join(
+                memory_text = "【相关历史记忆】\n" + "\n".join(
                     f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
                 )
-                task = args.get("task", "")
-                args["task"] = (memory_text + "\n\n" + task) if task else memory_text
+                # 合并到 extra_context
+                if extra_context:
+                    extra_context = memory_text + "\n\n" + extra_context
+                else:
+                    extra_context = memory_text
 
         _t0 = _time.monotonic()
         if use_fast_path:
