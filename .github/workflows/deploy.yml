@@ -37,15 +37,12 @@ jobs:
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} "
             mkdir -p /opt/knowlyr-crew/project/.crew
             cat > /opt/knowlyr-crew/project/.crew/wecom.yaml <<'EOFCONFIG'
-          apps:
-            - app_id: xinlei
-              corp_id: ${{ secrets.WECOM_CORP_ID }}
-              corp_secret: ${{ secrets.WECOM_CORP_SECRET }}
-              agent_id: ${{ secrets.WECOM_AGENT_ID }}
-              token: ${{ secrets.WECOM_TOKEN }}
-              encoding_aes_key: ${{ secrets.WECOM_ENCODING_AES_KEY }}
-              default_employee: hr-manager
-              primary: true
+          corp_id: ${{ secrets.WECOM_CORP_ID }}
+          secret: ${{ secrets.WECOM_CORP_SECRET }}
+          agent_id: ${{ secrets.WECOM_AGENT_ID }}
+          token: ${{ secrets.WECOM_TOKEN }}
+          encoding_aes_key: ${{ secrets.WECOM_ENCODING_AES_KEY }}
+          default_employee: hr-manager
           EOFCONFIG
             chmod 600 /opt/knowlyr-crew/project/.crew/wecom.yaml
           "
