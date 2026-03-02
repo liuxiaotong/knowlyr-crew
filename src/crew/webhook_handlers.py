@@ -772,6 +772,22 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             {"error": f"category must be one of {valid_categories}"}, status_code=400
         )
 
+    # 质量检查（2026-03-02 记忆质量控制）
+    from crew.memory_quality import check_memory_quality
+
+    quality_result = check_memory_quality(category, content)
+    if quality_result["score"] < 0.6:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Memory quality too low",
+                "score": quality_result["score"],
+                "issues": quality_result["issues"],
+                "suggestions": quality_result["suggestions"],
+            },
+            status_code=400,
+        )
+
     # 拦截 trajectory 标签写入（2026-03-02 记忆系统优化）
     if isinstance(tags, list) and "trajectory" in tags:
         import logging

@@ -71,7 +71,10 @@ class TestMemoryAddEndpoint:
 
         mock_query.return_value = []
         mock_add.return_value = MemoryEntry(
-            id="abc123", employee="backend-engineer", category="finding", content="测试记忆"
+            id="abc123",
+            employee="backend-engineer",
+            category="finding",
+            content="发现 API 响应时间过长的原因是数据库查询没有索引，添加索引后性能提升了 10 倍。",
         )
 
         client = _make_client()
@@ -80,7 +83,7 @@ class TestMemoryAddEndpoint:
             json={
                 "employee": "backend-engineer",
                 "category": "finding",
-                "content": "测试记忆",
+                "content": "发现 API 响应时间过长的原因是数据库查询没有索引，添加索引后性能提升了 10 倍。",
             },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
@@ -98,7 +101,10 @@ class TestMemoryAddEndpoint:
 
         mock_query.return_value = []
         mock_add.return_value = MemoryEntry(
-            id="pat123", employee="backend-engineer", category="pattern", content="test"
+            id="pat123",
+            employee="backend-engineer",
+            category="pattern",
+            content="代码审查模式：先看测试覆盖率，再检查边界条件处理，最后审查错误处理逻辑。这个流程能发现 80% 的潜在问题。",
         )
 
         client = _make_client()
@@ -107,7 +113,7 @@ class TestMemoryAddEndpoint:
             json={
                 "employee": "backend-engineer",
                 "category": "pattern",
-                "content": "代码审查时先看测试覆盖率",
+                "content": "代码审查模式：先看测试覆盖率，再检查边界条件处理，最后审查错误处理逻辑。这个流程能发现 80% 的潜在问题。",
                 "tags": ["code-review", "testing"],
                 "ttl_days": 90,
                 "shared": True,
@@ -139,7 +145,7 @@ class TestMemoryAddEndpoint:
             id="existing-id",
             employee="test",
             category="finding",
-            content="old",
+            content="发现了一个重要的性能问题，数据库连接池配置不当导致连接泄漏，需要调整最大连接数。",
             source_session="sess-001",
         )
         mock_query.return_value = [existing_entry]
@@ -150,7 +156,7 @@ class TestMemoryAddEndpoint:
             json={
                 "employee": "test",
                 "category": "finding",
-                "content": "duplicate",
+                "content": "发现了一个重要的性能问题，数据库连接池配置不当导致连接泄漏，需要调整最大连接数。",
                 "source_session": "sess-001",
             },
             headers={"Authorization": f"Bearer {TOKEN}"},
@@ -187,7 +193,7 @@ class TestMemoryAddEndpoint:
             json={
                 "employee": "backend-engineer",
                 "category": "finding",
-                "content": "工具调用轨迹",
+                "content": "调用了 Read 工具读取文件，然后使用 Edit 工具修改代码，最后用 Bash 工具运行测试验证修改正确。",
                 "tags": ["trajectory", "auto-generated"],
             },
             headers={"Authorization": f"Bearer {TOKEN}"},
@@ -199,6 +205,76 @@ class TestMemoryAddEndpoint:
         assert data["reason"] == "trajectory tag intercepted"
         # 验证没有调用 store.add
         mock_add.assert_not_called()
+
+    def test_add_low_quality_rejected(self):
+        """低质量记忆被拒绝（质量分数 < 0.6）."""
+        client = _make_client()
+        resp = client.post(
+            "/api/memory/add",
+            json={
+                "employee": "backend-engineer",
+                "category": "correction",
+                "content": "修复了 bug",  # 太短，缺少关键词和深度
+            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 400
+        data = resp.json()
+        assert data["ok"] is False
+        assert "quality too low" in data["error"].lower()
+        assert "score" in data
+        assert data["score"] < 0.6
+        assert len(data["issues"]) > 0
+        assert len(data["suggestions"]) > 0
+
+    def test_add_trajectory_prefix_rejected(self):
+        """以 [轨迹] 开头的记忆被拒绝."""
+        client = _make_client()
+        resp = client.post(
+            "/api/memory/add",
+            json={
+                "employee": "backend-engineer",
+                "category": "correction",
+                "content": "[轨迹] 修复了 webhook_handlers.py 的 bug，添加了质量检查逻辑。",
+            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 400
+        data = resp.json()
+        assert data["ok"] is False
+        assert any("[轨迹]" in issue for issue in data["issues"])
+
+    @patch("crew.memory.MemoryStore.add")
+    @patch("crew.memory.MemoryStore.query")
+    def test_add_high_quality_accepted(self, mock_query, mock_add):
+        """高质量记忆通过质量检查并写入."""
+        from crew.memory import MemoryEntry
+
+        mock_query.return_value = []
+        mock_add.return_value = MemoryEntry(
+            id="high-quality-001",
+            employee="backend-engineer",
+            category="correction",
+            content="教训：alembic migration 必须先检查字段是否存在再 add_column，否则重复执行会报错。正确做法是先查 information_schema.columns。",
+        )
+
+        client = _make_client()
+        resp = client.post(
+            "/api/memory/add",
+            json={
+                "employee": "backend-engineer",
+                "category": "correction",
+                "content": "教训：alembic migration 必须先检查字段是否存在再 add_column，否则重复执行会报错。正确做法是先查 information_schema.columns。",
+            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["skipped"] is False
+        assert data["entry_id"] == "high-quality-001"
+        # 验证调用了 store.add
+        mock_add.assert_called_once()
 
 
 class TestMemoryQueryEndpoint:
