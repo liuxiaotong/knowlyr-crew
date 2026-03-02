@@ -788,6 +788,16 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             status_code=400,
         )
 
+    # 标签规范化和建议（2026-03-02 标签系统）
+    from crew.memory_tags import normalize_tags, suggest_tags
+
+    # 规范化用户提供的标签
+    if tags and isinstance(tags, list):
+        tags = normalize_tags(tags)
+
+    # 自动建议标签（不强制添加，仅返回给用户）
+    suggested_tags = suggest_tags(category, content, tags or [])
+
     # 拦截 trajectory 标签写入（2026-03-02 记忆系统优化）
     if isinstance(tags, list) and "trajectory" in tags:
         import logging
@@ -845,6 +855,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             "entry_id": entry.id,
             "employee": entry.employee,
             "category": category,
+            "suggested_tags": suggested_tags,  # 2026-03-02 标签建议
         }
     )
 
@@ -879,6 +890,74 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     )
     data = [e.model_dump() for e in entries]
     return JSONResponse({"ok": True, "entries": data, "total": len(data)})
+
+
+async def _handle_memory_tags_list(request: Any, ctx: _AppContext) -> Any:
+    """列出所有预定义标签 — GET /api/memory/tags.
+
+    返回所有标签词典，用于前端展示和自动补全。
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_tags import get_all_predefined_tags
+
+    tags = get_all_predefined_tags()
+    return JSONResponse({"ok": True, "tags": tags})
+
+
+async def _handle_memory_tags_suggest(request: Any, ctx: _AppContext) -> Any:
+    """根据内容建议标签 — GET /api/memory/tags/suggest.
+
+    查询参数:
+        category (required): 记忆类别
+        content (required): 记忆内容
+        existing_tags (optional): 已有标签（逗号分隔）
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_tags import suggest_tags
+
+    category = request.query_params.get("category", "")
+    content = request.query_params.get("content", "")
+    existing_tags_str = request.query_params.get("existing_tags", "")
+
+    if not category or not content:
+        return JSONResponse({"error": "category and content are required"}, status_code=400)
+
+    valid_categories = {"decision", "estimate", "finding", "correction", "pattern"}
+    if category not in valid_categories:
+        return JSONResponse(
+            {"error": f"category must be one of {valid_categories}"}, status_code=400
+        )
+
+    existing_tags = [tag.strip() for tag in existing_tags_str.split(",") if tag.strip()]
+    suggestions = suggest_tags(category, content, existing_tags)
+
+    return JSONResponse({"ok": True, "suggestions": suggestions})
+
+
+async def _handle_memory_tags_search(request: Any, ctx: _AppContext) -> Any:
+    """搜索标签 — GET /api/memory/tags/search.
+
+    查询参数:
+        query (required): 搜索关键词
+        limit (optional): 最多返回数量，默认 10
+    """
+    from starlette.responses import JSONResponse
+
+    from crew.memory_tags import search_tags
+
+    query = request.query_params.get("query", "")
+    try:
+        limit = int(request.query_params.get("limit", "10"))
+    except (ValueError, TypeError):
+        limit = 10
+
+    if not query:
+        return JSONResponse({"error": "query is required"}, status_code=400)
+
+    matches = search_tags(query, limit)
+    return JSONResponse({"ok": True, "matches": matches})
 
 
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:

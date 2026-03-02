@@ -101,6 +101,9 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_ingest,
     _handle_memory_query,
     _handle_memory_search,
+    _handle_memory_tags_list,
+    _handle_memory_tags_search,
+    _handle_memory_tags_suggest,
     _handle_model_tiers,
     _handle_openclaw,
     _handle_org_memories,
@@ -449,6 +452,21 @@ def create_webhook_app(
         Route(
             "/api/memory/query",
             endpoint=_make_handler(ctx, _handle_memory_query),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/memory/tags",
+            endpoint=_make_handler(ctx, _handle_memory_tags_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/memory/tags/suggest",
+            endpoint=_make_handler(ctx, _handle_memory_tags_suggest),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/memory/tags/search",
+            endpoint=_make_handler(ctx, _handle_memory_tags_search),
             methods=["GET"],
         ),
         Route(
