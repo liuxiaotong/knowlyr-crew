@@ -9,23 +9,20 @@ from starlette.responses import JSONResponse
 from crew.memory import MemoryStore
 from crew.skills import Skill, SkillAction, SkillMetadata, SkillStore, SkillTrigger
 from crew.skills_engine import SkillsEngine
+from crew.webhook_context import _AppContext
 
 logger = logging.getLogger(__name__)
 
 
-def _get_skills_engine(request: Request) -> SkillsEngine:
+def _get_skills_engine(ctx: _AppContext) -> SkillsEngine:
     """获取 SkillsEngine 实例."""
-    # 从 app state 获取或创建
-    if not hasattr(request.app.state, "skills_engine"):
-        # 从 request.state 获取 project_dir（由 webhook.py 设置）
-        project_dir = getattr(request.state, "project_dir", None)
-        skill_store = SkillStore(project_dir=project_dir)
-        memory_store = MemoryStore(project_dir=project_dir)
-        request.app.state.skills_engine = SkillsEngine(skill_store, memory_store)
-    return request.app.state.skills_engine
+    # 每次都创建新实例，使用 ctx.project_dir
+    skill_store = SkillStore(project_dir=ctx.project_dir)
+    memory_store = MemoryStore(project_dir=ctx.project_dir)
+    return SkillsEngine(skill_store, memory_store)
 
 
-async def _handle_skill_create(request: Request) -> JSONResponse:
+async def _handle_skill_create(request: Request, ctx: _AppContext) -> JSONResponse:
     """创建 Skill.
 
     POST /api/employees/{employee_name}/skills
@@ -57,7 +54,7 @@ async def _handle_skill_create(request: Request) -> JSONResponse:
         )
 
         # 保存
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         created_skill = engine.skill_store.create_skill(skill)
 
         return JSONResponse(
@@ -78,7 +75,7 @@ async def _handle_skill_create(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skill_list(request: Request) -> JSONResponse:
+async def _handle_skill_list(request: Request, ctx: _AppContext) -> JSONResponse:
     """列出 Skills.
 
     GET /api/employees/{employee_name}/skills
@@ -86,7 +83,7 @@ async def _handle_skill_list(request: Request) -> JSONResponse:
     try:
         employee_name = request.path_params.get("employee_name")
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         skills = engine.skill_store.list_skills(employee_name)
 
         return JSONResponse(
@@ -112,7 +109,7 @@ async def _handle_skill_list(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skill_get(request: Request) -> JSONResponse:
+async def _handle_skill_get(request: Request, ctx: _AppContext) -> JSONResponse:
     """获取 Skill 详情.
 
     GET /api/employees/{employee_name}/skills/{skill_name}
@@ -124,7 +121,7 @@ async def _handle_skill_get(request: Request) -> JSONResponse:
         if not employee_name or not skill_name:
             return JSONResponse({"error": "employee_name and skill_name required"}, status_code=400)
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         skill = engine.skill_store.get_skill(employee_name, skill_name)
 
         if not skill:
@@ -137,7 +134,7 @@ async def _handle_skill_get(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skill_update(request: Request) -> JSONResponse:
+async def _handle_skill_update(request: Request, ctx: _AppContext) -> JSONResponse:
     """更新 Skill.
 
     PUT /api/employees/{employee_name}/skills/{skill_name}
@@ -156,7 +153,7 @@ async def _handle_skill_update(request: Request) -> JSONResponse:
 
         body = await request.json()
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         updated_skill = engine.skill_store.update_skill(employee_name, skill_name, body)
 
         return JSONResponse(
@@ -175,7 +172,7 @@ async def _handle_skill_update(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skill_delete(request: Request) -> JSONResponse:
+async def _handle_skill_delete(request: Request, ctx: _AppContext) -> JSONResponse:
     """删除 Skill.
 
     DELETE /api/employees/{employee_name}/skills/{skill_name}
@@ -187,7 +184,7 @@ async def _handle_skill_delete(request: Request) -> JSONResponse:
         if not employee_name or not skill_name:
             return JSONResponse({"error": "employee_name and skill_name required"}, status_code=400)
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         deleted = engine.skill_store.delete_skill(employee_name, skill_name)
 
         if not deleted:
@@ -200,7 +197,7 @@ async def _handle_skill_delete(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skills_check_triggers(request: Request) -> JSONResponse:
+async def _handle_skills_check_triggers(request: Request, ctx: _AppContext) -> JSONResponse:
     """检查应该触发的 Skills.
 
     POST /api/skills/check-triggers
@@ -219,7 +216,7 @@ async def _handle_skills_check_triggers(request: Request) -> JSONResponse:
         if not employee or not task:
             return JSONResponse({"error": "employee and task required"}, status_code=400)
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         triggered = engine.check_triggers(employee, task, context)
 
         return JSONResponse(
@@ -244,7 +241,7 @@ async def _handle_skills_check_triggers(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skills_execute(request: Request) -> JSONResponse:
+async def _handle_skills_execute(request: Request, ctx: _AppContext) -> JSONResponse:
     """执行 Skill.
 
     POST /api/skills/execute
@@ -263,7 +260,7 @@ async def _handle_skills_execute(request: Request) -> JSONResponse:
         if not skill_id or not employee:
             return JSONResponse({"error": "skill_id and employee required"}, status_code=400)
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
 
         # 找到对应的 skill
         skills = engine.skill_store.list_skills(employee)
@@ -298,13 +295,13 @@ async def _handle_skills_execute(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skills_stats(request: Request) -> JSONResponse:
+async def _handle_skills_stats(request: Request, ctx: _AppContext) -> JSONResponse:
     """获取 Skills 统计.
 
     GET /api/skills/stats
     """
     try:
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         stats = engine.skill_store.get_stats()
 
         return JSONResponse(stats)
@@ -314,7 +311,7 @@ async def _handle_skills_stats(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
-async def _handle_skills_trigger_history(request: Request) -> JSONResponse:
+async def _handle_skills_trigger_history(request: Request, ctx: _AppContext) -> JSONResponse:
     """获取触发历史.
 
     GET /api/skills/trigger-history?employee=赵云帆&limit=50
@@ -326,7 +323,7 @@ async def _handle_skills_trigger_history(request: Request) -> JSONResponse:
         limit = int(params.get("limit", "50"))
         since = params.get("since")
 
-        engine = _get_skills_engine(request)
+        engine = _get_skills_engine(ctx)
         triggers = engine.skill_store.get_trigger_history(
             employee=employee,
             skill_name=skill_name,
