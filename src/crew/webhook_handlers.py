@@ -2009,7 +2009,11 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
-    """接收外部 agent 的轨迹数据 — POST /api/trajectory/report."""
+    """接收外部 agent 的轨迹数据 — POST /api/trajectory/report.
+
+    轨迹数据存储到独立的文件系统，不写入永久记忆。
+    存储路径：/data/trajectory_archive/{date}/{employee}-{uuid}.jsonl
+    """
     from starlette.responses import JSONResponse
 
     # payload 大小限制 2MB（大轨迹可能有数百步）
@@ -2057,118 +2061,116 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
 
     try:
         import json as _json
+        import uuid
+        from datetime import date as dt_date
 
-        from crew.trajectory import TrajectoryCollector
+        # ── 独立轨迹存储（不使用 TrajectoryCollector，避免写入 .crew/trajectories） ──
+        trajectory_id = f"traj_{uuid.uuid4().hex[:12]}"
+        date_str = dt_date.today().isoformat()
+        archive_base = Path("/data/trajectory_archive")
+        date_dir = archive_base / date_str
+        date_dir.mkdir(parents=True, exist_ok=True)
 
-        output_dir = (ctx.project_dir / ".crew" / "trajectories") if ctx.project_dir else Path(".")
-        tc = TrajectoryCollector(
-            employee_name,
-            task_description,
-            model=model,
-            channel=channel,
-            output_dir=output_dir,
-        )
-        for s in steps:
-            # tool_name 必须存在，否则标记为 unknown
-            tool_name = s.get("tool_name") or "unknown"
+        # 文件名：{employee}-{short_uuid}.jsonl
+        trajectory_file = date_dir / f"{employee_name}-{uuid.uuid4().hex[:8]}.jsonl"
 
-            # tool_params 规范化：尽量保留原始结构
-            raw_params = s.get("tool_params", {})
-            if not isinstance(raw_params, dict):
-                if isinstance(raw_params, str):
-                    # 尝试 JSON 解析
-                    try:
-                        parsed = _json.loads(raw_params)
-                        if isinstance(parsed, dict):
-                            raw_params = parsed
-                        elif isinstance(parsed, list):
-                            raw_params = {"_list": parsed, "_type": "list"}
-                        else:
+        # ── 写入轨迹文件（每个 step 一行 JSON） ──
+        processed_steps = []
+        with open(trajectory_file, "w", encoding="utf-8") as f:
+            for s in steps:
+                # tool_name 必须存在，否则标记为 unknown
+                tool_name = s.get("tool_name") or "unknown"
+
+                # tool_params 规范化：尽量保留原始结构
+                raw_params = s.get("tool_params", {})
+                if not isinstance(raw_params, dict):
+                    if isinstance(raw_params, str):
+                        # 尝试 JSON 解析
+                        try:
+                            parsed = _json.loads(raw_params)
+                            if isinstance(parsed, dict):
+                                raw_params = parsed
+                            elif isinstance(parsed, list):
+                                raw_params = {"_list": parsed, "_type": "list"}
+                            else:
+                                raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
+                        except (ValueError, TypeError):
                             raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
-                    except (ValueError, TypeError):
-                        raw_params = {"_raw": str(raw_params)[:8000], "_type": "string"}
-                elif isinstance(raw_params, list):
-                    raw_params = {"_list": raw_params, "_type": "list"}
-                else:
-                    raw_params = {
-                        "_raw": str(raw_params)[:8000],
-                        "_type": type(raw_params).__name__,
-                    }
+                    elif isinstance(raw_params, list):
+                        raw_params = {"_list": raw_params, "_type": "list"}
+                    else:
+                        raw_params = {
+                            "_raw": str(raw_params)[:8000],
+                            "_type": type(raw_params).__name__,
+                        }
 
-            # 截断 thought / tool_output（8000 字符上限）
-            thought_raw = str(s.get("thought", ""))
-            if len(thought_raw) > 8000:
-                thought_raw = thought_raw[:8000]
-                if "thought" not in truncated_fields:
-                    truncated_fields.append("thought")
-            tool_output_raw = str(s.get("tool_output", ""))
-            if len(tool_output_raw) > 8000:
-                tool_output_raw = tool_output_raw[:8000]
-                if "tool_output" not in truncated_fields:
-                    truncated_fields.append("tool_output")
+                # 截断 thought / tool_output（8000 字符上限）
+                thought_raw = str(s.get("thought", ""))
+                if len(thought_raw) > 8000:
+                    thought_raw = thought_raw[:8000]
+                    if "thought" not in truncated_fields:
+                        truncated_fields.append("thought")
+                tool_output_raw = str(s.get("tool_output", ""))
+                if len(tool_output_raw) > 8000:
+                    tool_output_raw = tool_output_raw[:8000]
+                    if "tool_output" not in truncated_fields:
+                        truncated_fields.append("tool_output")
 
-            tc.add_tool_step(
-                thought=thought_raw,
-                tool_name=tool_name,
-                tool_params=raw_params,
-                tool_output=tool_output_raw,
-                tool_exit_code=s.get("tool_exit_code", 0),
-            )
-        result = tc.finish(success=success)
-        total_steps = (
-            result.get("total_steps", len(steps)) if isinstance(result, dict) else len(steps)
+                step_data = {
+                    "step_id": s.get("step_id", len(processed_steps) + 1),
+                    "thought": thought_raw,
+                    "tool_name": tool_name,
+                    "tool_params": raw_params,
+                    "tool_output": tool_output_raw,
+                    "tool_exit_code": s.get("tool_exit_code", 0),
+                    "timestamp": s.get("timestamp", ""),
+                }
+                f.write(_json.dumps(step_data, ensure_ascii=False) + "\n")
+                processed_steps.append(step_data)
+
+        total_steps = len(processed_steps)
+
+        # ── 更新元数据索引 ──
+        index_file = archive_base / "index.json"
+        index_data = {}
+        if index_file.exists():
+            try:
+                with open(index_file, "r", encoding="utf-8") as f:
+                    index_data = _json.load(f)
+            except Exception:
+                pass
+
+        from datetime import datetime
+
+        index_data[trajectory_id] = {
+            "trajectory_id": trajectory_id,
+            "employee": employee_name,
+            "task": task_description[:500],
+            "model": model,
+            "channel": channel,
+            "success": success,
+            "total_steps": total_steps,
+            "created_at": datetime.now().isoformat(),
+            "file_path": str(trajectory_file),
+        }
+
+        with open(index_file, "w", encoding="utf-8") as f:
+            _json.dump(index_data, f, ensure_ascii=False, indent=2)
+
+        logger.info(
+            "轨迹已存储: %s (employee=%s, steps=%d, id=%s)",
+            trajectory_file,
+            employee_name,
+            total_steps,
+            trajectory_id,
         )
 
-        # ── 写回链路：成功轨迹自动写入记忆 ──
-        memory_written = False
-        if success and task_description:
-            try:
-                from crew.memory import MemoryStore
-                from crew.memory_cache import invalidate as _invalidate_cache
-
-                _mem_store = MemoryStore(project_dir=ctx.project_dir)
-
-                # 用 task_id（轨迹的唯一标识）做幂等去重
-                _task_id = ""
-                if isinstance(result, dict):
-                    _task_id = result.get("task_id", "")
-                elif hasattr(result, "task") and hasattr(result.task, "task_id"):
-                    _task_id = result.task.task_id
-
-                # 幂等检查：同 session 同 category 不重复写
-                _should_write = True
-                if _task_id:
-                    _existing = _mem_store.query(employee_name, limit=50)
-                    for _e in _existing:
-                        if _e.source_session == _task_id and _e.category == "finding":
-                            _should_write = False
-                            break
-
-                if _should_write:
-                    # 从 task_description + steps 提取摘要
-                    _step_tools = [s.get("tool_name", "") for s in steps if s.get("tool_name")]
-                    _summary = f"[轨迹] {task_description[:200]}"
-                    if _step_tools:
-                        _unique_tools = list(dict.fromkeys(_step_tools))[:5]
-                        _summary += f" (工具: {', '.join(_unique_tools)})"
-                    _summary += f" [{total_steps}步]"
-
-                    _mem_store.add(
-                        employee=employee_name,
-                        category="finding",
-                        content=_summary[:500],
-                        source_session=_task_id,
-                        tags=["trajectory", "claude-code"],
-                    )
-                    _invalidate_cache(employee_name)
-                    memory_written = True
-                    logger.info("轨迹记忆写入成功: employee=%s task_id=%s", employee_name, _task_id)
-            except Exception as mem_err:
-                logger.warning("轨迹记忆写入失败（不影响轨迹上报）: %s", mem_err)
-
-        resp_data: dict[str, Any] = {"ok": True, "steps_received": total_steps}
-        if memory_written:
-            resp_data["memory_written"] = True
+        resp_data: dict[str, Any] = {
+            "ok": True,
+            "trajectory_id": trajectory_id,
+            "steps_received": total_steps,
+            "stored_at": str(trajectory_file),
+        }
         if truncated_fields:
             resp_data["truncated_fields"] = truncated_fields
         return JSONResponse(resp_data)
