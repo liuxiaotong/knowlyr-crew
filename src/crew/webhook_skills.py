@@ -17,8 +17,10 @@ def _get_skills_engine(request: Request) -> SkillsEngine:
     """获取 SkillsEngine 实例."""
     # 从 app state 获取或创建
     if not hasattr(request.app.state, "skills_engine"):
-        skill_store = SkillStore()
-        memory_store = MemoryStore()
+        # 从 request.state 获取 project_dir（由 webhook.py 设置）
+        project_dir = getattr(request.state, "project_dir", None)
+        skill_store = SkillStore(project_dir=project_dir)
+        memory_store = MemoryStore(project_dir=project_dir)
         request.app.state.skills_engine = SkillsEngine(skill_store, memory_store)
     return request.app.state.skills_engine
 
