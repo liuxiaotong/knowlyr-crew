@@ -3801,8 +3801,8 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         resp_data: dict[str, Any] = {
             "ok": True,
             "trajectory_id": trajectory_id,
-            "steps_received": total_steps,
-            "stored_at": str(trajectory_file),
+            "total_steps": total_steps,
+            "file_path": str(trajectory_file),
         }
         if truncated_fields:
             resp_data["truncated_fields"] = truncated_fields
