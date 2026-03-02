@@ -1418,6 +1418,23 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 else:
                     extra_context = memory_text
 
+                # 添加调试日志
+                logger.info(
+                    "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
+                    employee_name,
+                    len(memories),
+                    len(extra_context)
+                )
+
+        # 添加路径选择日志
+        logger.info(
+            "执行路径: employee=%s use_fast_path=%s has_tools=%s extra_context_len=%d",
+            name,
+            use_fast_path,
+            has_tools,
+            len(extra_context) if extra_context else 0
+        )
+
         _t0 = _time.monotonic()
         if use_fast_path:
             from crew.webhook_feishu import _feishu_fast_reply

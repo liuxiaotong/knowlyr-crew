@@ -335,6 +335,12 @@ async def _feishu_fast_reply(
 
     # 注入外部上下文（站内消息等渠道传入的记忆、用户记忆、对话摘要）
     if extra_context:
+        logger.info(
+            "Fast path 注入 extra_context: employee=%s len=%d preview=%s",
+            emp.name,
+            len(extra_context),
+            extra_context[:100]
+        )
         prompt += "\n\n" + extra_context
 
     # 用备用模型（kimi）降低成本，没配就用主模型
