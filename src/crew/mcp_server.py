@@ -3261,14 +3261,51 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
             except Exception as exc:
-                error_msg = str(exc)
-                if "409" in error_msg:
-                    error_msg = f"slug 冲突: '{slug}' 在空间 '{space_slug}' 中已存在"
+                import httpx as _httpx
+
+                # 409 slug 冲突 → 自动 fallback 到更新已有文档
+                if isinstance(exc, _httpx.HTTPStatusError) and exc.response.status_code == 409:
+                    try:
+                        conflict_detail = exc.response.json().get("detail", {})
+                        existing = conflict_detail.get("existing_doc", {}) if isinstance(conflict_detail, dict) else {}
+                        existing_id = existing.get("id")
+                    except Exception:
+                        existing_id = None
+
+                    if existing_id:
+                        try:
+                            update_result = await _wiki_update_doc(
+                                base_url,
+                                admin_token,
+                                doc_id=existing_id,
+                                title=title,
+                                content=arguments.get("content") or None,
+                                ai_content=arguments.get("ai_content") or None,
+                                excerpt=arguments.get("excerpt") or None,
+                            )
+                            update_result["_fallback"] = f"slug '{slug}' 已存在 (doc_id={existing_id})，已自动更新"
+                            return [
+                                TextContent(
+                                    type="text",
+                                    text=json.dumps(update_result, ensure_ascii=False, indent=2),
+                                )
+                            ]
+                        except Exception as update_exc:
+                            return [
+                                TextContent(
+                                    type="text",
+                                    text=json.dumps(
+                                        {"error": f"slug 冲突后 fallback 更新也失败: {update_exc}"},
+                                        ensure_ascii=False,
+                                    ),
+                                )
+                            ]
+
                 return [
                     TextContent(
                         type="text",
                         text=json.dumps(
-                            {"error": f"创建文档失败: {error_msg}"},
+                            {"error": f"创建文档失败: {exc}"},
                             ensure_ascii=False,
                         ),
                     )
