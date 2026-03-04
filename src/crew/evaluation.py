@@ -31,6 +31,8 @@ class Decision(BaseModel):
     status: Literal["pending", "evaluated"] = Field(default="pending", description="状态")
     actual_outcome: str = Field(default="", description="实际结果")
     evaluation: str = Field(default="", description="评估结论")
+    deadline: str = Field(default="", description="截止日期 ISO 格式，如 2026-03-07")
+    task_id: str = Field(default="", description="关联的 crew 任务 ID")
 
 
 class EvaluationEngine:
@@ -62,6 +64,8 @@ class EvaluationEngine:
         content: str,
         expected_outcome: str = "",
         meeting_id: str = "",
+        deadline: str = "",
+        task_id: str = "",
     ) -> Decision:
         """记录一个待评估的决策.
 
@@ -71,6 +75,8 @@ class EvaluationEngine:
             content: 决策内容
             expected_outcome: 预期结果
             meeting_id: 来源会议 ID
+            deadline: 截止日期 ISO 格式（可选）
+            task_id: 关联的 crew 任务 ID（可选）
 
         Returns:
             Decision 对象
@@ -82,6 +88,8 @@ class EvaluationEngine:
             content=content,
             expected_outcome=expected_outcome,
             meeting_id=meeting_id,
+            deadline=deadline,
+            task_id=task_id,
         )
         with self._decisions_file().open("a", encoding="utf-8") as f:
             f.write(decision.model_dump_json() + "\n")
@@ -229,6 +237,44 @@ class EvaluationEngine:
             except Exception:
                 continue
         return None
+
+    def list_overdue(self, as_of: str = "") -> list[Decision]:
+        """列出已过期且未评估的决策.
+
+        Args:
+            as_of: 参考日期 ISO 格式（YYYY-MM-DD），默认今天
+
+        Returns:
+            过期的 pending 决策列表
+        """
+        if as_of:
+            ref_date = as_of[:10]  # 取 YYYY-MM-DD 部分
+        else:
+            ref_date = datetime.now().strftime("%Y-%m-%d")
+
+        path = self._decisions_file()
+        if not path.exists():
+            return []
+
+        overdue: list[Decision] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                decision = Decision(**json.loads(line))
+            except Exception:
+                continue
+
+            if decision.status != "pending":
+                continue
+            if not decision.deadline:
+                continue
+            # 比较日期字符串（ISO 格式天然支持字典序比较）
+            if decision.deadline[:10] < ref_date:
+                overdue.append(decision)
+
+        return overdue
 
     def generate_evaluation_prompt(self, decision_id: str) -> str | None:
         """生成回溯评估 prompt.

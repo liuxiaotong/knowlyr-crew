@@ -1,6 +1,10 @@
 """评估闭环模块测试."""
 
 import json
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
+import pytest
 
 from crew.evaluation import Decision, EvaluationEngine
 
@@ -225,3 +229,171 @@ class TestEvaluationEngine:
 
         # 原文件应完好无损
         assert decisions_file.read_text() == original_content
+
+    def test_track_with_deadline(self, tmp_path):
+        """track 时传 deadline，验证 Decision 包含正确的 deadline."""
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        d = engine.track(
+            "pm", "estimate", "需要 3 天",
+            deadline="2026-03-07",
+        )
+        assert d.deadline == "2026-03-07"
+        # 从文件重新加载验证持久化
+        reloaded = engine.get(d.id)
+        assert reloaded is not None
+        assert reloaded.deadline == "2026-03-07"
+
+    def test_track_with_task_id(self, tmp_path):
+        """track 时传 task_id，验证 Decision 包含正确的 task_id."""
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        d = engine.track(
+            "dev", "commitment", "用 React 重构前端",
+            task_id="20260301-120000-abc12345",
+        )
+        assert d.task_id == "20260301-120000-abc12345"
+        reloaded = engine.get(d.id)
+        assert reloaded is not None
+        assert reloaded.task_id == "20260301-120000-abc12345"
+
+    def test_list_overdue_basic(self, tmp_path):
+        """list_overdue 只返回过期未评估的决策."""
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        # 已过期的 pending
+        d1 = engine.track("pm", "estimate", "过期决策", deadline="2026-01-01")
+        # 未过期的 pending
+        d2 = engine.track("pm", "estimate", "未来决策", deadline="2099-12-31")
+        # 已过期但已评估
+        d3 = engine.track("pm", "estimate", "已评估", deadline="2026-01-01")
+        engine.evaluate(d3.id, "结果 OK")
+        # 无 deadline 的 pending
+        d4 = engine.track("pm", "estimate", "无截止日期")
+
+        overdue = engine.list_overdue(as_of="2026-03-04")
+        assert len(overdue) == 1
+        assert overdue[0].id == d1.id
+
+    def test_list_overdue_empty(self, tmp_path):
+        """没有过期的决策，返回空列表."""
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        engine.track("pm", "estimate", "未来决策", deadline="2099-12-31")
+        engine.track("pm", "estimate", "无截止日期")
+        overdue = engine.list_overdue(as_of="2026-03-04")
+        assert overdue == []
+
+    def test_list_overdue_no_file(self, tmp_path):
+        """没有 decisions 文件时返回空列表."""
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        assert engine.list_overdue() == []
+
+
+class TestScanOverdueDecisions:
+    """测试过期决策扫描."""
+
+    @pytest.mark.asyncio
+    async def test_scan_overdue_auto_evaluate(self, tmp_path):
+        """有 task_id 且任务完成的 → 自动 evaluate."""
+        from crew.task_registry import TaskRecord, TaskRegistry
+
+        # 准备 eval engine
+        eval_dir = tmp_path / ".crew" / "evaluations"
+        engine = EvaluationEngine(eval_dir=eval_dir)
+
+        # 准备 task registry
+        tasks_path = tmp_path / ".crew" / "tasks.jsonl"
+        registry = TaskRegistry(persist_path=tasks_path)
+        task = registry.create(
+            trigger="direct",
+            target_type="employee",
+            target_name="dev",
+        )
+        registry.update(task.task_id, "completed", result={"summary": "任务完成了"})
+
+        # track 一个带 task_id 的过期决策
+        d = engine.track(
+            "dev", "commitment", "用新框架重构",
+            deadline="2026-02-01",
+            task_id=task.task_id,
+        )
+
+        # 运行扫描
+        from crew.cron_evaluate import scan_overdue_decisions
+
+        # 需要 mock resolve_project_dir 让它返回 tmp_path
+        with patch("crew.cron_evaluate.resolve_project_dir", return_value=tmp_path):
+            with patch("crew.evaluation.resolve_project_dir", return_value=tmp_path):
+                result = await scan_overdue_decisions(project_dir=tmp_path)
+
+        assert len(result["auto_evaluated"]) == 1
+        assert result["auto_evaluated"][0]["id"] == d.id
+        assert "系统自动评估" in result["auto_evaluated"][0]["evaluation"]
+
+        # 验证决策已被标记为 evaluated
+        reloaded = engine.get(d.id)
+        assert reloaded is not None
+        assert reloaded.status == "evaluated"
+
+    @pytest.mark.asyncio
+    async def test_scan_overdue_expired_writes_memory(self, tmp_path):
+        """超期 7 天的 → 写入 finding 记忆并自动关闭."""
+        eval_dir = tmp_path / ".crew" / "evaluations"
+        engine = EvaluationEngine(eval_dir=eval_dir)
+
+        # track 一个超期 10 天的决策
+        d = engine.track(
+            "pm", "estimate", "需要完成用户调研",
+            deadline="2026-02-20",
+        )
+
+        memory_add_calls = []
+
+        # Mock MemoryStore.add 来捕获调用
+        original_add = None
+
+        class FakeMemoryStore:
+            def __init__(self, **kwargs):
+                pass
+
+            def add(self, **kwargs):
+                memory_add_calls.append(kwargs)
+
+        from crew.cron_evaluate import scan_overdue_decisions
+
+        with patch("crew.cron_evaluate.resolve_project_dir", return_value=tmp_path):
+            with patch("crew.evaluation.resolve_project_dir", return_value=tmp_path):
+                with patch("crew.cron_evaluate.MemoryStore", FakeMemoryStore):
+                    result = await scan_overdue_decisions(project_dir=tmp_path)
+
+        # 应该在 expired 列表中
+        assert len(result["expired"]) == 1
+        assert result["expired"][0]["id"] == d.id
+        assert "系统自动关闭" in result["expired"][0]["evaluation"]
+
+        # 应该写入了 finding 记忆
+        assert len(memory_add_calls) == 1
+        assert memory_add_calls[0]["category"] == "finding"
+        assert "超期" in memory_add_calls[0]["content"]
+        assert memory_add_calls[0]["employee"] == "pm"
+
+    @pytest.mark.asyncio
+    async def test_scan_overdue_generates_reminders(self, tmp_path):
+        """过期 < 7 天且无 task_id 的决策 → 生成提醒."""
+        eval_dir = tmp_path / ".crew" / "evaluations"
+        engine = EvaluationEngine(eval_dir=eval_dir)
+
+        # track 一个过期 3 天的决策（无 task_id）
+        d = engine.track(
+            "dev", "recommendation", "建议用缓存优化查询",
+            deadline="2026-03-01",
+        )
+
+        from crew.cron_evaluate import scan_overdue_decisions
+
+        with patch("crew.cron_evaluate.resolve_project_dir", return_value=tmp_path):
+            with patch("crew.evaluation.resolve_project_dir", return_value=tmp_path):
+                result = await scan_overdue_decisions(project_dir=tmp_path)
+
+        assert len(result["reminders"]) == 1
+        assert result["reminders"][0]["decision_id"] == d.id
+        assert result["reminders"][0]["employee"] == "dev"
+        assert result["auto_evaluated"] == []
+        assert result["expired"] == []

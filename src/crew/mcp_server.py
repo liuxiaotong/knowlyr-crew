@@ -591,17 +591,23 @@ async def _remote_track_decision(
     content: str,
     expected_outcome: str = "",
     meeting_id: str = "",
+    deadline: str = "",
+    task_id: str = "",
 ) -> dict:
     """通过远程 API 记录决策."""
     import httpx
 
-    payload = {
+    payload: dict[str, str] = {
         "employee": employee,
         "category": category,
         "content": content,
         "expected_outcome": expected_outcome,
         "meeting_id": meeting_id,
     }
+    if deadline:
+        payload["deadline"] = deadline
+    if task_id:
+        payload["task_id"] = task_id
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{base_url}/api/decisions/track",
@@ -1217,6 +1223,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "string",
                             "description": "来源会议 ID（可选）",
                         },
+                        "deadline": {
+                            "type": "string",
+                            "description": "截止日期 ISO 格式，如 2026-03-07（可选）",
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": "关联的 crew 任务 ID（可选）",
+                        },
                     },
                     "required": ["employee", "category", "content"],
                 },
@@ -1241,6 +1255,19 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         },
                     },
                     "required": ["decision_id", "actual_outcome"],
+                },
+            ),
+            Tool(
+                name="list_overdue_decisions",
+                description="列出已过期且未评估的决策",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "as_of": {
+                            "type": "string",
+                            "description": "参考日期 ISO 格式（默认今天）",
+                        },
+                    },
                 },
             ),
             Tool(
@@ -2368,6 +2395,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         content=arguments["content"],
                         expected_outcome=arguments.get("expected_outcome", ""),
                         meeting_id=arguments.get("meeting_id", ""),
+                        deadline=arguments.get("deadline", ""),
+                        task_id=arguments.get("task_id", ""),
                     )
                     return [
                         TextContent(
@@ -2389,6 +2418,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 content=arguments["content"],
                 expected_outcome=arguments.get("expected_outcome", ""),
                 meeting_id=arguments.get("meeting_id", ""),
+                deadline=arguments.get("deadline", ""),
+                task_id=arguments.get("task_id", ""),
             )
             return [
                 TextContent(
@@ -2437,6 +2468,19 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 TextContent(
                     type="text",
                     text=json.dumps(decision.model_dump(), ensure_ascii=False, indent=2),
+                )
+            ]
+
+        elif name == "list_overdue_decisions":
+            from crew.evaluation import EvaluationEngine
+
+            engine = EvaluationEngine(project_dir=_project_dir)
+            overdue = engine.list_overdue(as_of=arguments.get("as_of", ""))
+            data = [d.model_dump() for d in overdue]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(data, ensure_ascii=False, indent=2),
                 )
             ]
 
