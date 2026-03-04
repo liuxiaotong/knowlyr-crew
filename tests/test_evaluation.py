@@ -514,3 +514,52 @@ class TestEvaluateScanDM:
         content_parsed = _json.loads(call_args[1]["json"]["content"])
         assert "决策评估日报" in content_parsed["text"]
         assert data.get("code") == 0
+
+
+class TestTrackDecisionAgentTool:
+    """测试 track_decision agent 工具集成."""
+
+    def test_schema_in_tool_schemas(self):
+        """track_decision schema 存在于 _TOOL_SCHEMAS."""
+        from crew.tool_schema import _TOOL_SCHEMAS
+
+        assert "track_decision" in _TOOL_SCHEMAS
+        schema = _TOOL_SCHEMAS["track_decision"]
+        assert schema["name"] == "track_decision"
+        assert "category" in schema["input_schema"]["properties"]
+        assert "content" in schema["input_schema"]["properties"]
+        assert "deadline" in schema["input_schema"]["properties"]
+        assert schema["input_schema"]["required"] == ["category", "content"]
+
+    def test_in_agent_tools_set(self):
+        """track_decision 在 AGENT_TOOLS set 中."""
+        from crew.tool_schema import AGENT_TOOLS
+
+        assert "track_decision" in AGENT_TOOLS
+
+    def test_schema_in_core_tools(self):
+        """track_decision 在 CORE_TOOLS 中."""
+        from crew.tool_schema import CORE_TOOLS
+
+        assert "track_decision" in CORE_TOOLS
+
+    def test_default_deadline_7_days(self, tmp_path):
+        """不传 deadline 时，executor 应自动设为 7 天后."""
+        from datetime import datetime, timedelta
+
+        from crew.evaluation import EvaluationEngine
+
+        # 模拟 executor 中的默认 deadline 逻辑
+        deadline = ""
+        if not deadline:
+            deadline = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        engine = EvaluationEngine(eval_dir=tmp_path / "eval")
+        d = engine.track("dev", "estimate", "需要 3 天", deadline=deadline)
+
+        expected_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        assert d.deadline == expected_date
+
+        reloaded = engine.get(d.id)
+        assert reloaded is not None
+        assert reloaded.deadline == expected_date

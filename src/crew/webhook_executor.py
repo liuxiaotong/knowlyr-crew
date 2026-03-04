@@ -1123,6 +1123,30 @@ async def _handle_tool_call(
         )
         return "已记住。"
 
+    if tool_name == "track_decision":
+        from datetime import datetime, timedelta
+
+        from crew.evaluation import EvaluationEngine
+
+        project_dir = ctx.project_dir if ctx else Path(".")
+        # 默认 deadline: 7 天后
+        deadline = arguments.get("deadline", "")
+        if not deadline:
+            deadline = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        engine = EvaluationEngine(project_dir=project_dir)
+        decision = engine.track(
+            employee=employee_name,
+            category=arguments.get("category", "recommendation"),
+            content=arguments.get("content", ""),
+            expected_outcome=arguments.get("expected_outcome", ""),
+            deadline=deadline,
+        )
+        logger.info(
+            "决策记录: %s → %s (deadline=%s)", employee_name, decision.content[:60], deadline
+        )
+        return f"已记录决策（ID: {decision.id}，截止: {deadline}）。系统会在到期后自动评估。"
+
     if tool_name == "delegate":
         logger.info("委派: %s → %s", employee_name, arguments.get("employee_name"))
         import crew.webhook as _wh

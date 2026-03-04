@@ -1029,6 +1029,35 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         },
     },
     # ── 记忆工具 ──
+    "track_decision": {
+        "name": "track_decision",
+        "description": "记录一个待评估的决策（技术选型、方案建议、工期预估等）。系统会在 deadline 后自动回收评估。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["estimate", "recommendation", "commitment"],
+                    "description": "决策类别: estimate=预估, recommendation=建议, commitment=承诺",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "决策内容（如「选用 Redis 做缓存，预计 3 天完成」）",
+                },
+                "expected_outcome": {
+                    "type": "string",
+                    "description": "预期结果（可选）",
+                    "default": "",
+                },
+                "deadline": {
+                    "type": "string",
+                    "description": "评估截止日期 ISO 格式（可选，默认 7 天后）",
+                    "default": "",
+                },
+            },
+            "required": ["category", "content"],
+        },
+    },
     "add_memory": {
         "name": "add_memory",
         "description": "记录持久记忆。",
@@ -1726,6 +1755,7 @@ AGENT_TOOLS = {
     "stock_price",
     # 记忆
     "add_memory",
+    "track_decision",
     # 飞书文档
     "search_feishu_docs",
     "read_feishu_doc",
@@ -1810,7 +1840,7 @@ CORE_TOOLS = {
     "organize_meeting", "check_meeting", "run_pipeline", "query_cost",
     "schedule_task", "list_schedules", "cancel_schedule",
     # 记忆与笔记
-    "add_memory", "create_note", "read_notes",
+    "add_memory", "create_note", "read_notes", "track_decision",
     # 基础执行
     "get_datetime", "calculate", "lookup_user", "web_search",
     "read_url", "agent_file_read", "agent_file_grep", "project_status",
