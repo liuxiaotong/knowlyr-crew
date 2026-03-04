@@ -103,6 +103,8 @@ def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:
         data["encrypt_key"] = os.environ.get("FEISHU_ENCRYPT_KEY", "")
     if not data.get("calendar_id"):
         data["calendar_id"] = os.environ.get("FEISHU_CALENDAR_ID", "")
+    if not data.get("owner_open_id"):
+        data["owner_open_id"] = os.environ.get("FEISHU_OWNER_OPEN_ID", "")
 
     return FeishuConfig(**data)
 
