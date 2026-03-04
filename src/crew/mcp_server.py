@@ -2338,9 +2338,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     ]
             else:
                 # 本地 fallback（未配置远程 API 时）
-                from crew.memory import MemoryStore
+                from crew.memory import get_memory_store
 
-                store = MemoryStore(project_dir=_project_dir)
+                store = get_memory_store(project_dir=_project_dir)
                 entry = store.add(
                     employee=arguments["employee"],
                     category=arguments["category"],
@@ -2396,9 +2396,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     ]
             else:
                 # 本地 fallback（未配置远程 API 时）
-                from crew.memory import MemoryStore
+                from crew.memory import get_memory_store
 
-                store = MemoryStore(project_dir=_project_dir)
+                store = get_memory_store(project_dir=_project_dir)
                 _query_kwargs: dict = {
                     "employee": arguments["employee"],
                     "category": arguments.get("category"),
@@ -3873,7 +3873,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
         复用 get_prompt_cached() 获取记忆（60s TTL 缓存），
         复用 _handle_employee_state 的 soul/notes 读取逻辑。
         """
-        from crew.memory import MemoryStore
+        from crew.memory import get_memory_store
 
         parts: list[str] = []
 
@@ -3895,7 +3895,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
             parts.append(soul)
 
         # 近期记忆 — 复用 get_prompt_cached（带 60s TTL 缓存）
-        store = MemoryStore(project_dir=project_dir)
+        store = get_memory_store(project_dir=project_dir)
         memories = store.query(
             emp.name,
             limit=10,

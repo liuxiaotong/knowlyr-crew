@@ -981,6 +981,13 @@ def create_webhook_app(
         ):
             logger.info("FEISHU_CALENDAR_ID 未设置且 feishu.yaml 无 calendar_id — 日历功能将不可用")
 
+        # ── 初始化 memories 表（幂等 DDL）──
+        try:
+            from crew.memory_store_db import init_memory_tables
+            init_memory_tables()
+        except Exception as _init_err:
+            logger.warning("memories 表初始化跳过: %s", _init_err)
+
         if scheduler:
             await scheduler.start()
         _task = asyncio.create_task(_resume_incomplete_pipelines(ctx))
