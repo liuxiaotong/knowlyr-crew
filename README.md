@@ -18,8 +18,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1859_passed-brightgreen.svg)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-primitive-mapping)
+[![Tests](https://img.shields.io/badge/tests-1868_passed-brightgreen.svg)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP_Tools-37-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#structured-dialectical-deliberation)
 
@@ -35,7 +35,7 @@ The primary failure modes of multi-agent collaboration systems are threefold: **
 
 The system implements a self-correcting closed loop of "**define -> deliberate -> decide -> evaluate -> update memory**", feeding human feedback directly into agents' persistent memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human evaluation outcomes shape subsequent inference behavior.
 
-> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
+> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 37 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
 
 ---
 
@@ -137,7 +137,7 @@ graph LR
 | Layer | Module | Responsibility |
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | Declarative employee definition parsing; YAML/Markdown dual format; priority-based discovery |
-| **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support |
+| **Protocol** | MCP Server · Skill Converter | 37 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support |
 | **Deliberation** | Discussion Engine | 9 structured interaction modes; cognitive conflict constraints; topologically sorted execution plans |
 | **Orchestration** | Pipeline · Route · Task Registry | Parallel/sequential/conditional/loop orchestration; checkpoint recovery; multi-model routing |
 | **Memory** | Memory Store · Semantic Index | Semantic search; exponential decay; importance ranking; access tracking; cross-employee pattern sharing; multi-backend embedding fallback |
@@ -153,10 +153,12 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | Each employee = one callable prompt template with typed parameters | 1 per employee |
 | **Resources** | Raw Markdown definitions, directly readable by AI IDEs | 1 per employee |
-| **Tools** | Employee/discussion/pipeline/memory/evaluation/permission/audit/metrics/project detection, etc. | 20 |
+| **Tools** | Employee/discussion/pipeline/memory/evaluation/permission/audit/metrics/project detection, etc. | 37 |
 
 <details>
-<summary>Full list of 20 MCP Tools</summary>
+<summary>Full list of 37 MCP Tools</summary>
+
+**Core Management**
 
 | Tool | Description |
 |:---|:---|
@@ -164,22 +166,64 @@ graph LR
 | `get_employee` | Get complete employee definition |
 | `run_employee` | Generate an executable prompt |
 | `get_work_log` | View employee work logs |
+| `create_employee` | Create a new AI employee (with avatar generation) |
+| `get_soul` | Read employee soul configuration |
+| `update_soul` | Update employee soul configuration (auto-versioned) |
 | `detect_project` | Detect project type, framework, and package manager |
+
+**Deliberation & Pipeline**
+
+| Tool | Description |
+|:---|:---|
 | `list_pipelines` | List all pipelines |
 | `run_pipeline` | Execute a pipeline |
+| `create_pipeline` | Create a pipeline configuration |
+| `update_pipeline` | Update a pipeline configuration |
 | `list_discussions` | List all discussion meetings |
 | `run_discussion` | Generate a discussion meeting prompt |
-| `add_memory` | Add persistent memory for an employee (supports pattern type) |
+| `create_discussion` | Create a discussion configuration |
+| `update_discussion` | Update a discussion configuration |
+
+**Memory & Evaluation**
+
+| Tool | Description |
+|:---|:---|
+| `add_memory` | Add persistent memory for an employee |
 | `query_memory` | Query an employee's persistent memory |
 | `track_decision` | Record a decision pending evaluation |
 | `evaluate_decision` | Evaluate a decision and write lessons learned to employee memory |
 | `list_meeting_history` | View discussion meeting history |
 | `get_meeting_detail` | Get complete meeting transcript |
+
+**Observability & Governance**
+
+| Tool | Description |
+|:---|:---|
 | `list_tool_schemas` | List all available tool definitions (filterable by role) |
 | `get_permission_matrix` | View employee permission matrix and policies |
 | `get_audit_log` | Query tool invocation audit logs |
-| `get_tool_metrics` | Query tool invocation statistics |
-| `query_events` | Query system event stream |
+| `get_tool_metrics` | Query tool usage statistics |
+| `query_events` | Query unified event stream |
+
+**Configuration**
+
+| Tool | Description |
+|:---|:---|
+| `put_config` | Write config to KV store |
+| `get_config` | Read config from KV store |
+| `list_configs` | List all config keys |
+
+**Wiki**
+
+| Tool | Description |
+|:---|:---|
+| `wiki_create_doc` | Create a Wiki document |
+| `wiki_update_doc` | Update a Wiki document |
+| `wiki_upload` | Upload a file to Wiki |
+| `wiki_read_file` | Read a Wiki file |
+| `wiki_list_files` | List Wiki files |
+| `wiki_list_spaces` | List Wiki spaces |
+| `wiki_delete_file` | Delete a Wiki file |
 
 </details>
 
@@ -911,7 +955,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-uv run --extra dev --extra mcp pytest tests/ -q    # 1859 test cases
+uv run --extra dev --extra mcp pytest tests/ -q    # 1868 test cases
 ```
 
 ---

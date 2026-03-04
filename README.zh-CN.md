@@ -18,8 +18,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1859_passed-brightgreen.svg)](#开发-development)
-[![MCP Tools](https://img.shields.io/badge/MCP_Tools-20-purple.svg)](#mcp-原语映射-mcp-primitive-mapping)
+[![Tests](https://img.shields.io/badge/tests-1868_passed-brightgreen.svg)](#开发-development)
+[![MCP Tools](https://img.shields.io/badge/MCP_Tools-37-purple.svg)](#mcp-原语映射-mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#流水线编排-pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#结构化辩证协商-structured-dialectical-deliberation)
 
@@ -35,7 +35,7 @@
 
 系统实现「**定义 → 协商 → 决策 → 评估 → 记忆更新**」的自校正闭环，将人类反馈直接反馈为 Agent 的持久化记忆——这与 RLHF 的核心机制（Christiano et al., 2017）在功能上同构：人工评估结果塑造后续推理行为。
 
-> **knowlyr-crew** 将 AI 员工能力形式化为声明式规范（YAML + Markdown），实现包含 9 种交互模式和魔鬼辩护人约束的结构化辩证协商，并提供具有指数置信度衰减的持久语义记忆。系统暴露 20 个 MCP 工具、支持 3 种传输协议，路由至 7 个 LLM 供应商，维护从评估到记忆的完整反馈闭环。
+> **knowlyr-crew** 将 AI 员工能力形式化为声明式规范（YAML + Markdown），实现包含 9 种交互模式和魔鬼辩护人约束的结构化辩证协商，并提供具有指数置信度衰减的持久语义记忆。系统暴露 37 个 MCP 工具、支持 3 种传输协议，路由至 7 个 LLM 供应商，维护从评估到记忆的完整反馈闭环。
 
 ---
 
@@ -137,7 +137,7 @@ graph LR
 | 层 | 模块 | 职责 |
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | 声明式员工定义解析，YAML/Markdown 双格式，优先级发现 |
-| **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
+| **Protocol** | MCP Server · Skill Converter | 37 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
 | **Deliberation** | Discussion Engine | 9 种结构化交互模式，认知冲突约束，拓扑排序执行计划 |
 | **Orchestration** | Pipeline · Route · Task Registry | 并行/串行/条件/循环编排，断点恢复，多模型路由 |
 | **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，重要性排序，访问追踪，跨员工 Pattern 共享，多后端 Embedding 降级 |
@@ -153,10 +153,12 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | 每位员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/指标/项目检测等 | 20 |
+| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/指标/项目检测/配置/Wiki 等 | 37 |
 
 <details>
-<summary>20 个 MCP Tools 详情</summary>
+<summary>37 个 MCP Tools 详情</summary>
+
+**核心管理**
 
 | Tool | 描述 |
 |:---|:---|
@@ -164,22 +166,64 @@ graph LR
 | `get_employee` | 获取完整员工定义 |
 | `run_employee` | 生成可执行 prompt |
 | `get_work_log` | 查看员工工作日志 |
+| `create_employee` | 创建新 AI 员工（含头像生成） |
+| `get_soul` | 读取员工灵魂配置 |
+| `update_soul` | 更新员工灵魂配置（自动版本递增） |
 | `detect_project` | 检测项目类型、框架、包管理器 |
+
+**协商与流水线**
+
+| Tool | 描述 |
+|:---|:---|
 | `list_pipelines` | 列出所有流水线 |
 | `run_pipeline` | 执行流水线 |
+| `create_pipeline` | 创建流水线配置 |
+| `update_pipeline` | 更新流水线配置 |
 | `list_discussions` | 列出所有讨论会 |
 | `run_discussion` | 生成讨论会 prompt |
-| `add_memory` | 为员工添加持久化记忆（支持 pattern 类型） |
+| `create_discussion` | 创建讨论会配置 |
+| `update_discussion` | 更新讨论会配置 |
+
+**记忆与评估**
+
+| Tool | 描述 |
+|:---|:---|
+| `add_memory` | 为员工添加持久化记忆 |
 | `query_memory` | 查询员工的持久化记忆 |
 | `track_decision` | 记录待评估的决策 |
 | `evaluate_decision` | 评估决策并将经验写入员工记忆 |
 | `list_meeting_history` | 查看讨论会历史记录 |
 | `get_meeting_detail` | 获取讨论会完整记录 |
+
+**可观测性与治理**
+
+| Tool | 描述 |
+|:---|:---|
 | `list_tool_schemas` | 列出所有可用工具定义（按角色过滤） |
 | `get_permission_matrix` | 查看员工权限矩阵与策略 |
 | `get_audit_log` | 查询工具调用审计日志 |
-| `get_tool_metrics` | 查询工具调用统计指标 |
-| `query_events` | 查询系统事件流 |
+| `get_tool_metrics` | 查询工具使用统计 |
+| `query_events` | 查询统一事件流 |
+
+**配置管理**
+
+| Tool | 描述 |
+|:---|:---|
+| `put_config` | 写入 KV 存储配置 |
+| `get_config` | 读取 KV 存储配置 |
+| `list_configs` | 列出所有配置键 |
+
+**Wiki**
+
+| Tool | 描述 |
+|:---|:---|
+| `wiki_create_doc` | 创建 Wiki 文档 |
+| `wiki_update_doc` | 更新 Wiki 文档 |
+| `wiki_upload` | 上传文件到 Wiki |
+| `wiki_read_file` | 读取 Wiki 文件 |
+| `wiki_list_files` | 列出 Wiki 文件 |
+| `wiki_list_spaces` | 列出 Wiki 空间 |
+| `wiki_delete_file` | 删除 Wiki 文件 |
 
 </details>
 
@@ -910,7 +954,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-uv run --extra dev --extra mcp pytest tests/ -q    # 1859 test cases
+uv run --extra dev --extra mcp pytest tests/ -q    # 1868 test cases
 ```
 
 ---
