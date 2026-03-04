@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -451,3 +451,66 @@ class TestFormatScanReport:
         assert "待回复 (1 条)" in report
         assert "自动评估" not in report
         assert "超期关闭" not in report
+
+
+class TestEvaluateScanDM:
+    """测试决策扫描的飞书私信投递逻辑."""
+
+    @pytest.mark.asyncio
+    async def test_scan_report_sends_dm_to_owner(self, tmp_path):
+        """扫描有结果时，通过飞书 open_id API 给 owner 发私信."""
+        # 准备 eval engine 和过期决策
+        eval_dir = tmp_path / ".crew" / "evaluations"
+        engine = EvaluationEngine(eval_dir=eval_dir)
+        engine.track("dev", "recommendation", "建议用缓存优化查询", deadline="2026-03-01")
+
+        # 构造 mock ctx
+        mock_feishu_config = MagicMock()
+        mock_feishu_config.owner_open_id = "ou_test_owner_123"
+        mock_token_mgr = AsyncMock()
+        mock_token_mgr.get_token = AsyncMock(return_value="fake_token")
+
+        # 构造 mock httpx client
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"code": 0, "msg": "success"}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        # 运行扫描获取报告
+        from crew.cron_evaluate import format_scan_report, scan_overdue_decisions
+
+        with patch("crew.cron_evaluate.resolve_project_dir", return_value=tmp_path):
+            with patch("crew.evaluation.resolve_project_dir", return_value=tmp_path):
+                results = await scan_overdue_decisions(project_dir=tmp_path)
+
+        report = format_scan_report(results)
+        assert report is not None, "应该有扫描报告"
+
+        # 模拟 _run_evaluate_scan_cron 中的 DM 投递逻辑
+        with patch("crew.feishu.get_feishu_client", return_value=mock_client):
+            import json as _json
+            from crew.feishu import get_feishu_client
+
+            token = await mock_token_mgr.get_token()
+            client = get_feishu_client()
+            resp = await client.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "receive_id": mock_feishu_config.owner_open_id,
+                    "msg_type": "text",
+                    "content": _json.dumps({"text": report}),
+                },
+                timeout=15.0,
+            )
+            data = resp.json()
+
+        # 验证调用了正确的 API
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        assert "receive_id_type=open_id" in call_args[0][0]
+        assert call_args[1]["json"]["receive_id"] == "ou_test_owner_123"
+        assert call_args[1]["json"]["msg_type"] == "text"
+        content_parsed = _json.loads(call_args[1]["json"]["content"])
+        assert "决策评估日报" in content_parsed["text"]
+        assert data.get("code") == 0

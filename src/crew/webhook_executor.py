@@ -614,16 +614,26 @@ async def _notify_approval_needed(
     )
 
     try:
-        from crew.feishu import send_feishu_message
+        import json as _json
+        from crew.feishu import get_feishu_client
 
-        await send_feishu_message(
-            ctx.feishu_token_mgr,
-            owner_id,
-            {"text": text},
-            msg_type="text",
+        token = await ctx.feishu_token_mgr.get_token()
+        client = get_feishu_client()
+        resp = await client.post(
+            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "receive_id": owner_id,
+                "msg_type": "text",
+                "content": _json.dumps({"text": text}),
+            },
+            timeout=15.0,
         )
+        data = resp.json()
+        if data.get("code") != 0:
+            logger.warning("审批通知发送失败 (task=%s): %s", task_id, data.get("msg", ""))
     except Exception as e:
-        logger.warning("审批通知发送失败 (task=%s): %s", task_id, e)
+        logger.warning("审批通知发送异常 (task=%s): %s", task_id, e)
 
 
 async def _resume_chain(ctx: _AppContext, task_id: str) -> None:

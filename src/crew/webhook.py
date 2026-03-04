@@ -423,18 +423,33 @@ def create_webhook_app(
                         len(results.get("reminders", [])),
                         len(results.get("expired", [])),
                     )
-                    # 投递到飞书（如果配置了 webhook URL）
-                    import os
-
-                    webhook_url = os.environ.get("EVALUATE_FEISHU_WEBHOOK", "")
-                    if webhook_url:
+                    # 私信发送给 Kai（使用 owner_open_id）
+                    if ctx.feishu_token_mgr and ctx.feishu_config and ctx.feishu_config.owner_open_id:
                         try:
-                            from crew.delivery import DeliveryTarget, deliver
+                            import json as _json
+                            from crew.feishu import get_feishu_client
 
-                            targets = [DeliveryTarget(type="feishu", url=webhook_url)]
-                            await deliver(targets, task_name="决策评估日报", task_result=report)
+                            token = await ctx.feishu_token_mgr.get_token()
+                            client = get_feishu_client()
+                            resp = await client.post(
+                                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
+                                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                                json={
+                                    "receive_id": ctx.feishu_config.owner_open_id,
+                                    "msg_type": "text",
+                                    "content": _json.dumps({"text": report}),
+                                },
+                                timeout=15.0,
+                            )
+                            data = resp.json()
+                            if data.get("code") == 0:
+                                logger.info("决策扫描报告已私信发送给 owner")
+                            else:
+                                logger.warning("决策扫描私信发送失败: %s", data.get("msg", ""))
                         except Exception as e:
-                            logger.warning("决策扫描飞书投递失败: %s", e)
+                            logger.warning("决策扫描私信发送异常: %s", e)
+                    else:
+                        logger.info("决策扫描: 飞书未配置或 owner_open_id 未设置，跳过通知")
                 else:
                     logger.info("决策扫描: 无过期决策")
             except asyncio.CancelledError:
