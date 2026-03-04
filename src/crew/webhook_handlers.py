@@ -4358,7 +4358,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             else:
                 # 使用简单的 chat 路径（无工具）
                 engine = CrewEngine(project_dir=ctx.project_dir)
-                result = await engine.chat(
+                chat_result = await engine.chat(
                     employee_id=employee_id,
                     message=message,
                     channel=channel,
@@ -4369,6 +4369,26 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     message_history=message_history,
                     model=model,
                 )
+
+                # stream=True 时 engine.chat 返回 AsyncIterator
+                if stream and not context_only:
+                    # 真流式：直接消费 AsyncIterator
+                    async def _real_sse_generator():
+                        async for chunk in chat_result:
+                            chunk_data = _json.dumps(chunk, ensure_ascii=False)
+                            yield f"data: {chunk_data}\n\n"
+
+                    return StreamingResponse(
+                        _real_sse_generator(),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "X-Accel-Buffering": "no",
+                        },
+                    )
+                else:
+                    result = chat_result
+
         except EmployeeNotFoundError:
             return JSONResponse(
                 {"ok": False, "error": f"员工不存在: {employee_id}"},
@@ -4383,14 +4403,15 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 status_code=500,
             )
 
-    # ── 流式响应（SSE）──
+    # ── 流式响应（SSE）— SG Bridge 或 agent tools 路径的兼容模式 ──
     if stream and not context_only:
         reply_text: str = result.get("reply", "")
 
         async def _sse_generator():
-            # Phase 1: 简单实现，将完整回复作为单个 SSE 事件推送
-            chunk_data = _json.dumps({"delta": reply_text, "done": False}, ensure_ascii=False)
-            yield f"data: {chunk_data}\n\n"
+            # 兼容模式：将完整回复拆成字符逐个推送（模拟流式体验）
+            for ch in reply_text:
+                chunk_data = _json.dumps({"delta": ch, "done": False}, ensure_ascii=False)
+                yield f"data: {chunk_data}\n\n"
             done_data = _json.dumps(
                 {
                     "done": True,
@@ -4403,7 +4424,14 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             )
             yield f"data: {done_data}\n\n"
 
-        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            _sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # ── 非流式响应 ──
     return JSONResponse(result)
