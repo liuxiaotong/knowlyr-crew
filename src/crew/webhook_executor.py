@@ -1226,7 +1226,11 @@ async def _stream_employee_with_tools(
     resolved_key = resolve_api_key(provider, match.api_key or None)
     client_kwargs = {"api_key": resolved_key}
     if match.base_url:
-        client_kwargs["base_url"] = match.base_url
+        # Anthropic SDK 会自动加 /v1/messages，去掉 base_url 末尾的 /v1 避免重复
+        base = match.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        client_kwargs["base_url"] = base
     client = anthropic.AsyncAnthropic(**client_kwargs)
 
     for round_idx in range(_max_rounds):  # noqa: B007
