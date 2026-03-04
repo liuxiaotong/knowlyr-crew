@@ -1161,7 +1161,7 @@ async def _stream_employee_with_tools(
 
     use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
-    is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
+    is_anthropic = provider == Provider.ANTHROPIC
 
     messages: list[dict[str, Any]] = []
     if message_history:
@@ -1224,7 +1224,10 @@ async def _stream_employee_with_tools(
         raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
 
     resolved_key = resolve_api_key(provider, match.api_key or None)
-    client = anthropic.AsyncAnthropic(api_key=resolved_key)
+    client_kwargs = {"api_key": resolved_key}
+    if match.base_url:
+        client_kwargs["base_url"] = match.base_url
+    client = anthropic.AsyncAnthropic(**client_kwargs)
 
     for round_idx in range(_max_rounds):  # noqa: B007
         # ── 每一轮都用流式 API ──
