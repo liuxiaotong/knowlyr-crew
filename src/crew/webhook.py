@@ -160,6 +160,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_low_quality,
     _handle_memory_popular,
     _handle_memory_feedback_summary,
+    _handle_evaluate_scan,
     _handle_wiki_file_delete,
     _handle_wiki_spaces_list,
     _handle_work_log,
@@ -382,6 +383,64 @@ def create_webhook_app(
                 break
             except Exception:
                 logger.exception("打卡通报定时任务异常，60s 后重试")
+                await asyncio.sleep(60)
+
+    # ── 决策扫描 cron 循环 ──
+    async def _run_evaluate_scan_cron() -> None:
+        """每天 10:00（北京时间）执行过期决策扫描."""
+        try:
+            from croniter import croniter
+        except ImportError:
+            logger.error("croniter 未安装，决策扫描定时任务无法启动")
+            return
+
+        from datetime import datetime as _dt
+
+        cron = croniter("0 10 * * *", _dt.now())
+        logger.info("决策扫描定时任务已注册: 0 10 * * * (每天 10:00)")
+
+        while True:
+            try:
+                import time as _time
+
+                next_time = cron.get_next(float)
+                delay = next_time - _time.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(0)
+
+                logger.info("触发决策扫描定时任务")
+                from crew.cron_evaluate import format_scan_report, scan_overdue_decisions
+
+                results = await scan_overdue_decisions()
+                report = format_scan_report(results)
+
+                if report:
+                    logger.info(
+                        "决策扫描结果: %d 自动评估, %d 待提醒, %d 超期关闭",
+                        len(results.get("auto_evaluated", [])),
+                        len(results.get("reminders", [])),
+                        len(results.get("expired", [])),
+                    )
+                    # 投递到飞书（如果配置了 webhook URL）
+                    import os
+
+                    webhook_url = os.environ.get("EVALUATE_FEISHU_WEBHOOK", "")
+                    if webhook_url:
+                        try:
+                            from crew.delivery import DeliveryTarget, deliver
+
+                            targets = [DeliveryTarget(type="feishu", url=webhook_url)]
+                            await deliver(targets, task_name="决策评估日报", task_result=report)
+                        except Exception as e:
+                            logger.warning("决策扫描飞书投递失败: %s", e)
+                else:
+                    logger.info("决策扫描: 无过期决策")
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("决策扫描定时任务异常，60s 后重试")
                 await asyncio.sleep(60)
 
     routes = [
@@ -801,6 +860,11 @@ def create_webhook_app(
             methods=["POST"],
         ),
         Route(
+            "/api/evaluate/scan",
+            endpoint=_make_handler(ctx, _handle_evaluate_scan),
+            methods=["POST"],
+        ),
+        Route(
             "/api/work-log",
             endpoint=_make_handler(ctx, _handle_work_log),
             methods=["GET"],
@@ -915,6 +979,13 @@ def create_webhook_app(
             )
             _startup_tasks.add(_checkin_task)
             _checkin_task.add_done_callback(_startup_tasks.discard)
+
+        # ── 决策扫描定时任务（每天 10:00 北京时间）──
+        _evaluate_task = asyncio.create_task(
+            _run_evaluate_scan_cron(), name="cron-evaluate-scan"
+        )
+        _startup_tasks.add(_evaluate_task)
+        _evaluate_task.add_done_callback(_startup_tasks.discard)
 
     async def on_shutdown():
         if scheduler:

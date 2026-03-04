@@ -5153,3 +5153,23 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
+    """手动触发过期决策扫描 — POST /api/evaluate/scan."""
+    from starlette.responses import JSONResponse
+
+    from crew.cron_evaluate import format_scan_report, scan_overdue_decisions
+
+    try:
+        results = await scan_overdue_decisions()
+        report = format_scan_report(results)
+
+        return JSONResponse({
+            "auto_evaluated": len(results.get("auto_evaluated", [])),
+            "reminders": len(results.get("reminders", [])),
+            "expired": len(results.get("expired", [])),
+            "report": report,
+            "details": results,
+        })
+    except Exception as exc:
+        logger.exception("evaluate scan failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)

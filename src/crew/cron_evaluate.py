@@ -144,3 +144,32 @@ def _task_result_summary(task: TaskRecord) -> str:
             return str(text)[:200]
         return f"任务结果: {str(task.result)[:200]}"
     return "任务已完成（无详细结果）"
+
+
+def format_scan_report(results: dict) -> str | None:
+    """将扫描结果格式化为可读报告。无内容返回 None。"""
+    auto_evaluated = results.get("auto_evaluated", [])
+    reminders = results.get("reminders", [])
+    expired = results.get("expired", [])
+
+    if not auto_evaluated and not reminders and not expired:
+        return None
+
+    parts = ["📋 决策评估日报"]
+
+    if auto_evaluated:
+        parts.append(f"\n✅ 自动评估 ({len(auto_evaluated)} 条):")
+        for d in auto_evaluated:
+            parts.append(f"  · {d.get('employee', '?')}: {d.get('content', '')[:50]}")
+
+    if reminders:
+        parts.append(f"\n⏰ 待回复 ({len(reminders)} 条):")
+        for r in reminders:
+            parts.append(f"  · {r['employee']}: {r['content']} (超期 {r['days_overdue']} 天)")
+
+    if expired:
+        parts.append(f"\n🔴 超期关闭 ({len(expired)} 条):")
+        for d in expired:
+            parts.append(f"  · {d.get('employee', '?')}: {d.get('content', '')[:50]}")
+
+    return "\n".join(parts)

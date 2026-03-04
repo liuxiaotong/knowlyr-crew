@@ -397,3 +397,57 @@ class TestScanOverdueDecisions:
         assert result["reminders"][0]["employee"] == "dev"
         assert result["auto_evaluated"] == []
         assert result["expired"] == []
+
+
+class TestFormatScanReport:
+    """测试扫描报告格式化."""
+
+    def test_format_scan_report_with_data(self):
+        """有数据时返回格式化报告."""
+        from crew.cron_evaluate import format_scan_report
+
+        results = {
+            "auto_evaluated": [
+                {"employee": "dev", "content": "用新框架重构前端模块"},
+            ],
+            "reminders": [
+                {"employee": "pm", "content": "需要完成调研", "days_overdue": 3},
+            ],
+            "expired": [
+                {"employee": "qa", "content": "测试覆盖率提升计划"},
+            ],
+        }
+        report = format_scan_report(results)
+        assert report is not None
+        assert "决策评估日报" in report
+        assert "自动评估 (1 条)" in report
+        assert "dev" in report
+        assert "待回复 (1 条)" in report
+        assert "pm" in report
+        assert "超期 3 天" in report
+        assert "超期关闭 (1 条)" in report
+        assert "qa" in report
+
+    def test_format_scan_report_empty(self):
+        """无数据时返回 None."""
+        from crew.cron_evaluate import format_scan_report
+
+        results = {"auto_evaluated": [], "reminders": [], "expired": []}
+        assert format_scan_report(results) is None
+
+    def test_format_scan_report_partial(self):
+        """只有部分数据时只输出对应段落."""
+        from crew.cron_evaluate import format_scan_report
+
+        results = {
+            "auto_evaluated": [],
+            "reminders": [
+                {"employee": "pm", "content": "调研任务", "days_overdue": 2},
+            ],
+            "expired": [],
+        }
+        report = format_scan_report(results)
+        assert report is not None
+        assert "待回复 (1 条)" in report
+        assert "自动评估" not in report
+        assert "超期关闭" not in report
