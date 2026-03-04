@@ -76,10 +76,10 @@ def get_effective_clearance(employee_name: str, channel: str) -> dict:
             "include_confidential": bool,      # 是否包含 confidential 级别
         }
     """
-    # 空 channel 时不做过滤（向后兼容）
+    # 空 channel 时默认最低权限（安全默认）
     if not channel:
         return {
-            "classification_max": None,
+            "classification_max": "public",
             "allowed_domains": None,
             "include_confidential": False,
         }

@@ -4,7 +4,6 @@ import logging
 import time
 from typing import Any
 
-from crew.memory import MemoryStore
 from crew.skills import Skill, SkillAction, SkillStore, SkillTriggerRecord
 
 logger = logging.getLogger(__name__)
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 class SkillsEngine:
     """Skills 触发和执行引擎."""
 
-    def __init__(self, skill_store: SkillStore, memory_store: MemoryStore):
+    def __init__(self, skill_store: SkillStore, memory_store: Any):
         self.skill_store = skill_store
         self.memory_store = memory_store
 

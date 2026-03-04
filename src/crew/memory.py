@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -30,7 +30,7 @@ class MemoryEntry(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12], description="唯一 ID")
     employee: str = Field(description="员工标识符")
     created_at: str = Field(
-        default_factory=lambda: datetime.now().isoformat(), description="创建时间"
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="创建时间"
     )
     category: Literal["decision", "estimate", "finding", "correction", "pattern"] = Field(
         description="记忆类别"
@@ -296,7 +296,11 @@ class MemoryStore:
         safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "_", employee)
         if not safe_name:
             safe_name = "employee"
-        return self.memory_dir / f"{safe_name}.jsonl"
+        result = self.memory_dir / f"{safe_name}.jsonl"
+        # 路径遍历防御
+        if not str(result.resolve()).startswith(str(self.memory_dir.resolve())):
+            raise ValueError(f"Invalid employee name: {employee}")
+        return result
 
     def add(
         self,
@@ -440,13 +444,34 @@ class MemoryStore:
 
             entries.append(decayed)
 
-        # 排序
-        if sort_by == "importance":
+        # 信息分级过滤（与 MemoryStoreDB 对齐）
+        _CLASSIFICATION_LEVELS = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
+
+        if not include_confidential:
+            entries = [e for e in entries if getattr(e, 'classification', 'internal') != 'confidential']
+
+        if classification_max is not None:
+            max_level = _CLASSIFICATION_LEVELS.get(classification_max, 1)
+            entries = [e for e in entries if _CLASSIFICATION_LEVELS.get(getattr(e, 'classification', 'internal'), 1) <= max_level]
+
+        if allowed_domains is not None:
+            filtered = []
+            for e in entries:
+                e_cls = getattr(e, 'classification', 'internal')
+                if e_cls == 'restricted':
+                    e_domain = getattr(e, 'domain', []) or []
+                    if e_domain and not set(e_domain) & set(allowed_domains):
+                        continue
+                filtered.append(e)
+            entries = filtered
+
+        # 按 created_at 显式排序（不依赖文件行序）
+        if sort_by == "created_at":
+            entries.sort(key=lambda e: e.created_at, reverse=True)
+        elif sort_by == "importance":
             entries.sort(key=lambda e: (e.importance, e.created_at), reverse=True)
         elif sort_by == "confidence":
             entries.sort(key=lambda e: (e.confidence, e.created_at), reverse=True)
-        else:
-            entries.reverse()  # JSONL 按时间正序追加，reverse 即最新在前
 
         result = entries if limit <= 0 else entries[:limit]
 
@@ -1005,6 +1030,6 @@ def get_memory_store(project_dir=None):
         if is_pg():
             from crew.memory_store_db import MemoryStoreDB
             return MemoryStoreDB(project_dir=project_dir)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning("MemoryStoreDB 初始化失败，降级到文件版: %s", e)
     return MemoryStore(project_dir=project_dir)

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from crew.database import get_connection, is_pg
+from crew.memory import MemoryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,8 @@ class MemoryStoreDB:
         self._project_dir = project_dir
         if not is_pg():
             raise RuntimeError("MemoryStoreDB 仅支持 PostgreSQL 模式")
+        import psycopg2.extras
+        self._dict_cursor_factory = psycopg2.extras.RealDictCursor
 
     def _resolve_to_character_name(self, employee: str) -> str:
         """将 slug 或花名统一转换为花名（character_name）.
@@ -126,6 +129,30 @@ class MemoryStoreDB:
             pass
         return employee
 
+    def _row_to_entry(self, row: dict) -> MemoryEntry:
+        """将数据库行（RealDictCursor dict）转换为 MemoryEntry."""
+        return MemoryEntry(
+            id=row["id"],
+            employee=row["employee"],
+            created_at=row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
+            category=row["category"],
+            content=row["content"],
+            source_session=row.get("source_session") or "",
+            confidence=float(row.get("confidence", 1.0)),
+            superseded_by=row.get("superseded_by") or "",
+            ttl_days=int(row.get("ttl_days", 0)),
+            importance=int(row.get("importance", 3)),
+            last_accessed=row["last_accessed"].isoformat() if row.get("last_accessed") and hasattr(row["last_accessed"], "isoformat") else (str(row["last_accessed"]) if row.get("last_accessed") else ""),
+            tags=list(row.get("tags") or []),
+            shared=bool(row.get("shared", False)),
+            visibility=row.get("visibility") or "open",
+            trigger_condition=row.get("trigger_condition") or "",
+            applicability=list(row.get("applicability") or []),
+            origin_employee=row.get("origin_employee") or "",
+            classification=row.get("classification") or "internal",
+            domain=list(row.get("domain") or []),
+        )
+
     def add(
         self,
         employee: str,
@@ -142,15 +169,15 @@ class MemoryStoreDB:
         origin_employee: str = "",
         classification: Literal["public", "internal", "restricted", "confidential"] = "internal",
         domain: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> MemoryEntry:
         """添加一条记忆.
 
         Returns:
-            记忆字典（包含所有字段）
+            MemoryEntry 对象
         """
         employee = self._resolve_to_character_name(employee)
 
-        # 生成 ID
+        # 12 位 hex = 48 bit 熵，碰撞概率 ~1/2.8e14，当前数据量安全
         entry_id = uuid.uuid4().hex[:12]
         created_at = datetime.now(timezone.utc)
 
@@ -206,28 +233,48 @@ class MemoryStoreDB:
                 ),
             )
 
-        return {
-            "id": entry_id,
-            "employee": employee,
-            "created_at": created_at.isoformat(),
-            "category": category,
-            "content": content,
-            "source_session": source_session,
-            "confidence": confidence,
-            "superseded_by": "",
-            "ttl_days": ttl_days,
-            "importance": 3,
-            "last_accessed": None,
-            "tags": tags_list,
-            "shared": shared,
-            "visibility": visibility,
-            "trigger_condition": trigger_condition,
-            "applicability": applicability_list,
-            "origin_employee": origin_emp,
-            "verified_count": 0,
-            "classification": classification,
-            "domain": domain_list,
-        }
+            # [W10] 容量管理：每个员工最多保留 500 条
+            MAX_ENTRIES = 500
+            cur.execute(
+                "SELECT count(*) FROM memories WHERE employee = %s AND (superseded_by = '' OR superseded_by IS NULL)",
+                (employee,),
+            )
+            count = cur.fetchone()[0]
+            if count > MAX_ENTRIES:
+                # 删除最旧的超出部分
+                cur.execute(
+                    """
+                    DELETE FROM memories WHERE id IN (
+                        SELECT id FROM memories
+                        WHERE employee = %s AND (superseded_by = '' OR superseded_by IS NULL)
+                        ORDER BY created_at ASC
+                        LIMIT %s
+                    )
+                    """,
+                    (employee, count - MAX_ENTRIES),
+                )
+
+        return MemoryEntry(
+            id=entry_id,
+            employee=employee,
+            created_at=created_at.isoformat(),
+            category=category,
+            content=content,
+            source_session=source_session,
+            confidence=confidence,
+            superseded_by="",
+            ttl_days=ttl_days,
+            importance=3,
+            last_accessed="",
+            tags=tags_list,
+            shared=shared,
+            visibility=visibility,
+            trigger_condition=trigger_condition,
+            applicability=applicability_list,
+            origin_employee=origin_emp,
+            classification=classification,
+            domain=domain_list,
+        )
 
     # 信息分级等级序（用于 classification_max 过滤）
     _CLASSIFICATION_LEVELS = {
@@ -251,7 +298,7 @@ class MemoryStoreDB:
         classification_max: str | None = None,
         allowed_domains: list[str] | None = None,
         include_confidential: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[MemoryEntry]:
         """查询员工记忆.
 
         Args:
@@ -269,12 +316,12 @@ class MemoryStoreDB:
             include_confidential: 是否包含 confidential 级别记忆（默认 False）
 
         Returns:
-            记忆列表
+            记忆列表（MemoryEntry）
         """
         employee = self._resolve_to_character_name(employee)
 
         # 构建查询
-        conditions = ["employee = %s", "superseded_by = ''"]
+        conditions = ["employee = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
         params: list[Any] = [employee]
 
         if category:
@@ -313,6 +360,14 @@ class MemoryStoreDB:
             )
             params.extend(allowed_classifications)
 
+        # [W7] restricted 域匹配移到 SQL 层
+        if allowed_domains is not None:
+            domain_placeholders = ", ".join(["%s"] * len(allowed_domains))
+            conditions.append(
+                f"(COALESCE(classification, 'internal') != 'restricted' OR domain && ARRAY[{domain_placeholders}]::text[])"
+            )
+            params.extend(allowed_domains)
+
         # 排序
         if sort_by == "importance":
             order_by = "importance DESC, created_at DESC"
@@ -323,7 +378,7 @@ class MemoryStoreDB:
 
         # 执行查询
         with get_connection() as conn:
-            cur = conn.cursor()
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
             sql = f"""
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
@@ -339,46 +394,13 @@ class MemoryStoreDB:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
 
-        # 转换为字典
-        results = []
-        entry_ids = []
+        # 转换为 MemoryEntry
+        results: list[MemoryEntry] = []
+        entry_ids: list[str] = []
         for row in rows:
-            row_classification = row[18] or "internal"
-            row_domain = row[19] or []
-
-            # restricted 级别的域匹配过滤（在 Python 层做，因为数组交集 SQL 较复杂）
-            if (
-                allowed_domains is not None
-                and row_classification == "restricted"
-                and row_domain
-                and not set(row_domain) & set(allowed_domains)
-            ):
-                continue
-
-            entry = {
-                "id": row[0],
-                "employee": row[1],
-                "created_at": row[2].isoformat() if row[2] else None,
-                "category": row[3],
-                "content": row[4],
-                "source_session": row[5],
-                "confidence": row[6],
-                "superseded_by": row[7],
-                "ttl_days": row[8],
-                "importance": row[9],
-                "last_accessed": row[10].isoformat() if row[10] else None,
-                "tags": row[11] or [],
-                "shared": row[12],
-                "visibility": row[13],
-                "trigger_condition": row[14],
-                "applicability": row[15] or [],
-                "origin_employee": row[16],
-                "verified_count": row[17],
-                "classification": row_classification,
-                "domain": row_domain,
-            }
+            entry = self._row_to_entry(row)
             results.append(entry)
-            entry_ids.append(row[0])
+            entry_ids.append(entry.id)
 
         # Phase 4：审计日志
         logger.info(
@@ -420,7 +442,7 @@ class MemoryStoreDB:
         exclude_employee: str = "",
         limit: int = 10,
         min_confidence: float = 0.3,
-    ) -> list[dict[str, Any]]:
+    ) -> list[MemoryEntry]:
         """查询跨员工的共享记忆.
 
         Args:
@@ -430,11 +452,11 @@ class MemoryStoreDB:
             min_confidence: 最低置信度
 
         Returns:
-            共享记忆列表
+            共享记忆列表（MemoryEntry）
         """
         exclude_employee = self._resolve_to_character_name(exclude_employee)
 
-        conditions = ["shared = TRUE", "superseded_by = ''"]
+        conditions = ["shared = TRUE", "(superseded_by = '' OR superseded_by IS NULL)"]
         params: list[Any] = []
 
         if exclude_employee:
@@ -454,7 +476,7 @@ class MemoryStoreDB:
             params.append(tags)
 
         with get_connection() as conn:
-            cur = conn.cursor()
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
             sql = f"""
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
@@ -470,32 +492,9 @@ class MemoryStoreDB:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
 
-        results = []
+        results: list[MemoryEntry] = []
         for row in rows:
-            results.append(
-                {
-                    "id": row[0],
-                    "employee": row[1],
-                    "created_at": row[2].isoformat() if row[2] else None,
-                    "category": row[3],
-                    "content": row[4],
-                    "source_session": row[5],
-                    "confidence": row[6],
-                    "superseded_by": row[7],
-                    "ttl_days": row[8],
-                    "importance": row[9],
-                    "last_accessed": row[10].isoformat() if row[10] else None,
-                    "tags": row[11] or [],
-                    "shared": row[12],
-                    "visibility": row[13],
-                    "trigger_condition": row[14],
-                    "applicability": row[15] or [],
-                    "origin_employee": row[16],
-                    "verified_count": row[17],
-                    "classification": row[18] or "internal",
-                    "domain": row[19] or [],
-                }
-            )
+            results.append(self._row_to_entry(row))
 
         return results
 
@@ -505,7 +504,7 @@ class MemoryStoreDB:
         applicability: list[str] | None = None,
         limit: int = 10,
         min_confidence: float = 0.3,
-    ) -> list[dict[str, Any]]:
+    ) -> list[MemoryEntry]:
         """查询可复用的工作模式（跨员工）.
 
         Args:
@@ -515,9 +514,9 @@ class MemoryStoreDB:
             min_confidence: 最低置信度
 
         Returns:
-            pattern 列表
+            pattern 列表（MemoryEntry）
         """
-        conditions = ["category = 'pattern'", "superseded_by = ''"]
+        conditions = ["category = 'pattern'", "(superseded_by = '' OR superseded_by IS NULL)"]
         params: list[Any] = []
 
         if employee:
@@ -538,7 +537,7 @@ class MemoryStoreDB:
             params.append(applicability)
 
         with get_connection() as conn:
-            cur = conn.cursor()
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
             sql = f"""
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
@@ -554,32 +553,9 @@ class MemoryStoreDB:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
 
-        results = []
+        results: list[MemoryEntry] = []
         for row in rows:
-            results.append(
-                {
-                    "id": row[0],
-                    "employee": row[1],
-                    "created_at": row[2].isoformat() if row[2] else None,
-                    "category": row[3],
-                    "content": row[4],
-                    "source_session": row[5],
-                    "confidence": row[6],
-                    "superseded_by": row[7],
-                    "ttl_days": row[8],
-                    "importance": row[9],
-                    "last_accessed": row[10].isoformat() if row[10] else None,
-                    "tags": row[11] or [],
-                    "shared": row[12],
-                    "visibility": row[13],
-                    "trigger_condition": row[14],
-                    "applicability": row[15] or [],
-                    "origin_employee": row[16],
-                    "verified_count": row[17],
-                    "classification": row[18] or "internal",
-                    "domain": row[19] or [],
-                }
-            )
+            results.append(self._row_to_entry(row))
 
         return results
 
@@ -635,7 +611,7 @@ class MemoryStoreDB:
                 SELECT COUNT(*)
                 FROM memories
                 WHERE employee = %s
-                  AND superseded_by = ''
+                  AND (superseded_by = '' OR superseded_by IS NULL)
                   AND (ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())
                 """,
                 (employee,),
@@ -650,3 +626,260 @@ class MemoryStoreDB:
             cur.execute("SELECT DISTINCT employee FROM memories ORDER BY employee")
             rows = cur.fetchall()
             return [row[0] for row in rows]
+
+    def correct(
+        self,
+        employee: str,
+        old_id: str,
+        new_content: str,
+        source_session: str = "",
+    ) -> MemoryEntry | None:
+        """纠正一条记忆：标记旧记忆为 superseded，创建新记忆.
+
+        Args:
+            employee: 员工名称
+            old_id: 要纠正的记忆 ID
+            new_content: 纠正后的内容
+            source_session: 来源 session
+
+        Returns:
+            新创建的纠正记忆，如果旧记忆不存在返回 None
+        """
+        employee = self._resolve_to_character_name(employee)
+
+        # 12 位 hex = 48 bit 熵，碰撞概率 ~1/2.8e14，当前数据量安全
+        new_id = uuid.uuid4().hex[:12]
+        now = datetime.now(timezone.utc)
+
+        with get_connection() as conn:
+            cur = conn.cursor()
+            # 标记旧记忆为 superseded
+            cur.execute(
+                """
+                UPDATE memories
+                SET superseded_by = %s, confidence = 0.0
+                WHERE id = %s AND employee = %s
+                """,
+                (new_id, old_id, employee),
+            )
+            if cur.rowcount == 0:
+                return None
+
+            # 创建纠正记忆
+            cur.execute(
+                """
+                INSERT INTO memories (
+                    id, employee, created_at, category, content,
+                    source_session, confidence, superseded_by, ttl_days,
+                    importance, last_accessed, tags, shared, visibility,
+                    trigger_condition, applicability, origin_employee, verified_count,
+                    classification, domain
+                ) VALUES (
+                    %s, %s, %s, 'correction', %s,
+                    %s, 1.0, '', 0,
+                    3, NULL, '{}', FALSE, 'open',
+                    '', '{}', %s, 0,
+                    'internal', '{}'
+                )
+                """,
+                (new_id, employee, now, new_content, source_session, employee),
+            )
+
+        return MemoryEntry(
+            id=new_id,
+            employee=employee,
+            created_at=now.isoformat(),
+            category="correction",
+            content=new_content,
+            source_session=source_session,
+            confidence=1.0,
+        )
+
+    def format_for_prompt(
+        self,
+        employee: str,
+        limit: int = 10,
+        query: str = "",
+        employee_tags: list[str] | None = None,
+        max_visibility: str = "open",
+        team_members: list[str] | None = None,
+    ) -> str:
+        """格式化记忆为可注入 prompt 的文本.
+
+        Args:
+            employee: 员工名称
+            limit: 最大条数
+            query: 查询上下文（暂不支持语义搜索，降级为普通查询）
+            employee_tags: 员工标签（用于匹配共享记忆）
+            max_visibility: 可见性上限
+            team_members: 同团队成员名列表
+
+        Returns:
+            Markdown 格式的记忆文本，无记忆时返回空字符串
+        """
+        employee = self._resolve_to_character_name(employee)
+        parts: list[str] = []
+
+        # 个人记忆
+        entries = self.query(employee, limit=limit, max_visibility=max_visibility)
+        if entries:
+            parts.append(self._format_entries(entries))
+
+        # 跨员工共享记忆
+        shared_entries = self.query_shared(
+            tags=employee_tags,
+            exclude_employee=employee,
+            limit=max(3, limit // 3),
+        )
+        if shared_entries:
+            lines = []
+            for entry in shared_entries:
+                tag_str = f" [{', '.join(entry.tags)}]" if entry.tags else ""
+                cat = self._category_label(entry.category)
+                conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
+                trigger = (
+                    f" [触发: {entry.trigger_condition}]"
+                    if entry.category == "pattern" and entry.trigger_condition
+                    else ""
+                )
+                lines.append(
+                    f"- [{cat}]{conf}{tag_str}{trigger} ({entry.employee}) {entry.content}"
+                )
+            parts.append("\n### 团队共享经验\n\n" + "\n".join(lines))
+
+        # 同团队成员的公开记忆
+        if team_members:
+            team_entries = self.query_team(
+                team_members,
+                exclude_employee=employee,
+                limit=max(3, limit // 3),
+            )
+            if team_entries:
+                lines = []
+                for entry in team_entries:
+                    cat = self._category_label(entry.category)
+                    conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
+                    lines.append(f"- [{cat}]{conf} ({entry.employee}) {entry.content}")
+                parts.append("\n### 队友近况\n\n" + "\n".join(lines))
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _category_label(category: str) -> str:
+        """将类别转为中文标签."""
+        return {
+            "decision": "决策",
+            "estimate": "估算",
+            "finding": "发现",
+            "correction": "纠正",
+            "pattern": "模式",
+        }.get(category, category)
+
+    @staticmethod
+    def _format_entries(entries: list[MemoryEntry]) -> str:
+        """格式化记忆条目列表为 Markdown."""
+        lines = []
+        for entry in entries:
+            category_label = {
+                "decision": "决策",
+                "estimate": "估算",
+                "finding": "发现",
+                "correction": "纠正",
+                "pattern": "模式",
+            }.get(entry.category, entry.category)
+            conf = f" (置信度: {entry.confidence:.0%})" if entry.confidence < 1.0 else ""
+            proxied = " ⚠️模拟讨论记录，非实际工作" if "proxied" in entry.tags else ""
+            trigger = (
+                f" [触发: {entry.trigger_condition}]"
+                if entry.category == "pattern" and entry.trigger_condition
+                else ""
+            )
+            lines.append(f"- [{category_label}]{conf}{proxied}{trigger} {entry.content}")
+        return "\n".join(lines)
+
+    def query_team(
+        self,
+        members: list[str],
+        exclude_employee: str = "",
+        limit: int = 5,
+        min_confidence: float = 0.3,
+    ) -> list[MemoryEntry]:
+        """查询指定团队成员的公开记忆（不要求 shared=True）.
+
+        Args:
+            members: 团队成员名列表
+            exclude_employee: 排除指定员工（通常是当前员工自身）
+            limit: 最大返回条数
+            min_confidence: 最低有效置信度
+        """
+        members = [self._resolve_to_character_name(m) for m in members]
+        exclude_employee = self._resolve_to_character_name(exclude_employee)
+
+        member_set = set(members) - {exclude_employee}
+        if not member_set:
+            return []
+
+        conditions = [
+            "employee = ANY(%s)",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+            "visibility = 'open'",
+            "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())",
+        ]
+        params: list[Any] = [list(member_set)]
+
+        if min_confidence > 0:
+            conditions.append("confidence >= %s")
+            params.append(min_confidence)
+
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+            sql = f"""
+                SELECT id, employee, created_at, category, content,
+                       source_session, confidence, superseded_by, ttl_days,
+                       importance, last_accessed, tags, shared, visibility,
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain
+                FROM memories
+                WHERE {" AND ".join(conditions)}
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            params.append(limit)
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+
+        return [self._row_to_entry(row) for row in rows]
+
+    def verify_pattern(self, pattern_id: str) -> bool:
+        """验证一条 pattern（verified_count +1）.
+
+        Returns:
+            True 如果找到并更新，False 如果未找到
+        """
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE memories
+                SET verified_count = verified_count + 1
+                WHERE id = %s AND category = 'pattern'
+                """,
+                (pattern_id,),
+            )
+            return cur.rowcount > 0
+
+    def add_from_session(
+        self,
+        *,
+        employee: str,
+        session_id: str,
+        summary: str,
+        category: Literal["decision", "estimate", "finding", "correction", "pattern"] = "finding",
+    ) -> MemoryEntry:
+        """根据会话摘要写入记忆."""
+        return self.add(
+            employee=employee,
+            category=category,
+            content=summary,
+            source_session=session_id,
+        )
