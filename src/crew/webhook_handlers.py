@@ -487,7 +487,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir)
@@ -509,7 +509,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             soul = soul_path.read_text(encoding="utf-8")
 
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
     memories = store.query(
         employee.name,
         limit=limit,
@@ -946,7 +946,7 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     employee = request.query_params.get("employee", "")
     category = request.query_params.get("category") or None
@@ -958,7 +958,7 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "employee is required"}, status_code=400)
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
     entries = store.query(
         employee=employee,
         category=category,
@@ -992,7 +992,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     try:
         payload = await request.json()
@@ -1010,7 +1010,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
             {"error": "entry_id, employee, content are required"}, status_code=400
         )
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
 
     # 查找原记忆
     employee = store._resolve_to_character_name(employee)
@@ -1212,7 +1212,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     # 从路径参数获取 entry_id
     entry_id = request.path_params.get("entry_id", "")
@@ -1222,7 +1222,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     # 从查询参数获取可选的 employee
     employee = request.query_params.get("employee")
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
 
     try:
         deleted = store.delete(entry_id, employee=employee)
@@ -1328,7 +1328,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
     from crew.memory_drafts import MemoryDraftStore
 
     draft_id = request.path_params.get("draft_id", "")
@@ -1348,7 +1348,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
 
         # 写入正式记忆
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         entry = memory_store.add(
             employee=draft.employee,
             category=draft.category,
@@ -1436,7 +1436,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
 
     employee = request.query_params.get("employee", "")
@@ -1458,7 +1458,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
         end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         archive = MemoryArchive(memory_store=memory_store)
 
         entries = archive.query_archive(
@@ -1495,7 +1495,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
 
     payload = (
@@ -1512,7 +1512,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "entry_ids is required"}, status_code=400)
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         archive = MemoryArchive(memory_store=memory_store)
 
         stats = archive.restore_from_archive(employee, entry_ids)
@@ -1541,7 +1541,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
 
     employee = request.query_params.get("employee", "")
@@ -1549,7 +1549,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         archive = MemoryArchive(memory_store=memory_store)
 
         stats = archive.get_archive_stats(employee)
@@ -1574,7 +1574,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     tags_str = request.query_params.get("tags", "")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
@@ -1587,7 +1587,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         limit = 20
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         entries = memory_store.query_shared(
             tags=tags,
             exclude_employee=exclude_employee,
@@ -1733,12 +1733,12 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     employee = request.query_params.get("employee")
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
 
         if employee:
             # 单个员工的统计
@@ -1851,7 +1851,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     payload = (
         await request.json() if request.headers.get("content-type") == "application/json" else {}
@@ -1868,7 +1868,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         path = memory_store._employee_file(employee)
 
         if not path.exists():
@@ -1945,7 +1945,7 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     payload = (
         await request.json() if request.headers.get("content-type") == "application/json" else {}
@@ -1961,7 +1961,7 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = MemoryStore(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir)
         deleted_count = 0
 
         for entry_id in entry_ids:
@@ -3518,14 +3518,14 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
     # limit=0 表示不限（向后兼容：客户端可传 limit=50 恢复旧行为）
     limit = _safe_int(request.query_params.get("limit", "0"), 0)
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
     # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
     employee_names = store.list_employees()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat() if days > 0 else ""
@@ -3624,7 +3624,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     query = request.query_params.get("q", "").strip()
     if not query:
@@ -3635,7 +3635,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         limit = 10
     employee = request.query_params.get("employee", "").strip()
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
 
     try:
         idx = store._get_semantic_index()
@@ -3932,9 +3932,9 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     cost = calibrate_employee_costs(cost, aiberm_real_usd=aiberm_real, moonshot_real_usd=kimi_real)
 
     # 预加载所有员工的记忆数量
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
     memory_counts: dict[str, int] = {}
     for name in result.employees:
         memory_counts[name] = store.count(name)

@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from crew.memory import MemoryEntry, MemoryStore
+from crew.memory import MemoryEntry, get_memory_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +43,13 @@ class MemoryRecommendation(BaseModel):
 class SemanticSearchEngine:
     """语义搜索引擎."""
 
-    def __init__(self, memory_store: MemoryStore | None = None):
+    def __init__(self, memory_store=None):
         """初始化搜索引擎.
 
         Args:
             memory_store: 记忆存储，默认使用全局实例
         """
-        self.memory_store = memory_store or MemoryStore()
+        self.memory_store = memory_store or get_memory_store()
 
     def search(
         self,

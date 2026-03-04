@@ -35,11 +35,11 @@ def main():
     logger.info("开始归档过期记忆: employee=%s dry_run=%s", args.employee or "all", args.dry_run)
 
     try:
-        from crew.memory import MemoryStore
+        from crew.memory import get_memory_store
         from crew.memory_archive import MemoryArchive
 
         # 初始化
-        memory_store = MemoryStore()
+        memory_store = get_memory_store()
         archive = MemoryArchive(memory_store=memory_store)
 
         # 确定要处理的员工列表

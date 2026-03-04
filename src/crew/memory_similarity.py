@@ -223,14 +223,14 @@ async def find_similar_memories(
     Returns:
         List of (memory_dict, similarity_score) tuples，按相似度降序
     """
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
     from crew.paths import resolve_project_dir
 
     # 初始化存储
     if project_dir is None:
         project_dir = resolve_project_dir(None)
 
-    store = MemoryStore(project_dir=project_dir)
+    store = get_memory_store(project_dir=project_dir)
     memory_dir = store.memory_dir
 
     # 解析员工名

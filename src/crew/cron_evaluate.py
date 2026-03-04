@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from crew.evaluation import Decision, EvaluationEngine
-from crew.memory import MemoryStore
+from crew.memory import get_memory_store
 from crew.paths import resolve_project_dir
 from crew.task_registry import TaskRecord, TaskRegistry
 
@@ -81,7 +81,7 @@ async def scan_overdue_decisions(
                 f"（ID: {decision.id}）"
             )
             try:
-                store = MemoryStore(project_dir=project_dir)
+                store = get_memory_store(project_dir=project_dir)
                 store.add(
                     employee=decision.employee,
                     category="finding",

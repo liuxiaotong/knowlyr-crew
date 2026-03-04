@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from crew.memory import MemoryStore
+from crew.memory import get_memory_store
 from crew.paths import resolve_project_dir
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ class DiscussionIngestor:
 
     def __init__(self, project_dir: Path | None = None):
         self.project_dir = resolve_project_dir(project_dir)
-        self.store = MemoryStore(project_dir=project_dir)
+        self.store = get_memory_store(project_dir=project_dir)
         self._name_to_slug: dict[str, str] = {}
         self._slug_to_name: dict[str, str] = {}
         self._load_name_map()

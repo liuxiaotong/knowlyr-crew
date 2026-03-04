@@ -211,9 +211,9 @@ async def _execute_task(
                         _mem_store = None
 
                         if match and getattr(match, "auto_memory", False):
-                            from crew.memory import MemoryStore
+                            from crew.memory import get_memory_store
 
-                            _mem_store = MemoryStore(project_dir=ctx.project_dir)
+                            _mem_store = get_memory_store(project_dir=ctx.project_dir)
                             summary = output_text[:300].strip()
                             if len(output_text) > 300:
                                 summary += "..."
@@ -238,9 +238,9 @@ async def _execute_task(
                         )
                         if check_match:
                             if _mem_store is None:
-                                from crew.memory import MemoryStore
+                                from crew.memory import get_memory_store
 
-                                _mem_store = MemoryStore(project_dir=ctx.project_dir)
+                                _mem_store = get_memory_store(project_dir=ctx.project_dir)
                             check_lines = check_match.group(1).strip().split("\n")
                             passed = []
                             failed = []
@@ -275,9 +275,9 @@ async def _execute_task(
                         )
                         if pattern_match:
                             if _mem_store is None:
-                                from crew.memory import MemoryStore
+                                from crew.memory import get_memory_store
 
-                                _mem_store = MemoryStore(project_dir=ctx.project_dir)
+                                _mem_store = get_memory_store(project_dir=ctx.project_dir)
                             pattern_block = pattern_match.group(1).strip()
                             # 解析结构化字段
                             p_name = ""
@@ -1102,10 +1102,10 @@ async def _handle_tool_call(
                 return f"[用户拒绝] 您拒绝了执行 {tool_name} 操作"
 
     if tool_name == "add_memory":
-        from crew.memory import MemoryStore
+        from crew.memory import get_memory_store
 
         project_dir = ctx.project_dir if ctx else Path(".")
-        store = MemoryStore(project_dir=project_dir)
+        store = get_memory_store(project_dir=project_dir)
         # 私聊时默认 private，LLM 也可显式指定
         default_vis = "private" if max_visibility == "private" else "open"
         entry = store.add(

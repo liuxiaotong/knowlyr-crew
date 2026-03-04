@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from crew.memory import MemoryEntry, MemoryStore
+from crew.memory import MemoryEntry, get_memory_store
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ class OptimizedMemoryStore:
 
     def __init__(
         self,
-        memory_store: MemoryStore | None = None,
+        memory_store=None,
         index_dir: Path | None = None,
         enable_cache: bool = True,
         cache_size: int = 1000,
@@ -134,7 +134,7 @@ class OptimizedMemoryStore:
             cache_size: 缓存大小
             cache_ttl: 缓存过期时间（秒）
         """
-        self.memory_store = memory_store or MemoryStore()
+        self.memory_store = memory_store or get_memory_store()
         self.index_dir = index_dir or Path("/data/memory_indexes")
         self.index_dir.mkdir(parents=True, exist_ok=True)
 

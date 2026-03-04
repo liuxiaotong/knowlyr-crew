@@ -166,9 +166,9 @@ class EvaluationEngine:
 
         # 将评估结论写入员工记忆（锁外执行，避免死锁）
         try:
-            from crew.memory import MemoryStore
+            from crew.memory import get_memory_store
 
-            store = MemoryStore(project_dir=self._project_dir)
+            store = get_memory_store(project_dir=self._project_dir)
             store.add(
                 employee=found_decision.employee,
                 category="correction",

@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from crew.memory import MemoryStore
+from crew.memory import get_memory_store
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,10 @@ class MemorySnapshot:
 _CACHE: dict[str, MemorySnapshot] = {}
 
 
-def _count_lines(store: MemoryStore, employee: str) -> int:
+def _count_lines(store, employee: str) -> int:
     """快速统计 JSONL 文件行数（不解析 JSON）."""
+    if not hasattr(store, '_employee_file'):
+        return -1  # DB-backed store: 无文件，依靠 TTL 失效
     path = store._employee_file(employee)
     if not path.exists():
         return 0
@@ -67,7 +69,7 @@ def get_prompt_cached(
     employee: str,
     query: str = "",
     *,
-    store: MemoryStore | None = None,
+    store=None,
     max_visibility: str = "open",
     team_members: list[str] | None = None,
     employee_tags: list[str] | None = None,
@@ -81,7 +83,7 @@ def get_prompt_cached(
     Args:
         employee: 员工名称
         query: 查询上下文（语义搜索用）
-        store: MemoryStore 实例（不传则新建）
+        store: MemoryStore / MemoryStoreDB 实例（不传则新建）
         max_visibility: 可见性上限
         team_members: 同团队成员
         employee_tags: 员工标签
@@ -90,7 +92,7 @@ def get_prompt_cached(
         截断到 800 token 的 prompt 文本
     """
     if store is None:
-        store = MemoryStore()
+        store = get_memory_store()
 
     # 统一用花名作为缓存 key（slug 自动转换）
     employee = store._resolve_to_character_name(employee)
@@ -103,7 +105,8 @@ def get_prompt_cached(
         if age < _TTL_SECONDS:
             # TTL 内，再检查行数是否变化
             current_seq = _count_lines(store, employee)
-            if current_seq == cached.last_seq:
+            if current_seq < 0 or current_seq == cached.last_seq:
+                # DB-backed (seq<0): 纯靠 TTL; file-backed: TTL + 行数双校验
                 logger.debug("记忆缓存命中: %s (age=%.1fs)", employee, age)
                 return cached.prompt_text
 
@@ -138,7 +141,7 @@ def invalidate(employee: str) -> None:
     _CACHE.pop(employee, None)
     # 也尝试解析后的花名（以防传入的是 slug）
     try:
-        resolved = MemoryStore()._resolve_to_character_name(employee)
+        resolved = get_memory_store()._resolve_to_character_name(employee)
         if resolved != employee:
             _CACHE.pop(resolved, None)
     except Exception:

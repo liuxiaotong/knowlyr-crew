@@ -15,9 +15,9 @@ def memory():
 @memory.command("list")
 def memory_list():
     """列出有记忆的员工."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
-    store = MemoryStore()
+    store = get_memory_store()
     employees = store.list_employees()
     if not employees:
         click.echo("暂无记忆数据。")
@@ -39,9 +39,9 @@ def memory_list():
 @click.option("--include-expired", is_flag=True, help="包含已过期记忆")
 def memory_show(employee: str, category: str | None, limit: int, include_expired: bool):
     """查看员工记忆."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
-    store = MemoryStore()
+    store = get_memory_store()
     entries = store.query(employee, category=category, limit=limit, include_expired=include_expired)
     if not entries:
         click.echo(f"员工 '{employee}' 暂无记忆。")
@@ -81,11 +81,11 @@ def memory_add(
     applicability: str,
 ):
     """手动添加员工记忆."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     app_list = [a.strip() for a in applicability.split(",") if a.strip()] if applicability else []
-    store = MemoryStore()
+    store = get_memory_store()
     entry = store.add(
         employee=employee,
         category=category,
@@ -105,9 +105,9 @@ def memory_add(
 @click.option("--content", "-m", required=True, help="纠正后的内容")
 def memory_correct(employee: str, old_id: str, content: str):
     """纠正一条记忆."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
-    store = MemoryStore()
+    store = get_memory_store()
     new_entry = store.correct(employee=employee, old_id=old_id, new_content=content)
     if new_entry is None:
         click.echo(f"未找到记忆: {old_id}", err=True)
@@ -120,10 +120,10 @@ def memory_correct(employee: str, old_id: str, content: str):
 def memory_index_cmd(repair: bool):
     """重建混合搜索索引."""
     if repair:
-        from crew.memory import MemoryStore
+        from crew.memory import get_memory_store
         from crew.memory_search import SemanticMemoryIndex
 
-        store = MemoryStore()
+        store = get_memory_store()
         memory_dir = store.memory_dir
         db_path = memory_dir / "embeddings.db"
         if db_path.exists():
@@ -205,10 +205,10 @@ def memory_search(
 @click.option("-n", "--limit", type=int, default=10, help="返回条数")
 def memory_shared(tags: str | None, limit: int):
     """查看共享记忆池."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-    store = MemoryStore()
+    store = get_memory_store()
     entries = store.query_shared(tags=tag_list, limit=limit)
     if not entries:
         click.echo("共享记忆池为空。")
@@ -229,9 +229,9 @@ def memory_shared(tags: str | None, limit: int):
 @click.option("--show", is_flag=True, help="显示当前配置")
 def memory_config(ttl: int | None, max_entries: int | None, half_life: float | None, show: bool):
     """查看或设置记忆系统配置."""
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
-    store = MemoryStore()
+    store = get_memory_store()
     config_path = store.memory_dir / "config.json"
 
     if show or (ttl is None and max_entries is None and half_life is None):

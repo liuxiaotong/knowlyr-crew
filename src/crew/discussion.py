@@ -747,10 +747,10 @@ def _render_participant_prompt(
 
     # 历史经验（从持久化记忆注入，走缓存 + 语义匹配）
     try:
-        from crew.memory import MemoryStore
+        from crew.memory import get_memory_store
         from crew.memory_cache import get_prompt_cached
 
-        memory_store = MemoryStore(project_dir=project_dir)
+        memory_store = get_memory_store(project_dir=project_dir)
         # 获取同团队成员（用于注入队友记忆）
         _team_members: list[str] | None = None
         try:

@@ -303,9 +303,9 @@ async def _feishu_fast_reply(
     # 私聊时注入私密记忆（快速路径也能看到 Kai 的秘密）
     if max_visibility == "private":
         try:
-            from crew.memory import MemoryStore
+            from crew.memory import get_memory_store
 
-            store = MemoryStore(project_dir=ctx.project_dir)
+            store = get_memory_store(project_dir=ctx.project_dir)
             memory_text = store.format_for_prompt(
                 emp.name,
                 limit=5,

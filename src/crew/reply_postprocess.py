@@ -6,7 +6,7 @@
 import logging
 import re
 
-from crew.memory import MemoryStore
+from crew.memory import get_memory_store
 from crew.memory_cache import invalidate
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def push_if_needed(
     reply: str,
     turn_count: int = 1,
     session_id: str = "",
-    store: MemoryStore | None = None,
+    store=None,
     max_retries: int = 2,
     timeout: float = 10.0,
 ) -> bool:
@@ -84,7 +84,7 @@ def push_if_needed(
         return False
 
     if store is None:
-        store = MemoryStore()
+        store = get_memory_store()
 
     # 幂等校验：用 session_id 去重
     if session_id:
