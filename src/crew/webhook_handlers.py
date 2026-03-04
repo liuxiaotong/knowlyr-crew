@@ -1012,7 +1012,52 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     store = get_memory_store(project_dir=ctx.project_dir)
 
-    # 查找原记忆
+    # DB 版：直接用 store.update()
+    if hasattr(store, "update") and callable(getattr(store, "update", None)):
+        employee = store._resolve_to_character_name(employee)
+
+        # 构建更新标签
+        update_tag = f"updated-by:{updated_by or 'unknown'}"
+        update_time_tag = f"updated-at:{datetime.now().strftime('%Y-%m-%d')}"
+        add_tags = [update_tag, update_time_tag]
+
+        # 如果提供了 tags，先 normalize 再完全替换
+        final_tags = None
+        if tags is not None and isinstance(tags, list):
+            try:
+                from crew.memory_tags import normalize_tags
+
+                final_tags = normalize_tags(tags)
+            except ImportError:
+                final_tags = tags
+
+        updated = store.update(
+            entry_id=entry_id,
+            employee=employee,
+            content=content,
+            tags=final_tags,
+            add_tags=add_tags,
+        )
+        if not updated:
+            return JSONResponse({"error": "Memory entry not found"}, status_code=404)
+
+        # 失效缓存
+        try:
+            from crew.memory_cache import invalidate
+
+            invalidate(employee)
+        except Exception:
+            pass
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "entry_id": entry_id,
+                "updated": True,
+            }
+        )
+
+    # 文件版：保留原有的 JSONL 操作逻辑
     employee = store._resolve_to_character_name(employee)
     path = store._employee_file(employee)
 
@@ -1869,6 +1914,41 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
 
     try:
         memory_store = get_memory_store(project_dir=ctx.project_dir)
+
+        # DB 版：直接用 store.update()
+        if hasattr(memory_store, "update") and callable(
+            getattr(memory_store, "update", None)
+        ):
+            updated_count = 0
+            failed_count = 0
+            for eid in entry_ids:
+                try:
+                    ok = memory_store.update(
+                        entry_id=eid,
+                        employee=employee,
+                        add_tags=updates.get("tags"),
+                        remove_tags=updates.get("remove_tags"),
+                        confidence=updates.get("confidence"),
+                    )
+                    if ok:
+                        updated_count += 1
+                    else:
+                        failed_count += 1
+                except Exception:
+                    failed_count += 1
+
+            logger.info(
+                "批量更新记忆(DB): employee=%s updated=%d failed=%d",
+                employee,
+                updated_count,
+                failed_count,
+            )
+
+            return JSONResponse(
+                {"ok": True, "updated": updated_count, "failed": failed_count}
+            )
+
+        # 文件版：保留原有的 JSONL 操作逻辑
         path = memory_store._employee_file(employee)
 
         if not path.exists():

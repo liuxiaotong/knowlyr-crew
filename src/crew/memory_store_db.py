@@ -868,6 +868,83 @@ class MemoryStoreDB:
             )
             return cur.rowcount > 0
 
+    def update(
+        self,
+        entry_id: str,
+        employee: str,
+        *,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        confidence: float | None = None,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+    ) -> bool:
+        """更新一条记忆.
+
+        Args:
+            entry_id: 记忆 ID
+            employee: 员工名称
+            content: 新内容（None 不更新）
+            tags: 完全替换标签列表（None 不更新）
+            confidence: 新置信度（None 不更新）
+            add_tags: 追加标签
+            remove_tags: 移除标签
+
+        Returns:
+            True 更新成功，False 未找到
+        """
+        employee = self._resolve_to_character_name(employee)
+
+        # 先查出当前状态
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+            cur.execute(
+                "SELECT id, tags FROM memories WHERE id = %s AND employee = %s",
+                (entry_id, employee),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+
+            # 构建 SET 子句
+            sets: list[str] = []
+            params: list[Any] = []
+
+            if content is not None:
+                sets.append("content = %s")
+                params.append(content)
+
+            if confidence is not None:
+                sets.append("confidence = %s")
+                params.append(confidence)
+
+            # 标签处理
+            current_tags = list(row.get("tags") or [])
+
+            if tags is not None:
+                # 完全替换
+                current_tags = tags
+
+            if add_tags:
+                current_tags = list(set(current_tags + add_tags))
+
+            if remove_tags:
+                current_tags = [t for t in current_tags if t not in remove_tags]
+
+            if tags is not None or add_tags or remove_tags:
+                sets.append("tags = %s")
+                params.append(current_tags)
+
+            if not sets:
+                return True  # 没有需要更新的字段
+
+            params.extend([entry_id, employee])
+            cur.execute(
+                f"UPDATE memories SET {', '.join(sets)} WHERE id = %s AND employee = %s",
+                tuple(params),
+            )
+            return cur.rowcount > 0
+
     def add_from_session(
         self,
         *,
