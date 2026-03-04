@@ -6,7 +6,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from crew.memory import MemoryStore
+from crew.memory import get_memory_store
 from crew.skills import Skill, SkillAction, SkillMetadata, SkillStore, SkillTrigger
 from crew.skills_engine import SkillsEngine
 from crew.webhook_context import _AppContext
@@ -18,7 +18,7 @@ def _get_skills_engine(ctx: _AppContext) -> SkillsEngine:
     """获取 SkillsEngine 实例."""
     # 每次都创建新实例，使用 ctx.project_dir
     skill_store = SkillStore(project_dir=ctx.project_dir)
-    memory_store = MemoryStore(project_dir=ctx.project_dir)
+    memory_store = get_memory_store(project_dir=ctx.project_dir)
     return SkillsEngine(skill_store, memory_store)
 
 

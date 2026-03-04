@@ -996,3 +996,15 @@ class MemoryStore:
                     return True
 
         return False
+
+
+def get_memory_store(project_dir=None):
+    """工厂函数：PG 可用时返回 MemoryStoreDB，否则降级到文件版 MemoryStore。"""
+    try:
+        from crew.database import is_pg
+        if is_pg():
+            from crew.memory_store_db import MemoryStoreDB
+            return MemoryStoreDB(project_dir=project_dir)
+    except Exception:
+        pass
+    return MemoryStore(project_dir=project_dir)

@@ -745,7 +745,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    from crew.memory import MemoryStore
+    from crew.memory import get_memory_store
 
     try:
         payload = await request.json()
@@ -851,23 +851,27 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
                 }
             )
 
-    store = MemoryStore(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir)
 
     # 幂等检查：同 employee + source_session + category 不重复写入
     if source_session:
         existing = store.query(employee, limit=50)
         for entry in existing:
-            if entry.source_session == source_session and entry.category == category:
+            # 兼容 MemoryEntry（属性访问）和 dict（键访问）
+            _src = entry.source_session if hasattr(entry, "source_session") else entry.get("source_session", "")
+            _cat = entry.category if hasattr(entry, "category") else entry.get("category", "")
+            _eid = entry.id if hasattr(entry, "id") else entry.get("id", "")
+            if _src == source_session and _cat == category:
                 return JSONResponse(
                     {
                         "ok": True,
                         "skipped": True,
                         "reason": "duplicate source_session + category",
-                        "existing_id": entry.id,
+                        "existing_id": _eid,
                     }
                 )
 
-    entry = store.add(
+    result = store.add(
         employee=employee,
         category=category,
         content=content,
@@ -882,11 +886,15 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         domain=domain if isinstance(domain, list) else [],
     )
 
-    # 写入后失效缓存（用 entry.employee 即解析后的花名作为 cache key）
+    # 兼容 MemoryEntry（属性访问）和 dict（键访问）
+    result_employee = result.employee if hasattr(result, "employee") else result.get("employee", employee)
+    result_id = result.id if hasattr(result, "id") else result.get("id", "")
+
+    # 写入后失效缓存（用解析后的花名作为 cache key）
     try:
         from crew.memory_cache import invalidate
 
-        invalidate(entry.employee)
+        invalidate(result_employee)
     except Exception:
         pass
 
@@ -894,8 +902,8 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         {
             "ok": True,
             "skipped": False,
-            "entry_id": entry.id,
-            "employee": entry.employee,
+            "entry_id": result_id,
+            "employee": result_employee,
             "category": category,
             "suggested_tags": suggested_tags,  # 2026-03-02 标签建议
         }
@@ -2901,12 +2909,12 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         employee_name = None
         if emp is not None and isinstance(user_message, str):
             try:
-                from crew.memory import MemoryStore
+                from crew.memory import get_memory_store
                 from crew.skills import SkillStore
                 from crew.skills_engine import SkillsEngine
 
                 skill_store = SkillStore(project_dir=ctx.project_dir)
-                memory_store = MemoryStore(project_dir=ctx.project_dir)
+                memory_store = get_memory_store(project_dir=ctx.project_dir)
                 engine = SkillsEngine(skill_store, memory_store)
 
                 employee_name = emp.character_name or name
