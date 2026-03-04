@@ -774,6 +774,32 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
             {"error": f"category must be one of {valid_categories}"}, status_code=400
         )
 
+    # 信息分级校验（写端）
+    valid_classifications = {"public", "internal", "restricted", "confidential"}
+    if classification not in valid_classifications:
+        classification = "internal"  # 无效值降级为 internal
+
+    # public 写入审计（外部用户可见，需记录）
+    if classification == "public":
+        logger.info(
+            "public_memory_write: employee=%s category=%s content_preview=%s tags=%s",
+            employee,
+            category,
+            content[:80],
+            tags,
+        )
+
+    # restricted/confidential 写入限制
+    if classification in ("restricted", "confidential"):
+        from crew.classification import EMPLOYEE_CLEARANCE, CLASSIFICATION_LEVELS
+        emp_clearance = EMPLOYEE_CLEARANCE.get(employee, {})
+        emp_level = emp_clearance.get("clearance", "internal")
+        if CLASSIFICATION_LEVELS.get(emp_level, 1) < CLASSIFICATION_LEVELS.get(classification, 2):
+            return JSONResponse(
+                {"error": f"员工 {employee} 的许可等级 ({emp_level}) 不足以写入 {classification} 级别记忆"},
+                status_code=403,
+            )
+
     # 质量检查（2026-03-02 记忆质量控制）
     from crew.memory_quality import check_memory_quality
 
