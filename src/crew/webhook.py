@@ -54,16 +54,22 @@ from crew.webhook_executor import (  # noqa: F401
 )
 
 # ── re-export: 飞书处理 ──
-from crew.webhook_feishu import (  # noqa: F401
-    _feishu_dispatch,
-    _find_recent_image_in_chat,
-    _handle_feishu_event,
-)
+try:
+    from crew.webhook_feishu import (  # noqa: F401
+        _feishu_dispatch,
+        _find_recent_image_in_chat,
+        _handle_feishu_event,
+    )
+except ImportError:
+    pass
 
 # ── re-export: 企微处理 ──
-from crew.webhook_wecom import (  # noqa: F401
-    handle_wecom_event,
-)
+try:
+    from crew.webhook_wecom import (  # noqa: F401
+        handle_wecom_event,
+    )
+except ImportError:
+    pass
 
 # ── re-export: HTTP handler ──
 from crew.webhook_handlers import (  # noqa: F401
@@ -160,14 +166,14 @@ from crew.webhook_handlers import (  # noqa: F401
     _health,
     _metrics,
 )
-from crew.webhook_tools.data_query import (  # noqa: F401
+from crew.webhook_tools.core import (  # noqa: F401
     _tool_create_note,
     _tool_list_agents,
     _tool_lookup_user,
     _tool_read_notes,
     _tool_send_message,
 )
-from crew.webhook_tools.data_query import (  # noqa: F401
+from crew.webhook_tools.core import (  # noqa: F401
     _tool_web_search,
 )
 try:
