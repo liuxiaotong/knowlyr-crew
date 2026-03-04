@@ -15,54 +15,6 @@ if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
 
 
-async def _tool_web_search(
-    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
-) -> str:
-    """搜索互联网（Bing cn）."""
-    import re
-
-    import httpx
-
-    query = args.get("query", "")
-    max_results = min(args.get("max_results", 5), 10)
-    if not query:
-        return "错误：query 不能为空"
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            resp = await client.get(
-                "https://cn.bing.com/search",
-                params={"q": query, "count": max_results},
-                headers={
-                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-                    "Accept-Language": "zh-CN,zh;q=0.9",
-                },
-            )
-
-        results: list[str] = []
-        for block in re.finditer(r'<li class="b_algo".*?</li>', resp.text, re.DOTALL):
-            if len(results) >= max_results:
-                break
-            title_m = re.search(
-                r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
-                block.group(),
-                re.DOTALL,
-            )
-            snippet_m = re.search(r"<p[^>]*>(.*?)</p>", block.group(), re.DOTALL)
-            if title_m:
-                href = title_m.group(1)
-                title = re.sub(r"<[^>]+>", "", title_m.group(2)).strip()
-                snippet = re.sub(r"<[^>]+>", "", snippet_m.group(1)).strip() if snippet_m else ""
-                if title or snippet:
-                    results.append(f"{title}\n{snippet}\n{href}")
-
-        if not results:
-            return f"未找到关于「{query}」的搜索结果"
-        return "\n\n---\n\n".join(results)
-    except Exception as e:
-        return f"搜索失败: {e}"
-
-
 async def _tool_weather(
     args: dict,
     *,
@@ -385,81 +337,6 @@ async def _tool_notion_create(
 
 
 # ── 信息采集工具 ──
-
-
-async def _tool_read_url(
-    args: dict,
-    *,
-    agent_id: str | None = None,
-    ctx: _AppContext | None = None,
-) -> str:
-    """读取网页正文."""
-    import ipaddress
-    import re
-    from urllib.parse import urlparse
-
-    import httpx
-
-    url = (args.get("url") or "").strip()
-    if not url:
-        return "缺少 URL。"
-
-    # SSRF 防护：仅允许 http/https，阻止私有/保留 IP
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return "仅支持 http/https 协议。"
-    hostname = parsed.hostname or ""
-    if not hostname:
-        return "无效 URL。"
-
-    import socket
-
-    # 先解析 DNS，再校验 IP，防止 DNS rebinding 绕过
-    try:
-        addr_infos = socket.getaddrinfo(
-            hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
-        )
-    except socket.gaierror:
-        return f"DNS 解析失败: {hostname}"
-    for family, _type, _proto, _canonname, sockaddr in addr_infos:
-        try:
-            addr = ipaddress.ip_address(sockaddr[0])
-            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-                return "不允许访问内网地址。"
-        except ValueError:
-            pass
-    if hostname in ("localhost", "metadata.google.internal"):
-        return "不允许访问内网地址。"
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        html = resp.text
-    except Exception as e:
-        return f"请求失败: {e}"
-
-    # 简单的 HTML → 纯文本提取
-    html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"<footer[^>]*>.*?</footer>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"<header[^>]*>.*?</header>", "", html, flags=re.DOTALL | re.IGNORECASE)
-
-    # 提取 <article> 或 <main>，否则取 <body>
-    for tag in ("article", "main"):
-        m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", html, re.DOTALL | re.IGNORECASE)
-        if m:
-            html = m.group(1)
-            break
-
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    if not text:
-        return "无法提取页面内容。"
-    if len(text) > 9500:
-        return text[:9500] + f"\n\n[内容已截断，共 {len(text)} 字符]"
-    return text
 
 
 async def _tool_rss_read(
@@ -916,14 +793,12 @@ async def _tool_aqi(
 
 
 HANDLERS: dict[str, object] = {
-    "web_search": _tool_web_search,
     "weather": _tool_weather,
     "exchange_rate": _tool_exchange_rate,
     "stock_price": _tool_stock_price,
     "notion_search": _tool_notion_search,
     "notion_read": _tool_notion_read,
     "notion_create": _tool_notion_create,
-    "read_url": _tool_read_url,
     "rss_read": _tool_rss_read,
     "translate": _tool_translate,
     "countdown": _tool_countdown,

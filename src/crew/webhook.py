@@ -167,7 +167,7 @@ from crew.webhook_tools.data_query import (  # noqa: F401
     _tool_read_notes,
     _tool_send_message,
 )
-from crew.webhook_tools.external import (  # noqa: F401
+from crew.webhook_tools.data_query import (  # noqa: F401
     _tool_web_search,
 )
 try:

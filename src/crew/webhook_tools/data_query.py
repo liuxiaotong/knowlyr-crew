@@ -1,4 +1,4 @@
-"""数据查询工具函数 — 消息、笔记、用户、项目状态等."""
+"""核心工具 — 员工管理、记忆、基础执行能力."""
 
 from __future__ import annotations
 
@@ -249,6 +249,244 @@ async def _tool_project_status(
         return f"读取报告失败: {e}"
 
 
+# ── 基础执行能力工具 ──
+
+
+async def _tool_get_datetime(
+    args: dict,
+    *,
+    agent_id: str | None = None,
+    ctx: _AppContext | None = None,
+) -> str:
+    """获取当前准确日期时间."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as _tz
+
+    tz_cn = _tz(timedelta(hours=8))
+    now = datetime.now(tz_cn)
+    weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
+    return f"{now.strftime('%Y-%m-%d %H:%M')} {weekday}"
+
+
+async def _tool_calculate(
+    args: dict,
+    *,
+    agent_id: str | None = None,
+    ctx: _AppContext | None = None,
+) -> str:
+    """安全计算数学表达式."""
+    import ast
+    import math
+    import operator
+
+    expr = (args.get("expression") or "").strip()
+    if not expr:
+        return "需要一个数学表达式，如 1+2*3 或 (100*1.15**12)。"
+
+    # 安全求值：只允许数学运算
+    _OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+    _FUNCS = {
+        "abs": abs,
+        "round": round,
+        "int": int,
+        "float": float,
+        "sqrt": math.sqrt,
+        "log": math.log,
+        "log10": math.log10,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "pi": math.pi,
+        "e": math.e,
+        "max": max,
+        "min": min,
+        "sum": sum,
+        "pow": pow,
+    }
+
+    def _eval(node: ast.AST) -> Any:  # noqa: F821
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError(f"不允许的常量: {node.value}")
+        if isinstance(node, ast.BinOp):
+            op = _OPS.get(type(node.op))
+            if op is None:
+                raise ValueError(f"不支持的运算: {type(node.op).__name__}")
+            left, right = _eval(node.left), _eval(node.right)
+            # 防止巨指数 DoS（如 2**999999999）
+            if isinstance(node.op, ast.Pow):
+                if isinstance(right, (int, float)) and abs(right) > 10000:
+                    raise ValueError(f"指数过大: {right}（上限 10000）")
+            return op(left, right)
+        if isinstance(node, ast.UnaryOp):
+            op = _OPS.get(type(node.op))
+            if op is None:
+                raise ValueError(f"不支持的运算: {type(node.op).__name__}")
+            return op(_eval(node.operand))
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _FUNCS:
+                fn = _FUNCS[node.func.id]
+                args_vals = [_eval(a) for a in node.args]
+                return fn(*args_vals)
+            raise ValueError(f"不允许的函数: {ast.dump(node.func)}")
+        if isinstance(node, ast.Name):
+            if node.id in _FUNCS:
+                return _FUNCS[node.id]
+            raise ValueError(f"未知变量: {node.id}")
+        if isinstance(node, ast.Tuple):
+            return tuple(_eval(e) for e in node.elts)
+        if isinstance(node, ast.List):
+            return [_eval(e) for e in node.elts]
+        raise ValueError(f"不支持的语法: {type(node).__name__}")
+
+    try:
+        tree = ast.parse(expr, mode="eval")
+        result = _eval(tree)
+        # 格式化结果
+        if isinstance(result, float):
+            if result == int(result) and abs(result) < 1e15:
+                return str(int(result))
+            return f"{result:,.6g}"
+        return str(result)
+    except (ValueError, TypeError, SyntaxError, ZeroDivisionError) as e:
+        return f"计算错误: {e}"
+
+
+async def _tool_web_search(
+    args: dict, *, agent_id: str | None = None, ctx: _AppContext | None = None
+) -> str:
+    """搜索互联网（Bing cn）."""
+    import re
+
+    import httpx
+
+    query = args.get("query", "")
+    max_results = min(args.get("max_results", 5), 10)
+    if not query:
+        return "错误：query 不能为空"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://cn.bing.com/search",
+                params={"q": query, "count": max_results},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+                    "Accept-Language": "zh-CN,zh;q=0.9",
+                },
+            )
+
+        results: list[str] = []
+        for block in re.finditer(r'<li class="b_algo".*?</li>', resp.text, re.DOTALL):
+            if len(results) >= max_results:
+                break
+            title_m = re.search(
+                r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+                block.group(),
+                re.DOTALL,
+            )
+            snippet_m = re.search(r"<p[^>]*>(.*?)</p>", block.group(), re.DOTALL)
+            if title_m:
+                href = title_m.group(1)
+                title = re.sub(r"<[^>]+>", "", title_m.group(2)).strip()
+                snippet = re.sub(r"<[^>]+>", "", snippet_m.group(1)).strip() if snippet_m else ""
+                if title or snippet:
+                    results.append(f"{title}\n{snippet}\n{href}")
+
+        if not results:
+            return f"未找到关于「{query}」的搜索结果"
+        return "\n\n---\n\n".join(results)
+    except Exception as e:
+        return f"搜索失败: {e}"
+
+
+async def _tool_read_url(
+    args: dict,
+    *,
+    agent_id: str | None = None,
+    ctx: _AppContext | None = None,
+) -> str:
+    """读取网页正文."""
+    import ipaddress
+    import re
+    import socket
+    from urllib.parse import urlparse
+
+    import httpx
+
+    url = (args.get("url") or "").strip()
+    if not url:
+        return "缺少 URL。"
+
+    # SSRF 防护：仅允许 http/https，阻止私有/保留 IP
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "仅支持 http/https 协议。"
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "无效 URL。"
+
+    # 先解析 DNS，再校验 IP，防止 DNS rebinding 绕过
+    try:
+        addr_infos = socket.getaddrinfo(
+            hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+        )
+    except socket.gaierror:
+        return f"DNS 解析失败: {hostname}"
+    for family, _type, _proto, _canonname, sockaddr in addr_infos:
+        try:
+            addr = ipaddress.ip_address(sockaddr[0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return "不允许访问内网地址。"
+        except ValueError:
+            pass
+    if hostname in ("localhost", "metadata.google.internal"):
+        return "不允许访问内网地址。"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = resp.text
+    except Exception as e:
+        return f"请求失败: {e}"
+
+    # 简单的 HTML → 纯文本提取
+    html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<footer[^>]*>.*?</footer>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<header[^>]*>.*?</header>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+    # 提取 <article> 或 <main>，否则取 <body>
+    for tag in ("article", "main"):
+        m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", html, re.DOTALL | re.IGNORECASE)
+        if m:
+            html = m.group(1)
+            break
+
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if not text:
+        return "无法提取页面内容。"
+    if len(text) > 9500:
+        return text[:9500] + f"\n\n[内容已截断，共 {len(text)} 字符]"
+    return text
+
+
 HANDLERS: dict[str, object] = {
     "send_message": _tool_send_message,
     "list_agents": _tool_list_agents,
@@ -256,4 +494,8 @@ HANDLERS: dict[str, object] = {
     "lookup_user": _tool_lookup_user,
     "read_notes": _tool_read_notes,
     "project_status": _tool_project_status,
+    "get_datetime": _tool_get_datetime,
+    "calculate": _tool_calculate,
+    "web_search": _tool_web_search,
+    "read_url": _tool_read_url,
 }
