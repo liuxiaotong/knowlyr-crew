@@ -1073,7 +1073,7 @@ async def _stream_employee_with_tools(
     sender_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
 ) -> Any:
-    """流式版 agent loop — 中间轮非流式处理工具，最后一轮流式输出.
+    """流式版 agent loop — 每一轮都用原生流式 API，逐 token 输出.
 
     Yields: {"delta": str, "done": False} 和最终 {"done": True, ...}
     """
@@ -1081,12 +1081,9 @@ async def _stream_employee_with_tools(
 
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
-    from crew.executor import (
-        StreamWithToolsResult,
-        aexecute_with_tools,
-        astream_final_response,
-    )
-    from crew.providers import Provider, detect_provider
+    from crew.executor import aexecute_with_tools
+    from crew.models import ToolCall
+    from crew.providers import Provider, detect_provider, resolve_api_key
     from crew.tool_schema import (
         AGENT_TOOLS,
         employee_tools_to_schemas,
@@ -1193,15 +1190,246 @@ async def _stream_employee_with_tools(
 
     total_input = 0
     total_output = 0
-    rounds = 0
     effective_agent_id = agent_id or getattr(match, "agent_id", None)
 
     import crew.webhook as _wh
 
     _max_rounds = getattr(_wh, "_MAX_TOOL_ROUNDS", _MAX_TOOL_ROUNDS)
 
-    for rounds in range(_max_rounds):  # noqa: B007
-        # 先用非流式执行一轮，看是否有 tool_calls
+    # ── 非 Anthropic provider: 降级到非流式 agent loop ──
+    if not is_anthropic:
+        async for chunk in _stream_employee_with_tools_fallback(
+            ctx=ctx,
+            name=name,
+            prompt=prompt,
+            messages=messages,
+            tool_schemas=tool_schemas,
+            deferred_names=deferred_names,
+            loaded_deferred=loaded_deferred,
+            match=match,
+            use_model=use_model,
+            effective_agent_id=effective_agent_id,
+            guard=guard,
+            max_visibility=max_visibility,
+            max_rounds=_max_rounds,
+        ):
+            yield chunk
+        return
+
+    # ── Anthropic 原生流式 agent loop ──
+    from crew.executor import _get_anthropic
+
+    anthropic = _get_anthropic()
+    if anthropic is None:
+        raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
+
+    resolved_key = resolve_api_key(provider, match.api_key or None)
+    client = anthropic.AsyncAnthropic(api_key=resolved_key)
+
+    for round_idx in range(_max_rounds):  # noqa: B007
+        # ── 每一轮都用流式 API ──
+        text_parts: list[str] = []
+        tool_calls_collected: list[dict[str, Any]] = []  # {id, name, input_json_parts}
+        current_tool_idx = -1
+        stop_reason = "end_turn"
+
+        try:
+            async with client.messages.stream(
+                model=use_model,
+                max_tokens=200000,
+                system=prompt,
+                messages=messages,
+                tools=tool_schemas,
+            ) as stream:
+                async for event in stream:
+                    if event.type == "content_block_start":
+                        if event.content_block.type == "text":
+                            pass  # 文本块开始，等 delta
+                        elif event.content_block.type == "tool_use":
+                            # 工具调用块开始 — 收集 id 和 name
+                            tool_calls_collected.append({
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                                "input_json_parts": [],
+                            })
+                            current_tool_idx = len(tool_calls_collected) - 1
+
+                    elif event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            # 文本增量 → 立即 yield 给用户
+                            text_parts.append(event.delta.text)
+                            yield {"delta": event.delta.text, "done": False}
+                        elif event.delta.type == "input_json_delta":
+                            # 工具参数增量 → 静默收集
+                            if current_tool_idx >= 0:
+                                tool_calls_collected[current_tool_idx]["input_json_parts"].append(
+                                    event.delta.partial_json
+                                )
+
+                    elif event.type == "message_delta":
+                        stop_reason = event.delta.stop_reason or "end_turn"
+
+                # 流结束，获取 final message 以拿到准确的 usage
+                final_msg = await stream.get_final_message()
+
+            total_input += final_msg.usage.input_tokens
+            total_output += final_msg.usage.output_tokens
+
+        except Exception as _stream_err:
+            logger.error("Anthropic 流式调用失败 (round %d): %s", round_idx, _stream_err)
+            # 降级：用非流式执行
+            try:
+                result = await aexecute_with_tools(
+                    system_prompt=prompt,
+                    messages=messages,
+                    tools=tool_schemas,
+                    api_key=match.api_key or None,
+                    model=use_model,
+                    max_tokens=200000,
+                    base_url=match.base_url or None,
+                    fallback_model=match.fallback_model or None,
+                    fallback_api_key=match.fallback_api_key or None,
+                    fallback_base_url=match.fallback_base_url or None,
+                )
+                total_input += result.input_tokens
+                total_output += result.output_tokens
+                if result.content:
+                    for chunk in _split_text_chunks(result.content, 20):
+                        yield {"delta": chunk, "done": False}
+                if not result.has_tool_calls:
+                    from crew.output_sanitizer import strip_internal_tags
+                    yield {
+                        "done": True,
+                        "employee_id": name,
+                        "tokens_used": total_input + total_output,
+                        "latency_ms": 0,
+                    }
+                    return
+                # 有 tool_calls — 构造数据继续后续处理
+                text_parts = [result.content] if result.content else []
+                tool_calls_collected = [
+                    {"id": tc.id, "name": tc.name, "input_json_parts": [_json.dumps(tc.arguments, ensure_ascii=False)]}
+                    for tc in result.tool_calls
+                ]
+                stop_reason = "tool_use"
+            except Exception as _fallback_err:
+                logger.error("非流式降级也失败: %s", _fallback_err)
+                yield {"delta": f"执行出错: {_fallback_err}", "done": False}
+                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+                return
+
+        # ── 这一轮结束，检查是否需要调工具 ──
+        if stop_reason != "tool_use" or not tool_calls_collected:
+            # 纯文本回复，结束
+            from crew.output_sanitizer import strip_internal_tags
+
+            # text_parts 已在流式中 yield 过了，这里只需要发 done
+            # 但需要对完整内容做清洗检查（内部标签已在流式中输出，无法撤回，仅做记录）
+            yield {
+                "done": True,
+                "employee_id": name,
+                "tokens_used": total_input + total_output,
+                "latency_ms": 0,
+            }
+            return
+
+        # ── 有工具调用 — 解析收集到的 tool calls ──
+        parsed_tool_calls: list[ToolCall] = []
+        for tc_raw in tool_calls_collected:
+            input_json_str = "".join(tc_raw["input_json_parts"])
+            try:
+                tc_args = _json.loads(input_json_str) if input_json_str else {}
+            except _json.JSONDecodeError:
+                tc_args = {}
+            parsed_tool_calls.append(ToolCall(
+                id=tc_raw["id"],
+                name=tc_raw["name"],
+                arguments=tc_args if isinstance(tc_args, dict) else {},
+            ))
+
+        # 构建 assistant message（Anthropic 格式）
+        assistant_content: list[dict[str, Any]] = []
+        full_text = "".join(text_parts)
+        if full_text:
+            assistant_content.append({"type": "text", "text": full_text})
+        for tc in parsed_tool_calls:
+            assistant_content.append({
+                "type": "tool_use",
+                "id": tc.id,
+                "name": tc.name,
+                "input": tc.arguments,
+            })
+        messages.append({"role": "assistant", "content": assistant_content})
+
+        # ── 执行工具 ──
+        tool_results: list[dict[str, Any]] = []
+        finished = False
+        final_content = ""
+        for tc in parsed_tool_calls:
+            # yield 工具执行提示
+            tool_display = tc.name
+            yield {"delta": "", "done": False, "tool_call": True, "tool_name": tool_display}
+
+            if tc.name == "load_tools":
+                load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
+                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": load_msg})
+                continue
+            tool_output = await _handle_tool_call(
+                ctx, name, tc.name, tc.arguments, effective_agent_id,
+                guard=guard, max_visibility=max_visibility, push_event_fn=None,
+            )
+            if tool_output is None:
+                final_content = tc.arguments.get("result", full_text)
+                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": final_content})
+                finished = True
+            else:
+                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": tool_output[:10000]})
+        messages.append({"role": "user", "content": tool_results})
+        if finished:
+            from crew.output_sanitizer import strip_internal_tags
+
+            final_content = strip_internal_tags(final_content)
+            # finish tool 被调用 — yield 完整结果
+            for chunk in _split_text_chunks(final_content, 20):
+                yield {"delta": chunk, "done": False}
+            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+            return
+
+    # 超过最大轮次
+    yield {"delta": "达到最大工具调用轮次限制。", "done": False}
+    yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+
+
+async def _stream_employee_with_tools_fallback(
+    *,
+    ctx: _AppContext,
+    name: str,
+    prompt: str,
+    messages: list[dict[str, Any]],
+    tool_schemas: list[dict[str, Any]],
+    deferred_names: set[str],
+    loaded_deferred: set[str],
+    match: Any,
+    use_model: str,
+    effective_agent_id: str | None,
+    guard: Any,
+    max_visibility: str,
+    max_rounds: int,
+) -> Any:
+    """非 Anthropic provider 的降级 agent loop — 非流式执行，结果分块输出.
+
+    Yields: {"delta": str, "done": False} 和最终 {"done": True, ...}
+    """
+    import json as _json
+
+    from crew.executor import aexecute_with_tools
+
+    total_input = 0
+    total_output = 0
+
+    yield {"delta": "", "done": False}  # 立即发一个 chunk 告诉前端已开始
+
+    for rounds in range(max_rounds):  # noqa: B007
         result = await aexecute_with_tools(
             system_prompt=prompt,
             messages=messages,
@@ -1218,132 +1446,57 @@ async def _stream_employee_with_tools(
         total_output += result.output_tokens
 
         if not result.has_tool_calls:
-            # ── 最后一轮：用流式重发 ──
-            # 把当前 messages 用流式 API 再发一次（跳过刚才的非流式结果）
-            # 这样用户能看到 token 级别的流式输出
-            try:
-                holder = StreamWithToolsResult()
-                token_stream = astream_final_response(
-                    system_prompt=prompt,
-                    messages=messages,
-                    tools=tool_schemas,
-                    api_key=match.api_key or None,
-                    model=use_model,
-                    max_tokens=200000,
-                    base_url=match.base_url or None,
-                    holder=holder,
-                )
-                async for token in token_stream:
-                    yield {"delta": token, "done": False}
-
-                # 更新 token 统计（用流式的结果替换非流式的）
-                if holder.result:
-                    # 减去非流式探测的 tokens，加上流式的
-                    total_input = total_input - result.input_tokens + holder.result.input_tokens
-                    total_output = total_output - result.output_tokens + holder.result.output_tokens
-                    final_content = holder.result.content
-                else:
-                    final_content = result.content
-            except Exception as _stream_err:
-                logger.warning("流式最后一轮失败，回退到非流式: %s", _stream_err)
-                final_content = result.content
-                # 回退：把非流式结果逐段 yield
-                for chunk in _split_text_chunks(final_content, 20):
-                    yield {"delta": chunk, "done": False}
-
-            # 清洗内部标签
             from crew.output_sanitizer import strip_internal_tags
-            final_content = strip_internal_tags(final_content)
 
-            yield {
-                "done": True,
-                "employee_id": name,
-                "tokens_used": total_input + total_output,
-                "latency_ms": 0,
-            }
+            final_content = strip_internal_tags(result.content)
+            for chunk in _split_text_chunks(final_content, 20):
+                yield {"delta": chunk, "done": False}
+            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
             return
 
-        # ── 中间轮：处理 tool calls（同 _execute_employee_with_tools 逻辑） ──
-        if is_anthropic:
-            assistant_content: list[dict[str, Any]] = []
-            if result.content:
-                assistant_content.append({"type": "text", "text": result.content})
-            for tc in result.tool_calls:
-                assistant_content.append({
-                    "type": "tool_use",
+        # 中间轮：处理 tool calls（OpenAI 格式）
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": result.content or "",
+            "tool_calls": [
+                {
                     "id": tc.id,
-                    "name": tc.name,
-                    "input": tc.arguments,
-                })
-            messages.append({"role": "assistant", "content": assistant_content})
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": _json.dumps(tc.arguments, ensure_ascii=False),
+                    },
+                }
+                for tc in result.tool_calls
+            ],
+        }
+        messages.append(assistant_msg)
 
-            tool_results: list[dict[str, Any]] = []
-            finished = False
-            for tc in result.tool_calls:
-                if tc.name == "load_tools":
-                    load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
-                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": load_msg})
-                    continue
-                tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id,
-                    guard=guard, max_visibility=max_visibility, push_event_fn=None,
-                )
-                if tool_output is None:
-                    final_content = tc.arguments.get("result", result.content)
-                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": final_content})
-                    finished = True
-                else:
-                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": tool_output[:10000]})
-            messages.append({"role": "user", "content": tool_results})
-            if finished:
-                from crew.output_sanitizer import strip_internal_tags
-                final_content = strip_internal_tags(final_content)
-                # finish tool 被调用 — 直接 yield 完整结果
-                for chunk in _split_text_chunks(final_content, 20):
-                    yield {"delta": chunk, "done": False}
-                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
-                return
-        else:
-            assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": result.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": _json.dumps(tc.arguments, ensure_ascii=False),
-                        },
-                    }
-                    for tc in result.tool_calls
-                ],
-            }
-            messages.append(assistant_msg)
+        finished = False
+        final_content = ""
+        for tc in result.tool_calls:
+            if tc.name == "load_tools":
+                load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": load_msg})
+                continue
+            tool_output = await _handle_tool_call(
+                ctx, name, tc.name, tc.arguments, effective_agent_id,
+                guard=guard, max_visibility=max_visibility, push_event_fn=None,
+            )
+            if tool_output is None:
+                final_content = tc.arguments.get("result", result.content)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": final_content})
+                finished = True
+            else:
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_output[:10000]})
+        if finished:
+            from crew.output_sanitizer import strip_internal_tags
 
-            finished = False
-            for tc in result.tool_calls:
-                if tc.name == "load_tools":
-                    load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": load_msg})
-                    continue
-                tool_output = await _handle_tool_call(
-                    ctx, name, tc.name, tc.arguments, effective_agent_id,
-                    guard=guard, max_visibility=max_visibility, push_event_fn=None,
-                )
-                if tool_output is None:
-                    final_content = tc.arguments.get("result", result.content)
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": final_content})
-                    finished = True
-                else:
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_output[:10000]})
-            if finished:
-                from crew.output_sanitizer import strip_internal_tags
-                final_content = strip_internal_tags(final_content)
-                for chunk in _split_text_chunks(final_content, 20):
-                    yield {"delta": chunk, "done": False}
-                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
-                return
+            final_content = strip_internal_tags(final_content)
+            for chunk in _split_text_chunks(final_content, 20):
+                yield {"delta": chunk, "done": False}
+            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+            return
 
     # 超过最大轮次
     yield {"delta": "达到最大工具调用轮次限制。", "done": False}
