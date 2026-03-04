@@ -3,6 +3,8 @@
 from crew.models import Employee, PermissionPolicy
 from crew.permission import PermissionDenied, PermissionGuard
 from crew.tool_schema import (
+    CORE_TOOLS,
+    FEISHU_TOOLS,
     TOOL_ROLE_PRESETS,
     resolve_effective_tools,
     validate_permissions,
@@ -306,7 +308,7 @@ class TestToolRolePresets:
         assert "bash" in all_preset
 
     def test_profile_engineer_excludes_life_tools(self):
-        """profile-engineer 应排除生活工具."""
+        """profile-engineer 应排除生活工具（Phase 2: allowlist 模式不再包含）."""
         preset = TOOL_ROLE_PRESETS["profile-engineer"]
         for tool in (
             "weather",
@@ -317,7 +319,9 @@ class TestToolRolePresets:
             "express_track",
         ):
             assert tool not in preset, f"profile-engineer 不应包含 {tool}"
-        assert "github_prs" in preset  # 应保留代码相关
+        # Phase 2: allowlist 模式下核心工具应存在
+        for tool in ("send_message", "web_search", "add_memory", "delegate"):
+            assert tool in preset, f"profile-engineer 应包含核心工具 {tool}"
 
     def test_profile_researcher_excludes_admin_tools(self):
         """profile-researcher 应排除管理写操作."""
@@ -344,3 +348,35 @@ class TestToolRolePresets:
         for name, preset in TOOL_ROLE_PRESETS.items():
             if name.startswith("profile-") and name != "profile-base":
                 assert preset <= base, f"{name} 包含了 profile-base 中不存在的工具"
+
+    def test_core_tools_in_all_profiles(self):
+        """所有 profile-* 都应包含 CORE_TOOLS（security 除外，它去掉了委派工具）."""
+        # security 刻意移除了部分核心委派工具
+        security_removed = {"delegate", "delegate_async", "delegate_chain", "route"}
+        # researcher 刻意移除了部分委派工具
+        researcher_removed = {"delegate_async", "delegate_chain", "route"}
+
+        for name, preset in TOOL_ROLE_PRESETS.items():
+            if not name.startswith("profile-") or name == "profile-base":
+                continue
+            if name == "profile-security":
+                expected = CORE_TOOLS - security_removed
+            elif name == "profile-researcher":
+                expected = CORE_TOOLS - researcher_removed
+            else:
+                expected = CORE_TOOLS
+            missing = expected - preset
+            assert not missing, f"{name} 缺少核心工具: {missing}"
+
+    def test_feishu_tools_in_all_profiles(self):
+        """所有 profile-* 都应包含 FEISHU_TOOLS（security 除外，它去掉了 send_feishu_dm）."""
+        security_removed = {"send_feishu_dm"}
+        for name, preset in TOOL_ROLE_PRESETS.items():
+            if not name.startswith("profile-") or name == "profile-base":
+                continue
+            if name == "profile-security":
+                expected = FEISHU_TOOLS - security_removed
+            else:
+                expected = FEISHU_TOOLS
+            missing = expected - preset
+            assert not missing, f"{name} 缺少飞书工具: {missing}"

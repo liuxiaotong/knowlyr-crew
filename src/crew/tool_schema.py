@@ -1800,6 +1800,35 @@ AGENT_TOOLS = {
 # 所有 agent 工具都延迟加载，首轮只有 load_tools + submit
 DEFERRED_TOOLS = AGENT_TOOLS
 
+# ── Phase 2: Allowlist 核心工具集 ──
+# 员工默认只拥有这些工具，其余需通过外部 MCP 插件获取
+
+CORE_TOOLS = {
+    # 员工管理
+    "send_message", "list_agents", "delegate", "delegate_async",
+    "delegate_chain", "route", "check_task", "list_tasks",
+    "organize_meeting", "check_meeting", "run_pipeline", "query_cost",
+    "schedule_task", "list_schedules", "cancel_schedule",
+    # 记忆与笔记
+    "add_memory", "create_note", "read_notes",
+    # 基础执行
+    "get_datetime", "calculate", "lookup_user", "web_search",
+    "read_url", "agent_file_read", "agent_file_grep", "project_status",
+}
+
+# 飞书工具（过渡期保留，Phase 3 拆为独立 MCP server 后移除）
+FEISHU_TOOLS = {
+    "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
+    "find_free_time", "create_feishu_task", "list_feishu_tasks",
+    "complete_feishu_task", "delete_feishu_task", "update_feishu_task",
+    "feishu_chat_history", "send_feishu_dm", "feishu_group_members",
+    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
+    "send_feishu_group", "send_feishu_file", "list_feishu_groups",
+    "read_feishu_sheet", "update_feishu_sheet", "create_feishu_spreadsheet",
+    "list_feishu_approvals", "feishu_contacts", "feishu_bitable",
+    "feishu_wiki", "approve_feishu",
+}
+
 # ── 工具角色预设 ──
 
 TOOL_ROLE_PRESETS: dict[str, set[str]] = {
@@ -1956,11 +1985,7 @@ TOOL_ROLE_PRESETS["feishu-admin"] = (
 TOOL_ROLE_PRESETS["all-agent"] = AGENT_TOOLS.copy()
 TOOL_ROLE_PRESETS["all"] = AGENT_TOOLS | {"file_read", "file_write", "bash", "git", "grep", "glob"}
 
-# ── 职能档位 — 以 all-agent 为基线，用 deny 精准控制 ──
-# 所有档位共享同一个基线（全部 agent 工具），差异通过 deny 列表体现
-# 这样每个档位只减少不合适的工具，不会意外丢失基础能力
-
-TOOL_ROLE_PRESETS["profile-base"] = AGENT_TOOLS.copy()
+# ── 历史 Deny 清单（Phase 1 遗留，保留作为文档）──
 
 # 工程师: 去掉与工程无关的生活/商务工具
 DENY_ENGINEER = {"weather", "exchange_rate", "stock_price", "flight_info", "aqi", "express_track"}
@@ -1986,14 +2011,35 @@ DENY_DATA = {"flight_info", "aqi", "express_track"}
 # 职能组: 去掉代码执行
 DENY_FUNCTIONS = {"run_python"}
 
-# ── 团队 profile 预设 ──
-TOOL_ROLE_PRESETS["profile-engineer"] = AGENT_TOOLS - DENY_ENGINEER
-TOOL_ROLE_PRESETS["profile-data"] = AGENT_TOOLS - DENY_DATA
-TOOL_ROLE_PRESETS["profile-researcher"] = AGENT_TOOLS - DENY_RESEARCHER
-TOOL_ROLE_PRESETS["profile-infra"] = AGENT_TOOLS - DENY_ENGINEER  # 复用工程师 deny
-TOOL_ROLE_PRESETS["profile-business"] = AGENT_TOOLS - DENY_BUSINESS
-TOOL_ROLE_PRESETS["profile-functions"] = AGENT_TOOLS - DENY_FUNCTIONS
-TOOL_ROLE_PRESETS["profile-security"] = AGENT_TOOLS - DENY_SECURITY
+# ── 团队 profile 预设（Phase 2: allowlist 模式）──
+# 基线 = CORE_TOOLS + FEISHU_TOOLS（过渡期），按职能微调
+
+TOOL_ROLE_PRESETS["profile-base"] = CORE_TOOLS | FEISHU_TOOLS | {"run_python"}
+
+# 工程师: 核心 + 飞书
+TOOL_ROLE_PRESETS["profile-engineer"] = CORE_TOOLS | FEISHU_TOOLS
+
+# 数据组: 核心 + 飞书 + 代码执行
+TOOL_ROLE_PRESETS["profile-data"] = CORE_TOOLS | FEISHU_TOOLS | {"run_python"}
+
+# 研究员: 核心 + 飞书，去掉委派（保持审计独立性）
+TOOL_ROLE_PRESETS["profile-researcher"] = (CORE_TOOLS | FEISHU_TOOLS) - {
+    "delegate_async", "delegate_chain", "route",
+}
+
+# 商务: 核心 + 飞书
+TOOL_ROLE_PRESETS["profile-business"] = CORE_TOOLS | FEISHU_TOOLS
+
+# 职能组: 核心 + 飞书
+TOOL_ROLE_PRESETS["profile-functions"] = CORE_TOOLS | FEISHU_TOOLS
+
+# 基础设施: 核心 + 飞书
+TOOL_ROLE_PRESETS["profile-infra"] = CORE_TOOLS | FEISHU_TOOLS
+
+# 安全审计: 核心 + 飞书，去掉影响独立性的写操作
+TOOL_ROLE_PRESETS["profile-security"] = (CORE_TOOLS | FEISHU_TOOLS) - {
+    "delegate", "delegate_async", "delegate_chain", "route", "send_feishu_dm",
+}
 
 
 def resolve_effective_tools(employee: Employee) -> set[str]:  # noqa: F821
