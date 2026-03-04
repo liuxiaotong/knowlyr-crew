@@ -61,6 +61,28 @@ def init_memory_tables() -> None:
         for sql in _PG_CREATE_INDEXES:
             cur.execute(sql)
 
+        # 幂等添加 classification 列（信息分级）
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN classification VARCHAR(20) DEFAULT 'internal';
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # 幂等添加 domain 列（职能域标签）
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN domain TEXT[] DEFAULT '{}';
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # 索引
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_classification ON memories(classification)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories USING GIN(domain)"
+        )
+
     logger.info("memories 表初始化完成")
 
 
@@ -118,6 +140,8 @@ class MemoryStoreDB:
         trigger_condition: str = "",
         applicability: list[str] | None = None,
         origin_employee: str = "",
+        classification: Literal["public", "internal", "restricted", "confidential"] = "internal",
+        domain: list[str] | None = None,
     ) -> dict[str, Any]:
         """添加一条记忆.
 
@@ -138,6 +162,7 @@ class MemoryStoreDB:
         tags_list = tags or []
         applicability_list = applicability or []
         origin_emp = origin_employee or employee
+        domain_list = domain or []
 
         with get_connection() as conn:
             cur = conn.cursor()
@@ -147,12 +172,14 @@ class MemoryStoreDB:
                     id, employee, created_at, category, content,
                     source_session, confidence, superseded_by, ttl_days,
                     importance, last_accessed, tags, shared, visibility,
-                    trigger_condition, applicability, origin_employee, verified_count
+                    trigger_condition, applicability, origin_employee, verified_count,
+                    classification, domain
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s, %s
                 )
                 """,
                 (
@@ -174,6 +201,8 @@ class MemoryStoreDB:
                     applicability_list,
                     origin_emp,
                     0,
+                    classification,
+                    domain_list,
                 ),
             )
 
@@ -196,7 +225,17 @@ class MemoryStoreDB:
             "applicability": applicability_list,
             "origin_employee": origin_emp,
             "verified_count": 0,
+            "classification": classification,
+            "domain": domain_list,
         }
+
+    # 信息分级等级序（用于 classification_max 过滤）
+    _CLASSIFICATION_LEVELS = {
+        "public": 0,
+        "internal": 1,
+        "restricted": 2,
+        "confidential": 3,
+    }
 
     def query(
         self,
@@ -209,6 +248,9 @@ class MemoryStoreDB:
         sort_by: str = "created_at",
         min_importance: int = 0,
         update_access: bool = False,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> list[dict[str, Any]]:
         """查询员工记忆.
 
@@ -222,6 +264,9 @@ class MemoryStoreDB:
             sort_by: 排序方式
             min_importance: 最低重要性
             update_access: 是否更新 last_accessed
+            classification_max: 最高信息分级（可选，按等级过滤）
+            allowed_domains: 允许的职能域（可选，restricted 级别需域匹配）
+            include_confidential: 是否包含 confidential 级别记忆（默认 False）
 
         Returns:
             记忆列表
@@ -253,6 +298,21 @@ class MemoryStoreDB:
                 "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())"
             )
 
+        # 信息分级过滤
+        if not include_confidential:
+            conditions.append("COALESCE(classification, 'internal') != 'confidential'")
+
+        if classification_max is not None:
+            max_level = self._CLASSIFICATION_LEVELS.get(classification_max, 1)
+            allowed_classifications = [
+                k for k, v in self._CLASSIFICATION_LEVELS.items() if v <= max_level
+            ]
+            placeholders = ", ".join(["%s"] * len(allowed_classifications))
+            conditions.append(
+                f"COALESCE(classification, 'internal') IN ({placeholders})"
+            )
+            params.extend(allowed_classifications)
+
         # 排序
         if sort_by == "importance":
             order_by = "importance DESC, created_at DESC"
@@ -268,7 +328,8 @@ class MemoryStoreDB:
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
-                       trigger_condition, applicability, origin_employee, verified_count
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY {order_by}
@@ -282,6 +343,18 @@ class MemoryStoreDB:
         results = []
         entry_ids = []
         for row in rows:
+            row_classification = row[18] or "internal"
+            row_domain = row[19] or []
+
+            # restricted 级别的域匹配过滤（在 Python 层做，因为数组交集 SQL 较复杂）
+            if (
+                allowed_domains is not None
+                and row_classification == "restricted"
+                and row_domain
+                and not set(row_domain) & set(allowed_domains)
+            ):
+                continue
+
             entry = {
                 "id": row[0],
                 "employee": row[1],
@@ -301,6 +374,8 @@ class MemoryStoreDB:
                 "applicability": row[15] or [],
                 "origin_employee": row[16],
                 "verified_count": row[17],
+                "classification": row_classification,
+                "domain": row_domain,
             }
             results.append(entry)
             entry_ids.append(row[0])
@@ -373,7 +448,8 @@ class MemoryStoreDB:
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
-                       trigger_condition, applicability, origin_employee, verified_count
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY created_at DESC
@@ -405,6 +481,8 @@ class MemoryStoreDB:
                     "applicability": row[15] or [],
                     "origin_employee": row[16],
                     "verified_count": row[17],
+                    "classification": row[18] or "internal",
+                    "domain": row[19] or [],
                 }
             )
 
@@ -454,7 +532,8 @@ class MemoryStoreDB:
                 SELECT id, employee, created_at, category, content,
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
-                       trigger_condition, applicability, origin_employee, verified_count
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY verified_count DESC, created_at DESC
@@ -486,6 +565,8 @@ class MemoryStoreDB:
                     "applicability": row[15] or [],
                     "origin_employee": row[16],
                     "verified_count": row[17],
+                    "classification": row[18] or "internal",
+                    "domain": row[19] or [],
                 }
             )
 

@@ -1079,6 +1079,18 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "default": "open",
                     "description": "可见性: open=公开, private=仅私聊可见",
                 },
+                "classification": {
+                    "type": "string",
+                    "enum": ["public", "internal", "restricted", "confidential"],
+                    "default": "internal",
+                    "description": "信息分级: public=可对外, internal=仅内部(默认), restricted=受限(需指定domain), confidential=机密",
+                },
+                "domain": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": [],
+                    "description": "职能域标签(仅restricted时使用)，如 ['hr'], ['finance']",
+                },
             },
             "required": ["content"],
         },

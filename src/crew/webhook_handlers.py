@@ -762,6 +762,8 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     trigger_condition = payload.get("trigger_condition", "")
     applicability = payload.get("applicability", [])
     origin_employee = payload.get("origin_employee", "")
+    classification = payload.get("classification", "internal")
+    domain = payload.get("domain", [])
 
     if not employee or not category or not content:
         return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
@@ -876,6 +878,8 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         trigger_condition=str(trigger_condition),
         applicability=applicability if isinstance(applicability, list) else [],
         origin_employee=str(origin_employee),
+        classification=str(classification) if classification in ("public", "internal", "restricted", "confidential") else "internal",
+        domain=domain if isinstance(domain, list) else [],
     )
 
     # 写入后失效缓存（用 entry.employee 即解析后的花名作为 cache key）

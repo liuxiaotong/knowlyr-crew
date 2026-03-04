@@ -37,6 +37,8 @@ async def _remote_memory_add(
     trigger_condition: str = "",
     applicability: list[str] | None = None,
     origin_employee: str = "",
+    classification: str = "internal",
+    domain: list[str] | None = None,
 ) -> dict:
     """通过远程 API 写入记忆，返回响应 dict."""
     import httpx
@@ -52,6 +54,8 @@ async def _remote_memory_add(
         "trigger_condition": trigger_condition,
         "applicability": applicability or [],
         "origin_employee": origin_employee,
+        "classification": classification,
+        "domain": domain or [],
     }
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
@@ -1167,6 +1171,18 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         "origin_employee": {
                             "type": "string",
                             "description": "来源员工名（仅 pattern 类型，默认当前员工）",
+                        },
+                        "classification": {
+                            "type": "string",
+                            "enum": ["public", "internal", "restricted", "confidential"],
+                            "default": "internal",
+                            "description": "信息分级: public=可对外, internal=仅内部(默认), restricted=受限(需指定domain), confidential=机密",
+                        },
+                        "domain": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": [],
+                            "description": "职能域标签(仅restricted时使用)，如 ['hr'], ['finance']",
                         },
                     },
                     "required": ["employee", "category", "content"],
@@ -2292,6 +2308,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         trigger_condition=arguments.get("trigger_condition", ""),
                         applicability=arguments.get("applicability"),
                         origin_employee=arguments.get("origin_employee", ""),
+                        classification=arguments.get("classification", "internal"),
+                        domain=arguments.get("domain"),
                     )
                     return [
                         TextContent(
@@ -2326,6 +2344,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     trigger_condition=arguments.get("trigger_condition", ""),
                     applicability=arguments.get("applicability"),
                     origin_employee=arguments.get("origin_employee", ""),
+                    classification=arguments.get("classification", "internal"),
+                    domain=arguments.get("domain"),
                 )
                 return [
                     TextContent(

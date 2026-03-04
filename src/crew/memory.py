@@ -53,6 +53,15 @@ class MemoryEntry(BaseModel):
     visibility: Literal["open", "private"] = Field(
         default="open", description="可见性: open=公开, private=仅私聊可见"
     )
+    # 信息分级（ISO 27001 四级分类）
+    classification: Literal["public", "internal", "restricted", "confidential"] = Field(
+        default="internal",
+        description="信息分级: public=公开, internal=内部(默认), restricted=受限(需域匹配), confidential=机密(仅CEO)",
+    )
+    domain: list[str] = Field(
+        default_factory=list,
+        description="职能域标签，仅 restricted 级别使用，如 ['hr'], ['finance']",
+    )
     # Pattern 专有字段（仅 category="pattern" 时使用）
     trigger_condition: str = Field(default="", description="触发条件：什么场景下该用此模式")
     applicability: list[str] = Field(default_factory=list, description="适用范围：角色/领域标签")
@@ -303,6 +312,8 @@ class MemoryStore:
         trigger_condition: str = "",
         applicability: list[str] | None = None,
         origin_employee: str = "",
+        classification: Literal["public", "internal", "restricted", "confidential"] = "internal",
+        domain: list[str] | None = None,
     ) -> MemoryEntry:
         """添加一条记忆."""
         employee = self._resolve_to_character_name(employee)
@@ -321,6 +332,8 @@ class MemoryStore:
             trigger_condition=trigger_condition,
             applicability=applicability or [],
             origin_employee=origin_employee or employee,
+            classification=classification,
+            domain=domain or [],
         )
         path = self._employee_file(employee)
         with file_lock(path):

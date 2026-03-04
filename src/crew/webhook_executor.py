@@ -1117,9 +1117,12 @@ async def _handle_tool_call(
             trigger_condition=arguments.get("trigger_condition", ""),
             applicability=arguments.get("applicability"),
             origin_employee=arguments.get("origin_employee", ""),
+            classification=arguments.get("classification", "internal"),
+            domain=arguments.get("domain"),
         )
         logger.info(
-            "记忆保存: %s → %s (visibility=%s)", employee_name, entry.content[:60], entry.visibility
+            "记忆保存: %s → %s (visibility=%s, classification=%s)",
+            employee_name, entry.content[:60], entry.visibility, entry.classification,
         )
         return "已记住。"
 
