@@ -370,6 +370,9 @@ class MemoryStore:
         sort_by: str = "created_at",
         min_importance: int = 0,
         update_access: bool = False,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> list[MemoryEntry]:
         """查询员工记忆.
 
@@ -383,9 +386,17 @@ class MemoryStore:
             sort_by: 排序方式 — "created_at"(默认,最新在前) | "importance"(重要性优先) | "confidence"(置信度优先)
             min_importance: 最低重要性 (0=不过滤, 1-5)
             update_access: 是否更新 last_accessed 时间戳（API 调用时设为 True）
+            classification_max: 最高信息分级（可选，文件版暂不过滤，仅兼容接口）
+            allowed_domains: 允许的职能域（可选，文件版暂不过滤，仅兼容接口）
+            include_confidential: 是否包含 confidential 级别（文件版暂不过滤，仅兼容接口）
 
         Returns:
             记忆列表（按 sort_by 排序，置信度为衰减后的有效值）
+
+        Note:
+            classification_max / allowed_domains / include_confidential 参数仅在
+            MemoryStoreDB（数据库版）中生效。文件版接受这些参数但不做过滤，
+            以保证调用层统一接口不报错。
         """
         employee = self._resolve_to_character_name(employee)
         path = self._employee_file(employee)

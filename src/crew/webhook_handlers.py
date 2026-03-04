@@ -2923,7 +2923,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     # 执行触发的 skills（按优先级排序）
                     for skill, score in triggered[:3]:
                         try:
-                            result = engine.execute_skill(skill, employee_name, {"task": user_message, **args})
+                            result = engine.execute_skill(skill, employee_name, {"task": user_message, "channel": channel, **args})
                             if result.get("enhanced_context"):
                                 for key, value in result["enhanced_context"].items():
                                     if key in enhanced_context:

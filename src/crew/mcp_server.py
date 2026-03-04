@@ -74,6 +74,7 @@ async def _remote_memory_query(
     employee: str,
     category: str | None = None,
     limit: int = 20,
+    classification_max: str | None = None,
 ) -> list[dict]:
     """通过远程 API 查询记忆，返回条目列表."""
     import httpx
@@ -81,6 +82,8 @@ async def _remote_memory_query(
     params: dict[str, str] = {"employee": employee, "limit": str(limit)}
     if category:
         params["category"] = category
+    if classification_max:
+        params["classification_max"] = classification_max
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/memory/query",
@@ -1207,6 +1210,11 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "integer",
                             "description": "最大返回条数（默认 20）",
                             "default": 20,
+                        },
+                        "classification_max": {
+                            "type": "string",
+                            "enum": ["public", "internal", "restricted", "confidential"],
+                            "description": "最高信息分级（可选，不传则不过滤）",
                         },
                     },
                     "required": ["employee"],
@@ -2355,6 +2363,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 ]
 
         elif name == "query_memory":
+            _classification_max = arguments.get("classification_max")
             remote_cfg = _get_remote_memory_config()
             if remote_cfg:
                 # 远程 API 路径
@@ -2366,6 +2375,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         employee=arguments["employee"],
                         category=arguments.get("category"),
                         limit=arguments.get("limit", 20),
+                        classification_max=_classification_max,
                     )
                     return [
                         TextContent(
@@ -2389,11 +2399,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 from crew.memory import MemoryStore
 
                 store = MemoryStore(project_dir=_project_dir)
-                entries = store.query(
-                    employee=arguments["employee"],
-                    category=arguments.get("category"),
-                    limit=arguments.get("limit", 20),
-                )
+                _query_kwargs: dict = {
+                    "employee": arguments["employee"],
+                    "category": arguments.get("category"),
+                    "limit": arguments.get("limit", 20),
+                }
+                if _classification_max:
+                    _query_kwargs["classification_max"] = _classification_max
+                entries = store.query(**_query_kwargs)
                 data = [e.model_dump() for e in entries]
                 return [
                     TextContent(

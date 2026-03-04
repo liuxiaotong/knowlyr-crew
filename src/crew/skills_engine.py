@@ -164,14 +164,34 @@ class SkillsEngine:
         category = params.get("category")
         limit = params.get("limit", 10)
 
+        # 信息分级过滤：从 context 中读取 channel，计算有效许可
+        clearance_kwargs: dict[str, Any] = {}
+        channel = context.get("channel", "")
+        if channel:
+            from crew.classification import get_effective_clearance
+
+            clearance = get_effective_clearance(employee, channel)
+            clearance_kwargs["classification_max"] = clearance["classification_max"]
+            clearance_kwargs["allowed_domains"] = clearance["allowed_domains"]
+            clearance_kwargs["include_confidential"] = clearance["include_confidential"]
+
         # 查询记忆
         memories = self.memory_store.query(
             employee=employee,
             category=category,
             limit=limit,
+            **clearance_kwargs,
         )
 
-        return {"memories": [m.model_dump() for m in memories], "count": len(memories)}
+        # 兼容 MemoryStore（文件版返回 MemoryEntry）和 MemoryStoreDB（返回 dict）
+        result_list = []
+        for m in memories:
+            if isinstance(m, dict):
+                result_list.append(m)
+            else:
+                result_list.append(m.model_dump())
+
+        return {"memories": result_list, "count": len(result_list)}
 
     def _execute_load_checklist(
         self, action: SkillAction, employee: str, context: dict[str, Any]
