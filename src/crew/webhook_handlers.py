@@ -2964,6 +2964,16 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     len(extra_context)
                 )
 
+        # Phase 3：外部对话输出控制
+        from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
+
+        _source_type = CHANNEL_SOURCE_TYPE.get(channel, "external")
+        if _source_type == "external":
+            if extra_context:
+                extra_context = EXTERNAL_OUTPUT_CONTROL_PROMPT + "\n\n" + extra_context
+            else:
+                extra_context = EXTERNAL_OUTPUT_CONTROL_PROMPT
+
         # ── 异步回调模式（频道 @mention）──
         callback_channel_id = payload.get("callback_channel_id")
         if callback_channel_id is not None:
@@ -4211,6 +4221,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 employee_name=employee_id,
                 message_history=message_history,
                 push_event_fn=None,  # TODO: 支持流式输出
+                channel=channel,
             )
             logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
         except SGAPIBridgeError as _sg_api_err:

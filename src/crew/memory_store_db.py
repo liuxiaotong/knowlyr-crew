@@ -380,6 +380,17 @@ class MemoryStoreDB:
             results.append(entry)
             entry_ids.append(row[0])
 
+        # Phase 4：审计日志
+        logger.info(
+            "memory_access: employee=%s classification_max=%s allowed_domains=%s "
+            "include_confidential=%s returned=%d channel=unknown",
+            employee,
+            classification_max or "none",
+            allowed_domains or "none",
+            include_confidential,
+            len(results),
+        )
+
         # 更新访问时间
         if update_access and entry_ids:
             self._update_last_accessed(employee, entry_ids)

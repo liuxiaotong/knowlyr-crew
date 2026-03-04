@@ -183,6 +183,21 @@ class SkillsEngine:
             **clearance_kwargs,
         )
 
+        # Phase 4：审计日志（skills_engine 层有 channel 信息）
+        from crew.classification import CHANNEL_SOURCE_TYPE
+
+        source_type = CHANNEL_SOURCE_TYPE.get(channel, "external") if channel else "internal"
+        logger.info(
+            "memory_audit: employee=%s channel=%s source_type=%s "
+            "classification_max=%s allowed_domains=%s returned=%d",
+            employee,
+            channel,
+            source_type,
+            clearance_kwargs.get("classification_max", "none"),
+            clearance_kwargs.get("allowed_domains", "none"),
+            len(memories),
+        )
+
         # 兼容 MemoryStore（文件版返回 MemoryEntry）和 MemoryStoreDB（返回 dict）
         result_list = []
         for m in memories:

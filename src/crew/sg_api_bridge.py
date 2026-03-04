@@ -86,6 +86,7 @@ async def sg_api_dispatch(
     message_history: list[dict] | None = None,
     permission_callback: Callable[[str, dict], bool] | None = None,
     push_event_fn: Callable[[dict], None] | None = None,
+    channel: str = "",
 ) -> str:
     """SG API 转发主入口 — 使用 Anthropic API + 本地工具执行.
 
@@ -97,6 +98,7 @@ async def sg_api_dispatch(
         message_history: 对话历史
         permission_callback: 权限回调 async (tool_name, tool_params) -> bool
         push_event_fn: 事件推送函数（用于流式输出）
+        channel: 对话渠道标识（空字符串时按内部对话处理）
 
     Returns:
         最终回复文本
@@ -125,6 +127,14 @@ async def sg_api_dispatch(
         "2. 不要输出 Sources/来源 引用块",
         "3. 直接用自然中文回复，像微信聊天一样简洁",
     ])
+
+    # Phase 3：外部对话输出控制
+    from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
+
+    _source_type = CHANNEL_SOURCE_TYPE.get(channel, "external" if channel else "internal")
+    if _source_type == "external":
+        system_parts.append("")
+        system_parts.append(EXTERNAL_OUTPUT_CONTROL_PROMPT)
 
     system_prompt = "\n".join(system_parts)
 

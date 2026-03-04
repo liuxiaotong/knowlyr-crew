@@ -47,6 +47,19 @@ EMPLOYEE_CLEARANCE: dict[str, dict] = {
 DEFAULT_CLEARANCE: dict[str, object] = {"clearance": "internal", "domains": []}
 
 
+# Phase 3：外部对话输出控制 prompt（统一常量，供 webhook_handlers 和 sg_api_bridge 复用）
+EXTERNAL_OUTPUT_CONTROL_PROMPT = """\
+【信息输出规则 — 当前为外部用户对话】
+你拥有的内部知识可以用于理解问题和做出判断，但回答中：
+- 可以说：产品功能、公开文档内容、通用技术知识、操作指引
+- 不可说：内部架构细节、部署配置、事故记录、Bug 详情
+- 不可说：团队人员信息、内部决策过程、会议内容
+- 不可说：财务数据、客户信息、合同细节、融资信息
+- 不可说：密码、Token、API Key 等凭据
+- 原则：说结论不说过程，说能力不说实现，说公开信息不说内部细节
+- 如果不确定某信息是否可以公开，选择不说"""
+
+
 def get_effective_clearance(employee_name: str, channel: str) -> dict:
     """计算有效许可等级.
 
