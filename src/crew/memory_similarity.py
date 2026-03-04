@@ -231,7 +231,7 @@ async def find_similar_memories(
         project_dir = resolve_project_dir(None)
 
     store = get_memory_store(project_dir=project_dir)
-    memory_dir = store.memory_dir
+    memory_dir = getattr(store, 'memory_dir', None)
 
     # 解析员工名
     employee = store._resolve_to_character_name(employee)
@@ -247,8 +247,11 @@ async def find_similar_memories(
     if not recent_memories:
         return []
 
-    # 尝试使用 embedding 计算相似度
-    new_embedding = await get_embedding(content)
+    # 尝试使用 embedding 计算相似度（需要 memory_dir 存储 embedding 缓存）
+    if memory_dir is not None:
+        new_embedding = await get_embedding(content)
+    else:
+        new_embedding = None  # DB 模式跳过 embedding，走 keyword fallback
 
     if new_embedding is not None:
         # 使用 embedding 方式
@@ -312,7 +315,7 @@ async def _find_similar_with_embedding(
                 similar.append((mem.model_dump(), similarity))
 
     # 保存更新的缓存
-    if updated_cache:
+    if updated_cache and memory_dir is not None:
         _save_embedding_cache(memory_dir, employee, cache)
 
     # 按相似度降序排序，返回前 3 条
