@@ -15,6 +15,7 @@ _TTL_SECONDS = 60  # 1 分钟内不重扫磁盘
 _PROMPT_TOKEN_LIMIT = 800
 _DEFAULT_LIMIT = 10
 _DEFAULT_MIN_IMPORTANCE = 3
+_MAX_CACHE_SIZE = 50  # 最多缓存 50 个员工的记忆
 
 
 @dataclass
@@ -123,6 +124,12 @@ def get_prompt_cached(
     )
     prompt_text = _truncate_to_token_limit(prompt_text, _PROMPT_TOKEN_LIMIT)
     current_seq = _count_lines(store, employee)
+
+    # 缓存大小控制（S5）
+    if len(_CACHE) >= _MAX_CACHE_SIZE and employee not in _CACHE:
+        # 淘汰最久未使用的条目
+        oldest_key = min(_CACHE, key=lambda k: _CACHE[k].fetched_at)
+        del _CACHE[oldest_key]
 
     _CACHE[employee] = MemorySnapshot(
         employee=employee,

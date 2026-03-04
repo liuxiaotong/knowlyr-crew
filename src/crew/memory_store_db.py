@@ -177,6 +177,9 @@ class MemoryStoreDB:
         """
         employee = self._resolve_to_character_name(employee)
 
+        # 防御性截断（S4：以防 API 层校验被绕过）
+        content = content[:5000] if len(content) > 5000 else content
+
         # 12 位 hex = 48 bit 熵，碰撞概率 ~1/2.8e14，当前数据量安全
         entry_id = uuid.uuid4().hex[:12]
         created_at = datetime.now(timezone.utc)

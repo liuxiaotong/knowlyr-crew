@@ -148,6 +148,8 @@ def jaccard_similarity(set1: set, set2: set) -> float:
 def _keyword_similarity(content1: str, content2: str) -> float:
     """基于关键词的相似度（降级方案）.
 
+    优先使用 jieba 中文分词，不可用时降级到字符 n-gram。
+
     Args:
         content1: 文本 1
         content2: 文本 2
@@ -155,9 +157,23 @@ def _keyword_similarity(content1: str, content2: str) -> float:
     Returns:
         相似度（0-1）
     """
-    keywords1 = _extract_keywords(content1)
-    keywords2 = _extract_keywords(content2)
-    return jaccard_similarity(keywords1, keywords2)
+    try:
+        import jieba
+
+        # 分词 + 去停用词（只保留长度 > 1 的词）
+        words1 = set(w for w in jieba.cut(content1) if len(w) > 1)
+        words2 = set(w for w in jieba.cut(content2) if len(w) > 1)
+    except ImportError:
+        # jieba 不可用，降级到字符 bigram
+        words1 = set(content1[i : i + 2] for i in range(len(content1) - 1))
+        words2 = set(content2[i : i + 2] for i in range(len(content2) - 1))
+
+    if not words1 or not words2:
+        return 0.0
+
+    intersection = words1 & words2
+    union = words1 | words2
+    return len(intersection) / len(union) if union else 0.0
 
 
 def _get_embedding_cache_path(memory_dir: Path, employee: str) -> Path:

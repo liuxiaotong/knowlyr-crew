@@ -768,6 +768,18 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     if not employee or not category or not content:
         return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
 
+    # 内容长度限制（S4）
+    MAX_CONTENT_LENGTH = 5000  # 字符
+    if len(content) > MAX_CONTENT_LENGTH:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": f"Content too long ({len(content)} chars, max {MAX_CONTENT_LENGTH})",
+                "suggestions": ["将内容拆分为多条记忆", "保留核心要点，删减重复信息"],
+            },
+            status_code=400,
+        )
+
     valid_categories = {"decision", "estimate", "finding", "correction", "pattern"}
     if category not in valid_categories:
         return JSONResponse(

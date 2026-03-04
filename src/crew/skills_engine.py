@@ -59,12 +59,16 @@ class SkillsEngine:
 
         elif trigger.type == "semantic":
             # TODO: 实现语义匹配（需要 embedding）
-            # 暂时降级为关键词匹配
-            logger.warning(
-                f"Semantic trigger not implemented for {skill.name}, falling back to keyword"
-            )
-            # 从 description 中提取关键词作为临时方案
-            keywords = self._extract_keywords_from_description(skill.description)
+            # 降级：从 trigger.keywords + description 合并关键词
+            keywords = list(trigger.keywords or [])  # 保留已有关键词
+            if not keywords:
+                # 只在没有预设关键词时从 description 提取
+                keywords = self._extract_keywords_from_description(skill.description)
+            if not keywords:
+                logger.warning(
+                    f"Semantic trigger has no keywords for {skill.name}"
+                )
+                return 0.0
             return self._keyword_match(keywords, task)
 
         return 0.0
@@ -84,12 +88,37 @@ class SkillsEngine:
         return min(matched / len(keywords), 1.0)
 
     def _extract_keywords_from_description(self, description: str) -> list[str]:
-        """从 description 中提取关键词（临时方案）."""
-        # 提取引号中的内容作为关键词
+        """从 description 中提取关键词（改进版）."""
         import re
 
-        keywords = re.findall(r'"([^"]+)"', description)
-        return keywords
+        keywords = []
+
+        # 1. 提取引号中的内容
+        keywords.extend(re.findall(r'[\"\'](.*?)[\"\']', description))
+
+        # 2. 提取中文关键词（2-4字的中文词组）
+        keywords.extend(re.findall(r'[\u4e00-\u9fff]{2,4}', description))
+
+        # 3. 提取英文关键词（3字母以上，去停用词）
+        keywords.extend(
+            w
+            for w in re.findall(r'[a-zA-Z]{3,}', description)
+            if w.lower()
+            not in {
+                'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'not',
+            }
+        )
+
+        # 去重（保留顺序）
+        seen: set[str] = set()
+        result: list[str] = []
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower not in seen:
+                seen.add(kw_lower)
+                result.append(kw)
+
+        return result
 
     def execute_skill(
         self, skill: Skill, employee: str, context: dict[str, Any] | None = None
