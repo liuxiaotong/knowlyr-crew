@@ -1061,6 +1061,302 @@ async def _execute_employee_with_tools(
     }
 
 
+async def _stream_employee_with_tools(
+    ctx: _AppContext,
+    name: str,
+    args: dict[str, str],
+    *,
+    agent_id: str | None = None,
+    model: str | None = None,
+    user_message: str | list[dict[str, Any]] | None = None,
+    message_history: list[dict[str, Any]] | None = None,
+    sender_id: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+) -> Any:
+    """流式版 agent loop — 中间轮非流式处理工具，最后一轮流式输出.
+
+    Yields: {"delta": str, "done": False} 和最终 {"done": True, ...}
+    """
+    import json as _json
+
+    from crew.discovery import discover_employees
+    from crew.engine import CrewEngine
+    from crew.executor import (
+        StreamWithToolsResult,
+        aexecute_with_tools,
+        astream_final_response,
+    )
+    from crew.providers import Provider, detect_provider
+    from crew.tool_schema import (
+        AGENT_TOOLS,
+        employee_tools_to_schemas,
+    )
+
+    discovery = discover_employees(project_dir=ctx.project_dir)
+    match = discovery.get(name)
+    if match is None:
+        raise EmployeeNotFoundError(name)
+
+    if match.agent_status == "frozen":
+        yield {"delta": f"员工 {match.character_name or name} 已冻结，无法执行任务", "done": False}
+        yield {"done": True, "employee_id": name, "tokens_used": 0, "latency_ms": 0}
+        return
+
+    engine = CrewEngine(project_dir=ctx.project_dir)
+    max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
+    prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
+
+    # delegate 同事名单（同 _execute_employee_with_tools 逻辑）
+    if "delegate" in (match.tools or []):
+        from crew.organization import get_effective_authority, load_organization
+
+        org = load_organization(project_dir=ctx.project_dir)
+        team_members: dict[str, list[str]] = {}
+        ungrouped: list[str] = []
+        for emp_name, emp in discovery.employees.items():
+            if emp_name == name:
+                continue
+            label = emp.character_name or emp.effective_display_name
+            auth = get_effective_authority(org, emp_name, project_dir=ctx.project_dir) or "?"
+            tag = f"{emp_name}({label},{auth})"
+            team_id = org.get_team(emp_name)
+            if team_id:
+                team_members.setdefault(team_id, []).append(tag)
+            else:
+                ungrouped.append(tag)
+        sections: list[str] = []
+        for tid, members in team_members.items():
+            team_def = org.teams.get(tid)
+            team_label = team_def.label if team_def else tid
+            sections.append(f"**{team_label}**: {' '.join(members)}")
+        if ungrouped:
+            sections.append(f"**其他**: {' '.join(ungrouped)}")
+        if sections:
+            prompt += (
+                "\n\n---\n\n## 可委派的同事\n\n"
+                "A=自主执行 B=需Kai确认 C=看场景。"
+                "用 delegate/delegate_async/delegate_chain/route 调用。\n\n" + "\n".join(sections)
+            )
+
+    from crew.permission import PermissionGuard
+
+    if sender_id == "1":
+        from crew.tool_schema import AGENT_TOOLS as _AT
+
+        class AdminGuard:
+            def __init__(self):
+                self.employee_name = match.name
+                self.allowed = _AT | {"submit", "finish", "load_tools"}
+
+            def check(self, tool_name: str) -> None:
+                pass
+
+            def check_soft(self, tool_name: str) -> str | None:
+                return None
+
+        guard = AdminGuard()
+    else:
+        guard = PermissionGuard(match)
+
+    agent_tool_names = [t for t in (match.tools or []) if t in AGENT_TOOLS]
+    tool_schemas, deferred_names = employee_tools_to_schemas(agent_tool_names)
+    loaded_deferred: set[str] = set()
+
+    use_model = model or match.model or "claude-sonnet-4-20250514"
+    provider = detect_provider(use_model)
+    is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
+
+    messages: list[dict[str, Any]] = []
+    if message_history:
+        for h in message_history:
+            hist_attachments = h.get("attachments")
+            if hist_attachments and any(att.get("type", "").startswith("image/") for att in hist_attachments):
+                content_blocks: list[dict[str, Any]] = [{"type": "text", "text": h["content"]}]
+                for att in hist_attachments:
+                    if att.get("type", "").startswith("image/"):
+                        content_blocks.append({"type": "image", "source": {"type": "url", "url": att["url"]}})
+                messages.append({"role": h["role"], "content": content_blocks})
+            else:
+                messages.append({"role": h["role"], "content": h["content"]})
+
+    task_text = user_message or args.get("task", "请开始执行上述任务。")
+    if attachments and any(att.get("type", "").startswith("image/") for att in attachments):
+        content_blocks_user: list[dict[str, Any]] = [
+            {"type": "text", "text": task_text if isinstance(task_text, str) else str(task_text)}
+        ]
+        for att in attachments:
+            if att.get("type", "").startswith("image/"):
+                content_blocks_user.append({"type": "image", "source": {"type": "url", "url": att["url"]}})
+        messages.append({"role": "user", "content": content_blocks_user})
+    else:
+        messages.append({"role": "user", "content": task_text})
+
+    total_input = 0
+    total_output = 0
+    rounds = 0
+    effective_agent_id = agent_id or getattr(match, "agent_id", None)
+
+    import crew.webhook as _wh
+
+    _max_rounds = getattr(_wh, "_MAX_TOOL_ROUNDS", _MAX_TOOL_ROUNDS)
+
+    for rounds in range(_max_rounds):  # noqa: B007
+        # 先用非流式执行一轮，看是否有 tool_calls
+        result = await aexecute_with_tools(
+            system_prompt=prompt,
+            messages=messages,
+            tools=tool_schemas,
+            api_key=match.api_key or None,
+            model=use_model,
+            max_tokens=200000,
+            base_url=match.base_url or None,
+            fallback_model=match.fallback_model or None,
+            fallback_api_key=match.fallback_api_key or None,
+            fallback_base_url=match.fallback_base_url or None,
+        )
+        total_input += result.input_tokens
+        total_output += result.output_tokens
+
+        if not result.has_tool_calls:
+            # ── 最后一轮：用流式重发 ──
+            # 把当前 messages 用流式 API 再发一次（跳过刚才的非流式结果）
+            # 这样用户能看到 token 级别的流式输出
+            try:
+                holder = StreamWithToolsResult()
+                token_stream = astream_final_response(
+                    system_prompt=prompt,
+                    messages=messages,
+                    tools=tool_schemas,
+                    api_key=match.api_key or None,
+                    model=use_model,
+                    max_tokens=200000,
+                    base_url=match.base_url or None,
+                    holder=holder,
+                )
+                async for token in token_stream:
+                    yield {"delta": token, "done": False}
+
+                # 更新 token 统计（用流式的结果替换非流式的）
+                if holder.result:
+                    # 减去非流式探测的 tokens，加上流式的
+                    total_input = total_input - result.input_tokens + holder.result.input_tokens
+                    total_output = total_output - result.output_tokens + holder.result.output_tokens
+                    final_content = holder.result.content
+                else:
+                    final_content = result.content
+            except Exception as _stream_err:
+                logger.warning("流式最后一轮失败，回退到非流式: %s", _stream_err)
+                final_content = result.content
+                # 回退：把非流式结果逐段 yield
+                for chunk in _split_text_chunks(final_content, 20):
+                    yield {"delta": chunk, "done": False}
+
+            # 清洗内部标签
+            from crew.output_sanitizer import strip_internal_tags
+            final_content = strip_internal_tags(final_content)
+
+            yield {
+                "done": True,
+                "employee_id": name,
+                "tokens_used": total_input + total_output,
+                "latency_ms": 0,
+            }
+            return
+
+        # ── 中间轮：处理 tool calls（同 _execute_employee_with_tools 逻辑） ──
+        if is_anthropic:
+            assistant_content: list[dict[str, Any]] = []
+            if result.content:
+                assistant_content.append({"type": "text", "text": result.content})
+            for tc in result.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            tool_results: list[dict[str, Any]] = []
+            finished = False
+            for tc in result.tool_calls:
+                if tc.name == "load_tools":
+                    load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
+                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": load_msg})
+                    continue
+                tool_output = await _handle_tool_call(
+                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                    guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                )
+                if tool_output is None:
+                    final_content = tc.arguments.get("result", result.content)
+                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": final_content})
+                    finished = True
+                else:
+                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": tool_output[:10000]})
+            messages.append({"role": "user", "content": tool_results})
+            if finished:
+                from crew.output_sanitizer import strip_internal_tags
+                final_content = strip_internal_tags(final_content)
+                # finish tool 被调用 — 直接 yield 完整结果
+                for chunk in _split_text_chunks(final_content, 20):
+                    yield {"delta": chunk, "done": False}
+                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+                return
+        else:
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": result.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": _json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for tc in result.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            finished = False
+            for tc in result.tool_calls:
+                if tc.name == "load_tools":
+                    load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": load_msg})
+                    continue
+                tool_output = await _handle_tool_call(
+                    ctx, name, tc.name, tc.arguments, effective_agent_id,
+                    guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                )
+                if tool_output is None:
+                    final_content = tc.arguments.get("result", result.content)
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": final_content})
+                    finished = True
+                else:
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_output[:10000]})
+            if finished:
+                from crew.output_sanitizer import strip_internal_tags
+                final_content = strip_internal_tags(final_content)
+                for chunk in _split_text_chunks(final_content, 20):
+                    yield {"delta": chunk, "done": False}
+                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+                return
+
+    # 超过最大轮次
+    yield {"delta": "达到最大工具调用轮次限制。", "done": False}
+    yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+
+
+def _split_text_chunks(text: str, chunk_size: int = 20) -> list[str]:
+    """将文本按固定长度拆分为块（用于非流式 fallback）."""
+    if not text:
+        return []
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
 async def _handle_tool_call(
     ctx: _AppContext,
     employee_name: str,
@@ -1100,6 +1396,28 @@ async def _handle_tool_call(
             if not approved:
                 logger.warning("用户拒绝执行: %s.%s", employee_name, tool_name)
                 return f"[用户拒绝] 您拒绝了执行 {tool_name} 操作"
+
+    if tool_name == "query_memory":
+        import json as _json
+
+        from crew.memory import get_memory_store
+
+        project_dir = ctx.project_dir if ctx else Path(".")
+        store = get_memory_store(project_dir=project_dir)
+        _query_kwargs: dict[str, Any] = {
+            "employee": arguments.get("employee", employee_name),
+            "limit": arguments.get("limit", 20),
+        }
+        _cat = arguments.get("category")
+        if _cat:
+            _query_kwargs["category"] = _cat
+        _cls_max = arguments.get("classification_max")
+        if _cls_max:
+            _query_kwargs["classification_max"] = _cls_max
+        entries = store.query(**_query_kwargs)
+        data = [e.model_dump() if hasattr(e, "model_dump") else e for e in entries]
+        logger.info("query_memory: %s → %d 条", _query_kwargs.get("employee"), len(data))
+        return _json.dumps(data, ensure_ascii=False, default=str)
 
     if tool_name == "add_memory":
         from crew.memory import get_memory_store

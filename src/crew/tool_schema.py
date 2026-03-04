@@ -1095,6 +1095,35 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["content"],
         },
     },
+    "query_memory": {
+        "name": "query_memory",
+        "description": "查询员工的持久化记忆。可按类别过滤。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "employee": {
+                    "type": "string",
+                    "description": "员工名称（slug）",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": ["decision", "estimate", "finding", "correction", "pattern"],
+                    "description": "按类别过滤（可选）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最大返回条数（默认 20）",
+                    "default": 20,
+                },
+                "classification_max": {
+                    "type": "string",
+                    "enum": ["public", "internal", "restricted", "confidential"],
+                    "description": "最高信息分级（可选，不传则不过滤）",
+                },
+            },
+            "required": ["employee"],
+        },
+    },
     # ── 生活助手 ──
     "translate": {
         "name": "translate",
@@ -1767,6 +1796,7 @@ AGENT_TOOLS = {
     "stock_price",
     # 记忆
     "add_memory",
+    "query_memory",
     "track_decision",
     # 飞书文档
     "search_feishu_docs",

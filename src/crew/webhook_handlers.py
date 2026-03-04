@@ -4332,8 +4332,37 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
 
         try:
-            if has_agent_tools and not context_only:
-                # 使用带工具的执行路径
+            if has_agent_tools and not context_only and stream:
+                # 流式 agent tools 路径 — 真流式逐 token 推送
+                import crew.webhook_executor as _wh_exec
+
+                agent_stream = _wh_exec._stream_employee_with_tools(
+                    ctx,
+                    employee_id,
+                    {},  # args
+                    agent_id=None,
+                    model=model,
+                    user_message=message,
+                    message_history=message_history,
+                    sender_id=sender_id,
+                    attachments=attachments,
+                )
+
+                async def _agent_sse_generator():
+                    async for chunk in agent_stream:
+                        chunk_data = _json.dumps(chunk, ensure_ascii=False)
+                        yield f"data: {chunk_data}\n\n"
+
+                return StreamingResponse(
+                    _agent_sse_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            elif has_agent_tools and not context_only:
+                # 非流式 agent tools 路径
                 import crew.webhook_executor as _wh_exec
 
                 exec_result = await _wh_exec._execute_employee_with_tools(
