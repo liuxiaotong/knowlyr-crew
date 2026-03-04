@@ -9,7 +9,7 @@ from crew.webhook_context import (
     _NOTION_API_KEY,
     _NOTION_VERSION,
 )
-from crew.webhook_tools.feishu import _CITY_CODES
+from crew.webhook_tools._constants import _CITY_CODES
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext

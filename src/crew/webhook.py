@@ -170,9 +170,12 @@ from crew.webhook_tools.data_query import (  # noqa: F401
 from crew.webhook_tools.external import (  # noqa: F401
     _tool_web_search,
 )
-from crew.webhook_tools.feishu import (  # noqa: F401
-    _tool_read_feishu_calendar,
-)
+try:
+    from crew.webhook_tools.feishu import (  # noqa: F401
+        _tool_read_feishu_calendar,
+    )
+except ImportError:
+    pass
 
 # ── re-export: 工具函数（测试和外部代码仍从 crew.webhook import）──
 # ── re-export: Skills handlers ──

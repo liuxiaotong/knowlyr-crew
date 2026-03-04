@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from crew.webhook_tools.feishu import _UNIT_CONVERSIONS
+from crew.webhook_tools._constants import _UNIT_CONVERSIONS
 
 if TYPE_CHECKING:
     from crew.webhook_context import _AppContext
