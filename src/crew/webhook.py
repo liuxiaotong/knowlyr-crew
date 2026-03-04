@@ -155,6 +155,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_popular,
     _handle_memory_feedback_summary,
     _handle_wiki_file_delete,
+    _handle_wiki_spaces_list,
     _handle_work_log,
     _health,
     _metrics,
@@ -811,6 +812,11 @@ def create_webhook_app(
             methods=["POST"],
         ),
         # Wiki 文件管理端点
+        Route(
+            "/api/wiki/spaces",
+            endpoint=_make_handler(ctx, _handle_wiki_spaces_list),
+            methods=["GET"],
+        ),
         Route(
             "/api/wiki/files/{file_id:int}",
             endpoint=_make_handler(ctx, _handle_wiki_file_delete),

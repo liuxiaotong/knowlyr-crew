@@ -4827,6 +4827,40 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": f"删除失败: {exc}"}, status_code=500)
 
 
+async def _handle_wiki_spaces_list(request: Any, ctx: _AppContext) -> Any:
+    """Wiki 空间列表 — GET /api/wiki/spaces.
+
+    返回所有可用的 Wiki 空间，包含 slug、名称、ID 等信息。
+    """
+    from starlette.responses import JSONResponse
+
+    wiki_api_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
+    wiki_admin_token = os.environ.get("WIKI_ADMIN_TOKEN", "") or os.environ.get(
+        "ANTGATHER_API_TOKEN", ""
+    )
+    if not wiki_api_url or not wiki_admin_token:
+        return JSONResponse(
+            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+            status_code=500,
+        )
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{wiki_api_url}/api/admin/wiki/spaces",
+                headers={"Authorization": f"Bearer {wiki_admin_token}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            spaces = data.get("spaces", [])
+            return JSONResponse({"spaces": spaces, "total": len(spaces)})
+    except Exception as exc:
+        logger.exception("Wiki 空间列表查询失败")
+        return JSONResponse({"error": f"查询失败: {exc}"}, status_code=500)
+
+
 # ── 配置存储 API ──
 
 

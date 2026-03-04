@@ -1513,6 +1513,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
+                name="wiki_list_spaces",
+                description="列出所有可用的 Wiki 空间 — 返回每个空间的 slug、名称、ID 和文档数量",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            Tool(
                 name="wiki_create_doc",
                 description="创建 Wiki 文档页 — 在指定空间下新建文档",
                 inputSchema={
@@ -3182,6 +3190,43 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
 
+        elif name == "wiki_list_spaces":
+            admin_cfg = _get_wiki_admin_config()
+            if not admin_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, admin_token = admin_cfg
+            try:
+                spaces = await _wiki_list_spaces(base_url, admin_token)
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"spaces": spaces, "total": len(spaces)},
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"查询空间列表失败: {exc}"}, ensure_ascii=False
+                        ),
+                    )
+                ]
+
         elif name == "wiki_create_doc":
             admin_cfg = _get_wiki_admin_config()
             if not admin_cfg:
@@ -3232,7 +3277,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         type="text",
                         text=json.dumps(
                             {
-                                "error": f"未找到空间: {space_slug}，可用空间请通过 wiki_list_files 查看"
+                                "error": f"空间不存在: {space_slug}，请先通过 wiki_list_spaces 查看可用空间"
                             },
                             ensure_ascii=False,
                         ),
