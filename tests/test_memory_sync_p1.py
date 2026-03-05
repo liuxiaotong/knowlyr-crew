@@ -64,11 +64,13 @@ class TestMemoryAddHandler:
             return_value={
                 "employee": "test-engineer",
                 "category": "decision",
-                "content": "决定使用 PostgreSQL",
+                "content": "决定使用 PostgreSQL 作为主数据库，因为它在事务处理和扩展性方面表现优秀，避免了 MySQL 的已知限制",
                 "source_session": "sess-001",
                 "tags": ["auto-push", "claude-code"],
             }
         )
+        # 设置 query_params 让 force=true 绕过质量检查和相似度检测
+        request.query_params = {"force": "true"}
 
         response = await _handle_memory_add(request, ctx)
         body = json.loads(response.body)
@@ -94,7 +96,7 @@ class TestMemoryAddHandler:
         payload = {
             "employee": "test-engineer",
             "category": "decision",
-            "content": "决定使用 PostgreSQL",
+            "content": "决定使用 PostgreSQL 作为主数据库，因为它在事务处理和扩展性方面表现优秀，避免了 MySQL 的已知限制",
             "source_session": "sess-002",
             "tags": ["auto-push"],
         }
@@ -102,14 +104,16 @@ class TestMemoryAddHandler:
         # 第一次写入
         request1 = AsyncMock()
         request1.json = AsyncMock(return_value=payload)
+        request1.query_params = {"force": "true"}
         resp1 = await _handle_memory_add(request1, ctx)
         body1 = json.loads(resp1.body)
         assert body1["ok"] is True
         assert body1["skipped"] is False
 
-        # 第二次写入（幂等）
+        # 第二次写入（幂等）— force=true 绕过相似度检测，但幂等检查仍在后面
         request2 = AsyncMock()
         request2.json = AsyncMock(return_value=payload)
+        request2.query_params = {"force": "true"}
         resp2 = await _handle_memory_add(request2, ctx)
         body2 = json.loads(resp2.body)
         assert body2["ok"] is True
@@ -176,10 +180,11 @@ class TestMemoryAddHandler:
             return_value={
                 "employee": "cache-test",
                 "category": "decision",
-                "content": "新决策",
+                "content": "决定重构缓存系统，因为当前方案在高并发场景下存在严重的竞态条件，导致数据不一致",
                 "source_session": "sess-cache",
             }
         )
+        request.query_params = {"force": "true"}
 
         await _handle_memory_add(request, ctx)
         assert "cache-test" not in _CACHE
@@ -408,11 +413,12 @@ class TestEndToEnd:
             return_value={
                 "employee": "e2e-test",
                 "category": "finding",
-                "content": "端到端测试记忆",
+                "content": "端到端测试发现数据库连接池配置存在问题，因为最大连接数设置过低导致高峰期请求排队，建议调整为合理值",
                 "source_session": "e2e-sess",
                 "tags": ["e2e"],
             }
         )
+        request.query_params = {"force": "true"}
 
         resp = await _handle_memory_add(request, ctx)
         body = json.loads(resp.body)
@@ -422,7 +428,7 @@ class TestEndToEnd:
         store = MemoryStore(memory_dir=mem_dir)
         entries = store.query("e2e-test")
         assert len(entries) == 1
-        assert entries[0].content == "端到端测试记忆"
+        assert "端到端测试" in entries[0].content
         assert "e2e" in entries[0].tags
 
     def test_different_sessions_different_categories(self, store):

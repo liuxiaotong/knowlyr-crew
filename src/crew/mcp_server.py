@@ -2770,8 +2770,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 # 本地 fallback
                 import re as _re_kv
 
-                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/-]*$")
-                if ".." in key or "." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
+                _KV_KEY_RE = _re_kv.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+                # BUG FIX: 原来 "." in key 会拦截所有带扩展名的文件（如 config/local.md）
+                # 修改为只检查 ".." 路径穿越，与远程版本 _validate_kv_key 保持一致
+                if ".." in key or key.startswith("/") or not _KV_KEY_RE.match(key):
                     return [
                         TextContent(
                             type="text",
@@ -3298,9 +3300,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 return [
                     TextContent(
                         type="text",
-                        text=json.dumps(
-                            {"error": f"查询空间列表失败: {exc}"}, ensure_ascii=False
-                        ),
+                        text=json.dumps({"error": f"查询空间列表失败: {exc}"}, ensure_ascii=False),
                     )
                 ]
 
@@ -3389,7 +3389,11 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 if isinstance(exc, _httpx.HTTPStatusError) and exc.response.status_code == 409:
                     try:
                         conflict_detail = exc.response.json().get("detail", {})
-                        existing = conflict_detail.get("existing_doc", {}) if isinstance(conflict_detail, dict) else {}
+                        existing = (
+                            conflict_detail.get("existing_doc", {})
+                            if isinstance(conflict_detail, dict)
+                            else {}
+                        )
                         existing_id = existing.get("id")
                     except Exception:
                         existing_id = None
@@ -3405,7 +3409,9 @@ def create_server(project_dir: Path | None = None) -> "Server":
                                 ai_content=arguments.get("ai_content") or None,
                                 excerpt=arguments.get("excerpt") or None,
                             )
-                            update_result["_fallback"] = f"slug '{slug}' 已存在 (doc_id={existing_id})，已自动更新"
+                            update_result["_fallback"] = (
+                                f"slug '{slug}' 已存在 (doc_id={existing_id})，已自动更新"
+                            )
                             return [
                                 TextContent(
                                     type="text",

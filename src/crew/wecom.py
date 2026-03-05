@@ -173,9 +173,7 @@ def verify_wecom_signature(
     return _hmac.compare_digest(digest, signature)
 
 
-def generate_wecom_signature(
-    token: str, timestamp: str, nonce: str, msg_encrypt: str
-) -> str:
+def generate_wecom_signature(token: str, timestamp: str, nonce: str, msg_encrypt: str) -> str:
     """生成企微回调签名."""
     parts = sorted([token, timestamp, nonce, msg_encrypt])
     return hashlib.sha1("".join(parts).encode("utf-8")).hexdigest()
@@ -346,7 +344,7 @@ def strip_wecom_at_prefix(content: str, app_name: str = "") -> str:
     # 格式: "@应用名 后续消息" 或 "@应用名\n后续消息"
     match = re.match(r"@\S+[\s]*", content)
     if match:
-        remaining = content[match.end():].strip()
+        remaining = content[match.end() :].strip()
         return remaining if remaining else content
 
     return content

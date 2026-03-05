@@ -38,7 +38,7 @@ class TestSGBridgeConfig:
 
     def test_defaults(self):
         cfg = SGBridgeConfig()
-        assert cfg.ssh_host == "43.106.24.105"
+        assert cfg.ssh_host == ""
         assert cfg.ssh_user == "root"
         assert cfg.enabled is True
         assert cfg.claude_timeout == 180

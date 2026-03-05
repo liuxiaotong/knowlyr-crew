@@ -21,6 +21,7 @@ class TestTrajectoryArchive:
             def __init__(self, payload):
                 self._payload = payload
                 self.query_params = {}
+                self.headers = {}
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -53,7 +54,11 @@ class TestTrajectoryArchive:
                     "step_id": 2,
                     "thought": "修改代码",
                     "tool_name": "Edit",
-                    "tool_params": {"file_path": "/root/test.py", "old_string": "old", "new_string": "new"},
+                    "tool_params": {
+                        "file_path": "/root/test.py",
+                        "old_string": "old",
+                        "new_string": "new",
+                    },
                     "tool_output": "修改成功",
                     "tool_exit_code": 0,
                     "timestamp": "2026-03-02T17:01:00Z",
@@ -61,8 +66,12 @@ class TestTrajectoryArchive:
             ],
         }
 
-        # Mock /data/trajectory_archive 路径到 tmp_path
-        monkeypatch.setattr("crew.webhook_handlers.Path", lambda p: tmp_path / p.lstrip("/data/"))  # noqa: B005
+        # Mock /data/trajectory_archive 路径到 tmp_path 下
+        archive_dir = tmp_path / "trajectory_archive"
+        monkeypatch.setattr(
+            "crew.webhook_handlers.Path",
+            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+        )
 
         request = MockRequest(payload)
         ctx = MockContext()
@@ -74,9 +83,9 @@ class TestTrajectoryArchive:
         assert response.status_code == 200
         resp_data = json.loads(response.body.decode("utf-8"))
         assert resp_data["ok"] is True
-        assert resp_data["steps_received"] == 2
+        assert resp_data["total_steps"] == 2
         assert "trajectory_id" in resp_data
-        assert "stored_at" in resp_data
+        assert "file_path" in resp_data
 
     @pytest.mark.asyncio
     async def test_trajectory_file_structure(self, tmp_path, monkeypatch):
@@ -87,6 +96,7 @@ class TestTrajectoryArchive:
             def __init__(self, payload):
                 self._payload = payload
                 self.query_params = {}
+                self.headers = {}
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -119,6 +129,13 @@ class TestTrajectoryArchive:
         # 使用真实路径
         date_str = date.today().isoformat()
 
+        # Mock /data/trajectory_archive 路径到 tmp_path 下
+        archive_dir = tmp_path / "trajectory_archive"
+        monkeypatch.setattr(
+            "crew.webhook_handlers.Path",
+            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+        )
+
         request = MockRequest(payload)
         ctx = MockContext()
 
@@ -128,17 +145,19 @@ class TestTrajectoryArchive:
         assert response.status_code == 200
         resp_data = json.loads(response.body.decode("utf-8"))
 
-        stored_path = Path(resp_data["stored_at"])
+        stored_path = Path(resp_data["file_path"])
         assert stored_path.exists()
         assert stored_path.parent.name == date_str
         assert stored_path.suffix == ".jsonl"
 
-        # 验证文件内容
-        lines = stored_path.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 1
-        step_data = json.loads(lines[0])
-        assert step_data["tool_name"] == "Bash"
-        assert step_data["tool_output"] == "test"
+        # 验证文件内容（单个 JSON 对象包含完整轨迹）
+        content = stored_path.read_text(encoding="utf-8").strip()
+        traj_data = json.loads(content)
+        assert "trajectory" in traj_data
+        assert len(traj_data["trajectory"]) == 1
+        step_data = traj_data["trajectory"][0]
+        assert step_data["action"]["tool"] == "Bash"
+        assert step_data["result"] == "test"
 
     @pytest.mark.asyncio
     async def test_trajectory_index_updated(self, tmp_path, monkeypatch):

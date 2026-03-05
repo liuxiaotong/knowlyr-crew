@@ -35,7 +35,7 @@ _CACHE: dict[str, MemorySnapshot] = {}
 
 def _count_lines(store, employee: str) -> int:
     """快速统计 JSONL 文件行数（不解析 JSON）."""
-    if not hasattr(store, '_employee_file'):
+    if not hasattr(store, "_employee_file"):
         return -1  # DB-backed store: 无文件，依靠 TTL 失效
     path = store._employee_file(employee)
     if not path.exists():

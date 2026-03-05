@@ -1,6 +1,5 @@
 """测试记忆标签规范和词典."""
 
-
 from crew.memory_tags import (
     get_all_predefined_tags,
     normalize_tag,

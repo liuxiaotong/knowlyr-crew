@@ -42,7 +42,7 @@ PERMISSIONS_EXCEPTIONS = {"ceo-assistant"}
 def audit_employee(emp, org):
     """审计单个员工，返回 (issues, infos) 列表."""
     issues = []  # 错误/警告
-    infos = []   # 信息
+    infos = []  # 信息
 
     name = emp.name
 
@@ -120,6 +120,7 @@ def main():
         for d in private_dir.iterdir():
             if d.is_dir() and (d / "employee.yaml").exists():
                 import yaml
+
                 config = yaml.safe_load((d / "employee.yaml").read_text("utf-8"))
                 private_names.add(config.get("name", d.name))
 
@@ -154,14 +155,16 @@ def main():
             status = "PASS"
             total_pass += 1
 
-        results.append({
-            "name": name,
-            "status": status,
-            "team": team_id,
-            "authority": auth,
-            "issues": issues,
-            "infos": infos,
-        })
+        results.append(
+            {
+                "name": name,
+                "status": status,
+                "team": team_id,
+                "authority": auth,
+                "issues": issues,
+                "infos": infos,
+            }
+        )
 
     if json_output:
         print(json.dumps(results, ensure_ascii=False, indent=2))
@@ -181,8 +184,12 @@ def main():
         table.add_column("问题 / 信息", ratio=1)
 
         for r in results:
-            status_style = {"PASS": "[green]PASS[/]", "INFO": "[yellow]INFO[/]",
-                            "FAIL": "[red]FAIL[/]", "MISS": "[red]MISS[/]"}
+            status_style = {
+                "PASS": "[green]PASS[/]",
+                "INFO": "[yellow]INFO[/]",
+                "FAIL": "[red]FAIL[/]",
+                "MISS": "[red]MISS[/]",
+            }
             details = []
             for i in r["issues"]:
                 details.append(f"[red]{i}[/]")
@@ -208,8 +215,10 @@ def main():
         print("-" * 80)
         for r in results:
             details = "; ".join(r["issues"] + r.get("infos", [])) or "OK"
-            print(f"{r['name']:<24} {r['status']:<6} {r.get('team', '-'):<16} "
-                  f"{r.get('authority', '-'):<4} {details}")
+            print(
+                f"{r['name']:<24} {r['status']:<6} {r.get('team', '-'):<16} "
+                f"{r.get('authority', '-'):<4} {details}"
+            )
         print(f"\n总计: {total_pass} PASS  {total_warn} INFO  {total_fail} FAIL")
 
     if total_fail > 0:

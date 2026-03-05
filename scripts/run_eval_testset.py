@@ -136,8 +136,6 @@ def run_test_case(
     }
 
 
-
-
 # ── 评分 ────────────────────────────────────────────────────────────
 
 
@@ -250,8 +248,7 @@ def _print_comparison(current: list[dict[str, Any]], previous: list[dict[str, An
             emp = r.get("employee", "unknown")
             prev_by_employee.setdefault(emp, []).append(r)
         prev_avg = {
-            emp: sum(r["total_score"] for r in rs) / len(rs)
-            for emp, rs in prev_by_employee.items()
+            emp: sum(r["total_score"] for r in rs) / len(rs) for emp, rs in prev_by_employee.items()
         }
     else:
         prev_avg = {}

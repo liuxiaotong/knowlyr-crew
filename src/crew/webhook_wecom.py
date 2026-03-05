@@ -148,7 +148,11 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     # 后台处理（企微要求快速返回 "success"）
     task = asyncio.create_task(
         _wecom_dispatch(
-            ctx, from_user, content, config.agent_id, token_mgr,
+            ctx,
+            from_user,
+            content,
+            config.agent_id,
+            token_mgr,
             chat_id=chat_id if is_group else "",
             is_group=is_group,
         )

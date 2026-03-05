@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from crew.webhook_tools.engineering import _tool_run_python, _validate_python_code
+
+# 启用代码执行功能（测试环境需要）
+os.environ.setdefault("CREW_ENABLE_CODE_EXEC", "1")
 
 
 def _run(coro):

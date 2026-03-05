@@ -448,18 +448,25 @@ class MemoryStore:
         _CLASSIFICATION_LEVELS = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
 
         if not include_confidential:
-            entries = [e for e in entries if getattr(e, 'classification', 'internal') != 'confidential']
+            entries = [
+                e for e in entries if getattr(e, "classification", "internal") != "confidential"
+            ]
 
         if classification_max is not None:
             max_level = _CLASSIFICATION_LEVELS.get(classification_max, 1)
-            entries = [e for e in entries if _CLASSIFICATION_LEVELS.get(getattr(e, 'classification', 'internal'), 1) <= max_level]
+            entries = [
+                e
+                for e in entries
+                if _CLASSIFICATION_LEVELS.get(getattr(e, "classification", "internal"), 1)
+                <= max_level
+            ]
 
         if allowed_domains is not None:
             filtered = []
             for e in entries:
-                e_cls = getattr(e, 'classification', 'internal')
-                if e_cls == 'restricted':
-                    e_domain = getattr(e, 'domain', []) or []
+                e_cls = getattr(e, "classification", "internal")
+                if e_cls == "restricted":
+                    e_domain = getattr(e, "domain", []) or []
                     if e_domain and not set(e_domain) & set(allowed_domains):
                         continue
                 filtered.append(e)
@@ -634,7 +641,12 @@ class MemoryStore:
                         results = index.search(employee, query, limit=limit)
                         if results:
                             entries_map = {e.id: e for e in self._load_employee_entries(employee)}
-                            _CLASSIFICATION_LEVELS = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
+                            _CLASSIFICATION_LEVELS = {
+                                "public": 0,
+                                "internal": 1,
+                                "restricted": 2,
+                                "confidential": 3,
+                            }
                             filtered: list[MemoryEntry] = []
                             for entry_id, _content, _score in results:
                                 entry = entries_map.get(entry_id)
@@ -645,16 +657,25 @@ class MemoryStore:
                                 if max_visibility != "private" and entry.visibility == "private":
                                     continue
                                 # 信息分级过滤（与 query() 对齐）
-                                if not include_confidential and getattr(entry, 'classification', 'internal') == 'confidential':
+                                if (
+                                    not include_confidential
+                                    and getattr(entry, "classification", "internal")
+                                    == "confidential"
+                                ):
                                     continue
                                 if classification_max is not None:
                                     max_level = _CLASSIFICATION_LEVELS.get(classification_max, 1)
-                                    if _CLASSIFICATION_LEVELS.get(getattr(entry, 'classification', 'internal'), 1) > max_level:
+                                    if (
+                                        _CLASSIFICATION_LEVELS.get(
+                                            getattr(entry, "classification", "internal"), 1
+                                        )
+                                        > max_level
+                                    ):
                                         continue
                                 if allowed_domains is not None:
-                                    e_cls = getattr(entry, 'classification', 'internal')
-                                    if e_cls == 'restricted':
-                                        e_domain = getattr(entry, 'domain', []) or []
+                                    e_cls = getattr(entry, "classification", "internal")
+                                    if e_cls == "restricted":
+                                        e_domain = getattr(entry, "domain", []) or []
                                         if e_domain and not set(e_domain) & set(allowed_domains):
                                             continue
                                 filtered.append(self._apply_decay(entry))
@@ -665,7 +686,9 @@ class MemoryStore:
                 logger.debug("语义搜索降级: %s", e)
 
         if not own_found:
-            entries = self.query(employee, limit=limit, max_visibility=max_visibility, **_cls_kwargs)
+            entries = self.query(
+                employee, limit=limit, max_visibility=max_visibility, **_cls_kwargs
+            )
             if entries:
                 parts.append(self._format_entries(entries))
 
@@ -1055,8 +1078,10 @@ def get_memory_store(project_dir=None):
     """工厂函数：PG 可用时返回 MemoryStoreDB，否则降级到文件版 MemoryStore。"""
     try:
         from crew.database import is_pg
+
         if is_pg():
             from crew.memory_store_db import MemoryStoreDB
+
             return MemoryStoreDB(project_dir=project_dir)
     except Exception as e:
         logging.getLogger(__name__).warning("MemoryStoreDB 初始化失败，降级到文件版: %s", e)

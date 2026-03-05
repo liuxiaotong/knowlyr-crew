@@ -124,14 +124,16 @@ def clean_file(file_path: Path, *, apply: bool = False) -> dict[str, Any]:
                 stats["soul_prompt_fixed"] += 1
             else:
                 stats["soul_prompt_needs_review"] += 1
-                needs_review.append({
-                    "line": i + 1,
-                    "task_preview": task_str[:100] + "...",
-                    "employee": (
-                        data.get("metadata", {}).get("employee")
-                        or data.get("employee", "unknown")
-                    ),
-                })
+                needs_review.append(
+                    {
+                        "line": i + 1,
+                        "task_preview": task_str[:100] + "...",
+                        "employee": (
+                            data.get("metadata", {}).get("employee")
+                            or data.get("employee", "unknown")
+                        ),
+                    }
+                )
 
         cleaned.append(json.dumps(data, ensure_ascii=False))
 

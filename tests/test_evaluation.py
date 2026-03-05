@@ -234,7 +234,9 @@ class TestEvaluationEngine:
         """track 时传 deadline，验证 Decision 包含正确的 deadline."""
         engine = EvaluationEngine(eval_dir=tmp_path / "eval")
         d = engine.track(
-            "pm", "estimate", "需要 3 天",
+            "pm",
+            "estimate",
+            "需要 3 天",
             deadline="2026-03-07",
         )
         assert d.deadline == "2026-03-07"
@@ -247,7 +249,9 @@ class TestEvaluationEngine:
         """track 时传 task_id，验证 Decision 包含正确的 task_id."""
         engine = EvaluationEngine(eval_dir=tmp_path / "eval")
         d = engine.track(
-            "dev", "commitment", "用 React 重构前端",
+            "dev",
+            "commitment",
+            "用 React 重构前端",
             task_id="20260301-120000-abc12345",
         )
         assert d.task_id == "20260301-120000-abc12345"
@@ -310,7 +314,9 @@ class TestScanOverdueDecisions:
 
         # track 一个带 task_id 的过期决策
         d = engine.track(
-            "dev", "commitment", "用新框架重构",
+            "dev",
+            "commitment",
+            "用新框架重构",
             deadline="2026-02-01",
             task_id=task.task_id,
         )
@@ -340,7 +346,9 @@ class TestScanOverdueDecisions:
 
         # track 一个超期 10 天的决策
         d = engine.track(
-            "pm", "estimate", "需要完成用户调研",
+            "pm",
+            "estimate",
+            "需要完成用户调研",
             deadline="2026-02-20",
         )
 
@@ -359,7 +367,7 @@ class TestScanOverdueDecisions:
 
         with patch("crew.cron_evaluate.resolve_project_dir", return_value=tmp_path):
             with patch("crew.evaluation.resolve_project_dir", return_value=tmp_path):
-                with patch("crew.cron_evaluate.MemoryStore", FakeMemoryStore):
+                with patch("crew.cron_evaluate.get_memory_store", return_value=FakeMemoryStore()):
                     result = await scan_overdue_decisions(project_dir=tmp_path)
 
         # 应该在 expired 列表中
@@ -381,7 +389,9 @@ class TestScanOverdueDecisions:
 
         # track 一个过期 3 天的决策（无 task_id）
         d = engine.track(
-            "dev", "recommendation", "建议用缓存优化查询",
+            "dev",
+            "recommendation",
+            "建议用缓存优化查询",
             deadline="2026-03-01",
         )
 

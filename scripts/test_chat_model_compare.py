@@ -106,12 +106,9 @@ def main():
 
         for model_name, config in MODELS.items():
             try:
-                reply, elapsed, in_tok, out_tok = call_model(
-                    config, SYSTEM_PROMPT, prompt
-                )
+                reply, elapsed, in_tok, out_tok = call_model(config, SYSTEM_PROMPT, prompt)
                 cost = (
-                    in_tok * prices[model_name]["input"]
-                    + out_tok * prices[model_name]["output"]
+                    in_tok * prices[model_name]["input"] + out_tok * prices[model_name]["output"]
                 ) / 1000
                 total_cost[model_name] += cost
                 total_time[model_name] += elapsed
@@ -137,9 +134,7 @@ def main():
             f"总成本 ${total_cost[model_name]:.4f}"
         )
     if total_cost["claude-opus-4-6"] > 0:
-        saving = (
-            1 - total_cost["kimi-k2.5"] / total_cost["claude-opus-4-6"]
-        ) * 100
+        saving = (1 - total_cost["kimi-k2.5"] / total_cost["claude-opus-4-6"]) * 100
         speedup = total_time["claude-opus-4-6"] / max(total_time["kimi-k2.5"], 0.1)
         print(f"\n  kimi 成本节省: {saving:.0f}%")
         print(f"  kimi 速度倍数: {speedup:.1f}x")

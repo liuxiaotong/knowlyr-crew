@@ -81,9 +81,7 @@ class SkillTriggerRecord(BaseModel):
     triggered_at: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="触发时间"
     )
-    execution_status: Literal["success", "failure", "skipped"] = Field(
-        description="执行状态"
-    )
+    execution_status: Literal["success", "failure", "skipped"] = Field(description="执行状态")
     execution_time_ms: int = Field(default=0, description="执行时间（毫秒）")
     actions_executed: int = Field(default=0, description="执行的动作数量")
     result: dict[str, Any] = Field(default_factory=dict, description="执行结果")
@@ -276,9 +274,7 @@ class SkillStore:
 
         for skill in all_skills:
             # 按员工统计
-            stats["by_employee"][skill.employee] = (
-                stats["by_employee"].get(skill.employee, 0) + 1
-            )
+            stats["by_employee"][skill.employee] = stats["by_employee"].get(skill.employee, 0) + 1
 
             # 按分类统计
             category = skill.metadata.category

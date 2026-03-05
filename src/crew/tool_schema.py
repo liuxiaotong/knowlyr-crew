@@ -1877,28 +1877,65 @@ DEFERRED_TOOLS = AGENT_TOOLS
 
 CORE_TOOLS = {
     # 员工管理
-    "send_message", "list_agents", "delegate", "delegate_async",
-    "delegate_chain", "route", "check_task", "list_tasks",
-    "organize_meeting", "check_meeting", "run_pipeline", "query_cost",
-    "schedule_task", "list_schedules", "cancel_schedule",
+    "send_message",
+    "list_agents",
+    "delegate",
+    "delegate_async",
+    "delegate_chain",
+    "route",
+    "check_task",
+    "list_tasks",
+    "organize_meeting",
+    "check_meeting",
+    "run_pipeline",
+    "query_cost",
+    "schedule_task",
+    "list_schedules",
+    "cancel_schedule",
     # 记忆与笔记
-    "add_memory", "create_note", "read_notes", "track_decision",
+    "add_memory",
+    "create_note",
+    "read_notes",
+    "track_decision",
     # 基础执行
-    "get_datetime", "calculate", "lookup_user", "web_search",
-    "read_url", "agent_file_read", "agent_file_grep", "project_status",
+    "get_datetime",
+    "calculate",
+    "lookup_user",
+    "web_search",
+    "read_url",
+    "agent_file_read",
+    "agent_file_grep",
+    "project_status",
 }
 
 # 飞书工具（过渡期保留，Phase 3 拆为独立 MCP server 后移除）
 FEISHU_TOOLS = {
-    "read_feishu_calendar", "delete_feishu_event", "create_feishu_event",
-    "find_free_time", "create_feishu_task", "list_feishu_tasks",
-    "complete_feishu_task", "delete_feishu_task", "update_feishu_task",
-    "feishu_chat_history", "send_feishu_dm", "feishu_group_members",
-    "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
-    "send_feishu_group", "send_feishu_file", "list_feishu_groups",
-    "read_feishu_sheet", "update_feishu_sheet", "create_feishu_spreadsheet",
-    "list_feishu_approvals", "feishu_contacts", "feishu_bitable",
-    "feishu_wiki", "approve_feishu",
+    "read_feishu_calendar",
+    "delete_feishu_event",
+    "create_feishu_event",
+    "find_free_time",
+    "create_feishu_task",
+    "list_feishu_tasks",
+    "complete_feishu_task",
+    "delete_feishu_task",
+    "update_feishu_task",
+    "feishu_chat_history",
+    "send_feishu_dm",
+    "feishu_group_members",
+    "search_feishu_docs",
+    "read_feishu_doc",
+    "create_feishu_doc",
+    "send_feishu_group",
+    "send_feishu_file",
+    "list_feishu_groups",
+    "read_feishu_sheet",
+    "update_feishu_sheet",
+    "create_feishu_spreadsheet",
+    "list_feishu_approvals",
+    "feishu_contacts",
+    "feishu_bitable",
+    "feishu_wiki",
+    "approve_feishu",
 }
 
 # ── 工具角色预设 ──
@@ -2096,7 +2133,9 @@ TOOL_ROLE_PRESETS["profile-data"] = CORE_TOOLS | FEISHU_TOOLS | {"run_python"}
 
 # 研究员: 核心 + 飞书，去掉委派（保持审计独立性）
 TOOL_ROLE_PRESETS["profile-researcher"] = (CORE_TOOLS | FEISHU_TOOLS) - {
-    "delegate_async", "delegate_chain", "route",
+    "delegate_async",
+    "delegate_chain",
+    "route",
 }
 
 # 商务: 核心 + 飞书
@@ -2110,7 +2149,11 @@ TOOL_ROLE_PRESETS["profile-infra"] = CORE_TOOLS | FEISHU_TOOLS
 
 # 安全审计: 核心 + 飞书，去掉影响独立性的写操作
 TOOL_ROLE_PRESETS["profile-security"] = (CORE_TOOLS | FEISHU_TOOLS) - {
-    "delegate", "delegate_async", "delegate_chain", "route", "send_feishu_dm",
+    "delegate",
+    "delegate_async",
+    "delegate_chain",
+    "route",
+    "send_feishu_dm",
 }
 
 

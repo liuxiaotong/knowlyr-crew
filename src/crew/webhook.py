@@ -422,7 +422,11 @@ def create_webhook_app(
                         len(results.get("expired", [])),
                     )
                     # 私信发送给 Kai（使用 owner_open_id）
-                    if ctx.feishu_token_mgr and ctx.feishu_config and ctx.feishu_config.owner_open_id:
+                    if (
+                        ctx.feishu_token_mgr
+                        and ctx.feishu_config
+                        and ctx.feishu_config.owner_open_id
+                    ):
                         try:
                             import json as _json
 
@@ -432,7 +436,10 @@ def create_webhook_app(
                             client = get_feishu_client()
                             resp = await client.post(
                                 "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
-                                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json",
+                                },
                                 json={
                                     "receive_id": ctx.feishu_config.owner_open_id,
                                     "msg_type": "text",
@@ -983,6 +990,7 @@ def create_webhook_app(
         # ── 初始化 memories 表（幂等 DDL）──
         try:
             from crew.memory_store_db import init_memory_tables
+
             init_memory_tables()
         except Exception as _init_err:
             logger.warning("memories 表初始化跳过: %s", _init_err)
@@ -995,22 +1003,57 @@ def create_webhook_app(
 
         # ── 打卡通报定时任务（每天 10:30 北京时间）──
         if ctx.wecom_ctx:
-            _checkin_task = asyncio.create_task(
-                _run_checkin_cron(), name="cron-wecom-checkin"
-            )
+            _checkin_task = asyncio.create_task(_run_checkin_cron(), name="cron-wecom-checkin")
             _startup_tasks.add(_checkin_task)
             _checkin_task.add_done_callback(_startup_tasks.discard)
 
         # ── 决策扫描定时任务（每天 10:00 北京时间）──
-        _evaluate_task = asyncio.create_task(
-            _run_evaluate_scan_cron(), name="cron-evaluate-scan"
-        )
+        _evaluate_task = asyncio.create_task(_run_evaluate_scan_cron(), name="cron-evaluate-scan")
         _startup_tasks.add(_evaluate_task)
         _evaluate_task.add_done_callback(_startup_tasks.discard)
+
+        # ── MCP Gateway 启动 ──
+        try:
+            from crew.mcp_gateway import MCPGatewayManager
+            from crew.mcp_gateway.audit import init_audit_table
+            from crew.mcp_gateway.credentials import _init_credentials_table
+
+            # 初始化审计和凭据表（幂等）
+            try:
+                init_audit_table()
+                _init_credentials_table()
+            except Exception as _tbl_err:
+                logger.warning("MCP Gateway 表初始化跳过: %s", _tbl_err)
+
+            _mcp_mgr = MCPGatewayManager(project_dir=project_dir)
+            ctx.mcp_gateway = _mcp_mgr
+
+            async def _start_mcp_gateway():
+                try:
+                    tool_count = await _mcp_mgr.start()
+                    if tool_count > 0:
+                        _mcp_mgr.inject_tools()
+                        logger.info("MCP Gateway: %d 个外部工具已注入", tool_count)
+                    else:
+                        logger.info("MCP Gateway: 无外部工具需要注入")
+                except Exception as _mcp_err:
+                    logger.warning("MCP Gateway 启动异常（非致命）: %s", _mcp_err)
+
+            _mcp_task = asyncio.create_task(_start_mcp_gateway(), name="mcp-gateway-startup")
+            _startup_tasks.add(_mcp_task)
+            _mcp_task.add_done_callback(_startup_tasks.discard)
+        except ImportError:
+            logger.debug("MCP Gateway 模块未安装，跳过")
 
     async def on_shutdown():
         if scheduler:
             await scheduler.stop()
+        # 关闭 MCP Gateway
+        if ctx.mcp_gateway:
+            try:
+                await ctx.mcp_gateway.stop()
+            except Exception as _mcp_err:
+                logger.warning("MCP Gateway 关闭异常: %s", _mcp_err)
         # 关闭企微 httpx 连接池
         from crew.wecom import close_wecom_client
 

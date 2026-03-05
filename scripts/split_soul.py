@@ -3,6 +3,7 @@
 
 用法: python scripts/split_soul.py [--dry-run]
 """
+
 import sys
 from pathlib import Path
 

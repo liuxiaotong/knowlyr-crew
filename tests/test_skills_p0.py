@@ -88,9 +88,7 @@ def test_keyword_trigger():
             employee="赵云帆",
             description="写代码前触发",
             trigger=SkillTrigger(type="keyword", keywords=["写代码", "实现 API", "修改 schema"]),
-            actions=[
-                SkillAction(type="query_memory", params={"query": "correction", "limit": 5})
-            ],
+            actions=[SkillAction(type="query_memory", params={"query": "correction", "limit": 5})],
         )
         skill_store.create_skill(skill)
 
@@ -138,9 +136,7 @@ def test_skill_execution():
             description="写代码前触发",
             trigger=SkillTrigger(type="keyword", keywords=["写代码"]),
             actions=[
-                SkillAction(
-                    type="query_memory", params={"category": "correction", "limit": 5}
-                )
+                SkillAction(type="query_memory", params={"category": "correction", "limit": 5})
             ],
         )
         skill_store.create_skill(skill)

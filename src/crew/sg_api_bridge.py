@@ -121,13 +121,15 @@ async def sg_api_dispatch(
     if soul:
         system_parts.append(soul)
 
-    system_parts.extend([
-        "",
-        "【聊天规则】",
-        "1. 不要加【墨言】或任何方括号前缀",
-        "2. 不要输出 Sources/来源 引用块",
-        "3. 直接用自然中文回复，像微信聊天一样简洁",
-    ])
+    system_parts.extend(
+        [
+            "",
+            "【聊天规则】",
+            "1. 不要加【墨言】或任何方括号前缀",
+            "2. 不要输出 Sources/来源 引用块",
+            "3. 直接用自然中文回复，像微信聊天一样简洁",
+        ]
+    )
 
     # Phase 3：外部对话输出控制（综合 channel + sender_type）
     from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
@@ -263,24 +265,38 @@ async def sg_api_dispatch(
                     push_event_fn=push_event_fn,
                 )
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": tool_output or "[工具执行完成]",
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": tool_output or "[工具执行完成]",
+                    }
+                )
 
             # 构建下一轮消息
-            messages.append({
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": turn_text_str},
-                    *[{"type": "tool_use", "id": t["id"], "name": t["name"], "input": t["input"]} for t in tool_uses],
-                ],
-            })
-            messages.append({
-                "role": "user",
-                "content": tool_results,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": turn_text_str},
+                        *[
+                            {
+                                "type": "tool_use",
+                                "id": t["id"],
+                                "name": t["name"],
+                                "input": t["input"],
+                            }
+                            for t in tool_uses
+                        ],
+                    ],
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": tool_results,
+                }
+            )
 
         except Exception as e:
             logger.error("SG API 调用失败: %s", e, exc_info=True)

@@ -3,6 +3,7 @@
 
 用法: python scripts/sync_api_tools.py [--dry-run]
 """
+
 import sys
 from pathlib import Path
 
@@ -32,14 +33,27 @@ ROLE_TOOLS: dict[str, list[str]] = {
     "solutions-architect": ["github_prs", "github_issues", "github_repo_activity", "web_search"],
     # 产品/文档类 — GitHub + Notion + 飞书文档
     "product-manager": [
-        "github_prs", "github_issues", "github_repo_activity", "web_search",
-        "notion_search", "notion_read", "notion_create",
-        "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
+        "github_prs",
+        "github_issues",
+        "github_repo_activity",
+        "web_search",
+        "notion_search",
+        "notion_read",
+        "notion_create",
+        "search_feishu_docs",
+        "read_feishu_doc",
+        "create_feishu_doc",
     ],
     "doc-writer": [
-        "github_prs", "github_issues", "web_search",
-        "notion_search", "notion_read", "notion_create",
-        "search_feishu_docs", "read_feishu_doc", "create_feishu_doc",
+        "github_prs",
+        "github_issues",
+        "web_search",
+        "notion_search",
+        "notion_read",
+        "notion_create",
+        "search_feishu_docs",
+        "read_feishu_doc",
+        "create_feishu_doc",
     ],
     "ux-designer": ["github_issues", "web_search", "notion_search", "notion_read"],
     # 研究类 — web_search + 信息采集
