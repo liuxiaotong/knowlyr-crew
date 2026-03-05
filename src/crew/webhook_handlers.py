@@ -335,6 +335,11 @@ async def _generate_avatar_background(
 async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
     """创建新员工 — POST /api/employees."""
 
+    # P2: 员工创建需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return _error_response(admin_err, 403)
+
     from crew.config_store import create_employee
 
     # 1. 解析请求
@@ -609,6 +614,11 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
 async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     """更新员工配置（model 等）— employee.yaml 是唯一真相源."""
     from starlette.responses import JSONResponse
+
+    # P2: 员工修改需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discovery import discover_employees
 
@@ -994,13 +1004,23 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "employee is required"}, status_code=400)
 
+    # P2: 记忆查询分级过滤 — 未指定 classification_max 时默认 "internal"
+    classification_max = request.query_params.get("classification_max", "internal")
+    _classification_levels = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
+    max_level = _classification_levels.get(classification_max, 1)
+
     store = get_memory_store(project_dir=ctx.project_dir)
     entries = store.query(
         employee=employee,
         category=category,
         limit=limit,
     )
-    data = [e.model_dump() for e in entries]
+    # 过滤超出请求分级上限的记忆
+    filtered = [
+        e for e in entries
+        if _classification_levels.get(getattr(e, "classification", "internal"), 1) <= max_level
+    ]
+    data = [e.model_dump() for e in filtered]
     return JSONResponse({"ok": True, "entries": data, "total": len(data)})
 
 
@@ -1293,6 +1313,11 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # P2: 记忆删除需要管理员权限（所有权校验）
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory import get_memory_store
 
     # 从路径参数获取 entry_id
@@ -1419,7 +1444,9 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     payload = (
         await request.json() if request.headers.get("content-type") == "application/json" else {}
     )
-    reviewed_by = payload.get("reviewed_by", "system")
+    # P2: reviewed_by 优先从 header 获取，防止 payload 伪造
+    reviewed_by = request.headers.get("x-user-id") or payload.get("reviewed_by", "system")
+    # TODO: reviewed_by 应强制从认证 token 解析，payload fallback 仅为过渡方案
 
     try:
         draft_store = MemoryDraftStore()
@@ -1485,7 +1512,9 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         await request.json() if request.headers.get("content-type") == "application/json" else {}
     )
     reason = payload.get("reason", "")
-    reviewed_by = payload.get("reviewed_by", "system")
+    # P2: reviewed_by 优先从 header 获取，防止 payload 伪造
+    reviewed_by = request.headers.get("x-user-id") or payload.get("reviewed_by", "system")
+    # TODO: reviewed_by 应强制从认证 token 解析，payload fallback 仅为过渡方案
 
     try:
         store = MemoryDraftStore()
@@ -1932,6 +1961,11 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # P2: 批量记忆操作需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory import get_memory_store
 
     payload = (
@@ -2060,6 +2094,11 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
         {"ok": true, "deleted": 2}
     """
     from starlette.responses import JSONResponse
+
+    # P2: 批量删除需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.memory import get_memory_store
 
@@ -3126,6 +3165,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 extra_context = EXTERNAL_OUTPUT_CONTROL_PROMPT
 
         # ── 异步回调模式（频道 @mention）──
+        # TODO: callback 目标应与调用者身份绑定，防止将结果投递到非授权渠道
         callback_channel_id = payload.get("callback_channel_id")
         if callback_channel_id is not None:
             try:
@@ -3605,6 +3645,11 @@ async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
 async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     """恢复员工权限 — POST /api/employees/{identifier}/authority/restore."""
     from starlette.responses import JSONResponse
+
+    # P2: 权限恢复需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discovery import discover_employees
     from crew.organization import (
@@ -4766,6 +4811,12 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # P2: KV 写入需要管理员权限
+    # TODO: 需要命名空间隔离，按调用者身份限定可写 key 前缀
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     key = request.path_params.get("key", "")
     err = _validate_kv_key(key)
     if err:
@@ -5160,6 +5211,11 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # P2: Wiki 文件删除需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     file_id_str = request.path_params.get("file_id", "")
     if not file_id_str:
         return JSONResponse({"error": "file_id is required"}, status_code=400)
@@ -5349,6 +5405,11 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
     """创建讨论会配置 — POST /api/config/discussions."""
     from starlette.responses import JSONResponse
 
+    # P2: 讨论会创建需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.config_store import create_discussion
 
     try:
@@ -5375,6 +5436,11 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
 async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
     """更新讨论会配置 — PUT /api/config/discussions/{name}."""
     from starlette.responses import JSONResponse
+
+    # P2: 讨论会更新需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import update_discussion
 
