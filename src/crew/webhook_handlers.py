@@ -3538,8 +3538,11 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
 
     # 归属校验：如果 task 有 owner，请求方须提供匹配的 user_id
     user_id = request.query_params.get("user_id") or request.headers.get("x-user-id", "")
-    if record.owner and user_id and record.owner != user_id:
-        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+    if record.owner:
+        if not user_id:
+            return JSONResponse({"error": "user_id required to access owned task"}, status_code=401)
+        if record.owner != user_id:
+            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
 
     return JSONResponse(record.model_dump(mode="json"))
 
@@ -3556,8 +3559,11 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
     # 归属校验
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
-    if record.owner and user_id != record.owner:
-        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+    if record.owner:
+        if not user_id:
+            return JSONResponse({"error": "user_id required to replay owned task"}, status_code=401)
+        if record.owner != user_id:
+            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
 
     if record.status not in ("completed", "failed"):
         return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
@@ -3591,8 +3597,11 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
 
     # 归属校验
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
-    if record.owner and user_id != record.owner:
-        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+    if record.owner:
+        if not user_id:
+            return JSONResponse({"error": "user_id required to approve owned task"}, status_code=401)
+        if record.owner != user_id:
+            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
 
     if record.status != "awaiting_approval":
         return JSONResponse(
