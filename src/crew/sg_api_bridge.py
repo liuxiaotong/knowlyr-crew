@@ -325,6 +325,7 @@ async def _execute_tool(
         from crew.webhook_executor import _handle_tool_call
 
         # 调用现有的工具执行逻辑（包含权限确认）
+        # TODO: sg_api_dispatch 尚未传入 sender_id，待认证体系完善后补充 target_user_id
         result = await _handle_tool_call(
             ctx=ctx,
             employee_name=employee_name,

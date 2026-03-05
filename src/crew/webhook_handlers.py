@@ -3691,15 +3691,22 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
             {"ok": False, "error": "请求不存在或已过期"},
             status_code=404,
         )
-    if perm_req.target_user_id and user_id and perm_req.target_user_id != user_id:
-        logger.warning(
-            "权限响应鉴权失败: request_id=%s, target=%s, actual=%s",
-            request_id, perm_req.target_user_id, user_id,
-        )
-        return JSONResponse(
-            {"ok": False, "error": "无权响应此权限请求"},
-            status_code=403,
-        )
+    # 当权限请求指定了目标用户时，必须验证操作者身份
+    if perm_req.target_user_id:
+        if not user_id:
+            return JSONResponse(
+                {"ok": False, "error": "user_id required for targeted permission"},
+                status_code=400,
+            )
+        if perm_req.target_user_id != user_id:
+            logger.warning(
+                "权限响应鉴权失败: request_id=%s, target=%s, actual=%s",
+                request_id, perm_req.target_user_id, user_id,
+            )
+            return JSONResponse(
+                {"ok": False, "error": "not authorized to respond"},
+                status_code=403,
+            )
 
     success = manager.respond(request_id, approved)
 
@@ -3722,6 +3729,7 @@ async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
 
     from crew.permission_request import PermissionManager
 
+    # TODO: user_id 应从认证 token 中提取而非查询参数，当前为临时方案
     user_id = request.query_params.get("user_id") or None
 
     manager = PermissionManager()

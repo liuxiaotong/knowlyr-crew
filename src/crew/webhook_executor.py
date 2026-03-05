@@ -947,6 +947,7 @@ async def _execute_employee_with_tools(
                     guard=guard,
                     max_visibility=max_visibility,
                     push_event_fn=None,
+                    target_user_id=sender_id or "",
                 )
                 if tool_output is None:
                     # finish tool
@@ -1014,6 +1015,7 @@ async def _execute_employee_with_tools(
                     guard=guard,
                     max_visibility=max_visibility,
                     push_event_fn=None,
+                    target_user_id=sender_id or "",
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
@@ -1236,6 +1238,7 @@ async def _stream_employee_with_tools(
             guard=guard,
             max_visibility=max_visibility,
             max_rounds=_max_rounds,
+            sender_id=sender_id,
         ):
             yield chunk
         return
@@ -1408,6 +1411,7 @@ async def _stream_employee_with_tools(
             tool_output = await _handle_tool_call(
                 ctx, name, tc.name, tc.arguments, effective_agent_id,
                 guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                target_user_id=sender_id or "",
             )
             if tool_output is None:
                 final_content = tc.arguments.get("result", full_text)
@@ -1446,6 +1450,7 @@ async def _stream_employee_with_tools_fallback(
     guard: Any,
     max_visibility: str,
     max_rounds: int,
+    sender_id: str | None = None,
 ) -> Any:
     """非 Anthropic provider 的降级 agent loop — 非流式执行，结果分块输出.
 
@@ -1513,6 +1518,7 @@ async def _stream_employee_with_tools_fallback(
             tool_output = await _handle_tool_call(
                 ctx, name, tc.name, tc.arguments, effective_agent_id,
                 guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                target_user_id=sender_id or "",
             )
             if tool_output is None:
                 final_content = tc.arguments.get("result", result.content)
