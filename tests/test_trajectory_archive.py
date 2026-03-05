@@ -197,13 +197,20 @@ class TestTrajectoryArchive:
             ],
         }
 
+        # Mock /data/trajectory_archive 路径到 tmp_path 下
+        archive_dir = tmp_path / "trajectory_archive"
+        monkeypatch.setattr(
+            "crew.webhook_handlers.Path",
+            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+        )
+
         request = MockRequest(payload)
         ctx = MockContext()
 
         response = await _handle_trajectory_report(request, ctx)
 
         # 验证索引文件
-        index_file = Path("/data/trajectory_archive/index.json")
+        index_file = archive_dir / "index.json"
         assert index_file.exists()
 
         index_data = json.loads(index_file.read_text(encoding="utf-8"))
@@ -263,6 +270,13 @@ class TestTrajectoryArchive:
                 },
             ],
         }
+
+        # Mock /data/trajectory_archive 路径到 tmp_path 下
+        archive_dir = tmp_path / "trajectory_archive"
+        monkeypatch.setattr(
+            "crew.webhook_handlers.Path",
+            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+        )
 
         request = MockRequest(payload)
         ctx = MockContext()
