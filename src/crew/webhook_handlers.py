@@ -3165,7 +3165,8 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 extra_context = EXTERNAL_OUTPUT_CONTROL_PROMPT
 
         # ── 异步回调模式（频道 @mention）──
-        # TODO: callback 目标应与调用者身份绑定，防止将结果投递到非授权渠道
+        # callback_sender_id 强制绑定调用者身份（X-User-Id header），防止伪造 sender
+        # 长期方案：引入 caller identity 体系后做完整的频道投递权限校验
         callback_channel_id = payload.get("callback_channel_id")
         if callback_channel_id is not None:
             try:
@@ -3181,6 +3182,17 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 callback_parent_id = int(callback_parent_id)
             except (TypeError, ValueError):
                 callback_parent_id = None
+
+        # 绑定调用者身份：如果有 X-User-Id，强制覆盖 callback_sender_id 防止伪造
+        if callback_channel_id:
+            caller_id = request.headers.get("x-user-id")
+            if caller_id:
+                callback_sender_id = str(caller_id)
+            else:
+                logger.warning(
+                    "callback_channel_id=%s 提供但缺少 X-User-Id header，无法绑定调用者身份（可能是内部调用）",
+                    callback_channel_id,
+                )
 
         if callback_channel_id:
             # 立即返回 202，后台处理 + 回调蚁聚
@@ -3833,8 +3845,9 @@ async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
 
     from crew.permission_request import PermissionManager
 
-    # TODO: user_id 应从认证 token 中提取而非查询参数，当前为临时方案
-    user_id = request.query_params.get("user_id") or None
+    # 优先从 X-User-Id header 获取调用者身份，query param 作为向后兼容 fallback
+    # 长期方案：引入 caller identity 体系后改为从认证 token 中提取
+    user_id = request.headers.get("x-user-id") or request.query_params.get("user_id") or None
 
     manager = PermissionManager()
     pending = manager.get_pending_requests(user_id=user_id)
@@ -4820,8 +4833,9 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    # P2: KV 写入需要管理员权限
-    # TODO: 需要命名空间隔离，按调用者身份限定可写 key 前缀
+    # P2: KV 写入需要管理员权限 + 审计日志
+    # 当前方案：admin_token 校验 + X-User-Id 审计日志记录
+    # 长期方案：引入命名空间强隔离（需架构层面支持，当前不加 key 前缀以免破坏现有功能）
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
@@ -4830,6 +4844,13 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     err = _validate_kv_key(key)
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=400)
+
+    # 审计日志：记录 KV 写入者身份
+    kv_caller_id = request.headers.get("x-user-id")
+    if kv_caller_id:
+        logger.info("KV write: key=%s caller=%s", key, kv_caller_id)
+    else:
+        logger.info("KV write: key=%s caller=unknown (no X-User-Id header)", key)
 
     # 读取内容
     content_type = request.headers.get("content-type", "")
