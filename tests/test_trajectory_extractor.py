@@ -62,7 +62,9 @@ class TestTrajectoryExtractor:
         assert extractor.model == "claude-3-5-sonnet-20241022"
         assert extractor.value_threshold == 0.7
 
-    def test_analyze_trajectory_high_value(self, extractor, mock_anthropic_client, sample_trajectory):
+    def test_analyze_trajectory_high_value(
+        self, extractor, mock_anthropic_client, sample_trajectory
+    ):
         """测试分析高价值轨迹."""
         # Mock Claude 返回
         mock_response = MagicMock()
@@ -77,7 +79,9 @@ class TestTrajectoryExtractor:
         assert result["should_extract"] is True
         assert "认证" in result["reasoning"]
 
-    def test_analyze_trajectory_low_value(self, extractor, mock_anthropic_client, sample_trajectory):
+    def test_analyze_trajectory_low_value(
+        self, extractor, mock_anthropic_client, sample_trajectory
+    ):
         """测试分析低价值轨迹."""
         mock_response = MagicMock()
         mock_response.content = [
@@ -90,7 +94,9 @@ class TestTrajectoryExtractor:
         assert result["value_score"] == 0.3
         assert result["should_extract"] is False
 
-    def test_analyze_trajectory_invalid_json(self, extractor, mock_anthropic_client, sample_trajectory):
+    def test_analyze_trajectory_invalid_json(
+        self, extractor, mock_anthropic_client, sample_trajectory
+    ):
         """测试 Claude 返回无效 JSON."""
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text="这不是 JSON")]
@@ -148,7 +154,9 @@ class TestTrajectoryExtractor:
 
         assert len(memories) == 0
 
-    def test_extract_memories_invalid_format(self, extractor, mock_anthropic_client, sample_trajectory):
+    def test_extract_memories_invalid_format(
+        self, extractor, mock_anthropic_client, sample_trajectory
+    ):
         """测试 Claude 返回格式异常."""
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text='{"wrong_field": []}')]
@@ -199,7 +207,10 @@ class TestTrajectoryExtractor:
 
     def test_summarize_steps_truncation(self, extractor):
         """测试步骤过多时的截断."""
-        steps = [{"tool_name": f"Tool{i}", "thought": "test", "tool_output": "", "tool_exit_code": 0} for i in range(25)]
+        steps = [
+            {"tool_name": f"Tool{i}", "thought": "test", "tool_output": "", "tool_exit_code": 0}
+            for i in range(25)
+        ]
 
         summary = extractor._summarize_steps(steps)
 

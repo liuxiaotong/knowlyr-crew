@@ -50,7 +50,6 @@ EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
     "ceo-assistant": "conversation",
     "customer-success": "conversation",
     "community-operator": "conversation",
-
     # engineering — 工程/技术类
     "code-reviewer": "engineering",
     "backend-engineer": "engineering",
@@ -68,7 +67,6 @@ EMPLOYEE_DOMAIN_MAP: dict[str, str] = {
     "data-engineer": "engineering",
     "mlops-engineer": "engineering",
     "i18n-expert": "engineering",
-
     # advisory — 分析/顾问/研究类
     "product-manager": "advisory",
     "hr-manager": "advisory",
@@ -178,6 +176,7 @@ def cli():
 
 # ── snapshot 命令 ─────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--description", "-d", default="", help="快照说明")
 @click.option("--list", "list_all", is_flag=True, help="列出所有快照")
@@ -261,12 +260,14 @@ def snapshot(description, list_all, diff_versions):
 
 # ── convert 命令 ──────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--employee", help="只转换特定员工 (如 ceo-assistant)")
 @click.option("--since", help="只转换该日期之后的 session (如 20260215)")
 @click.option("--limit", type=int, help="最多转换 N 个")
 @click.option(
-    "--origin", default="organic",
+    "--origin",
+    default="organic",
     help="来源过滤: organic=真实对话(默认), synthetic=程序生成, all=不过滤",
 )
 @click.option("--output", default=str(TRAJECTORIES_FILE), help="输出文件路径")
@@ -306,6 +307,7 @@ def convert(employee, since, limit, origin, output):
 
 # ── score 命令 ────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--input", "input_file", default=str(TRAJECTORIES_FILE), help="输入 trajectory 文件")
 @click.option("--rule-only", is_flag=True, help="仅用规则层评分 (0 API 成本)")
@@ -316,8 +318,17 @@ def convert(employee, since, limit, origin, output):
 @click.option("--api-key", help="LLM API 密钥 (也可用环境变量)")
 @click.option("--output", "output_file", help="输出文件路径 (默认自动生成)")
 @click.option("--snapshot-version", help="关联的快照版本 (自动填入结果中)")
-def score(input_file, rule_only, sample, model_name, provider, base_url, api_key, output_file,
-          snapshot_version):
+def score(
+    input_file,
+    rule_only,
+    sample,
+    model_name,
+    provider,
+    base_url,
+    api_key,
+    output_file,
+    snapshot_version,
+):
     """批量评分 — 调用 RewardEngine."""
     try:
         from agentreward.config import RewardConfig
@@ -330,6 +341,7 @@ def score(input_file, rule_only, sample, model_name, provider, base_url, api_key
     if not snapshot_version:
         try:
             from crew.snapshot import SnapshotManager
+
             sm = SnapshotManager(CREW_ROOT)
             snapshot_version = sm.find_matching_snapshot()
             if snapshot_version:
@@ -363,7 +375,7 @@ def score(input_file, rule_only, sample, model_name, provider, base_url, api_key
         emp = traj.get("metadata", {}).get("employee", "")
         domain = _get_domain(emp)
 
-        click.echo(f"评分 [{i+1}/{len(trajectories)}] ({domain}): {traj['task'][:50]}...")
+        click.echo(f"评分 [{i + 1}/{len(trajectories)}] ({domain}): {traj['task'][:50]}...")
 
         if rule_only:
             config = RewardConfig(
@@ -431,10 +443,13 @@ def score(input_file, rule_only, sample, model_name, provider, base_url, api_key
     # 摘要
     if results:
         scores = [r["total_score"] for r in results]
-        click.echo(f"总分: min={min(scores):.4f}, max={max(scores):.4f}, avg={statistics.mean(scores):.4f}")
+        click.echo(
+            f"总分: min={min(scores):.4f}, max={max(scores):.4f}, avg={statistics.mean(scores):.4f}"
+        )
 
 
 # ── report 命令 ───────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--run", "run_file", help="评分结果文件路径 (默认最新)")
@@ -578,12 +593,14 @@ def _generate_employee_report(employee: str, results: list[dict], domain: str) -
 
 # ── compare 命令 ──────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("run_before")
 @click.argument("run_after")
 @click.option("--employee", help="只对比特定员工")
 def compare(run_before, run_after, employee):
     """对比两次评分运行的结果."""
+
     def load_run(path_str):
         p = Path(path_str)
         if not p.exists():
@@ -607,8 +624,12 @@ def compare(run_before, run_after, employee):
         after = [r for r in after if r.get("employee") == employee]
 
     # 提取快照版本
-    snap_before = next((r.get("snapshot_version", "") for r in before if r.get("snapshot_version")), "")
-    snap_after = next((r.get("snapshot_version", "") for r in after if r.get("snapshot_version")), "")
+    snap_before = next(
+        (r.get("snapshot_version", "") for r in before if r.get("snapshot_version")), ""
+    )
+    snap_after = next(
+        (r.get("snapshot_version", "") for r in after if r.get("snapshot_version")), ""
+    )
 
     click.echo(f"对比: {name_before} ({len(before)}条) vs {name_after} ({len(after)}条)")
     if snap_before or snap_after:
@@ -650,6 +671,7 @@ def compare(run_before, run_after, employee):
 
 # ── archive 命令 ──────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="只统计不移动，先看看会动多少文件")
 def archive(dry_run):
@@ -687,6 +709,7 @@ def archive(dry_run):
 
 # ── run 命令（完整流水线）────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--employee", help="只评估特定员工")
 @click.option("--sample", type=int, default=30, help="采样数量")
@@ -697,13 +720,14 @@ def archive(dry_run):
 @click.option("--base-url", help="API base_url")
 @click.option("--api-key", help="API 密钥")
 @click.option(
-    "--origin", default="organic",
+    "--origin",
+    default="organic",
     help="来源过滤: organic=真实对话(默认), synthetic=程序生成, all=不过滤",
 )
-@click.option("--snapshot/--no-snapshot", "do_snapshot", default=False,
-              help="运行前自动打快照")
-def run(employee, sample, since, rule_only, model_name, provider, base_url, api_key, origin,
-        do_snapshot):
+@click.option("--snapshot/--no-snapshot", "do_snapshot", default=False, help="运行前自动打快照")
+def run(
+    employee, sample, since, rule_only, model_name, provider, base_url, api_key, origin, do_snapshot
+):
     """完整流水线: [snapshot →] convert → score → report."""
     from click.testing import CliRunner
 

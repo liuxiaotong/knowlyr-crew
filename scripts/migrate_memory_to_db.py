@@ -158,10 +158,24 @@ def _insert_entries(entries: list[dict], employee_name: str) -> int:
                     ON CONFLICT (id) DO NOTHING
                     """,
                     (
-                        entry_id, employee, created_at, category, content,
-                        source_session, confidence, superseded_by, ttl_days,
-                        importance, last_accessed, tags, shared, visibility,
-                        trigger_condition, applicability, origin_employee, verified_count
+                        entry_id,
+                        employee,
+                        created_at,
+                        category,
+                        content,
+                        source_session,
+                        confidence,
+                        superseded_by,
+                        ttl_days,
+                        importance,
+                        last_accessed,
+                        tags,
+                        shared,
+                        visibility,
+                        trigger_condition,
+                        applicability,
+                        origin_employee,
+                        verified_count,
                     ),
                 )
 
@@ -205,9 +219,7 @@ def verify_migration(memory_dir: Path) -> dict:
     db_counts = {}
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT employee, COUNT(*) FROM memories GROUP BY employee"
-        )
+        cur.execute("SELECT employee, COUNT(*) FROM memories GROUP BY employee")
         for row in cur.fetchall():
             db_counts[row[0]] = row[1]
 
@@ -276,8 +288,7 @@ def main():
             logger.info("\n员工详情:")
             for emp, counts in sorted(result["employees"].items()):
                 logger.info(
-                    f"  {emp}: 文件={counts['file']}, 数据库={counts['db']}, "
-                    f"差异={counts['diff']}"
+                    f"  {emp}: 文件={counts['file']}, 数据库={counts['db']}, 差异={counts['diff']}"
                 )
 
         else:

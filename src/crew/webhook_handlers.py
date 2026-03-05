@@ -838,11 +838,14 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     # restricted/confidential 写入限制
     if classification in ("restricted", "confidential"):
         from crew.classification import CLASSIFICATION_LEVELS, EMPLOYEE_CLEARANCE
+
         emp_clearance = EMPLOYEE_CLEARANCE.get(employee, {})
         emp_level = emp_clearance.get("clearance", "internal")
         if CLASSIFICATION_LEVELS.get(emp_level, 1) < CLASSIFICATION_LEVELS.get(classification, 2):
             return JSONResponse(
-                {"error": f"员工 {employee} 的许可等级 ({emp_level}) 不足以写入 {classification} 级别记忆"},
+                {
+                    "error": f"员工 {employee} 的许可等级 ({emp_level}) 不足以写入 {classification} 级别记忆"
+                },
                 status_code=403,
             )
 
@@ -928,7 +931,11 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         existing = store.query(employee, limit=50)
         for entry in existing:
             # 兼容 MemoryEntry（属性访问）和 dict（键访问）
-            _src = entry.source_session if hasattr(entry, "source_session") else entry.get("source_session", "")
+            _src = (
+                entry.source_session
+                if hasattr(entry, "source_session")
+                else entry.get("source_session", "")
+            )
             _cat = entry.category if hasattr(entry, "category") else entry.get("category", "")
             _eid = entry.id if hasattr(entry, "id") else entry.get("id", "")
             if _src == source_session and _cat == category:
@@ -952,12 +959,16 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         trigger_condition=str(trigger_condition),
         applicability=applicability if isinstance(applicability, list) else [],
         origin_employee=str(origin_employee),
-        classification=str(classification) if classification in ("public", "internal", "restricted", "confidential") else "internal",
+        classification=str(classification)
+        if classification in ("public", "internal", "restricted", "confidential")
+        else "internal",
         domain=domain if isinstance(domain, list) else [],
     )
 
     # 兼容 MemoryEntry（属性访问）和 dict（键访问）
-    result_employee = result.employee if hasattr(result, "employee") else result.get("employee", employee)
+    result_employee = (
+        result.employee if hasattr(result, "employee") else result.get("employee", employee)
+    )
     result_id = result.id if hasattr(result, "id") else result.get("id", "")
 
     # 写入后失效缓存（用解析后的花名作为 cache key）
@@ -1015,7 +1026,8 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     )
     # 过滤超出请求分级上限的记忆
     filtered = [
-        e for e in entries
+        e
+        for e in entries
         if _classification_levels.get(getattr(e, "classification", "internal"), 1) <= max_level
     ]
     data = [e.model_dump() for e in filtered]
@@ -1060,9 +1072,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
     updated_by = payload.get("updated_by", "")
 
     if not entry_id or not employee or not content:
-        return JSONResponse(
-            {"error": "entry_id, employee, content are required"}, status_code=400
-        )
+        return JSONResponse({"error": "entry_id, employee, content are required"}, status_code=400)
 
     store = get_memory_store(project_dir=ctx.project_dir)
 
@@ -1988,9 +1998,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
         memory_store = get_memory_store(project_dir=ctx.project_dir)
 
         # DB 版：直接用 store.update()
-        if hasattr(memory_store, "update") and callable(
-            getattr(memory_store, "update", None)
-        ):
+        if hasattr(memory_store, "update") and callable(getattr(memory_store, "update", None)):
             updated_count = 0
             failed_count = 0
             for eid in entry_ids:
@@ -2016,9 +2024,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
                 failed_count,
             )
 
-            return JSONResponse(
-                {"ok": True, "updated": updated_count, "failed": failed_count}
-            )
+            return JSONResponse({"ok": True, "updated": updated_count, "failed": failed_count})
 
         # 文件版：保留原有的 JSONL 操作逻辑
         path = memory_store._employee_file(employee)
@@ -2485,7 +2491,10 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
 
         if feedback_type not in ["helpful", "not_helpful", "outdated", "incorrect"]:
             return JSONResponse(
-                {"ok": False, "error": "feedback_type 必须是 helpful/not_helpful/outdated/incorrect"},
+                {
+                    "ok": False,
+                    "error": "feedback_type 必须是 helpful/not_helpful/outdated/incorrect",
+                },
                 status_code=400,
             )
 
@@ -3115,11 +3124,17 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     # 执行触发的 skills（按优先级排序）
                     for skill, score in triggered[:3]:
                         try:
-                            result = engine.execute_skill(skill, employee_name, {"task": user_message, "channel": channel, **args})
+                            result = engine.execute_skill(
+                                skill,
+                                employee_name,
+                                {"task": user_message, "channel": channel, **args},
+                            )
                             if result.get("enhanced_context"):
                                 for key, value in result["enhanced_context"].items():
                                     if key in enhanced_context:
-                                        if isinstance(enhanced_context[key], list) and isinstance(value, list):
+                                        if isinstance(enhanced_context[key], list) and isinstance(
+                                            value, list
+                                        ):
                                             enhanced_context[key].extend(value)
                                         else:
                                             enhanced_context[key] = value
@@ -3133,7 +3148,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                                 execution_result=result,
                             )
                         except Exception as skill_exec_error:
-                            logger.warning("Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error)
+                            logger.warning(
+                                "Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error
+                            )
             except Exception as skills_error:
                 logger.warning("Skills 检查失败: %s", skills_error)
 
@@ -3142,7 +3159,8 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             memories = enhanced_context.get("memories", [])
             if memories:
                 memory_text = "【相关历史记忆】\n" + "\n".join(
-                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
+                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
+                    for m in memories[:5]
                 )
                 if extra_context:
                     extra_context = memory_text + "\n\n" + extra_context
@@ -3153,7 +3171,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
                     employee_name or name,
                     len(memories),
-                    len(extra_context)
+                    len(extra_context),
                 )
 
         # Phase 3：外部对话输出控制
@@ -3264,7 +3282,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
             name,
             use_fast_path,
             has_tools,
-            len(extra_context) if extra_context else 0
+            len(extra_context) if extra_context else 0,
         )
 
         _t0 = _time.monotonic()
@@ -3556,7 +3574,9 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
         if not user_id:
             return JSONResponse({"error": "user_id required to access owned task"}, status_code=401)
         if record.owner != user_id:
-            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+            return JSONResponse(
+                {"error": "forbidden: task does not belong to this user"}, status_code=403
+            )
 
     return JSONResponse(record.model_dump(mode="json"))
 
@@ -3577,7 +3597,9 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         if not user_id:
             return JSONResponse({"error": "user_id required to replay owned task"}, status_code=401)
         if record.owner != user_id:
-            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+            return JSONResponse(
+                {"error": "forbidden: task does not belong to this user"}, status_code=403
+            )
 
     if record.status not in ("completed", "failed"):
         return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
@@ -3613,9 +3635,13 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
     if record.owner:
         if not user_id:
-            return JSONResponse({"error": "user_id required to approve owned task"}, status_code=401)
+            return JSONResponse(
+                {"error": "user_id required to approve owned task"}, status_code=401
+            )
         if record.owner != user_id:
-            return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+            return JSONResponse(
+                {"error": "forbidden: task does not belong to this user"}, status_code=403
+            )
 
     if record.status != "awaiting_approval":
         return JSONResponse(
@@ -3819,7 +3845,9 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
         if perm_req.target_user_id != user_id:
             logger.warning(
                 "权限响应鉴权失败: request_id=%s, target=%s, actual=%s",
-                request_id, perm_req.target_user_id, user_id,
+                request_id,
+                perm_req.target_user_id,
+                user_id,
             )
             return JSONResponse(
                 {"ok": False, "error": "not authorized to respond"},
@@ -3829,7 +3857,9 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
     success = manager.respond(request_id, approved)
 
     if success:
-        logger.info("权限响应: request_id=%s, approved=%s, user_id=%s", request_id, approved, user_id)
+        logger.info(
+            "权限响应: request_id=%s, approved=%s, user_id=%s", request_id, approved, user_id
+        )
         return JSONResponse({"ok": True})
     else:
         return JSONResponse(
@@ -4490,13 +4520,16 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 for skill, score in triggered[:3]:
                     try:
                         result = skills_engine.execute_skill(
-                            skill, _chat_employee_name,
+                            skill,
+                            _chat_employee_name,
                             {"task": message, "channel": channel, "sender_type": sender_type},
                         )
                         if result.get("enhanced_context"):
                             for key, value in result["enhanced_context"].items():
                                 if key in enhanced_context:
-                                    if isinstance(enhanced_context[key], list) and isinstance(value, list):
+                                    if isinstance(enhanced_context[key], list) and isinstance(
+                                        value, list
+                                    ):
                                         enhanced_context[key].extend(value)
                                     else:
                                         enhanced_context[key] = value
@@ -4510,7 +4543,11 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                             execution_result=result,
                         )
                     except Exception as _skill_exec_err:
-                        logger.warning("Skill 执行失败 (/api/chat): skill=%s error=%s", skill.name, _skill_exec_err)
+                        logger.warning(
+                            "Skill 执行失败 (/api/chat): skill=%s error=%s",
+                            skill.name,
+                            _skill_exec_err,
+                        )
 
                 # 将 enhanced_context 中的 memories 格式化为文本
                 memories = enhanced_context.get("memories", [])
@@ -5302,7 +5339,9 @@ async def _handle_wiki_spaces_list(request: Any, ctx: _AppContext) -> Any:
     )
     if not wiki_api_url or not wiki_admin_token:
         return JSONResponse(
-            {"error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"},
+            {
+                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+            },
             status_code=500,
         )
 
@@ -5640,13 +5679,15 @@ async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
         results = await scan_overdue_decisions()
         report = format_scan_report(results)
 
-        return JSONResponse({
-            "auto_evaluated": len(results.get("auto_evaluated", [])),
-            "reminders": len(results.get("reminders", [])),
-            "expired": len(results.get("expired", [])),
-            "report": report,
-            "details": results,
-        })
+        return JSONResponse(
+            {
+                "auto_evaluated": len(results.get("auto_evaluated", [])),
+                "reminders": len(results.get("reminders", [])),
+                "expired": len(results.get("expired", [])),
+                "report": report,
+                "details": results,
+            }
+        )
     except Exception as exc:
         logger.exception("evaluate scan failed: %s", exc)
         return JSONResponse({"error": str(exc)}, status_code=500)

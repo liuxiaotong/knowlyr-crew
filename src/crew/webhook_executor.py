@@ -760,6 +760,7 @@ async def _execute_employee_with_tools(
     _cls_kwargs: dict = {}
     if channel:
         from crew.classification import get_effective_clearance
+
         _clearance = get_effective_clearance(match.name, channel, sender_type=sender_type)
         _cls_kwargs["classification_max"] = _clearance["classification_max"]
         _cls_kwargs["allowed_domains"] = _clearance["allowed_domains"]
@@ -844,17 +845,16 @@ async def _execute_employee_with_tools(
         for h in message_history:
             # 历史消息可能包含附件
             hist_attachments = h.get("attachments")
-            if hist_attachments and any(att.get("type", "").startswith("image/") for att in hist_attachments):
+            if hist_attachments and any(
+                att.get("type", "").startswith("image/") for att in hist_attachments
+            ):
                 # 转换为 content blocks 格式
-                content_blocks: list[dict[str, Any]] = [
-                    {"type": "text", "text": h["content"]}
-                ]
+                content_blocks: list[dict[str, Any]] = [{"type": "text", "text": h["content"]}]
                 for att in hist_attachments:
                     if att.get("type", "").startswith("image/"):
-                        content_blocks.append({
-                            "type": "image",
-                            "source": {"type": "url", "url": att["url"]}
-                        })
+                        content_blocks.append(
+                            {"type": "image", "source": {"type": "url", "url": att["url"]}}
+                        )
                 messages.append({"role": h["role"], "content": content_blocks})
             else:
                 messages.append({"role": h["role"], "content": h["content"]})
@@ -868,10 +868,9 @@ async def _execute_employee_with_tools(
         ]
         for att in attachments:
             if att.get("type", "").startswith("image/"):
-                content_blocks.append({
-                    "type": "image",
-                    "source": {"type": "url", "url": att["url"]}
-                })
+                content_blocks.append(
+                    {"type": "image", "source": {"type": "url", "url": att["url"]}}
+                )
         messages.append({"role": "user", "content": content_blocks})
     else:
         messages.append({"role": "user", "content": task_text})
@@ -1125,6 +1124,7 @@ async def _stream_employee_with_tools(
     _cls_kwargs: dict = {}
     if channel:
         from crew.classification import get_effective_clearance
+
         _clearance = get_effective_clearance(match.name, channel, sender_type=sender_type)
         _cls_kwargs["classification_max"] = _clearance["classification_max"]
         _cls_kwargs["allowed_domains"] = _clearance["allowed_domains"]
@@ -1196,11 +1196,15 @@ async def _stream_employee_with_tools(
     if message_history:
         for h in message_history:
             hist_attachments = h.get("attachments")
-            if hist_attachments and any(att.get("type", "").startswith("image/") for att in hist_attachments):
+            if hist_attachments and any(
+                att.get("type", "").startswith("image/") for att in hist_attachments
+            ):
                 content_blocks: list[dict[str, Any]] = [{"type": "text", "text": h["content"]}]
                 for att in hist_attachments:
                     if att.get("type", "").startswith("image/"):
-                        content_blocks.append({"type": "image", "source": {"type": "url", "url": att["url"]}})
+                        content_blocks.append(
+                            {"type": "image", "source": {"type": "url", "url": att["url"]}}
+                        )
                 messages.append({"role": h["role"], "content": content_blocks})
             else:
                 messages.append({"role": h["role"], "content": h["content"]})
@@ -1212,7 +1216,9 @@ async def _stream_employee_with_tools(
         ]
         for att in attachments:
             if att.get("type", "").startswith("image/"):
-                content_blocks_user.append({"type": "image", "source": {"type": "url", "url": att["url"]}})
+                content_blocks_user.append(
+                    {"type": "image", "source": {"type": "url", "url": att["url"]}}
+                )
         messages.append({"role": "user", "content": content_blocks_user})
     else:
         messages.append({"role": "user", "content": task_text})
@@ -1284,11 +1290,13 @@ async def _stream_employee_with_tools(
                             pass  # 文本块开始，等 delta
                         elif event.content_block.type == "tool_use":
                             # 工具调用块开始 — 收集 id 和 name
-                            tool_calls_collected.append({
-                                "id": event.content_block.id,
-                                "name": event.content_block.name,
-                                "input_json_parts": [],
-                            })
+                            tool_calls_collected.append(
+                                {
+                                    "id": event.content_block.id,
+                                    "name": event.content_block.name,
+                                    "input_json_parts": [],
+                                }
+                            )
                             current_tool_idx = len(tool_calls_collected) - 1
 
                     elif event.type == "content_block_delta":
@@ -1335,6 +1343,7 @@ async def _stream_employee_with_tools(
                         yield {"delta": chunk, "done": False}
                 if not result.has_tool_calls:
                     from crew.output_sanitizer import strip_internal_tags
+
                     yield {
                         "done": True,
                         "employee_id": name,
@@ -1345,14 +1354,23 @@ async def _stream_employee_with_tools(
                 # 有 tool_calls — 构造数据继续后续处理
                 text_parts = [result.content] if result.content else []
                 tool_calls_collected = [
-                    {"id": tc.id, "name": tc.name, "input_json_parts": [_json.dumps(tc.arguments, ensure_ascii=False)]}
+                    {
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input_json_parts": [_json.dumps(tc.arguments, ensure_ascii=False)],
+                    }
                     for tc in result.tool_calls
                 ]
                 stop_reason = "tool_use"
             except Exception as _fallback_err:
                 logger.error("非流式降级也失败: %s", _fallback_err)
                 yield {"delta": f"执行出错: {_fallback_err}", "done": False}
-                yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+                yield {
+                    "done": True,
+                    "employee_id": name,
+                    "tokens_used": total_input + total_output,
+                    "latency_ms": 0,
+                }
                 return
 
         # ── 这一轮结束，检查是否需要调工具 ──
@@ -1378,11 +1396,13 @@ async def _stream_employee_with_tools(
                 tc_args = _json.loads(input_json_str) if input_json_str else {}
             except _json.JSONDecodeError:
                 tc_args = {}
-            parsed_tool_calls.append(ToolCall(
-                id=tc_raw["id"],
-                name=tc_raw["name"],
-                arguments=tc_args if isinstance(tc_args, dict) else {},
-            ))
+            parsed_tool_calls.append(
+                ToolCall(
+                    id=tc_raw["id"],
+                    name=tc_raw["name"],
+                    arguments=tc_args if isinstance(tc_args, dict) else {},
+                )
+            )
 
         # 构建 assistant message（Anthropic 格式）
         assistant_content: list[dict[str, Any]] = []
@@ -1390,12 +1410,14 @@ async def _stream_employee_with_tools(
         if full_text:
             assistant_content.append({"type": "text", "text": full_text})
         for tc in parsed_tool_calls:
-            assistant_content.append({
-                "type": "tool_use",
-                "id": tc.id,
-                "name": tc.name,
-                "input": tc.arguments,
-            })
+            assistant_content.append(
+                {
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                }
+            )
         messages.append({"role": "assistant", "content": assistant_content})
 
         # ── 执行工具 ──
@@ -1408,20 +1430,34 @@ async def _stream_employee_with_tools(
             yield {"delta": "", "done": False, "tool_call": True, "tool_name": tool_display}
 
             if tc.name == "load_tools":
-                load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
-                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": load_msg})
+                load_msg = _process_load_tools(
+                    tc.arguments, deferred_names, loaded_deferred, tool_schemas
+                )
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tc.id, "content": load_msg}
+                )
                 continue
             tool_output = await _handle_tool_call(
-                ctx, name, tc.name, tc.arguments, effective_agent_id,
-                guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                ctx,
+                name,
+                tc.name,
+                tc.arguments,
+                effective_agent_id,
+                guard=guard,
+                max_visibility=max_visibility,
+                push_event_fn=None,
                 target_user_id=sender_id or "",
             )
             if tool_output is None:
                 final_content = tc.arguments.get("result", full_text)
-                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": final_content})
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tc.id, "content": final_content}
+                )
                 finished = True
             else:
-                tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": tool_output[:10000]})
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tc.id, "content": tool_output[:10000]}
+                )
         messages.append({"role": "user", "content": tool_results})
         if finished:
             from crew.output_sanitizer import strip_internal_tags
@@ -1430,12 +1466,22 @@ async def _stream_employee_with_tools(
             # finish tool 被调用 — yield 完整结果
             for chunk in _split_text_chunks(final_content, 20):
                 yield {"delta": chunk, "done": False}
-            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+            yield {
+                "done": True,
+                "employee_id": name,
+                "tokens_used": total_input + total_output,
+                "latency_ms": 0,
+            }
             return
 
     # 超过最大轮次
     yield {"delta": "达到最大工具调用轮次限制。", "done": False}
-    yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+    yield {
+        "done": True,
+        "employee_id": name,
+        "tokens_used": total_input + total_output,
+        "latency_ms": 0,
+    }
 
 
 async def _stream_employee_with_tools_fallback(
@@ -1490,7 +1536,12 @@ async def _stream_employee_with_tools_fallback(
             final_content = strip_internal_tags(result.content)
             for chunk in _split_text_chunks(final_content, 20):
                 yield {"delta": chunk, "done": False}
-            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+            yield {
+                "done": True,
+                "employee_id": name,
+                "tokens_used": total_input + total_output,
+                "latency_ms": 0,
+            }
             return
 
         # 中间轮：处理 tool calls（OpenAI 格式）
@@ -1515,12 +1566,20 @@ async def _stream_employee_with_tools_fallback(
         final_content = ""
         for tc in result.tool_calls:
             if tc.name == "load_tools":
-                load_msg = _process_load_tools(tc.arguments, deferred_names, loaded_deferred, tool_schemas)
+                load_msg = _process_load_tools(
+                    tc.arguments, deferred_names, loaded_deferred, tool_schemas
+                )
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": load_msg})
                 continue
             tool_output = await _handle_tool_call(
-                ctx, name, tc.name, tc.arguments, effective_agent_id,
-                guard=guard, max_visibility=max_visibility, push_event_fn=None,
+                ctx,
+                name,
+                tc.name,
+                tc.arguments,
+                effective_agent_id,
+                guard=guard,
+                max_visibility=max_visibility,
+                push_event_fn=None,
                 target_user_id=sender_id or "",
             )
             if tool_output is None:
@@ -1528,19 +1587,31 @@ async def _stream_employee_with_tools_fallback(
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": final_content})
                 finished = True
             else:
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_output[:10000]})
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": tool_output[:10000]}
+                )
         if finished:
             from crew.output_sanitizer import strip_internal_tags
 
             final_content = strip_internal_tags(final_content)
             for chunk in _split_text_chunks(final_content, 20):
                 yield {"delta": chunk, "done": False}
-            yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+            yield {
+                "done": True,
+                "employee_id": name,
+                "tokens_used": total_input + total_output,
+                "latency_ms": 0,
+            }
             return
 
     # 超过最大轮次
     yield {"delta": "达到最大工具调用轮次限制。", "done": False}
-    yield {"done": True, "employee_id": name, "tokens_used": total_input + total_output, "latency_ms": 0}
+    yield {
+        "done": True,
+        "employee_id": name,
+        "tokens_used": total_input + total_output,
+        "latency_ms": 0,
+    }
 
 
 def _split_text_chunks(text: str, chunk_size: int = 20) -> list[str]:
@@ -1635,7 +1706,10 @@ async def _handle_tool_call(
         )
         logger.info(
             "记忆保存: %s → %s (visibility=%s, classification=%s)",
-            employee_name, entry.content[:60], entry.visibility, entry.classification,
+            employee_name,
+            entry.content[:60],
+            entry.visibility,
+            entry.classification,
         )
         return "已记住。"
 

@@ -231,8 +231,6 @@ def _normalize_trajectory(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-
-
 # ── 日报生成 ─────────────────────────────────────────────────────────
 
 
@@ -384,10 +382,7 @@ def run_daily_eval(
     # 过滤无归属轨迹
     SKIP_EMPLOYEES = {"unknown", "unknown-agent", ""}
     before_filter = len(trajectories)
-    trajectories = [
-        t for t in trajectories
-        if traj_employee(t) not in SKIP_EMPLOYEES
-    ]
+    trajectories = [t for t in trajectories if traj_employee(t) not in SKIP_EMPLOYEES]
     if before_filter != len(trajectories):
         logger.info("过滤无归属轨迹: %d → %d", before_filter, len(trajectories))
 
@@ -395,8 +390,7 @@ def run_daily_eval(
     SKIP_CHANNELS = {"training", "test", "debug"}
     before_channel = len(trajectories)
     trajectories = [
-        t for t in trajectories
-        if (t.get("metadata", {}).get("channel") or "") not in SKIP_CHANNELS
+        t for t in trajectories if (t.get("metadata", {}).get("channel") or "") not in SKIP_CHANNELS
     ]
     if before_channel != len(trajectories):
         logger.info("过滤非工作channel: %d → %d", before_channel, len(trajectories))
@@ -404,10 +398,7 @@ def run_daily_eval(
     # 按员工过滤
     if employee_filter:
         before_emp = len(trajectories)
-        trajectories = [
-            t for t in trajectories
-            if traj_employee(t) == employee_filter
-        ]
+        trajectories = [t for t in trajectories if traj_employee(t) == employee_filter]
         logger.info("员工过滤 [%s]: %d → %d", employee_filter, before_emp, len(trajectories))
 
     # 过滤空壳轨迹（steps 全空 = 采集 bug，不值得评分）

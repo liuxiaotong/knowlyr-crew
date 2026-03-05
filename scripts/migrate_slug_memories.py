@@ -82,7 +82,9 @@ def migrate(memory_dir: Path, *, execute: bool = False) -> dict:
         print(f"  [FOUND] {slug}.jsonl: {len(entries)} 条记忆")
         for entry in entries:
             content_preview = entry.get("content", "")[:60]
-            print(f"    - [{entry.get('id', '?')}] ({entry.get('category', '?')}) {content_preview}")
+            print(
+                f"    - [{entry.get('id', '?')}] ({entry.get('category', '?')}) {content_preview}"
+            )
 
         if not execute:
             print(f"    → 将迁移到 {char_name}.jsonl（dry-run，未执行）")
@@ -183,9 +185,7 @@ def rebuild_index(project_dir: Path) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="迁移英文 slug 残留记忆到中文花名"
-    )
+    parser = argparse.ArgumentParser(description="迁移英文 slug 残留记忆到中文花名")
     parser.add_argument(
         "--project-dir",
         type=Path,

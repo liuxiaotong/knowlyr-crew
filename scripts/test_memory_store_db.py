@@ -45,7 +45,7 @@ def test_memory_store_db():
             shared=True,
         )
         print(f"✓ 添加记忆成功: {entry['id']}")
-        test_id = entry['id']
+        test_id = entry["id"]
     except Exception as e:
         print(f"❌ 添加记忆失败: {e}")
         return False

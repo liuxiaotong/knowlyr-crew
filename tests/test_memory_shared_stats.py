@@ -1,6 +1,5 @@
 """共享记忆统计测试."""
 
-
 import pytest
 
 from crew.memory import MemoryStore

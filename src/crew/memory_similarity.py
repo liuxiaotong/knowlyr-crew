@@ -84,6 +84,16 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
             return 0.0
 
         return float(dot_product / (norm1 * norm2))
+    except ImportError:
+        # 纯 Python fallback（numpy 不可用时）
+        import math
+
+        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
+        norm1 = math.sqrt(sum(a * a for a in vec1))
+        norm2 = math.sqrt(sum(b * b for b in vec2))
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        return dot_product / (norm1 * norm2)
     except Exception as e:
         logger.warning(f"余弦相似度计算失败: {e}")
         return 0.0
@@ -101,9 +111,44 @@ def _extract_keywords(text: str, top_n: int = 10) -> set[str]:
     """
     # 简单的中文停用词
     stopwords = {
-        "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一", "一个",
-        "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好",
-        "自己", "这", "那", "为", "与", "及", "等", "但", "或", "而", "因为", "所以",
+        "的",
+        "了",
+        "在",
+        "是",
+        "我",
+        "有",
+        "和",
+        "就",
+        "不",
+        "人",
+        "都",
+        "一",
+        "一个",
+        "上",
+        "也",
+        "很",
+        "到",
+        "说",
+        "要",
+        "去",
+        "你",
+        "会",
+        "着",
+        "没有",
+        "看",
+        "好",
+        "自己",
+        "这",
+        "那",
+        "为",
+        "与",
+        "及",
+        "等",
+        "但",
+        "或",
+        "而",
+        "因为",
+        "所以",
     }
 
     # 分词（简单按字符分割）
@@ -183,6 +228,7 @@ def _get_embedding_cache_path(memory_dir: Path, employee: str) -> Path:
 
     # 文件名安全化
     import re
+
     safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "_", employee)
     return cache_dir / f"{safe_name}.json"
 
@@ -247,7 +293,7 @@ async def find_similar_memories(
         project_dir = resolve_project_dir(None)
 
     store = get_memory_store(project_dir=project_dir)
-    memory_dir = getattr(store, 'memory_dir', None)
+    memory_dir = getattr(store, "memory_dir", None)
 
     # 解析员工名
     employee = store._resolve_to_character_name(employee)

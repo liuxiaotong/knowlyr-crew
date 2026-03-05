@@ -13,6 +13,7 @@ from crew.webhook import create_webhook_app
 from crew.webhook_config import WebhookConfig
 
 TOKEN = "test-token-123"
+ADMIN_TOKEN = "test-admin-token-456"
 
 
 def _make_client(token=TOKEN):
@@ -42,14 +43,18 @@ class TestWikiFileDelete:
         with (
             patch.dict(
                 "os.environ",
-                {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
+                {
+                    "WIKI_API_URL": "https://wiki.example.com",
+                    "WIKI_API_TOKEN": "wiki-token",
+                    "ADMIN_TOKEN": ADMIN_TOKEN,
+                },
             ),
             patch("httpx.AsyncClient", return_value=mock_client_instance),
         ):
             client = _make_client()
             resp = client.delete(
                 "/api/wiki/files/42",
-                headers={"Authorization": f"Bearer {TOKEN}"},
+                headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
             )
 
         assert resp.status_code == 200
@@ -71,14 +76,18 @@ class TestWikiFileDelete:
         with (
             patch.dict(
                 "os.environ",
-                {"WIKI_API_URL": "https://wiki.example.com", "WIKI_API_TOKEN": "wiki-token"},
+                {
+                    "WIKI_API_URL": "https://wiki.example.com",
+                    "WIKI_API_TOKEN": "wiki-token",
+                    "ADMIN_TOKEN": ADMIN_TOKEN,
+                },
             ),
             patch("httpx.AsyncClient", return_value=mock_client_instance),
         ):
             client = _make_client()
             resp = client.delete(
                 "/api/wiki/files/99999",
-                headers={"Authorization": f"Bearer {TOKEN}"},
+                headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
             )
 
         assert resp.status_code == 404
@@ -98,12 +107,13 @@ class TestWikiFileDelete:
         env_copy = os.environ.copy()
         env_copy.pop("WIKI_API_URL", None)
         env_copy.pop("WIKI_API_TOKEN", None)
+        env_copy["ADMIN_TOKEN"] = ADMIN_TOKEN
 
         with patch.dict("os.environ", env_copy, clear=True):
             client = _make_client()
             resp = client.delete(
                 "/api/wiki/files/42",
-                headers={"Authorization": f"Bearer {TOKEN}"},
+                headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
             )
 
         assert resp.status_code == 500

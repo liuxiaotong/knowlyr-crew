@@ -65,3 +65,5 @@ class _AppContext:
         self.feishu_bots: dict[str, FeishuBotContext] = {}  # bot_id -> context
         # 企业微信
         self.wecom_ctx: dict[str, Any] | None = None  # {config, crypto, token_mgr, dedup}
+        # MCP Gateway
+        self.mcp_gateway: Any = None  # MCPGatewayManager, set by create_webhook_app

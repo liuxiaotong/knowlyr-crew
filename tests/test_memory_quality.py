@@ -1,6 +1,5 @@
 """测试记忆质量控制."""
 
-
 from crew.memory_quality import check_memory_quality
 
 
@@ -45,7 +44,9 @@ class TestMemoryQuality:
 
     def test_missing_keywords_correction(self):
         """correction 缺少关键词应该扣分."""
-        content = "今天做了一个功能，把 API 改了一下，然后测试通过了，就提交了代码。" * 2  # 凑够长度
+        content = (
+            "今天做了一个功能，把 API 改了一下，然后测试通过了，就提交了代码。" * 2
+        )  # 凑够长度
         result = check_memory_quality("correction", content)
         assert result["score"] < 0.6
         assert any("缺少关键词" in issue for issue in result["issues"])
@@ -59,7 +60,9 @@ class TestMemoryQuality:
 
     def test_trajectory_prefix(self):
         """以 [轨迹] 开头应该被拒绝."""
-        content = "[轨迹] 修复了 webhook_handlers.py 的 bug，添加了质量检查逻辑，测试通过后提交代码。"
+        content = (
+            "[轨迹] 修复了 webhook_handlers.py 的 bug，添加了质量检查逻辑，测试通过后提交代码。"
+        )
         result = check_memory_quality("correction", content)
         assert result["score"] < 0.6
         assert any("[轨迹]" in issue for issue in result["issues"])
@@ -151,7 +154,10 @@ class TestMemoryQuality:
         test_cases = [
             ("correction", "A"),  # 极短
             ("correction", "A" * 1000),  # 极长
-            ("correction", "教训：这是一个很好的经验，说明了为什么要这样做，以及如何避免问题。"),  # 完美
+            (
+                "correction",
+                "教训：这是一个很好的经验，说明了为什么要这样做，以及如何避免问题。",
+            ),  # 完美
         ]
 
         for category, content in test_cases:

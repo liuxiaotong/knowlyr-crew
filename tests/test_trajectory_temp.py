@@ -129,7 +129,7 @@ class TestTrajectoryTempFile:
         # 添加多个步骤
         for i in range(3):
             collector.add_tool_step(
-                thought=f"步骤 {i+1}",
+                thought=f"步骤 {i + 1}",
                 tool_name=f"tool_{i}",
                 tool_params={"index": i},
                 tool_output=f"output_{i}",

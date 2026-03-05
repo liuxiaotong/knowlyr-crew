@@ -17,10 +17,14 @@ from crew.webhook import create_webhook_app
 from crew.webhook_config import WebhookConfig
 
 TOKEN = "test-kv-token"
+ADMIN_TOKEN = "test-admin-token"
 
 
 def _make_client(project_dir=None):
     """创建测试客户端."""
+    import os
+
+    os.environ["ADMIN_TOKEN"] = ADMIN_TOKEN
     app = create_webhook_app(
         project_dir=project_dir or Path("/tmp/test-kv"),
         token=TOKEN,
@@ -51,6 +55,7 @@ class TestKVPutEndpoint:
             headers={
                 "Authorization": f"Bearer {TOKEN}",
                 "Content-Type": "text/plain",
+                "X-Admin-Token": ADMIN_TOKEN,
             },
         )
         assert resp.status_code == 200
@@ -70,7 +75,7 @@ class TestKVPutEndpoint:
         resp = client.put(
             "/api/kv/config/global/CLAUDE.md",
             json={"content": "# Global Config"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -84,7 +89,11 @@ class TestKVPutEndpoint:
     def test_put_overwrite(self, tmp_path):
         """覆盖写入."""
         client = _make_client(project_dir=tmp_path)
-        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "text/plain"}
+        headers = {
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "text/plain",
+            "X-Admin-Token": ADMIN_TOKEN,
+        }
 
         # 第一次写
         client.put("/api/kv/config/overwrite.md", content=b"v1", headers=headers)
@@ -123,6 +132,7 @@ class TestKVPutEndpoint:
             headers={
                 "Authorization": f"Bearer {TOKEN}",
                 "Content-Type": "text/plain",
+                "X-Admin-Token": ADMIN_TOKEN,
             },
         )
         assert resp.status_code == 400
@@ -137,10 +147,11 @@ class TestKVPutEndpoint:
             headers={
                 "Authorization": f"Bearer {TOKEN}",
                 "Content-Type": "text/plain",
+                "X-Admin-Token": ADMIN_TOKEN,
             },
         )
-        # Starlette 路由可能会 404 或者 handler 返回 400
-        assert resp.status_code in (400, 404)
+        # Starlette 路由可能会 404 或者 handler 返回 400/403
+        assert resp.status_code in (400, 403, 404)
 
     def test_put_empty_body(self, tmp_path):
         """空 body 返回 400."""
@@ -151,6 +162,7 @@ class TestKVPutEndpoint:
             headers={
                 "Authorization": f"Bearer {TOKEN}",
                 "Content-Type": "text/plain",
+                "X-Admin-Token": ADMIN_TOKEN,
             },
         )
         assert resp.status_code == 400
@@ -162,7 +174,7 @@ class TestKVPutEndpoint:
         resp = client.put(
             "/api/kv/config/test.md",
             json={"wrong_field": "hello"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 400
 
@@ -225,7 +237,7 @@ class TestKVGetEndpoint:
     def test_put_then_get_roundtrip(self, tmp_path):
         """写入后读取，内容一致."""
         client = _make_client(project_dir=tmp_path)
-        headers = {"Authorization": f"Bearer {TOKEN}"}
+        headers = {"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN}
         content = "# CLAUDE.md\n\n这是中文内容 🎉\nLine 2"
 
         # PUT

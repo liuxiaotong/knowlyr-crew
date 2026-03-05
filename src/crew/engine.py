@@ -190,7 +190,9 @@ class CrewEngine:
         if not skip_memory:
             try:
                 memory_parts = self._load_memories_sync(
-                    employee, rendered, max_visibility,
+                    employee,
+                    rendered,
+                    max_visibility,
                     classification_max=classification_max,
                     allowed_domains=allowed_domains,
                     include_confidential=include_confidential,
@@ -311,6 +313,7 @@ class CrewEngine:
         _team_members: list[str] | None = None
         try:
             from crew.organization import load_organization as _load_org
+
             _org = _load_org(project_dir=self.project_dir)
             _tid = _org.get_team(employee.name)
             if _tid:
@@ -334,7 +337,10 @@ class CrewEngine:
         # 2. 上次教训（corrections）
         try:
             corrections = memory_store.query(
-                employee.name, category="correction", limit=3, max_visibility=max_visibility,
+                employee.name,
+                category="correction",
+                limit=3,
+                max_visibility=max_visibility,
                 **_cls_kwargs,
             )
             if corrections:
@@ -345,41 +351,74 @@ class CrewEngine:
                         lesson_lines.append(f"- ⚠ {focus}")
                     else:
                         lesson_lines.append(f"- {c.content}")
-                parts.extend(["", "---", "", "## 上次教训", "",
-                              "以下是你最近任务的自检结果，本次注意改进：", ""] + lesson_lines)
+                parts.extend(
+                    [
+                        "",
+                        "---",
+                        "",
+                        "## 上次教训",
+                        "",
+                        "以下是你最近任务的自检结果，本次注意改进：",
+                        "",
+                    ]
+                    + lesson_lines
+                )
         except Exception:
             pass
 
         # 3. 高分范例（exemplars）
         try:
             exemplars = memory_store.query(
-                employee.name, category="finding", limit=3, max_visibility=max_visibility,
+                employee.name,
+                category="finding",
+                limit=3,
+                max_visibility=max_visibility,
                 **_cls_kwargs,
             )
             exemplars = [e for e in exemplars if "exemplar" in (e.tags or [])]
             if exemplars:
                 ex_lines = [f"- {e.content}" for e in exemplars]
-                parts.extend(["", "---", "", "## 高分范例", "",
-                              "以下是你近期表现优秀的任务案例，可作为参考：", ""] + ex_lines)
+                parts.extend(
+                    [
+                        "",
+                        "---",
+                        "",
+                        "## 高分范例",
+                        "",
+                        "以下是你近期表现优秀的任务案例，可作为参考：",
+                        "",
+                    ]
+                    + ex_lines
+                )
         except Exception:
             pass
 
         # 4. 可复用工作模式（patterns）
         try:
             patterns = memory_store.query_patterns(
-                employee=employee.name, applicability=employee.tags, limit=5,
+                employee=employee.name,
+                applicability=employee.tags,
+                limit=5,
             )
             if patterns:
                 pattern_lines = []
                 for p in patterns:
                     verified = f" ✓{p.verified_count}" if p.verified_count > 0 else ""
                     trigger = f" [触发: {p.trigger_condition}]" if p.trigger_condition else ""
-                    origin = (
-                        f" ({p.origin_employee})" if p.origin_employee != employee.name else ""
-                    )
+                    origin = f" ({p.origin_employee})" if p.origin_employee != employee.name else ""
                     pattern_lines.append(f"- {p.content}{trigger}{origin}{verified}")
-                parts.extend(["", "---", "", "## 可参考的工作模式", "",
-                              "以下是团队验证过的有效工作模式，适用时可直接采用：", ""] + pattern_lines)
+                parts.extend(
+                    [
+                        "",
+                        "---",
+                        "",
+                        "## 可参考的工作模式",
+                        "",
+                        "以下是团队验证过的有效工作模式，适用时可直接采用：",
+                        "",
+                    ]
+                    + pattern_lines
+                )
         except Exception:
             pass
 
@@ -416,6 +455,7 @@ class CrewEngine:
         _team_members: list[str] | None = None
         try:
             from crew.organization import load_organization as _load_org
+
             _org = _load_org(project_dir=self.project_dir)
             _tid = _org.get_team(employee.name)
             if _tid:
@@ -426,8 +466,11 @@ class CrewEngine:
         # 4 个同步 DB 查询 → asyncio.to_thread 并行
         def _q_cached():
             return get_prompt_cached(
-                employee.name, query=rendered, store=memory_store,
-                employee_tags=employee.tags, max_visibility=max_visibility,
+                employee.name,
+                query=rendered,
+                store=memory_store,
+                employee_tags=employee.tags,
+                max_visibility=max_visibility,
                 team_members=_team_members,
                 **_cls_kwargs,
             )
@@ -435,7 +478,9 @@ class CrewEngine:
         def _q_corrections():
             try:
                 return memory_store.query(
-                    employee.name, category="correction", limit=3,
+                    employee.name,
+                    category="correction",
+                    limit=3,
                     max_visibility=max_visibility,
                     **_cls_kwargs,
                 )
@@ -445,7 +490,9 @@ class CrewEngine:
         def _q_exemplars():
             try:
                 results = memory_store.query(
-                    employee.name, category="finding", limit=3,
+                    employee.name,
+                    category="finding",
+                    limit=3,
                     max_visibility=max_visibility,
                     **_cls_kwargs,
                 )
@@ -456,7 +503,9 @@ class CrewEngine:
         def _q_patterns():
             try:
                 return memory_store.query_patterns(
-                    employee=employee.name, applicability=employee.tags, limit=5,
+                    employee=employee.name,
+                    applicability=employee.tags,
+                    limit=5,
                 )
             except Exception:
                 return []
@@ -481,25 +530,45 @@ class CrewEngine:
                     lesson_lines.append(f"- ⚠ {focus}")
                 else:
                     lesson_lines.append(f"- {c.content}")
-            parts.extend(["", "---", "", "## 上次教训", "",
-                          "以下是你最近任务的自检结果，本次注意改进：", ""] + lesson_lines)
+            parts.extend(
+                ["", "---", "", "## 上次教训", "", "以下是你最近任务的自检结果，本次注意改进：", ""]
+                + lesson_lines
+            )
 
         if exemplars:
             ex_lines = [f"- {e.content}" for e in exemplars]
-            parts.extend(["", "---", "", "## 高分范例", "",
-                          "以下是你近期表现优秀的任务案例，可作为参考：", ""] + ex_lines)
+            parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "## 高分范例",
+                    "",
+                    "以下是你近期表现优秀的任务案例，可作为参考：",
+                    "",
+                ]
+                + ex_lines
+            )
 
         if patterns:
             pattern_lines = []
             for p in patterns:
                 verified = f" ✓{p.verified_count}" if p.verified_count > 0 else ""
                 trigger = f" [触发: {p.trigger_condition}]" if p.trigger_condition else ""
-                origin = (
-                    f" ({p.origin_employee})" if p.origin_employee != employee.name else ""
-                )
+                origin = f" ({p.origin_employee})" if p.origin_employee != employee.name else ""
                 pattern_lines.append(f"- {p.content}{trigger}{origin}{verified}")
-            parts.extend(["", "---", "", "## 可参考的工作模式", "",
-                          "以下是团队验证过的有效工作模式，适用时可直接采用：", ""] + pattern_lines)
+            parts.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "## 可参考的工作模式",
+                    "",
+                    "以下是团队验证过的有效工作模式，适用时可直接采用：",
+                    "",
+                ]
+                + pattern_lines
+            )
 
         return parts
 
@@ -570,7 +639,9 @@ class CrewEngine:
 
         # 先生成不含记忆的 prompt 骨架（快速，无 DB 查询）
         base_prompt = self.prompt(
-            emp, max_visibility=max_visibility, skip_memory=True,
+            emp,
+            max_visibility=max_visibility,
+            skip_memory=True,
             classification_max=_cls_max,
             allowed_domains=_cls_domains,
             include_confidential=_cls_confidential,
@@ -580,7 +651,9 @@ class CrewEngine:
         # 并行加载记忆（4 个 DB 查询同时执行 ~200ms，vs 串行 ~500ms-1s）
         try:
             memory_parts = await self._load_memories_parallel(
-                emp, rendered, max_visibility,
+                emp,
+                rendered,
+                max_visibility,
                 classification_max=_cls_max,
                 allowed_domains=_cls_domains,
                 include_confidential=_cls_confidential,
@@ -618,7 +691,9 @@ class CrewEngine:
                     {
                         "content": m.content if hasattr(m, "content") else m.get("content", ""),
                         "category": m.category if hasattr(m, "category") else m.get("category", ""),
-                        "importance": m.importance if hasattr(m, "importance") else m.get("importance", 0),
+                        "importance": m.importance
+                        if hasattr(m, "importance")
+                        else m.get("importance", 0),
                         "tags": (m.tags if hasattr(m, "tags") else m.get("tags")) or [],
                     }
                     for m in raw_memories
@@ -644,11 +719,7 @@ class CrewEngine:
         # 1. 有工具的员工 + 消息不需要工具 → 走 fast（原逻辑）
         # 2. 短消息（<=30字）+ 不需要工具 → 走 fast（闲聊优化）
         _is_short = len(message) <= 30
-        use_fast_path = (
-            emp.fallback_model
-            and not needs_tools
-            and (has_tools or _is_short)
-        )
+        use_fast_path = emp.fallback_model and not needs_tools and (has_tools or _is_short)
 
         # ── 6. 构建 user_message（含历史上下文嵌入）──
         if message_history:
@@ -667,8 +738,7 @@ class CrewEngine:
         t0 = _time.monotonic()
         # 确定模型和参数
         effective_user_msg = (
-            full_user_message if isinstance(full_user_message, str)
-            else "请开始执行上述任务。"
+            full_user_message if isinstance(full_user_message, str) else "请开始执行上述任务。"
         )
 
         if use_fast_path:
@@ -747,7 +817,12 @@ class CrewEngine:
 
         # ── 9. 记忆异步写回（fire-and-forget）──
         self._fire_memory_write(
-            employee_id, channel, sender_id, message, reply_text, max_visibility,
+            employee_id,
+            channel,
+            sender_id,
+            message,
+            reply_text,
+            max_visibility,
         )
 
         logger.info(
@@ -803,8 +878,13 @@ class CrewEngine:
             )
         except (ValueError, ImportError) as e:
             logger.warning("chat() stream LLM 调用失败 emp=%s: %s", employee_id, e)
-            yield {"done": True, "employee_id": employee_id, "tokens_used": 0,
-                   "latency_ms": int((_time.monotonic() - t0) * 1000), "error": str(e)}
+            yield {
+                "done": True,
+                "employee_id": employee_id,
+                "tokens_used": 0,
+                "latency_ms": int((_time.monotonic() - t0) * 1000),
+                "error": str(e),
+            }
             return
 
         # 逐 token 推送
@@ -829,15 +909,24 @@ class CrewEngine:
         # 记忆异步写回
         full_reply = "".join(collected)
         from crew.output_sanitizer import strip_internal_tags
+
         clean_reply = strip_internal_tags(full_reply)
         self._fire_memory_write(
-            employee_id, channel, sender_id, message, clean_reply, max_visibility,
+            employee_id,
+            channel,
+            sender_id,
+            message,
+            clean_reply,
+            max_visibility,
         )
 
         logger.info(
             "chat() stream 完成 [%s] emp=%s channel=%s latency=%dms tokens=%d",
             "fast" if use_fast_path else "full",
-            employee_id, channel, elapsed_ms, tokens_used,
+            employee_id,
+            channel,
+            elapsed_ms,
+            tokens_used,
         )
 
         yield {
@@ -878,7 +967,10 @@ class CrewEngine:
                     reply_lower = reply_text.lower()
 
                     # 识别决策类内容
-                    if any(keyword in reply_lower for keyword in ["决定", "建议", "方案", "计划", "应该"]):
+                    if any(
+                        keyword in reply_lower
+                        for keyword in ["决定", "建议", "方案", "计划", "应该"]
+                    ):
                         if len(reply_text) > 50:
                             mem_store.add(
                                 employee_id,
@@ -890,7 +982,10 @@ class CrewEngine:
                             )
 
                     # 识别发现类内容
-                    if any(keyword in reply_lower for keyword in ["发现", "注意到", "观察到", "问题", "风险"]):
+                    if any(
+                        keyword in reply_lower
+                        for keyword in ["发现", "注意到", "观察到", "问题", "风险"]
+                    ):
                         if len(reply_text) > 50:
                             mem_store.add(
                                 employee_id,
@@ -902,7 +997,10 @@ class CrewEngine:
                             )
 
                     # 识别纠正类内容
-                    if any(keyword in reply_lower for keyword in ["错误", "修正", "纠正", "不对", "应该是"]):
+                    if any(
+                        keyword in reply_lower
+                        for keyword in ["错误", "修正", "纠正", "不对", "应该是"]
+                    ):
                         if len(reply_text) > 50:
                             mem_store.add(
                                 employee_id,

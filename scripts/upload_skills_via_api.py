@@ -84,9 +84,7 @@ def main():
     # 验证
     print("\n验证服务端 Skills 统计:")
     try:
-        response = requests.get(
-            f"{API_BASE}/api/skills/stats", headers=HEADERS, timeout=10
-        )
+        response = requests.get(f"{API_BASE}/api/skills/stats", headers=HEADERS, timeout=10)
         if response.status_code == 200:
             stats = response.json()
             print(f"  - 总数: {stats.get('total_skills', 0)}")

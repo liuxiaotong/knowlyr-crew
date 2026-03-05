@@ -204,9 +204,7 @@ class MemoryFeedbackManager:
                 continue
 
         # 按有帮助比例升序排序
-        low_quality.sort(
-            key=lambda s: s.helpful_count / s.total_uses if s.total_uses > 0 else 0.0
-        )
+        low_quality.sort(key=lambda s: s.helpful_count / s.total_uses if s.total_uses > 0 else 0.0)
         return low_quality
 
     def get_popular_memories(

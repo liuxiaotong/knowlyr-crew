@@ -1,6 +1,5 @@
 """记忆反馈和使用分析测试."""
 
-
 import pytest
 
 from crew.memory_feedback import MemoryFeedbackManager
@@ -137,29 +136,19 @@ class TestMemoryFeedbackManager:
         # 创建一些记忆统计
         # mem-001: 10 次使用，2 次有帮助 (20%)
         for _ in range(2):
-            feedback_manager.submit_feedback(
-                "mem-001", "赵云帆", "helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-001", "赵云帆", "helpful", "姜墨言")
         for _ in range(8):
-            feedback_manager.submit_feedback(
-                "mem-001", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-001", "赵云帆", "not_helpful", "姜墨言")
 
         # mem-002: 10 次使用，8 次有帮助 (80%)
         for _ in range(8):
-            feedback_manager.submit_feedback(
-                "mem-002", "赵云帆", "helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-002", "赵云帆", "helpful", "姜墨言")
         for _ in range(2):
-            feedback_manager.submit_feedback(
-                "mem-002", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-002", "赵云帆", "not_helpful", "姜墨言")
 
         # mem-003: 3 次使用（不满足 min_uses=5）
         for _ in range(3):
-            feedback_manager.submit_feedback(
-                "mem-003", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-003", "赵云帆", "not_helpful", "姜墨言")
 
         # 获取低质量记忆
         low_quality = feedback_manager.get_low_quality_memories(
@@ -174,33 +163,21 @@ class TestMemoryFeedbackManager:
         """测试获取热门记忆."""
         # mem-001: 10 次使用，8 次有帮助 (80%)
         for _ in range(8):
-            feedback_manager.submit_feedback(
-                "mem-001", "赵云帆", "helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-001", "赵云帆", "helpful", "姜墨言")
         for _ in range(2):
-            feedback_manager.submit_feedback(
-                "mem-001", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-001", "赵云帆", "not_helpful", "姜墨言")
 
         # mem-002: 5 次使用，4 次有帮助 (80%)
         for _ in range(4):
-            feedback_manager.submit_feedback(
-                "mem-002", "赵云帆", "helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-002", "赵云帆", "helpful", "姜墨言")
         for _ in range(1):
-            feedback_manager.submit_feedback(
-                "mem-002", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-002", "赵云帆", "not_helpful", "姜墨言")
 
         # mem-003: 10 次使用，2 次有帮助 (20%) - 不应该出现
         for _ in range(2):
-            feedback_manager.submit_feedback(
-                "mem-003", "赵云帆", "helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-003", "赵云帆", "helpful", "姜墨言")
         for _ in range(8):
-            feedback_manager.submit_feedback(
-                "mem-003", "赵云帆", "not_helpful", "姜墨言"
-            )
+            feedback_manager.submit_feedback("mem-003", "赵云帆", "not_helpful", "姜墨言")
 
         # 获取热门记忆
         popular = feedback_manager.get_popular_memories(limit=10)

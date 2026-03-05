@@ -14,8 +14,12 @@ SYNC_MODEL_CONFIG = True
 
 # 模型配置字段
 MODEL_CONFIG_FIELDS = [
-    "model", "api_key", "base_url",
-    "fallback_model", "fallback_api_key", "temperature",
+    "model",
+    "api_key",
+    "base_url",
+    "fallback_model",
+    "fallback_api_key",
+    "temperature",
 ]
 
 
@@ -60,7 +64,9 @@ def main():
 
         save_yaml(yaml_path, data)
         updated += 1
-        print(f"  ✓ {emp_dir.name} ({data.get('character_name', '?')}): {len(old_tools)} → {len(source_tools)} 工具")
+        print(
+            f"  ✓ {emp_dir.name} ({data.get('character_name', '?')}): {len(old_tools)} → {len(source_tools)} 工具"
+        )
 
     print(f"\n完成: 更新 {updated} 个员工")
 

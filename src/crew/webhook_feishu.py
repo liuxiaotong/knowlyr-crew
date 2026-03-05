@@ -339,7 +339,7 @@ async def _feishu_fast_reply(
             "Fast path 注入 extra_context: employee=%s len=%d preview=%s",
             emp.name,
             len(extra_context),
-            extra_context[:100]
+            extra_context[:100],
         )
         prompt += "\n\n" + extra_context
 

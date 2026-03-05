@@ -139,7 +139,9 @@ class OptimizedMemoryStore:
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
         self.enable_cache = enable_cache
-        self.cache = MemoryCache(max_size=cache_size, ttl_seconds=cache_ttl) if enable_cache else None
+        self.cache = (
+            MemoryCache(max_size=cache_size, ttl_seconds=cache_ttl) if enable_cache else None
+        )
 
         # 索引缓存（内存中）
         self._index_cache: dict[str, MemoryIndex] = {}
@@ -268,7 +270,9 @@ class OptimizedMemoryStore:
             logger.info("已清空所有缓存")
         else:
             # 清除该员工相关的缓存
-            keys_to_remove = [k for k in self.cache._cache.keys() if k.startswith(f"query:{employee}:")]
+            keys_to_remove = [
+                k for k in self.cache._cache.keys() if k.startswith(f"query:{employee}:")
+            ]
             for key in keys_to_remove:
                 self.cache.invalidate(key)
             logger.info("已清除缓存: employee=%s count=%d", employee, len(keys_to_remove))

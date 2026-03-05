@@ -80,9 +80,7 @@ def init_memory_tables() -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_classification ON memories(classification)"
         )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories USING GIN(domain)"
-        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories USING GIN(domain)")
 
     logger.info("memories 表初始化完成")
 
@@ -106,6 +104,7 @@ class MemoryStoreDB:
         if not is_pg():
             raise RuntimeError("MemoryStoreDB 仅支持 PostgreSQL 模式")
         import psycopg2.extras
+
         self._dict_cursor_factory = psycopg2.extras.RealDictCursor
 
     def _resolve_to_character_name(self, employee: str) -> str:
@@ -134,7 +133,9 @@ class MemoryStoreDB:
         return MemoryEntry(
             id=row["id"],
             employee=row["employee"],
-            created_at=row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
+            created_at=row["created_at"].isoformat()
+            if hasattr(row["created_at"], "isoformat")
+            else str(row["created_at"]),
             category=row["category"],
             content=row["content"],
             source_session=row.get("source_session") or "",
@@ -142,7 +143,9 @@ class MemoryStoreDB:
             superseded_by=row.get("superseded_by") or "",
             ttl_days=int(row.get("ttl_days", 0)),
             importance=int(row.get("importance", 3)),
-            last_accessed=row["last_accessed"].isoformat() if row.get("last_accessed") and hasattr(row["last_accessed"], "isoformat") else (str(row["last_accessed"]) if row.get("last_accessed") else ""),
+            last_accessed=row["last_accessed"].isoformat()
+            if row.get("last_accessed") and hasattr(row["last_accessed"], "isoformat")
+            else (str(row["last_accessed"]) if row.get("last_accessed") else ""),
             tags=list(row.get("tags") or []),
             shared=bool(row.get("shared", False)),
             visibility=row.get("visibility") or "open",
@@ -358,9 +361,7 @@ class MemoryStoreDB:
                 k for k, v in self._CLASSIFICATION_LEVELS.items() if v <= max_level
             ]
             placeholders = ", ".join(["%s"] * len(allowed_classifications))
-            conditions.append(
-                f"COALESCE(classification, 'internal') IN ({placeholders})"
-            )
+            conditions.append(f"COALESCE(classification, 'internal') IN ({placeholders})")
             params.extend(allowed_classifications)
 
         # [W7] restricted 域匹配移到 SQL 层
@@ -731,7 +732,9 @@ class MemoryStoreDB:
 
         # 个人记忆（透传 classification 参数）
         entries = self.query(
-            employee, limit=limit, max_visibility=max_visibility,
+            employee,
+            limit=limit,
+            max_visibility=max_visibility,
             classification_max=classification_max,
             allowed_domains=allowed_domains,
             include_confidential=include_confidential,

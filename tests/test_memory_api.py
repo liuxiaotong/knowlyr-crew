@@ -152,7 +152,7 @@ class TestMemoryAddEndpoint:
 
         client = _make_client()
         resp = client.post(
-            "/api/memory/add",
+            "/api/memory/add?force=true",
             json={
                 "employee": "test",
                 "category": "finding",

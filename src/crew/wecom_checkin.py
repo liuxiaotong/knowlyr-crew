@@ -283,9 +283,7 @@ async def get_leave_users(
             errcode = data.get("errcode", -1)
             if errcode != 0:
                 errmsg = data.get("errmsg", "unknown")
-                logger.warning(
-                    "获取审批详情失败 sp_no=%s: %s (errcode=%d)", sp_no, errmsg, errcode
-                )
+                logger.warning("获取审批详情失败 sp_no=%s: %s (errcode=%d)", sp_no, errmsg, errcode)
                 continue
 
             info = data.get("info", {})
@@ -527,7 +525,9 @@ async def run_checkin_report(
         rules = None  # 传 None 让 classify_checkin 用 fallback
 
     # 获取上班打卡数据
-    logger.info("获取打卡数据: %s ~ %s", today_start.strftime("%Y-%m-%d %H:%M"), now.strftime("%H:%M"))
+    logger.info(
+        "获取打卡数据: %s ~ %s", today_start.strftime("%Y-%m-%d %H:%M"), now.strftime("%H:%M")
+    )
     checkin_records = await get_checkin_data(
         token, filtered_user_ids, start_ts, end_ts, checkin_type=1
     )

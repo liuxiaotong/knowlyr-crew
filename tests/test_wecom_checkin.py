@@ -26,10 +26,12 @@ class TestClassifyCheckin:
         for uid, time_str in data:
             h, m = map(int, time_str.split(":"))
             dt = today.replace(hour=h, minute=m)
-            records.append({
-                "userid": uid,
-                "checkin_time": int(dt.timestamp()),
-            })
+            records.append(
+                {
+                    "userid": uid,
+                    "checkin_time": int(dt.timestamp()),
+                }
+            )
         return records
 
     def test_all_normal_fallback(self):
@@ -467,9 +469,7 @@ class TestGetCheckinRules:
                     "checkindate": [
                         {
                             "workdays": [1, 2, 3, 4, 5],
-                            "checkintime": [
-                                {"work_sec": 34200, "off_work_sec": 66600}
-                            ],
+                            "checkintime": [{"work_sec": 34200, "off_work_sec": 66600}],
                             "late_rule": {"onwork_flex_time": 3600},
                             "allow_flex": True,
                         }
@@ -586,9 +586,7 @@ class TestGetCheckinRules:
                 "userid": "u0",
                 "group": {
                     "groupname": "G",
-                    "checkindate": [
-                        {"checkintime": [{"work_sec": 34200}], "allow_flex": False}
-                    ],
+                    "checkindate": [{"checkintime": [{"work_sec": 34200}], "allow_flex": False}],
                 },
             }
         ]
@@ -617,17 +615,13 @@ class TestGetCheckinRules:
                     "checkindate": [
                         {
                             "workdays": [1, 2, 3, 4, 5],
-                            "checkintime": [
-                                {"work_sec": 34200, "off_work_sec": 66600}
-                            ],
+                            "checkintime": [{"work_sec": 34200, "off_work_sec": 66600}],
                             "allow_flex": True,
                             "max_allow_arrive_early": 1800,
                             "max_allow_arrive_late": 1800,
                             "late_rule": {
                                 "onwork_flex_time": 0,
-                                "timerules": [
-                                    {"offwork_after_time": 0, "onwork_flex_time": 0}
-                                ],
+                                "timerules": [{"offwork_after_time": 0, "onwork_flex_time": 0}],
                             },
                         }
                     ],
@@ -973,9 +967,7 @@ class TestGetLeaveUsers:
         }
 
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(
-            side_effect=[page1_resp, page2_resp, detail1, detail2]
-        )
+        mock_client.post = AsyncMock(side_effect=[page1_resp, page2_resp, detail1, detail2])
 
         with patch("crew.wecom.get_wecom_client", return_value=mock_client):
             result = await get_leave_users("token", 100, 200)

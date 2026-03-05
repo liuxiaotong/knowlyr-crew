@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# 企业微信依赖 pycryptodome 和 defusedxml（webhook optional deps）
+pytest.importorskip("Crypto", reason="pycryptodome not installed")
+pytest.importorskip("defusedxml", reason="defusedxml not installed")
+
 # ── 加解密测试 ──
 
 
@@ -125,12 +129,7 @@ class TestParseWecomMessage:
     def test_parse_empty_content(self):
         from crew.wecom import parse_wecom_message
 
-        xml = (
-            "<xml>"
-            "<MsgType><![CDATA[text]]></MsgType>"
-            "<Content></Content>"
-            "</xml>"
-        )
+        xml = "<xml><MsgType><![CDATA[text]]></MsgType><Content></Content></xml>"
         result = parse_wecom_message(xml)
         assert result["Content"] == ""
 
@@ -525,14 +524,17 @@ class TestWecomDispatch:
             mock_send.return_value = {"errcode": 0}
 
             await _wecom_dispatch(
-                ctx, "user001", "你好", 1000017, token_mgr,
-                chat_id="", is_group=True,
+                ctx,
+                "user001",
+                "你好",
+                1000017,
+                token_mgr,
+                chat_id="",
+                is_group=True,
             )
 
             # 无 chat_id -> 降级为单聊回复
-            mock_send.assert_called_once_with(
-                token_mgr, "user001", 1000017, "group reply"
-            )
+            mock_send.assert_called_once_with(token_mgr, "user001", 1000017, "group reply")
 
     @pytest.mark.asyncio
     async def test_group_message_with_chat_id_tries_group_api(self):
@@ -556,14 +558,17 @@ class TestWecomDispatch:
             mock_send_group.return_value = {"errcode": 0}
 
             await _wecom_dispatch(
-                ctx, "user001", "你好", 1000017, token_mgr,
-                chat_id="group_chat_001", is_group=True,
+                ctx,
+                "user001",
+                "你好",
+                1000017,
+                token_mgr,
+                chat_id="group_chat_001",
+                is_group=True,
             )
 
             # 群聊 API 成功 -> 不走单聊
-            mock_send_group.assert_called_once_with(
-                token_mgr, "group_chat_001", "group reply"
-            )
+            mock_send_group.assert_called_once_with(token_mgr, "group_chat_001", "group reply")
             mock_send_dm.assert_not_called()
 
     @pytest.mark.asyncio
@@ -590,15 +595,18 @@ class TestWecomDispatch:
             mock_send_dm.return_value = {"errcode": 0}
 
             await _wecom_dispatch(
-                ctx, "user001", "你好", 1000017, token_mgr,
-                chat_id="group_chat_001", is_group=True,
+                ctx,
+                "user001",
+                "你好",
+                1000017,
+                token_mgr,
+                chat_id="group_chat_001",
+                is_group=True,
             )
 
             # 群聊 API 失败 -> 降级为单聊
             mock_send_group.assert_called_once()
-            mock_send_dm.assert_called_once_with(
-                token_mgr, "user001", 1000017, "group reply"
-            )
+            mock_send_dm.assert_called_once_with(token_mgr, "user001", 1000017, "group reply")
 
     @pytest.mark.asyncio
     async def test_group_dispatch_records_trigger_wecom_group(self):
@@ -621,7 +629,11 @@ class TestWecomDispatch:
             mock_send.return_value = {"errcode": 0}
 
             await _wecom_dispatch(
-                ctx, "user001", "你好", 1000017, token_mgr,
+                ctx,
+                "user001",
+                "你好",
+                1000017,
+                token_mgr,
                 is_group=True,
             )
 

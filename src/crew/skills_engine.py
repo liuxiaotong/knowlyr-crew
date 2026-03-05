@@ -65,9 +65,7 @@ class SkillsEngine:
                 # 只在没有预设关键词时从 description 提取
                 keywords = self._extract_keywords_from_description(skill.description)
             if not keywords:
-                logger.warning(
-                    f"Semantic trigger has no keywords for {skill.name}"
-                )
+                logger.warning(f"Semantic trigger has no keywords for {skill.name}")
                 return 0.0
             return self._keyword_match(keywords, task)
 
@@ -94,18 +92,26 @@ class SkillsEngine:
         keywords = []
 
         # 1. 提取引号中的内容
-        keywords.extend(re.findall(r'[\"\'](.*?)[\"\']', description))
+        keywords.extend(re.findall(r"[\"\'](.*?)[\"\']", description))
 
         # 2. 提取中文关键词（2-4字的中文词组）
-        keywords.extend(re.findall(r'[\u4e00-\u9fff]{2,4}', description))
+        keywords.extend(re.findall(r"[\u4e00-\u9fff]{2,4}", description))
 
         # 3. 提取英文关键词（3字母以上，去停用词）
         keywords.extend(
             w
-            for w in re.findall(r'[a-zA-Z]{3,}', description)
+            for w in re.findall(r"[a-zA-Z]{3,}", description)
             if w.lower()
             not in {
-                'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'not',
+                "the",
+                "and",
+                "for",
+                "that",
+                "this",
+                "with",
+                "from",
+                "have",
+                "not",
             }
         )
 
@@ -145,9 +151,7 @@ class SkillsEngine:
 
                 # 合并到 enhanced_context
                 if action.type == "query_memory":
-                    enhanced_context.setdefault("memories", []).extend(
-                        result.get("memories", [])
-                    )
+                    enhanced_context.setdefault("memories", []).extend(result.get("memories", []))
                 elif action.type == "load_checklist":
                     enhanced_context.setdefault("checklist_items", []).extend(
                         result.get("items", [])
@@ -155,9 +159,7 @@ class SkillsEngine:
 
             except Exception as e:
                 logger.error(f"Failed to execute action {action.type}: {e}")
-                executed_actions.append(
-                    {"type": action.type, "status": "failure", "error": str(e)}
-                )
+                executed_actions.append({"type": action.type, "status": "failure", "error": str(e)})
 
         execution_time_ms = int((time.time() - start_time) * 1000)
 

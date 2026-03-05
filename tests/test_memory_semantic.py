@@ -1,6 +1,5 @@
 """语义搜索和智能推荐测试."""
 
-
 import pytest
 
 from crew.memory import MemoryStore

@@ -55,7 +55,15 @@ def main() -> None:
             age_hours = (now - created_at).total_seconds() / 3600
             if age_hours < args.max_age_hours:
                 continue
-        pending.append((data.get("id"), data.get("employee"), data.get("category"), data.get("content"), created_at))
+        pending.append(
+            (
+                data.get("id"),
+                data.get("employee"),
+                data.get("category"),
+                data.get("content"),
+                created_at,
+            )
+        )
 
     if not pending:
         print("No pending eval decisions.")

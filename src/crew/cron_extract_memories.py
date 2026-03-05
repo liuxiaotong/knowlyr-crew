@@ -98,7 +98,9 @@ def process_trajectories_batch(
 
     for i in range(0, len(trajectories), batch_size):
         batch = trajectories[i : i + batch_size]
-        logger.info("处理批次 %d-%d / %d", i + 1, min(i + batch_size, len(trajectories)), len(trajectories))
+        logger.info(
+            "处理批次 %d-%d / %d", i + 1, min(i + batch_size, len(trajectories)), len(trajectories)
+        )
 
         for traj in batch:
             try:

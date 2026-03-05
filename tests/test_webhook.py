@@ -303,6 +303,7 @@ class TestTaskPersistence:
 
 
 TOKEN = "test-token-123"
+ADMIN_TOKEN = "test-admin-token-456"
 
 
 def _make_client(config=None, token=TOKEN):
@@ -803,6 +804,7 @@ class TestTaskReplay:
         mock_record.target_type = "pipeline"
         mock_record.target_name = "test-pipe"
         mock_record.args = {"target": "main"}
+        mock_record.owner = None
 
         with patch.object(TaskRegistry, "get", return_value=mock_record):
             resp = client.post(
@@ -1041,6 +1043,8 @@ class TestEmployeeGetEndpoint:
 class TestEmployeeUpdatePUT:
     """PUT /api/employees/{identifier} — employee.yaml 唯一真相源."""
 
+    _admin_headers = {"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN}
+
     def _make_emp(self, tmp_path, name="test-emp", agent_id="AI3080"):
         """创建带 source_path 的 Employee + 真实 employee.yaml."""
         from crew.models import Employee
@@ -1069,6 +1073,7 @@ class TestEmployeeUpdatePUT:
 
     @patch("crew.discovery.discover_employees")
     @patch("crew.webhook_handlers._write_yaml_field")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_model(self, mock_write, mock_discover, tmp_path):
         """PUT 应更新 model 到 employee.yaml."""
         from crew.models import DiscoveryResult
@@ -1080,7 +1085,7 @@ class TestEmployeeUpdatePUT:
         resp = client.put(
             f"/api/employees/{emp.name}",
             json={"model": "claude-opus-4-6"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers=self._admin_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -1090,6 +1095,7 @@ class TestEmployeeUpdatePUT:
 
     @patch("crew.discovery.discover_employees")
     @patch("crew.webhook_handlers._write_yaml_field")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_by_agent_id(self, mock_write, mock_discover, tmp_path):
         """PUT 可通过 agent_id 查找员工."""
         from crew.models import DiscoveryResult
@@ -1101,13 +1107,14 @@ class TestEmployeeUpdatePUT:
         resp = client.put(
             "/api/employees/AI3081",
             json={"temperature": 0.8},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers=self._admin_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["updated"]["temperature"] == 0.8
 
     @patch("crew.discovery.discover_employees")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_not_found(self, mock_discover):
         """不存在的员工应返回 404."""
         from crew.models import DiscoveryResult
@@ -1118,11 +1125,12 @@ class TestEmployeeUpdatePUT:
         resp = client.put(
             "/api/employees/nonexistent",
             json={"model": "gpt-4o"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers=self._admin_headers,
         )
         assert resp.status_code == 404
 
     @patch("crew.discovery.discover_employees")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_invalid_field(self, mock_discover, tmp_path):
         """不在白名单的字段应被拒绝."""
         from crew.models import DiscoveryResult, Employee
@@ -1140,7 +1148,7 @@ class TestEmployeeUpdatePUT:
         resp = client.put(
             "/api/employees/emp",
             json={"name": "hacked", "description": "pwned"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers=self._admin_headers,
         )
         assert resp.status_code == 400
         assert "No updatable fields" in resp.json()["error"]
@@ -1259,6 +1267,7 @@ class TestModelTierUpdatable:
 
     @patch("crew.discovery.discover_employees")
     @patch("crew.webhook_handlers._write_yaml_field")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_model_tier(self, mock_write, mock_discover, tmp_path):
         """PUT 应允许更新 model_tier."""
         from crew.models import DiscoveryResult, Employee
@@ -1289,7 +1298,7 @@ class TestModelTierUpdatable:
         resp = client.put(
             "/api/employees/test-emp",
             json={"model_tier": "kimi"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -1415,6 +1424,7 @@ class TestAuthorityRestoreEndpoint:
     """POST /api/employees/{id}/authority/restore — 权限恢复."""
 
     @patch("crew.discovery.discover_employees")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_restore_no_override(self, mock_discover):
         """无覆盖记录时返回当前权限."""
         from crew.models import DiscoveryResult, Employee
@@ -1425,7 +1435,7 @@ class TestAuthorityRestoreEndpoint:
         client = _make_client()
         resp = client.post(
             "/api/employees/test-emp/authority/restore",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -1433,6 +1443,7 @@ class TestAuthorityRestoreEndpoint:
         assert "无覆盖记录" in data["message"]
 
     @patch("crew.discovery.discover_employees")
+    @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_restore_not_found(self, mock_discover):
         """不存在的员工应返回 404."""
         from crew.models import DiscoveryResult
@@ -1442,7 +1453,7 @@ class TestAuthorityRestoreEndpoint:
         client = _make_client()
         resp = client.post(
             "/api/employees/nonexistent/authority/restore",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 404
 

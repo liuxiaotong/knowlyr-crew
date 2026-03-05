@@ -77,8 +77,7 @@ async def scan_overdue_decisions(
         if days_overdue >= 7:
             content_summary = decision.content[:60]
             finding_text = (
-                f"决策 [{content_summary}] 超期 {days_overdue} 天未评估"
-                f"（ID: {decision.id}）"
+                f"决策 [{content_summary}] 超期 {days_overdue} 天未评估（ID: {decision.id}）"
             )
             try:
                 store = get_memory_store(project_dir=project_dir)

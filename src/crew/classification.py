@@ -29,23 +29,23 @@ CHANNEL_SOURCE_TYPE: dict[str, str] = {
     "feishu_dm": "internal",
     "feishu_bot": "internal",
     "wecom": "internal",
-    "pull": "internal",       # Claude Code 派遣
-    "api": "internal",        # 内部 API 调用
-    "web": "external",        # Web widget
-    "mcp": "internal",        # MCP server
+    "pull": "internal",  # Claude Code 派遣
+    "api": "internal",  # 内部 API 调用
+    "web": "external",  # Web widget
+    "mcp": "internal",  # MCP server
 }
 
 # Source type → 默认 classification_max
 SOURCE_TYPE_CLEARANCE: dict[str, str] = {
-    "external": "public",     # 外部用户只能看 public
-    "internal": "internal",   # 内部员工默认看到 internal
+    "external": "public",  # 外部用户只能看 public
+    "internal": "internal",  # 内部员工默认看到 internal
 }
 
 # Sender type → clearance（发送者身份，可提升渠道默认等级）
 SENDER_TYPE_CLEARANCE: dict[str, str] = {
-    "internal": "internal",    # 内部员工 → internal
-    "agent": "internal",       # AI 员工 → internal
-    "external": "public",      # 外部用户 → public
+    "internal": "internal",  # 内部员工 → internal
+    "agent": "internal",  # AI 员工 → internal
+    "external": "public",  # 外部用户 → public
 }
 
 # Employee profile → clearance + domains

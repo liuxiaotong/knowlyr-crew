@@ -30,49 +30,50 @@ PROJECT_TAGS = [
 
 # 记忆类型标签
 MEMORY_TYPE_TAGS = [
-    "architecture",      # 架构决策
-    "bug-fix",          # Bug 修复
-    "gotcha",           # 陷阱/坑
-    "api-gotcha",       # API 陷阱
-    "best-practice",    # 最佳实践
-    "lesson-learned",   # 经验教训
-    "workflow",         # 工作流程
-    "code-review",      # 代码审查
-    "incident",         # 事故
-    "feature",          # 功能实现
+    "architecture",  # 架构决策
+    "bug-fix",  # Bug 修复
+    "gotcha",  # 陷阱/坑
+    "api-gotcha",  # API 陷阱
+    "best-practice",  # 最佳实践
+    "lesson-learned",  # 经验教训
+    "workflow",  # 工作流程
+    "code-review",  # 代码审查
+    "incident",  # 事故
+    "feature",  # 功能实现
 ]
 
 # 状态标签
 STATUS_TAGS = [
-    "milestone",        # 里程碑
-    "handoff-state",    # 交接状态
-    "project-board",    # 项目看板
-    "pending",          # 待处理
-    "resolved",         # 已解决
-    "in-progress",      # 进行中
+    "milestone",  # 里程碑
+    "handoff-state",  # 交接状态
+    "project-board",  # 项目看板
+    "pending",  # 待处理
+    "resolved",  # 已解决
+    "in-progress",  # 进行中
 ]
 
 # 特殊标签（系统保留）
 RESERVED_TAGS = [
-    "trajectory",       # 轨迹标记（会被拦截）
-    "claude-code",      # Claude Code 来源
-    "exemplar",         # 高分范例
-    "high-score",       # 高分
-    "wiki-pointer",     # Wiki 文档指针
+    "trajectory",  # 轨迹标记（会被拦截）
+    "claude-code",  # Claude Code 来源
+    "exemplar",  # 高分范例
+    "high-score",  # 高分
+    "wiki-pointer",  # Wiki 文档指针
 ]
 
 # 第三方服务标签
 SERVICE_TAGS = [
-    "wecom",           # 企业微信
-    "feishu",          # 飞书
-    "github",          # GitHub
-    "lark",            # Lark
+    "wecom",  # 企业微信
+    "feishu",  # 飞书
+    "github",  # GitHub
+    "lark",  # Lark
 ]
 
 
 # ============================================================================
 # 标签规范化
 # ============================================================================
+
 
 def normalize_tag(tag: str) -> str:
     """规范化标签：小写、连字符、去除空格.
@@ -135,6 +136,7 @@ def normalize_tags(tags: list[str]) -> list[str]:
 # ============================================================================
 # 标签建议
 # ============================================================================
+
 
 def suggest_tags(
     category: Literal["decision", "estimate", "finding", "correction", "pattern"],
@@ -210,17 +212,25 @@ def suggest_tags(
         for tag in category_suggestions[category]:
             if tag not in existing_set:
                 # 检查内容是否相关
-                if category == "correction" and any(kw in content_lower for kw in ["陷阱", "注意", "避免", "错误"]):
+                if category == "correction" and any(
+                    kw in content_lower for kw in ["陷阱", "注意", "避免", "错误"]
+                ):
                     if tag == "gotcha":
                         suggestions.append(tag)
-                elif category == "pattern" and any(kw in content_lower for kw in ["模式", "方法", "流程", "步骤"]):
+                elif category == "pattern" and any(
+                    kw in content_lower for kw in ["模式", "方法", "流程", "步骤"]
+                ):
                     if tag in ["best-practice", "workflow"]:
                         suggestions.append(tag)
                 elif category == "finding":
                     if "bug" in content_lower or "修复" in content_lower or "问题" in content_lower:
                         if tag == "bug-fix":
                             suggestions.append(tag)
-                    elif "功能" in content_lower or "实现" in content_lower or "新增" in content_lower:
+                    elif (
+                        "功能" in content_lower
+                        or "实现" in content_lower
+                        or "新增" in content_lower
+                    ):
                         if tag == "feature":
                             suggestions.append(tag)
                 elif category == "decision" and tag == "architecture":
@@ -238,7 +248,9 @@ def suggest_tags(
             if any(kw in content_lower for kw in keywords):
                 # api-gotcha 需要同时包含 api 和陷阱相关词
                 if tag == "api-gotcha":
-                    if ("api" in content_lower or "接口" in content) and any(kw in content_lower for kw in ["陷阱", "注意", "坑", "gotcha"]):
+                    if ("api" in content_lower or "接口" in content) and any(
+                        kw in content_lower for kw in ["陷阱", "注意", "坑", "gotcha"]
+                    ):
                         suggestions.append(tag)
                 else:
                     suggestions.append(tag)
@@ -252,6 +264,7 @@ def suggest_tags(
 # ============================================================================
 # 标签验证
 # ============================================================================
+
 
 def validate_tags(tags: list[str]) -> dict:
     """验证标签是否符合规范.
@@ -314,6 +327,7 @@ def validate_tags(tags: list[str]) -> dict:
 # 标签查询
 # ============================================================================
 
+
 def get_all_predefined_tags() -> dict:
     """获取所有预定义标签.
 
@@ -373,6 +387,12 @@ def search_tags(query: str, limit: int = 10) -> list[str]:
             matches.append(tag)
 
     # 按相关度排序（完全匹配优先）
-    matches.sort(key=lambda t: (t.lower() != query_lower, t.lower().index(query_lower) if query_lower in t.lower() else 999, t))
+    matches.sort(
+        key=lambda t: (
+            t.lower() != query_lower,
+            t.lower().index(query_lower) if query_lower in t.lower() else 999,
+            t,
+        )
+    )
 
     return matches[:limit]
