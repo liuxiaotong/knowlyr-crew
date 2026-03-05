@@ -1,0 +1,16 @@
+# MCP Server 配置 — 系统级
+# 每个 server 通过 stdio transport 连接
+
+servers:
+  gws:
+    command: "gws"
+    args: ["mcp"]
+    env:
+      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
+    whitelist:
+      - "calendar_list_events"
+      - "calendar_get_event"
+      - "gmail_list_messages"
+      - "gmail_get_message"
+    timeout: 30
+    description: "Google Workspace (只读)"
