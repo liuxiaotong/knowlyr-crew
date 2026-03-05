@@ -212,11 +212,11 @@ class TestCredentials:
         from crew.mcp_gateway.credentials import _decrypt, _encrypt
 
         encrypted = _encrypt("secret")
-        raw = base64.b64decode(encrypted)
+        raw = base64.urlsafe_b64decode(encrypted)
         # 篡改一个字节
         tampered = bytes([raw[0] ^ 0xFF]) + raw[1:]
         with pytest.raises(Exception):
-            _decrypt(base64.b64encode(tampered).decode())
+            _decrypt(base64.urlsafe_b64encode(tampered).decode())
 
     def test_store_and_get_credential(self, tmp_path):
         """端到端测试：直接用 sqlite3 验证 SQL 逻辑."""
