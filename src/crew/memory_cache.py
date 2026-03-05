@@ -74,6 +74,9 @@ def get_prompt_cached(
     max_visibility: str = "open",
     team_members: list[str] | None = None,
     employee_tags: list[str] | None = None,
+    classification_max: str | None = None,
+    allowed_domains: list[str] | None = None,
+    include_confidential: bool = False,
 ) -> str:
     """获取员工记忆的 prompt 文本，带进程内缓存.
 
@@ -88,6 +91,9 @@ def get_prompt_cached(
         max_visibility: 可见性上限
         team_members: 同团队成员
         employee_tags: 员工标签
+        classification_max: 最高信息分级（可选）
+        allowed_domains: 允许的职能域（可选）
+        include_confidential: 是否包含 confidential 级别
 
     Returns:
         截断到 800 token 的 prompt 文本
@@ -98,8 +104,11 @@ def get_prompt_cached(
     # 统一用花名作为缓存 key（slug 自动转换）
     employee = store._resolve_to_character_name(employee)
 
+    # 缓存 key：有 classification_max 时拼入，避免不同分级互相污染
+    cache_key = f"{employee}:{classification_max}" if classification_max is not None else employee
+
     now = time.monotonic()
-    cached = _CACHE.get(employee)
+    cached = _CACHE.get(cache_key)
 
     if cached is not None:
         age = now - cached.fetched_at
@@ -108,11 +117,11 @@ def get_prompt_cached(
             current_seq = _count_lines(store, employee)
             if current_seq < 0 or current_seq == cached.last_seq:
                 # DB-backed (seq<0): 纯靠 TTL; file-backed: TTL + 行数双校验
-                logger.debug("记忆缓存命中: %s (age=%.1fs)", employee, age)
+                logger.debug("记忆缓存命中: %s (age=%.1fs)", cache_key, age)
                 return cached.prompt_text
 
     # 缓存未命中，重新加载
-    logger.debug("记忆缓存未命中: %s，重新加载", employee)
+    logger.debug("记忆缓存未命中: %s，重新加载", cache_key)
 
     prompt_text = store.format_for_prompt(
         employee,
@@ -121,17 +130,20 @@ def get_prompt_cached(
         employee_tags=employee_tags,
         max_visibility=max_visibility,
         team_members=team_members,
+        classification_max=classification_max,
+        allowed_domains=allowed_domains,
+        include_confidential=include_confidential,
     )
     prompt_text = _truncate_to_token_limit(prompt_text, _PROMPT_TOKEN_LIMIT)
     current_seq = _count_lines(store, employee)
 
     # 缓存大小控制（S5）
-    if len(_CACHE) >= _MAX_CACHE_SIZE and employee not in _CACHE:
+    if len(_CACHE) >= _MAX_CACHE_SIZE and cache_key not in _CACHE:
         # 淘汰最久未使用的条目
         oldest_key = min(_CACHE, key=lambda k: _CACHE[k].fetched_at)
         del _CACHE[oldest_key]
 
-    _CACHE[employee] = MemorySnapshot(
+    _CACHE[cache_key] = MemorySnapshot(
         employee=employee,
         entries=[],  # 不缓存条目本身，只缓存 prompt 文本
         last_seq=current_seq,

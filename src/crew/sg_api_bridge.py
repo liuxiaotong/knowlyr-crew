@@ -87,6 +87,7 @@ async def sg_api_dispatch(
     permission_callback: Callable[[str, dict], bool] | None = None,
     push_event_fn: Callable[[dict], None] | None = None,
     channel: str = "",
+    sender_type: str = "",
 ) -> str:
     """SG API 转发主入口 — 使用 Anthropic API + 本地工具执行.
 
@@ -128,11 +129,13 @@ async def sg_api_dispatch(
         "3. 直接用自然中文回复，像微信聊天一样简洁",
     ])
 
-    # Phase 3：外部对话输出控制
+    # Phase 3：外部对话输出控制（综合 channel + sender_type）
     from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
 
     _source_type = CHANNEL_SOURCE_TYPE.get(channel, "external" if channel else "internal")
-    if _source_type == "external":
+    # 内部员工（sender_type=internal/agent）在蚁聚聊天时不注入外部限制
+    _is_internal_sender = sender_type in ("internal", "agent")
+    if _source_type == "external" and not _is_internal_sender:
         system_parts.append("")
         system_parts.append(EXTERNAL_OUTPUT_CONTROL_PROMPT)
 

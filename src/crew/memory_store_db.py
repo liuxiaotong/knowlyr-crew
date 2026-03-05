@@ -706,6 +706,9 @@ class MemoryStoreDB:
         employee_tags: list[str] | None = None,
         max_visibility: str = "open",
         team_members: list[str] | None = None,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
@@ -716,6 +719,9 @@ class MemoryStoreDB:
             employee_tags: 员工标签（用于匹配共享记忆）
             max_visibility: 可见性上限
             team_members: 同团队成员名列表
+            classification_max: 最高信息分级（可选）
+            allowed_domains: 允许的职能域（可选）
+            include_confidential: 是否包含 confidential 级别
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
@@ -723,8 +729,13 @@ class MemoryStoreDB:
         employee = self._resolve_to_character_name(employee)
         parts: list[str] = []
 
-        # 个人记忆
-        entries = self.query(employee, limit=limit, max_visibility=max_visibility)
+        # 个人记忆（透传 classification 参数）
+        entries = self.query(
+            employee, limit=limit, max_visibility=max_visibility,
+            classification_max=classification_max,
+            allowed_domains=allowed_domains,
+            include_confidential=include_confidential,
+        )
         if entries:
             parts.append(self._format_entries(entries))
 

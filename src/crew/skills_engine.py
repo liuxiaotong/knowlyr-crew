@@ -192,13 +192,14 @@ class SkillsEngine:
         category = params.get("category")
         limit = params.get("limit", 10)
 
-        # 信息分级过滤：从 context 中读取 channel，计算有效许可
+        # 信息分级过滤：从 context 中读取 channel + sender_type，计算有效许可
         clearance_kwargs: dict[str, Any] = {}
         channel = context.get("channel", "")
         if channel:
             from crew.classification import get_effective_clearance
 
-            clearance = get_effective_clearance(employee, channel)
+            _sender_type = context.get("sender_type", "")
+            clearance = get_effective_clearance(employee, channel, sender_type=_sender_type)
             clearance_kwargs["classification_max"] = clearance["classification_max"]
             clearance_kwargs["allowed_domains"] = clearance["allowed_domains"]
             clearance_kwargs["include_confidential"] = clearance["include_confidential"]

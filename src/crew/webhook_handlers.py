@@ -4296,6 +4296,9 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     model: str | None = payload.get("model")
     attachments: list[dict[str, Any]] | None = payload.get("attachments")
 
+    # 发送者身份（"internal"/"external"/"agent"/""，用于信息分级）
+    sender_type: str = payload.get("sender_type", "")
+
     # 来自蚁聚的额外上下文（用户名、上下文预算等）
     extra_context: str | None = payload.get("extra_context")
 
@@ -4322,7 +4325,8 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
 
             _chat_employee_name = _chat_emp.character_name or employee_id
 
-            triggered = skills_engine.check_triggers(_chat_employee_name, message, {})
+            _skills_context = {"channel": channel, "sender_type": sender_type}
+            triggered = skills_engine.check_triggers(_chat_employee_name, message, _skills_context)
             if triggered:
                 logger.info(
                     "Skills 触发 (/api/chat): employee=%s task=%s triggered=%d",
@@ -4335,7 +4339,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     try:
                         result = skills_engine.execute_skill(
                             skill, _chat_employee_name,
-                            {"task": message, "channel": channel},
+                            {"task": message, "channel": channel, "sender_type": sender_type},
                         )
                         if result.get("enhanced_context"):
                             for key, value in result["enhanced_context"].items():
@@ -4431,6 +4435,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 message_history=message_history,
                 push_event_fn=None,  # TODO: 支持流式输出
                 channel=channel,
+                sender_type=sender_type,
             )
             logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
         except SGAPIBridgeError as _sg_api_err:
@@ -4521,6 +4526,8 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
+                    sender_type=sender_type,
+                    channel=channel,
                 )
 
                 async def _agent_sse_generator():
@@ -4550,6 +4557,8 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
+                    sender_type=sender_type,
+                    channel=channel,
                 )
                 result = {
                     "reply": exec_result.get("output", ""),
@@ -4572,6 +4581,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     context_only=context_only,
                     message_history=message_history,
                     model=model,
+                    sender_type=sender_type,
                 )
 
                 # stream=True 时 engine.chat 返回 AsyncIterator

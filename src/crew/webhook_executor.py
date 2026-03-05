@@ -723,6 +723,8 @@ async def _execute_employee_with_tools(
     message_history: list[dict[str, Any]] | None = None,
     sender_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    sender_type: str = "",
+    channel: str = "",
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
@@ -750,7 +752,17 @@ async def _execute_employee_with_tools(
     engine = CrewEngine(project_dir=ctx.project_dir)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
+
+    # 信息分级：计算有效许可
+    _cls_kwargs: dict = {}
+    if channel:
+        from crew.classification import get_effective_clearance
+        _clearance = get_effective_clearance(match.name, channel, sender_type=sender_type)
+        _cls_kwargs["classification_max"] = _clearance["classification_max"]
+        _cls_kwargs["allowed_domains"] = _clearance["allowed_domains"]
+        _cls_kwargs["include_confidential"] = _clearance["include_confidential"]
+
+    prompt = engine.prompt(match, args=args, max_visibility=max_visibility, **_cls_kwargs)
 
     # 如果有 delegate 工具，追加同事名单（按组织架构分组）
     if "delegate" in (match.tools or []):
@@ -1072,6 +1084,8 @@ async def _stream_employee_with_tools(
     message_history: list[dict[str, Any]] | None = None,
     sender_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    sender_type: str = "",
+    channel: str = "",
 ) -> Any:
     """流式版 agent loop — 每一轮都用原生流式 API，逐 token 输出.
 
@@ -1101,7 +1115,17 @@ async def _stream_employee_with_tools(
 
     engine = CrewEngine(project_dir=ctx.project_dir)
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
-    prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
+
+    # 信息分级：计算有效许可
+    _cls_kwargs: dict = {}
+    if channel:
+        from crew.classification import get_effective_clearance
+        _clearance = get_effective_clearance(match.name, channel, sender_type=sender_type)
+        _cls_kwargs["classification_max"] = _clearance["classification_max"]
+        _cls_kwargs["allowed_domains"] = _clearance["allowed_domains"]
+        _cls_kwargs["include_confidential"] = _clearance["include_confidential"]
+
+    prompt = engine.prompt(match, args=args, max_visibility=max_visibility, **_cls_kwargs)
 
     # delegate 同事名单（同 _execute_employee_with_tools 逻辑）
     if "delegate" in (match.tools or []):

@@ -121,6 +121,9 @@ class CrewEngine:
         project_info: "ProjectInfo | None" = None,  # noqa: F821
         max_visibility: str = "open",
         skip_memory: bool = False,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> str:
         """生成完整的 system prompt.
 
@@ -129,6 +132,9 @@ class CrewEngine:
         Args:
             project_info: 可选的项目类型检测结果（注入 prompt header + 环境变量）
             skip_memory: 跳过记忆加载（用于 chat() 中并行加载记忆的场景）
+            classification_max: 最高信息分级（可选）
+            allowed_domains: 允许的职能域（可选）
+            include_confidential: 是否包含 confidential 级别
         """
         rendered = self.render(employee, args=args, positional=positional)
 
@@ -185,6 +191,9 @@ class CrewEngine:
             try:
                 memory_parts = self._load_memories_sync(
                     employee, rendered, max_visibility,
+                    classification_max=classification_max,
+                    allowed_domains=allowed_domains,
+                    include_confidential=include_confidential,
                 )
                 parts.extend(memory_parts)
             except Exception as e:
@@ -279,6 +288,9 @@ class CrewEngine:
         employee: Employee,
         rendered: str,
         max_visibility: str,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> list[str]:
         """同步加载记忆（串行），返回 prompt parts."""
         from crew.memory import get_memory_store
@@ -286,6 +298,14 @@ class CrewEngine:
 
         memory_store = get_memory_store(project_dir=self.project_dir)
         parts: list[str] = []
+
+        # classification 参数包
+        _cls_kwargs: dict = {}
+        if classification_max is not None:
+            _cls_kwargs["classification_max"] = classification_max
+        if allowed_domains is not None:
+            _cls_kwargs["allowed_domains"] = allowed_domains
+        _cls_kwargs["include_confidential"] = include_confidential
 
         # 获取同团队成员
         _team_members: list[str] | None = None
@@ -306,6 +326,7 @@ class CrewEngine:
             employee_tags=employee.tags,
             max_visibility=max_visibility,
             team_members=_team_members,
+            **_cls_kwargs,
         )
         if memory_text:
             parts.extend(["", "---", "", "## 历史经验", "", memory_text])
@@ -314,6 +335,7 @@ class CrewEngine:
         try:
             corrections = memory_store.query(
                 employee.name, category="correction", limit=3, max_visibility=max_visibility,
+                **_cls_kwargs,
             )
             if corrections:
                 lesson_lines = []
@@ -332,6 +354,7 @@ class CrewEngine:
         try:
             exemplars = memory_store.query(
                 employee.name, category="finding", limit=3, max_visibility=max_visibility,
+                **_cls_kwargs,
             )
             exemplars = [e for e in exemplars if "exemplar" in (e.tags or [])]
             if exemplars:
@@ -367,6 +390,9 @@ class CrewEngine:
         employee: Employee,
         rendered: str,
         max_visibility: str,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> list[str]:
         """异步并行加载记忆（4 个 DB 查询同时执行），返回 prompt parts.
 
@@ -377,6 +403,14 @@ class CrewEngine:
 
         memory_store = get_memory_store(project_dir=self.project_dir)
         parts: list[str] = []
+
+        # classification 参数包
+        _cls_kwargs: dict = {}
+        if classification_max is not None:
+            _cls_kwargs["classification_max"] = classification_max
+        if allowed_domains is not None:
+            _cls_kwargs["allowed_domains"] = allowed_domains
+        _cls_kwargs["include_confidential"] = include_confidential
 
         # 获取同团队成员
         _team_members: list[str] | None = None
@@ -395,6 +429,7 @@ class CrewEngine:
                 employee.name, query=rendered, store=memory_store,
                 employee_tags=employee.tags, max_visibility=max_visibility,
                 team_members=_team_members,
+                **_cls_kwargs,
             )
 
         def _q_corrections():
@@ -402,6 +437,7 @@ class CrewEngine:
                 return memory_store.query(
                     employee.name, category="correction", limit=3,
                     max_visibility=max_visibility,
+                    **_cls_kwargs,
                 )
             except Exception:
                 return []
@@ -411,6 +447,7 @@ class CrewEngine:
                 results = memory_store.query(
                     employee.name, category="finding", limit=3,
                     max_visibility=max_visibility,
+                    **_cls_kwargs,
                 )
                 return [e for e in results if "exemplar" in (e.tags or [])]
             except Exception:
@@ -478,6 +515,7 @@ class CrewEngine:
         context_only: bool = False,
         message_history: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        sender_type: str = "",
     ) -> dict[str, Any] | AsyncIterator[dict[str, Any]]:
         """统一对话接口 — prompt 构建 → LLM 调用 → 记忆写回全流程.
 
@@ -522,14 +560,30 @@ class CrewEngine:
             raise EmployeeNotFoundError(employee_id)
 
         # ── 3. prompt 构建 + 记忆并行加载 ──
+        # 计算信息分级
+        from crew.classification import get_effective_clearance
+
+        _clearance = get_effective_clearance(emp.name, channel, sender_type=sender_type)
+        _cls_max = _clearance["classification_max"]
+        _cls_domains = _clearance["allowed_domains"]
+        _cls_confidential = _clearance["include_confidential"]
+
         # 先生成不含记忆的 prompt 骨架（快速，无 DB 查询）
-        base_prompt = self.prompt(emp, max_visibility=max_visibility, skip_memory=True)
+        base_prompt = self.prompt(
+            emp, max_visibility=max_visibility, skip_memory=True,
+            classification_max=_cls_max,
+            allowed_domains=_cls_domains,
+            include_confidential=_cls_confidential,
+        )
         rendered = self.render(emp)
 
         # 并行加载记忆（4 个 DB 查询同时执行 ~200ms，vs 串行 ~500ms-1s）
         try:
             memory_parts = await self._load_memories_parallel(
                 emp, rendered, max_visibility,
+                classification_max=_cls_max,
+                allowed_domains=_cls_domains,
+                include_confidential=_cls_confidential,
             )
             if memory_parts:
                 # 把记忆注入到 prompt 中（插入到安全准则之前）

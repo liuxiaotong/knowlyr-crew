@@ -592,6 +592,9 @@ class MemoryStore:
         employee_tags: list[str] | None = None,
         max_visibility: str = "open",
         team_members: list[str] | None = None,
+        classification_max: str | None = None,
+        allowed_domains: list[str] | None = None,
+        include_confidential: bool = False,
     ) -> str:
         """格式化记忆为可注入 prompt 的文本.
 
@@ -602,12 +605,23 @@ class MemoryStore:
             employee_tags: 员工标签（用于匹配共享记忆）
             max_visibility: 可见性上限 — "private" 返回全部, "open" 只返回公开记忆
             team_members: 同团队成员名列表（注入队友的公开记忆）
+            classification_max: 最高信息分级（可选）
+            allowed_domains: 允许的职能域（可选）
+            include_confidential: 是否包含 confidential 级别
 
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
         """
         employee = self._resolve_to_character_name(employee)
         parts: list[str] = []
+
+        # classification 过滤参数
+        _cls_kwargs: dict = {}
+        if classification_max is not None:
+            _cls_kwargs["classification_max"] = classification_max
+        if allowed_domains is not None:
+            _cls_kwargs["allowed_domains"] = allowed_domains
+        _cls_kwargs["include_confidential"] = include_confidential
 
         # 尝试语义搜索
         own_found = False
@@ -620,6 +634,7 @@ class MemoryStore:
                         results = index.search(employee, query, limit=limit)
                         if results:
                             entries_map = {e.id: e for e in self._load_employee_entries(employee)}
+                            _CLASSIFICATION_LEVELS = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
                             filtered: list[MemoryEntry] = []
                             for entry_id, _content, _score in results:
                                 entry = entries_map.get(entry_id)
@@ -629,6 +644,19 @@ class MemoryStore:
                                     continue
                                 if max_visibility != "private" and entry.visibility == "private":
                                     continue
+                                # 信息分级过滤（与 query() 对齐）
+                                if not include_confidential and getattr(entry, 'classification', 'internal') == 'confidential':
+                                    continue
+                                if classification_max is not None:
+                                    max_level = _CLASSIFICATION_LEVELS.get(classification_max, 1)
+                                    if _CLASSIFICATION_LEVELS.get(getattr(entry, 'classification', 'internal'), 1) > max_level:
+                                        continue
+                                if allowed_domains is not None:
+                                    e_cls = getattr(entry, 'classification', 'internal')
+                                    if e_cls == 'restricted':
+                                        e_domain = getattr(entry, 'domain', []) or []
+                                        if e_domain and not set(e_domain) & set(allowed_domains):
+                                            continue
                                 filtered.append(self._apply_decay(entry))
                             if filtered:
                                 parts.append(self._format_entries(filtered))
@@ -637,7 +665,7 @@ class MemoryStore:
                 logger.debug("语义搜索降级: %s", e)
 
         if not own_found:
-            entries = self.query(employee, limit=limit, max_visibility=max_visibility)
+            entries = self.query(employee, limit=limit, max_visibility=max_visibility, **_cls_kwargs)
             if entries:
                 parts.append(self._format_entries(entries))
 

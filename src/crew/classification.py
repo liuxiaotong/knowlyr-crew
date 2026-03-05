@@ -35,6 +35,13 @@ SOURCE_TYPE_CLEARANCE: dict[str, str] = {
     "internal": "internal",   # 内部员工默认看到 internal
 }
 
+# Sender type → clearance（发送者身份，可提升渠道默认等级）
+SENDER_TYPE_CLEARANCE: dict[str, str] = {
+    "internal": "internal",    # 内部员工 → internal
+    "agent": "internal",       # AI 员工 → internal
+    "external": "public",      # 外部用户 → public
+}
+
 # Employee profile → clearance + domains
 EMPLOYEE_CLEARANCE: dict[str, dict] = {
     "ceo-assistant": {"clearance": "confidential", "domains": []},  # C3，全域
@@ -60,14 +67,21 @@ EXTERNAL_OUTPUT_CONTROL_PROMPT = """\
 - 如果不确定某信息是否可以公开，选择不说"""
 
 
-def get_effective_clearance(employee_name: str, channel: str) -> dict:
+def get_effective_clearance(
+    employee_name: str,
+    channel: str,
+    sender_type: str = "",
+) -> dict:
     """计算有效许可等级.
 
     取 min(员工自身许可, 对话场景许可)。
+    场景许可 = max(渠道默认等级, sender_type 等级)。
 
     Args:
         employee_name: 员工标识（slug 或花名均可）
         channel: 对话渠道标识（如 "antgather_dm", "feishu_group" 等）
+        sender_type: 发送者身份（"internal"/"external"/"agent"/""），
+                     空字符串时不提升渠道默认等级（向后兼容）
 
     Returns:
         {
@@ -89,13 +103,21 @@ def get_effective_clearance(employee_name: str, channel: str) -> dict:
     emp_level = str(emp_clearance["clearance"])
     emp_domains: list[str] = list(emp_clearance.get("domains", []))
 
-    # 2. 场景许可
+    # 2. 场景许可 = max(渠道默认等级, sender_type 等级)
     source_type = CHANNEL_SOURCE_TYPE.get(channel, "external")  # 未知渠道默认外部
-    scene_level = SOURCE_TYPE_CLEARANCE.get(source_type, "public")
+    channel_level = SOURCE_TYPE_CLEARANCE.get(source_type, "public")
+    channel_level_num = CLASSIFICATION_LEVELS.get(channel_level, 0)
 
-    # 3. 取较低的等级
+    # sender_type 提升（仅在提供时生效）
+    if sender_type:
+        sender_level = SENDER_TYPE_CLEARANCE.get(sender_type, "public")
+        sender_level_num = CLASSIFICATION_LEVELS.get(sender_level, 0)
+        scene_level_num = max(channel_level_num, sender_level_num)
+    else:
+        scene_level_num = channel_level_num
+
+    # 3. 取较低的等级 min(员工, 场景)
     emp_level_num = CLASSIFICATION_LEVELS.get(emp_level, 1)
-    scene_level_num = CLASSIFICATION_LEVELS.get(scene_level, 0)
     effective_level_num = min(emp_level_num, scene_level_num)
 
     # 反查等级名称
