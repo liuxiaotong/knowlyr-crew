@@ -47,14 +47,37 @@ jobs:
             chmod 600 /opt/knowlyr-crew/project/.crew/wecom.yaml
           "
 
+      - name: Snapshot for rollback
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            if [ -d "/opt/knowlyr-crew" ]; then
+              /opt/knowlyr-crew/venv/bin/pip freeze > /opt/knowlyr-crew/prev-requirements.txt
+              echo "Snapshot saved to /opt/knowlyr-crew/prev-requirements.txt"
+            fi
+          '
+
       - name: Update engine & restart
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             /opt/knowlyr-crew/venv/bin/pip install --force-reinstall --no-deps \
               "knowlyr-crew[webhook,execute,openai,id,trajectory] @ git+https://github.com/liuxiaotong/knowlyr-crew.git" \
             && systemctl restart knowlyr-crew \
-            && sleep 2 \
+            && sleep 10 \
             && curl -sf http://localhost:8765/health
+          '
+
+      - name: Rollback on engine failure
+        if: failure()
+        run: |
+          echo "Rolling back to previous version..."
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            if [ -f "/opt/knowlyr-crew/prev-requirements.txt" ]; then
+              /opt/knowlyr-crew/venv/bin/pip install -r /opt/knowlyr-crew/prev-requirements.txt
+              systemctl restart knowlyr-crew
+              echo "Rolled back successfully"
+            else
+              echo "No prev-requirements.txt found, cannot rollback"
+            fi
           '
 
       - name: Upgrade trajectory packages
@@ -65,7 +88,7 @@ jobs:
               --index-url https://pypi.org/simple/ \
               knowlyr-core knowlyr-sandbox knowlyr-recorder knowlyr-reward knowlyr-hub \
             && systemctl restart knowlyr-crew \
-            && sleep 2 \
+            && sleep 10 \
             && curl -sf http://localhost:8765/health
           '
 
@@ -95,7 +118,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
             chmod +x /opt/knowlyr-crew/project/scripts/run_daily_eval.sh
             systemctl restart knowlyr-crew
-            sleep 2
+            sleep 10
             curl -sf http://localhost:8765/health
           '
 
