@@ -2,6 +2,12 @@
 
 根据对话渠道和员工身份，计算有效的信息访问许可等级，
 用于 MemoryStore.query() 的分级过滤参数。
+
+统一分级语言（人类 + AI 共用）：
+    public      — 任何人可见（Wiki: open）
+    internal    — 已登录/内部员工（Wiki: public, Crew 默认）
+    restricted  — staff 角色/指定域（Wiki: internal + allowed_roles）
+    confidential — 创始人/C-level（Wiki: draft, Crew: ceo-assistant）
 """
 
 from __future__ import annotations
