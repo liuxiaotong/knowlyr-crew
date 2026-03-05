@@ -4296,10 +4296,88 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     model: str | None = payload.get("model")
     attachments: list[dict[str, Any]] | None = payload.get("attachments")
 
+    # 来自蚁聚的额外上下文（用户名、上下文预算等）
+    extra_context: str | None = payload.get("extra_context")
+
     # 异步回调参数（用于长任务）
     callback_channel_id: int | None = payload.get("callback_channel_id")
     callback_sender_id: str | None = payload.get("callback_sender_id")
     async_mode: bool = bool(payload.get("async", False))
+
+    # ── Skills 自动触发（在所有执行路径之前统一执行）──
+    _skills_memory_text: str | None = None
+    try:
+        from crew.discovery import discover_employees as _chat_discover
+        from crew.memory import get_memory_store
+        from crew.skills import SkillStore
+        from crew.skills_engine import SkillsEngine
+
+        _chat_discovery = _chat_discover(project_dir=ctx.project_dir)
+        _chat_emp = _chat_discovery.get(employee_id)
+
+        if _chat_emp is not None and isinstance(message, str):
+            skill_store = SkillStore(project_dir=ctx.project_dir)
+            memory_store = get_memory_store(project_dir=ctx.project_dir)
+            skills_engine = SkillsEngine(skill_store, memory_store)
+
+            _chat_employee_name = _chat_emp.character_name or employee_id
+
+            triggered = skills_engine.check_triggers(_chat_employee_name, message, {})
+            if triggered:
+                logger.info(
+                    "Skills 触发 (/api/chat): employee=%s task=%s triggered=%d",
+                    _chat_employee_name,
+                    message[:50],
+                    len(triggered),
+                )
+                enhanced_context: dict[str, Any] = {}
+                for skill, score in triggered[:3]:
+                    try:
+                        result = skills_engine.execute_skill(
+                            skill, _chat_employee_name,
+                            {"task": message, "channel": channel},
+                        )
+                        if result.get("enhanced_context"):
+                            for key, value in result["enhanced_context"].items():
+                                if key in enhanced_context:
+                                    if isinstance(enhanced_context[key], list) and isinstance(value, list):
+                                        enhanced_context[key].extend(value)
+                                    else:
+                                        enhanced_context[key] = value
+                                else:
+                                    enhanced_context[key] = value
+                        skills_engine.record_trigger(
+                            skill=skill,
+                            employee=_chat_employee_name,
+                            task=message,
+                            match_score=score,
+                            execution_result=result,
+                        )
+                    except Exception as _skill_exec_err:
+                        logger.warning("Skill 执行失败 (/api/chat): skill=%s error=%s", skill.name, _skill_exec_err)
+
+                # 将 enhanced_context 中的 memories 格式化为文本
+                memories = enhanced_context.get("memories", [])
+                if memories:
+                    _skills_memory_text = "【相关历史记忆】\n" + "\n".join(
+                        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
+                        for m in memories[:5]
+                    )
+                    logger.info(
+                        "Skills 记忆注入 (/api/chat): employee=%s memories=%d text_len=%d",
+                        _chat_employee_name,
+                        len(memories),
+                        len(_skills_memory_text),
+                    )
+    except Exception as _skills_err:
+        logger.warning("Skills 检查失败 (/api/chat): %s", _skills_err)
+
+    # 合并 Skills 记忆与 extra_context
+    if _skills_memory_text:
+        if extra_context:
+            extra_context = _skills_memory_text + "\n\n" + extra_context
+        else:
+            extra_context = _skills_memory_text
 
     # 如果指定了异步模式，立即返回并在后台执行
     if async_mode and callback_channel_id:
@@ -4315,7 +4393,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 model=model,
                 user_message=message,
                 message_history=message_history,
-                extra_context=None,
+                extra_context=extra_context,
                 sender_name=sender_id,
                 channel=channel,
                 callback_channel_id=callback_channel_id,
@@ -4333,6 +4411,11 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             }
         )
 
+    # ── 构建带上下文的消息（将 extra_context 注入到所有路径） ──
+    _effective_message = message
+    if extra_context:
+        _effective_message = f"[上下文信息]\n{extra_context}\n\n[用户消息]\n{message}"
+
     # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
     _sg_reply: str | None = None
     if not stream and not context_only:
@@ -4341,7 +4424,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
 
             _sg_reply = await sg_api_dispatch(
-                message,
+                _effective_message,
                 ctx=ctx,
                 project_dir=ctx.project_dir,
                 employee_name=employee_id,
@@ -4386,7 +4469,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     return approved
 
                 _sg_reply = await sg_dispatch(
-                    message,
+                    _effective_message,
                     project_dir=ctx.project_dir,
                     employee_name=employee_id,
                     message_history=message_history,
@@ -4434,7 +4517,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     {},  # args
                     agent_id=None,
                     model=model,
-                    user_message=message,
+                    user_message=_effective_message,
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
@@ -4463,7 +4546,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     {},  # args
                     agent_id=None,
                     model=model,
-                    user_message=message,
+                    user_message=_effective_message,
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
@@ -4481,7 +4564,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 engine = CrewEngine(project_dir=ctx.project_dir)
                 chat_result = await engine.chat(
                     employee_id=employee_id,
-                    message=message,
+                    message=_effective_message,
                     channel=channel,
                     sender_id=sender_id,
                     max_visibility=max_visibility,
