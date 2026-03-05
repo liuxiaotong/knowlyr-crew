@@ -35,6 +35,7 @@ class PermissionRequest:
     created_at: float
     event: asyncio.Event
     approved: bool | None = None
+    target_user_id: str = ""
 
 
 class PermissionManager:
@@ -50,7 +51,7 @@ class PermissionManager:
         return cls._instance
 
     def create_request(
-        self, tool_name: str, tool_params: dict[str, Any]
+        self, tool_name: str, tool_params: dict[str, Any], target_user_id: str = ""
     ) -> PermissionRequest:
         """创建权限请求"""
         request_id = f"req_{uuid.uuid4().hex[:8]}"
@@ -65,6 +66,7 @@ class PermissionManager:
             message=message,
             created_at=time.time(),
             event=asyncio.Event(),
+            target_user_id=target_user_id,
         )
 
         self._requests[request_id] = request
@@ -94,9 +96,10 @@ class PermissionManager:
         tool_params: dict[str, Any],
         timeout: float = 60.0,
         push_event_fn: Callable[[dict], None] | None = None,
+        target_user_id: str = "",
     ) -> bool:
         """请求权限确认"""
-        request = self.create_request(tool_name, tool_params)
+        request = self.create_request(tool_name, tool_params, target_user_id=target_user_id)
 
         # 如果提供了推送函数，通过 SSE 推送事件
         if push_event_fn:
@@ -108,6 +111,7 @@ class PermissionManager:
                     "tool_params": request.tool_params,
                     "risk_level": request.risk_level,
                     "message": request.message,
+                    "target_user_id": request.target_user_id,
                 }
             )
 
@@ -123,6 +127,10 @@ class PermissionManager:
 
         return approved
 
+    def get_request(self, request_id: str) -> PermissionRequest | None:
+        """获取权限请求对象（用于鉴权校验）"""
+        return self._requests.get(request_id)
+
     def respond(self, request_id: str, approved: bool) -> bool:
         """响应权限请求"""
         request = self._requests.get(request_id)
@@ -133,17 +141,29 @@ class PermissionManager:
         request.event.set()
         return True
 
-    def get_pending_requests(self) -> list[dict[str, Any]]:
-        """获取所有待处理的权限请求"""
-        return [
-            {
-                "request_id": req.request_id,
-                "tool_name": req.tool_name,
-                "tool_params": req.tool_params,
-                "risk_level": req.risk_level,
-                "message": req.message,
-                "created_at": req.created_at,
-            }
-            for req in self._requests.values()
-            if req.approved is None
-        ]
+    def get_pending_requests(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """获取待处理的权限请求。
+
+        Args:
+            user_id: 如果指定，只返回 target_user_id 匹配的请求。
+                     target_user_id 为空的请求视为广播，始终返回。
+        """
+        result = []
+        for req in self._requests.values():
+            if req.approved is not None:
+                continue
+            # 用户隔离：如果指定了 user_id，只返回目标用户的请求或广播请求
+            if user_id is not None and req.target_user_id and req.target_user_id != user_id:
+                continue
+            result.append(
+                {
+                    "request_id": req.request_id,
+                    "tool_name": req.tool_name,
+                    "tool_params": req.tool_params,
+                    "risk_level": req.risk_level,
+                    "message": req.message,
+                    "created_at": req.created_at,
+                    "target_user_id": req.target_user_id,
+                }
+            )
+        return result

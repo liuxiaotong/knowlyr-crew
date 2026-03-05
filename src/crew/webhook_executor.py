@@ -1550,6 +1550,7 @@ async def _handle_tool_call(
     guard: Any | None = None,
     max_visibility: str = "open",
     push_event_fn: Any = None,
+    target_user_id: str = "",
 ) -> str | None:
     """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
     from crew.tool_schema import is_finish_tool
@@ -1576,6 +1577,7 @@ async def _handle_tool_call(
                 tool_name=tool_name,
                 tool_params=arguments,
                 push_event_fn=push_event_fn,
+                target_user_id=target_user_id,
             )
             if not approved:
                 logger.warning("用户拒绝执行: %s.%s", employee_name, tool_name)

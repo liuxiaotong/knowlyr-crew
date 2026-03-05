@@ -3675,6 +3675,7 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
 
     request_id = payload.get("request_id", "")
     approved = payload.get("approved", False)
+    user_id = payload.get("user_id", "")
 
     if not request_id:
         return JSONResponse({"ok": False, "error": "缺少 request_id 参数"}, status_code=400)
@@ -3682,10 +3683,28 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
     from crew.permission_request import PermissionManager
 
     manager = PermissionManager()
+
+    # 鉴权：校验发起响应的用户是否是 target_user_id
+    perm_req = manager.get_request(request_id)
+    if perm_req is None:
+        return JSONResponse(
+            {"ok": False, "error": "请求不存在或已过期"},
+            status_code=404,
+        )
+    if perm_req.target_user_id and user_id and perm_req.target_user_id != user_id:
+        logger.warning(
+            "权限响应鉴权失败: request_id=%s, target=%s, actual=%s",
+            request_id, perm_req.target_user_id, user_id,
+        )
+        return JSONResponse(
+            {"ok": False, "error": "无权响应此权限请求"},
+            status_code=403,
+        )
+
     success = manager.respond(request_id, approved)
 
     if success:
-        logger.info("权限响应: request_id=%s, approved=%s", request_id, approved)
+        logger.info("权限响应: request_id=%s, approved=%s, user_id=%s", request_id, approved, user_id)
         return JSONResponse({"ok": True})
     else:
         return JSONResponse(
@@ -3695,13 +3714,18 @@ async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
-    """GET /api/permissions — 获取待处理的权限请求列表."""
+    """GET /api/permissions — 获取待处理的权限请求列表.
+
+    支持 ?user_id=xxx 查询参数进行用户隔离过滤。
+    """
     from starlette.responses import JSONResponse
 
     from crew.permission_request import PermissionManager
 
+    user_id = request.query_params.get("user_id") or None
+
     manager = PermissionManager()
-    pending = manager.get_pending_requests()
+    pending = manager.get_pending_requests(user_id=user_id)
 
     return JSONResponse({"ok": True, "requests": pending})
 
