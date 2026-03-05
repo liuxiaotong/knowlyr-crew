@@ -41,6 +41,7 @@ async def _dispatch_task(
     sync: bool = False,
     agent_id: str | None = None,
     model: str | None = None,
+    owner: str | None = None,
 ) -> Any:
     """创建任务并调度执行."""
     from starlette.responses import JSONResponse
@@ -51,6 +52,7 @@ async def _dispatch_task(
         target_type=target_type,
         target_name=target_name,
         args=args,
+        owner=owner,
     )
     logger.info(
         "任务开始 [trace=%s] %s → %s/%s (task=%s)",

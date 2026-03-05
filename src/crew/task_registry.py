@@ -31,6 +31,7 @@ class TaskRecord(BaseModel):
     result: dict[str, Any] | None = None
     error: str | None = None
     checkpoint: dict[str, Any] | None = Field(default=None, description="Pipeline 断点数据")
+    owner: str | None = Field(default=None, description="任务创建者 ID（用于归属校验）")
 
 
 class TaskRegistry:
@@ -135,6 +136,7 @@ class TaskRegistry:
         target_type: str,
         target_name: str,
         args: dict[str, str] | None = None,
+        owner: str | None = None,
     ) -> TaskRecord:
         """创建新任务."""
         task_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -144,6 +146,7 @@ class TaskRegistry:
             target_type=target_type,
             target_name=target_name,
             args=args or {},
+            owner=owner,
         )
         with self._lock:
             self._tasks[task_id] = record

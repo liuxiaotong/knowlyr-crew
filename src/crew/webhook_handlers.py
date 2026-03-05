@@ -29,6 +29,25 @@ import re as _re
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
 
 
+def _require_admin_token(request: Any) -> str | None:
+    """校验管理员 token，返回错误消息或 None（通过）.
+
+    要求请求 header 中携带 X-Admin-Token，与环境变量 ADMIN_TOKEN 比对。
+    如果 ADMIN_TOKEN 未配置，拒绝所有请求（fail-closed）。
+    """
+    import hmac
+
+    admin_token = os.environ.get("ADMIN_TOKEN", "")
+    if not admin_token:
+        return "ADMIN_TOKEN not configured, admin operations are disabled"
+
+    provided = request.headers.get("x-admin-token", "")
+    if not provided or not hmac.compare_digest(provided, admin_token):
+        return "forbidden: valid X-Admin-Token header required"
+
+    return None
+
+
 def _safe_int(value: str | None, default: int = 0) -> int:
     """安全转换为 int，转换失败时返回默认值."""
     if value is None:
@@ -644,6 +663,11 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     from pathlib import Path
 
     from starlette.responses import JSONResponse
+
+    # 管理员权限校验
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import get_soul
     from crew.database import get_connection, is_pg
@@ -2920,6 +2944,7 @@ async def _run_and_callback(
             target_type="employee",
             target_name=name,
             args=_args,
+            owner=callback_sender_id or None,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
     except Exception:
@@ -3240,11 +3265,13 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 _exit_stack.close()
 
         # 记录任务用于成本追踪
+        _owner_id = payload.get("callback_sender_id") or payload.get("user_id") or ""
         record = ctx.registry.create(
             trigger=channel,
             target_type="employee",
             target_name=name,
             args=args,
+            owner=_owner_id or None,
         )
         ctx.registry.update(record.task_id, "completed", result=result)
 
@@ -3275,6 +3302,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     # ── 原有同步/异步模式 ──
     import crew.webhook as _wh
 
+    # 从 payload 提取 owner（callback_sender_id 或 user_id）
+    _owner = payload.get("callback_sender_id") or payload.get("user_id") or ""
+
     return await _wh._dispatch_task(
         ctx,
         trigger="direct",
@@ -3284,6 +3314,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         sync=sync,
         agent_id=agent_id,
         model=model,
+        owner=_owner or None,
     )
 
 
@@ -3464,6 +3495,12 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
     record = ctx.registry.get(task_id)
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
+
+    # 归属校验：如果 task 有 owner，请求方须提供匹配的 user_id
+    user_id = request.query_params.get("user_id") or request.headers.get("x-user-id", "")
+    if record.owner and user_id and record.owner != user_id:
+        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+
     return JSONResponse(record.model_dump(mode="json"))
 
 
@@ -3475,6 +3512,12 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
     record = ctx.registry.get(task_id)
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
+
+    # 归属校验
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    user_id = body.get("user_id") or request.headers.get("x-user-id", "")
+    if record.owner and user_id != record.owner:
+        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
 
     if record.status not in ("completed", "failed"):
         return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
@@ -3488,6 +3531,7 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         target_name=record.target_name,
         args=record.args,
         sync=False,
+        owner=record.owner,
     )
 
 
@@ -3504,6 +3548,12 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
     record = ctx.registry.get(task_id)
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
+
+    # 归属校验
+    user_id = body.get("user_id") or request.headers.get("x-user-id", "")
+    if record.owner and user_id != record.owner:
+        return JSONResponse({"error": "forbidden: task does not belong to this user"}, status_code=403)
+
     if record.status != "awaiting_approval":
         return JSONResponse(
             {"error": f"任务状态为 {record.status}，无法审批"},
@@ -5229,6 +5279,11 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
 async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
     """更新员工灵魂配置 — PUT /api/souls/{employee_name}."""
     from starlette.responses import JSONResponse
+
+    # 管理员权限校验
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import update_soul
 
