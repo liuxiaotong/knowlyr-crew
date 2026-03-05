@@ -600,6 +600,9 @@ class CrewEngine:
             logger.debug("并行记忆加载失败，使用无记忆 prompt: %s", _mem_err)
             system_prompt = base_prompt
 
+        # 聊天格式指令：不加名字前缀
+        system_prompt += "\n\n【聊天格式】\n直接回复内容，不要在开头加【名字】或任何方括号前缀。"
+
         # ── 4. context_only 模式：直接返回 prompt + 记忆，不调 LLM ──
         if context_only:
             try:

@@ -79,7 +79,10 @@ def strip_internal_tags(text: str) -> str:
     # 3. 移除已知名称的工具调用标签
     result = _TOOL_CALL_XML_RE.sub("", result)
 
-    # 4. 清理残留空行（多个连续空行压缩为最多两个）
+    # 4. 移除方括号名字前缀（如【墨言】、【姜墨言】）
+    result = re.sub(r"^【[^】]+】\s*", "", result)
+
+    # 5. 清理残留空行（多个连续空行压缩为最多两个）
     result = re.sub(r"\n{3,}", "\n\n", result)
 
     return result.strip()
