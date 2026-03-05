@@ -1,6 +1,5 @@
 """测试记忆相似度检测."""
 
-import json
 from pathlib import Path
 
 import pytest

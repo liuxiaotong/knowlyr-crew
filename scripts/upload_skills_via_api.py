@@ -31,10 +31,10 @@ def upload_skill(employee: str, skill_file: Path) -> bool:
         response = requests.post(url, headers=HEADERS, json=skill_data, timeout=10)
 
         if response.status_code == 200:
-            print(f"  ✓ 成功")
+            print("  ✓ 成功")
             return True
         elif response.status_code == 400 and "already exists" in response.text:
-            print(f"  ℹ️  已存在，跳过")
+            print("  ℹ️  已存在，跳过")
             return True
         else:
             print(f"  ✗ 失败: HTTP {response.status_code}")
@@ -57,7 +57,6 @@ def main():
 
     success_count = 0
     failed_count = 0
-    skipped_count = 0
 
     # 遍历所有员工目录
     for employee_dir in sorted(skills_dir.iterdir()):
@@ -77,7 +76,7 @@ def main():
 
     # 总结
     print("\n" + "=" * 50)
-    print(f"上传完成:")
+    print("上传完成:")
     print(f"  - 成功: {success_count}")
     print(f"  - 失败: {failed_count}")
     print("=" * 50)

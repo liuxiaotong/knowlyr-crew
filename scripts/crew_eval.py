@@ -514,9 +514,9 @@ def _generate_employee_report(employee: str, results: list[dict], domain: str) -
     avg_total = statistics.mean(total_scores) if total_scores else 0
 
     lines.append(f"## {employee} ({domain})")
-    lines.append(f"")
+    lines.append("")
     lines.append(f"评估: {len(results)} 条 | 平均总分: {avg_total:.2f}")
-    lines.append(f"")
+    lines.append("")
 
     # 汇总各维度
     all_dims: dict[str, list[float]] = {}
@@ -644,7 +644,7 @@ def compare(run_before, run_after, employee):
     avg_before = statistics.mean([r["total_score"] for r in before]) if before else 0
     avg_after = statistics.mean([r["total_score"] for r in after]) if after else 0
     diff = avg_after - avg_before
-    click.echo(f"")
+    click.echo("")
     click.echo(f"总分变化: {avg_before:.2f} → {avg_after:.2f} ({diff:+.2f})")
 
 

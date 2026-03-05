@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """迁移本地 Skills 到服务端."""
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -179,21 +178,21 @@ def migrate_skills():
         # 解析 SKILL.md
         skill_data = parse_skill_md(skill_md)
         if not skill_data:
-            print(f"  ⚠️  跳过（无法解析）\n")
+            print("  ⚠️  跳过（无法解析）\n")
             skipped += 1
             continue
 
         # 映射到员工
         employee = map_skill_to_employee(skill_name)
         if not employee:
-            print(f"  ⚠️  跳过（无法映射到员工）\n")
+            print("  ⚠️  跳过（无法映射到员工）\n")
             skipped += 1
             continue
 
         # 检查是否已存在
         existing = skill_store.get_skill(employee, skill_name)
         if existing:
-            print(f"  ℹ️  已存在，跳过\n")
+            print("  ℹ️  已存在，跳过\n")
             skipped += 1
             continue
 
@@ -222,7 +221,7 @@ def migrate_skills():
             # 保存
             skill_store.create_skill(skill)
 
-            print(f"  ✓ 迁移成功")
+            print("  ✓ 迁移成功")
             print(f"    - 员工: {employee}")
             print(f"    - 触发类型: {skill.trigger.type}")
             print(f"    - 关键词数: {len(keywords)}")
@@ -236,7 +235,7 @@ def migrate_skills():
 
     # 总结
     print("=" * 50)
-    print(f"迁移完成:")
+    print("迁移完成:")
     print(f"  - 成功: {migrated}")
     print(f"  - 跳过: {skipped}")
     print(f"  - 失败: {failed}")

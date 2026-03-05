@@ -1,8 +1,6 @@
 """轨迹数据集导出测试."""
 
 import json
-from datetime import datetime
-from pathlib import Path
 
 import pytest
 

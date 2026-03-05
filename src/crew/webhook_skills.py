@@ -1,7 +1,6 @@
 """Skills API handlers — HTTP 端点."""
 
 import logging
-from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse

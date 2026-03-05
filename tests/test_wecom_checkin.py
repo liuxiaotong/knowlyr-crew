@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -599,7 +599,7 @@ class TestGetCheckinRules:
         user_ids = [f"u{i}" for i in range(150)]
 
         with patch("crew.wecom.get_wecom_client", return_value=mock_client):
-            rules = await get_checkin_rules("token", user_ids, 1709280000)
+            await get_checkin_rules("token", user_ids, 1709280000)
 
         # 150 人 -> 2 批
         assert mock_client.post.call_count == 2
@@ -788,7 +788,7 @@ class TestRunCheckinReport:
             mock_leave.return_value = set()
             mock_send.return_value = {"errcode": 0, "errmsg": "ok"}
 
-            report = await run_checkin_report(
+            await run_checkin_report(
                 corp_id="test_corp",
                 secret="test_secret",
                 dry_run=False,

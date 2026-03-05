@@ -1,7 +1,6 @@
 """集成测试：轨迹提炼流程."""
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

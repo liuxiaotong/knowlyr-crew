@@ -95,6 +95,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_employee_prompt,
     _handle_employee_state,
     _handle_employee_update,
+    _handle_evaluate_scan,
     _handle_generic,
     _handle_github,
     _handle_kv_get,
@@ -114,16 +115,26 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_drafts_get,
     _handle_memory_drafts_list,
     _handle_memory_drafts_reject,
+    _handle_memory_feedback_get,
+    _handle_memory_feedback_submit,
+    _handle_memory_feedback_summary,
     _handle_memory_ingest,
+    _handle_memory_low_quality,
+    _handle_memory_popular,
     _handle_memory_query,
+    _handle_memory_recommend,
     _handle_memory_search,
+    _handle_memory_semantic_search,
     _handle_memory_shared_list,
     _handle_memory_shared_record_usage,
     _handle_memory_shared_stats,
+    _handle_memory_similar,
     _handle_memory_tags_list,
     _handle_memory_tags_search,
     _handle_memory_tags_suggest,
     _handle_memory_update,
+    _handle_memory_usage_record,
+    _handle_memory_usage_stats,
     _handle_model_tiers,
     _handle_openclaw,
     _handle_org_memories,
@@ -150,33 +161,21 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_trajectory_annotation_list,
     _handle_trajectory_export,
     _handle_trajectory_report,
-    _handle_memory_semantic_search,
-    _handle_memory_recommend,
-    _handle_memory_similar,
-    _handle_memory_feedback_submit,
-    _handle_memory_feedback_get,
-    _handle_memory_usage_stats,
-    _handle_memory_usage_record,
-    _handle_memory_low_quality,
-    _handle_memory_popular,
-    _handle_memory_feedback_summary,
-    _handle_evaluate_scan,
     _handle_wiki_file_delete,
     _handle_wiki_spaces_list,
     _handle_work_log,
     _health,
     _metrics,
 )
-from crew.webhook_tools.core import (  # noqa: F401
+from crew.webhook_tools.core import (  # noqa: F401  # noqa: F401
     _tool_create_note,
     _tool_list_agents,
     _tool_lookup_user,
     _tool_read_notes,
     _tool_send_message,
-)
-from crew.webhook_tools.core import (  # noqa: F401
     _tool_web_search,
 )
+
 try:
     from crew.webhook_tools.feishu import (  # noqa: F401
         _tool_read_feishu_calendar,
@@ -197,7 +196,6 @@ from crew.webhook_skills import (  # noqa: F401
     _handle_skills_stats,
     _handle_skills_trigger_history,
 )
-
 from crew.webhook_tools.orchestration import (  # noqa: F401
     _tool_agent_file_grep,
     _tool_agent_file_read,
@@ -427,6 +425,7 @@ def create_webhook_app(
                     if ctx.feishu_token_mgr and ctx.feishu_config and ctx.feishu_config.owner_open_id:
                         try:
                             import json as _json
+
                             from crew.feishu import get_feishu_client
 
                             token = await ctx.feishu_token_mgr.get_token()

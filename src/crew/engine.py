@@ -665,8 +665,6 @@ class CrewEngine:
 
         # ── 7. LLM 调用 ──
         t0 = _time.monotonic()
-        memory_updated = False
-
         # 确定模型和参数
         effective_user_msg = (
             full_user_message if isinstance(full_user_message, str)

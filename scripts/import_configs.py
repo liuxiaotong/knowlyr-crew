@@ -87,7 +87,7 @@ def import_discussions(private_dir: Path) -> int:
             pass
 
         try:
-            result = create_discussion(name, yaml_content, description)
+            create_discussion(name, yaml_content, description)
             logger.info("✓ 导入 discussion: %s", name)
             count += 1
         except Exception as exc:
@@ -96,7 +96,7 @@ def import_discussions(private_dir: Path) -> int:
                 try:
                     from crew.config_store import update_discussion
 
-                    result = update_discussion(name, yaml_content, description)
+                    update_discussion(name, yaml_content, description)
                     logger.info("✓ 更新 discussion: %s", name)
                     count += 1
                 except Exception as exc2:
@@ -133,7 +133,7 @@ def import_pipelines(private_dir: Path) -> int:
             pass
 
         try:
-            result = create_pipeline(name, yaml_content, description)
+            create_pipeline(name, yaml_content, description)
             logger.info("✓ 导入 pipeline: %s", name)
             count += 1
         except Exception as exc:
@@ -142,7 +142,7 @@ def import_pipelines(private_dir: Path) -> int:
                 try:
                     from crew.config_store import update_pipeline
 
-                    result = update_pipeline(name, yaml_content, description)
+                    update_pipeline(name, yaml_content, description)
                     logger.info("✓ 更新 pipeline: %s", name)
                     count += 1
                 except Exception as exc2:

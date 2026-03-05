@@ -1,10 +1,10 @@
 """过期决策扫描 — 自动回收评估结果."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-from crew.evaluation import Decision, EvaluationEngine
+from crew.evaluation import EvaluationEngine
 from crew.memory import get_memory_store
 from crew.paths import resolve_project_dir
 from crew.task_registry import TaskRecord, TaskRegistry

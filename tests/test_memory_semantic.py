@@ -1,7 +1,5 @@
 """语义搜索和智能推荐测试."""
 
-import json
-from pathlib import Path
 
 import pytest
 
