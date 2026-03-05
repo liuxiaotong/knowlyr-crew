@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """测试 Skills API P0 功能."""
 
-import json
 import sys
 from pathlib import Path
 
 # 添加 src 到路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from crew.memory import MemoryStore
 from crew.skills import Skill, SkillAction, SkillMetadata, SkillStore, SkillTrigger
 from crew.skills_engine import SkillsEngine
-from crew.memory import MemoryStore
 
 
 def test_skill_crud():
@@ -64,12 +63,12 @@ def test_skill_crud():
         # 5. 删除 Skill
         deleted = skill_store.delete_skill("赵云帆", "query-before-code")
         assert deleted is True
-        print(f"✓ 删除 Skill")
+        print("✓ 删除 Skill")
 
         # 验证已删除
         retrieved = skill_store.get_skill("赵云帆", "query-before-code")
         assert retrieved is None
-        print(f"✓ 验证删除成功")
+        print("✓ 验证删除成功")
 
 
 def test_keyword_trigger():
@@ -149,7 +148,7 @@ def test_skill_execution():
         # 执行 Skill
         result = engine.execute_skill(skill, "赵云帆", {"task": "写一个新的 API"})
 
-        print(f"✓ 执行 Skill")
+        print("✓ 执行 Skill")
         print(f"  - 执行动作数: {len(result['executed_actions'])}")
         print(f"  - 执行时间: {result['execution_time_ms']}ms")
         print(f"  - 加载记忆数: {len(result['enhanced_context'].get('memories', []))}")
@@ -191,7 +190,7 @@ def test_trigger_history():
             execution_result=result,
         )
 
-        print(f"✓ 记录触发历史")
+        print("✓ 记录触发历史")
 
         # 查询历史
         history = skill_store.get_trigger_history(employee="赵云帆", limit=10)
@@ -230,7 +229,7 @@ def test_stats():
         # 获取统计
         stats = skill_store.get_stats()
 
-        print(f"✓ 获取统计信息")
+        print("✓ 获取统计信息")
         print(f"  - 总 Skills 数: {stats['total_skills']}")
         print(f"  - 按员工: {stats['by_employee']}")
         print(f"  - 按分类: {stats['by_category']}")

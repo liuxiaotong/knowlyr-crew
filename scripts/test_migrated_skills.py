@@ -79,10 +79,10 @@ def test_migrated_skills():
 
         # 验证
         if set(expected).issubset(set(triggered_names)):
-            print(f"  ✓ 通过\n")
+            print("  ✓ 通过\n")
             passed += 1
         else:
-            print(f"  ✗ 失败\n")
+            print("  ✗ 失败\n")
             failed += 1
 
     # 总结
@@ -106,7 +106,7 @@ def test_moyan_start():
     triggered = engine.check_triggers("姜墨言", "任意任务")
     triggered_names = [skill.name for skill, score in triggered]
 
-    print(f"任务: 任意任务")
+    print("任务: 任意任务")
     print(f"触发的 skills: {triggered_names}")
 
     if "moyan-start" in triggered_names:

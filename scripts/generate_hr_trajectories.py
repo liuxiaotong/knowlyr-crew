@@ -282,8 +282,8 @@ def main() -> None:
         sys.exit(1)
 
     count = end - start + 1
-    print(f"=== HR 轨迹生成 ===")
-    print(f"员工: hr-manager (心蕾)")
+    print("=== HR 轨迹生成 ===")
+    print("员工: hr-manager (心蕾)")
     print(f"范围: #{start:02d} ~ #{end:02d} (共 {count} 个场景)")
     print(f"间隔: {args.delay}s")
     print()
@@ -329,7 +329,7 @@ def main() -> None:
     # 汇总
     total_tokens = total_input_tokens + total_output_tokens
     print()
-    print(f"=== 完成 ===")
+    print("=== 完成 ===")
     print(f"成功: {success_count} / {count}")
     print(f"失败: {fail_count} / {count}")
     print(f"Token 消耗: {total_tokens} (input: {total_input_tokens}, output: {total_output_tokens})")

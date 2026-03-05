@@ -2,8 +2,9 @@
 """为所有员工生成通用 prompt.md 和 rules.md."""
 
 import shutil
-import yaml
 from pathlib import Path
+
+import yaml
 
 EMPLOYEES_DIR = Path(__file__).parent.parent / "private" / "employees"
 TEMPLATES_DIR = EMPLOYEES_DIR / "_templates"
@@ -97,7 +98,7 @@ Kai 说"发到群里"时默认用集识光年群。
 
 
 def load_yaml(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

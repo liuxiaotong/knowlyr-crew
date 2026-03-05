@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from crew.memory import MemoryStore
 from crew.skills import Skill, SkillAction, SkillStore, SkillTrigger
 from crew.skills_engine import SkillsEngine
-from crew.memory import MemoryStore
 
 
 def test_load_checklist():

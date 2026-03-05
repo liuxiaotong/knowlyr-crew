@@ -1,6 +1,5 @@
 """测试记忆质量控制."""
 
-import pytest
 
 from crew.memory_quality import check_memory_quality
 

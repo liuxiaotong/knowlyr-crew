@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def _get_openai_api_key() -> str | None:
     return os.getenv("OPENAI_API_KEY")
 
 
-async def get_embedding(text: str) -> List[float] | None:
+async def get_embedding(text: str) -> list[float] | None:
     """获取文本的 embedding 向量.
 
     Args:
@@ -60,7 +60,7 @@ async def get_embedding(text: str) -> List[float] | None:
         return None
 
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     """计算余弦相似度.
 
     Args:
@@ -113,7 +113,7 @@ def _extract_keywords(text: str, top_n: int = 10) -> set[str]:
             words.append(char)
 
     # 统计词频
-    word_freq: Dict[str, int] = {}
+    word_freq: dict[str, int] = {}
     for word in words:
         if word not in stopwords and len(word) > 0:
             word_freq[word] = word_freq.get(word, 0) + 1
@@ -161,12 +161,12 @@ def _keyword_similarity(content1: str, content2: str) -> float:
         import jieba
 
         # 分词 + 去停用词（只保留长度 > 1 的词）
-        words1 = set(w for w in jieba.cut(content1) if len(w) > 1)
-        words2 = set(w for w in jieba.cut(content2) if len(w) > 1)
+        words1 = {w for w in jieba.cut(content1) if len(w) > 1}
+        words2 = {w for w in jieba.cut(content2) if len(w) > 1}
     except ImportError:
         # jieba 不可用，降级到字符 bigram
-        words1 = set(content1[i : i + 2] for i in range(len(content1) - 1))
-        words2 = set(content2[i : i + 2] for i in range(len(content2) - 1))
+        words1 = {content1[i : i + 2] for i in range(len(content1) - 1)}
+        words2 = {content2[i : i + 2] for i in range(len(content2) - 1)}
 
     if not words1 or not words2:
         return 0.0
@@ -187,7 +187,7 @@ def _get_embedding_cache_path(memory_dir: Path, employee: str) -> Path:
     return cache_dir / f"{safe_name}.json"
 
 
-def _load_embedding_cache(memory_dir: Path, employee: str) -> Dict[str, List[float]]:
+def _load_embedding_cache(memory_dir: Path, employee: str) -> dict[str, list[float]]:
     """加载 embedding 缓存.
 
     Returns:
@@ -208,7 +208,7 @@ def _load_embedding_cache(memory_dir: Path, employee: str) -> Dict[str, List[flo
 def _save_embedding_cache(
     memory_dir: Path,
     employee: str,
-    cache: Dict[str, List[float]],
+    cache: dict[str, list[float]],
 ) -> None:
     """保存 embedding 缓存."""
     cache_path = _get_embedding_cache_path(memory_dir, employee)
@@ -225,7 +225,7 @@ async def find_similar_memories(
     threshold: float = 0.85,
     project_dir: Path | None = None,
     use_keyword_fallback: bool = True,
-) -> List[Tuple[Dict[str, Any], float]]:
+) -> list[tuple[dict[str, Any], float]]:
     """查找相似记忆.
 
     Args:
@@ -297,18 +297,18 @@ async def find_similar_memories(
 
 
 async def _find_similar_with_embedding(
-    new_embedding: List[float],
-    recent_memories: List[Any],
+    new_embedding: list[float],
+    recent_memories: list[Any],
     threshold: float,
     memory_dir: Path,
     employee: str,
-) -> List[Tuple[Dict[str, Any], float]]:
+) -> list[tuple[dict[str, Any], float]]:
     """使用 embedding 查找相似记忆."""
     # 加载缓存
     cache = _load_embedding_cache(memory_dir, employee)
     updated_cache = False
 
-    similar: List[Tuple[Dict[str, Any], float]] = []
+    similar: list[tuple[dict[str, Any], float]] = []
 
     for mem in recent_memories:
         mem_id = mem.id
@@ -341,11 +341,11 @@ async def _find_similar_with_embedding(
 
 def _find_similar_with_keywords(
     content: str,
-    recent_memories: List[Any],
+    recent_memories: list[Any],
     threshold: float,
-) -> List[Tuple[Dict[str, Any], float]]:
+) -> list[tuple[dict[str, Any], float]]:
     """使用关键词匹配查找相似记忆（降级方案）."""
-    similar: List[Tuple[Dict[str, Any], float]] = []
+    similar: list[tuple[dict[str, Any], float]] = []
 
     for mem in recent_memories:
         similarity = _keyword_similarity(content, mem.content)

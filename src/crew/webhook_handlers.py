@@ -837,7 +837,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
     # restricted/confidential 写入限制
     if classification in ("restricted", "confidential"):
-        from crew.classification import EMPLOYEE_CLEARANCE, CLASSIFICATION_LEVELS
+        from crew.classification import CLASSIFICATION_LEVELS, EMPLOYEE_CLEARANCE
         emp_clearance = EMPLOYEE_CLEARANCE.get(employee, {})
         emp_level = emp_clearance.get("clearance", "internal")
         if CLASSIFICATION_LEVELS.get(emp_level, 1) < CLASSIFICATION_LEVELS.get(classification, 2):
@@ -874,8 +874,6 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
     # 拦截 trajectory 标签写入（2026-03-02 记忆系统优化）
     if isinstance(tags, list) and "trajectory" in tags:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(f"Intercepted trajectory memory: employee={employee}, session={source_session}")
         return JSONResponse(
             {
@@ -1181,7 +1179,11 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # 更新 embedding 缓存
     try:
-        from crew.memory_similarity import get_embedding, _get_embedding_cache_path, _load_embedding_cache, _save_embedding_cache
+        from crew.memory_similarity import (
+            _load_embedding_cache,
+            _save_embedding_cache,
+            get_embedding,
+        )
 
         new_embedding = await get_embedding(content)
         if new_embedding is not None:
@@ -1189,8 +1191,6 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
             cache[entry_id] = new_embedding
             _save_embedding_cache(store.memory_dir, employee, cache)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.debug(f"更新 embedding 缓存失败: {e}")
 
     return JSONResponse(
@@ -1973,6 +1973,8 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     )
 
     employee = payload.get("employee", "")
+    import json
+
     entry_ids = payload.get("entry_ids", [])
     updates = payload.get("updates", {})
 
@@ -3958,7 +3960,8 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     try:
         import json as _json
         import uuid
-        from datetime import date as dt_date, datetime
+        from datetime import date as dt_date
+        from datetime import datetime
 
         # ── 独立轨迹存储（不使用 TrajectoryCollector，避免写入 .crew/trajectories） ──
         trajectory_id = f"traj_{uuid.uuid4().hex[:12]}"
@@ -4057,7 +4060,7 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         index_data = {}
         if index_file.exists():
             try:
-                with open(index_file, "r", encoding="utf-8") as f:
+                with open(index_file, encoding="utf-8") as f:
                     index_data = _json.load(f)
             except Exception:
                 pass

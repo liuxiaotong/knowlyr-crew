@@ -617,6 +617,7 @@ async def _notify_approval_needed(
 
     try:
         import json as _json
+
         from crew.feishu import get_feishu_client
 
         token = await ctx.feishu_token_mgr.get_token()

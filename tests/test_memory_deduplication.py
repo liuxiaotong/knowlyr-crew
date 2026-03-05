@@ -1,6 +1,5 @@
 """集成测试：记忆去重和更新 API."""
 
-import json
 from pathlib import Path
 
 import pytest

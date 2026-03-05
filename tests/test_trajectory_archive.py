@@ -13,8 +13,6 @@ class TestTrajectoryArchive:
     @pytest.mark.asyncio
     async def test_trajectory_report_basic(self, tmp_path, monkeypatch):
         """基本轨迹上报功能."""
-        from starlette.requests import Request
-        from starlette.datastructures import Headers
 
         from crew.webhook_handlers import _handle_trajectory_report
 
@@ -64,8 +62,7 @@ class TestTrajectoryArchive:
         }
 
         # Mock /data/trajectory_archive 路径到 tmp_path
-        archive_base = tmp_path / "trajectory_archive"
-        monkeypatch.setattr("crew.webhook_handlers.Path", lambda p: tmp_path / p.lstrip("/data/"))
+        monkeypatch.setattr("crew.webhook_handlers.Path", lambda p: tmp_path / p.lstrip("/data/"))  # noqa: B005
 
         request = MockRequest(payload)
         ctx = MockContext()
@@ -120,7 +117,6 @@ class TestTrajectoryArchive:
         }
 
         # 使用真实路径
-        archive_base = Path("/data/trajectory_archive")
         date_str = date.today().isoformat()
 
         request = MockRequest(payload)
@@ -210,8 +206,8 @@ class TestTrajectoryArchive:
     @pytest.mark.asyncio
     async def test_trajectory_no_memory_pollution(self, tmp_path, monkeypatch):
         """验证轨迹不写入永久记忆."""
-        from crew.webhook_handlers import _handle_trajectory_report
         from crew.memory import MemoryStore
+        from crew.webhook_handlers import _handle_trajectory_report
 
         class MockRequest:
             def __init__(self, payload):

@@ -117,7 +117,7 @@ class SharedMemoryStats:
         return {
             "total_uses": total,
             "unique_users": len(users),
-            "users": sorted(list(users)),
+            "users": sorted(users),
         }
 
     def get_popular_memories(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import struct
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -303,8 +302,8 @@ class TestWecomEventHandler:
 
     @pytest.mark.asyncio
     async def test_get_url_verify(self):
-        from crew.wecom import generate_wecom_signature
         from crew.webhook_wecom import handle_wecom_event
+        from crew.wecom import generate_wecom_signature
 
         ctx = self._make_ctx()
         crypto = ctx.wecom_ctx["crypto"]
@@ -445,10 +444,10 @@ class TestWecomDispatch:
         token_mgr = ctx.wecom_ctx["token_mgr"]
 
         with (
-            patch("crew.webhook_wecom.discover_employees", create=True) as mock_discover,
-            patch("crew.webhook_wecom.resolve_employee_from_mention", create=True) as mock_resolve,
-            patch("crew.webhook_wecom.sg_dispatch", create=True) as mock_sg,
-            patch("crew.webhook_wecom.send_wecom_text", create=True) as mock_send,
+            patch("crew.webhook_wecom.discover_employees", create=True) as _mock_discover,  # noqa: F841
+            patch("crew.webhook_wecom.resolve_employee_from_mention", create=True) as _mock_resolve,  # noqa: F841
+            patch("crew.webhook_wecom.sg_dispatch", create=True) as _mock_sg,  # noqa: F841
+            patch("crew.webhook_wecom.send_wecom_text", create=True) as _mock_send,  # noqa: F841
             patch("crew.webhook_wecom.strip_internal_tags", side_effect=lambda x: x, create=True),
             patch("crew.discovery.discover_employees") as mock_disc2,
             patch("crew.feishu.resolve_employee_from_mention") as mock_res2,

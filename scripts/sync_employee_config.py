@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """同步姜墨言的工具列表和模型配置到其他所有员工的 employee.yaml."""
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 EMPLOYEES_DIR = Path(__file__).parent.parent / "private" / "employees"
 SOURCE_DIR = EMPLOYEES_DIR / "姜墨言-3073"
@@ -19,7 +20,7 @@ MODEL_CONFIG_FIELDS = [
 
 
 def load_yaml(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

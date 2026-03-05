@@ -1,7 +1,6 @@
 """记忆性能优化测试."""
 
 import time
-from pathlib import Path
 
 import pytest
 

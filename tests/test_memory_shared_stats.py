@@ -1,6 +1,5 @@
 """共享记忆统计测试."""
 
-from pathlib import Path
 
 import pytest
 

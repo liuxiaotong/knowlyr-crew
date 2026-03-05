@@ -4,8 +4,6 @@ import json
 from datetime import date
 from pathlib import Path
 
-import pytest
-
 
 class TestTrajectoryTempFile:
     """测试 TrajectoryCollector 写入临时文件."""
@@ -33,8 +31,6 @@ class TestTrajectoryTempFile:
         )
 
         # Mock _write_temp_file 以使用 tmp_path
-        original_write = collector._write_temp_file
-
         def mock_write_temp():
             temp_base = tmp_path / "trajectory_temp"
             date_str = date.today().isoformat()
@@ -193,7 +189,6 @@ class TestTrajectoryTempFile:
         )
 
         # Mock Path.mkdir 抛出异常
-        from pathlib import Path
 
         original_mkdir = Path.mkdir
 

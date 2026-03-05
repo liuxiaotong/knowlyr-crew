@@ -1,7 +1,6 @@
 """记忆草稿管理测试."""
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -243,7 +242,7 @@ class TestMemoryDraftStore:
         # 创建草稿
         draft1 = store.create_draft("赵云帆", "finding", "内容1")
         draft2 = store.create_draft("赵云帆", "finding", "内容2")
-        draft3 = store.create_draft("赵云帆", "finding", "内容3")
+        store.create_draft("赵云帆", "finding", "内容3")
 
         # 批准一个，拒绝一个
         store.approve_draft(draft1.id)

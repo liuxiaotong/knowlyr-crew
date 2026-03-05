@@ -261,12 +261,12 @@ class TestEvaluationEngine:
         # 已过期的 pending
         d1 = engine.track("pm", "estimate", "过期决策", deadline="2026-01-01")
         # 未过期的 pending
-        d2 = engine.track("pm", "estimate", "未来决策", deadline="2099-12-31")
+        engine.track("pm", "estimate", "未来决策", deadline="2099-12-31")
         # 已过期但已评估
         d3 = engine.track("pm", "estimate", "已评估", deadline="2026-01-01")
         engine.evaluate(d3.id, "结果 OK")
         # 无 deadline 的 pending
-        d4 = engine.track("pm", "estimate", "无截止日期")
+        engine.track("pm", "estimate", "无截止日期")
 
         overdue = engine.list_overdue(as_of="2026-03-04")
         assert len(overdue) == 1
@@ -292,7 +292,7 @@ class TestScanOverdueDecisions:
     @pytest.mark.asyncio
     async def test_scan_overdue_auto_evaluate(self, tmp_path):
         """有 task_id 且任务完成的 → 自动 evaluate."""
-        from crew.task_registry import TaskRecord, TaskRegistry
+        from crew.task_registry import TaskRegistry
 
         # 准备 eval engine
         eval_dir = tmp_path / ".crew" / "evaluations"
@@ -347,7 +347,6 @@ class TestScanOverdueDecisions:
         memory_add_calls = []
 
         # Mock MemoryStore.add 来捕获调用
-        original_add = None
 
         class FakeMemoryStore:
             def __init__(self, **kwargs):
@@ -489,6 +488,7 @@ class TestEvaluateScanDM:
         # 模拟 _run_evaluate_scan_cron 中的 DM 投递逻辑
         with patch("crew.feishu.get_feishu_client", return_value=mock_client):
             import json as _json
+
             from crew.feishu import get_feishu_client
 
             token = await mock_token_mgr.get_token()
@@ -545,7 +545,6 @@ class TestTrackDecisionAgentTool:
 
     def test_default_deadline_7_days(self, tmp_path):
         """不传 deadline 时，executor 应自动设为 7 天后."""
-        from datetime import datetime, timedelta
 
         from crew.evaluation import EvaluationEngine
 

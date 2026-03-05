@@ -75,20 +75,20 @@ def test_integration():
             print(f"  加载的记忆数: {len(memories)}")
 
             if memories:
-                print(f"  记忆内容:")
+                print("  记忆内容:")
                 for m in memories[:2]:
                     print(f"    - [{m['category']}] {m['content'][:60]}...")
 
             has_memories = len(memories) > 0
             if has_memories == expected:
-                print(f"  ✓ 通过\n")
+                print("  ✓ 通过\n")
             else:
                 print(f"  ✗ 失败（期望记忆={expected}, 实际={has_memories}）\n")
         else:
             if not expected:
-                print(f"  ✓ 通过（未触发）\n")
+                print("  ✓ 通过（未触发）\n")
             else:
-                print(f"  ✗ 失败（期望触发但未触发）\n")
+                print("  ✗ 失败（期望触发但未触发）\n")
 
     print("=" * 50)
     print("测试完成")
