@@ -106,6 +106,7 @@ jobs:
             scripts/audit_employees.py \
             scripts/daily_eval.py \
             scripts/run_daily_eval.sh \
+            scripts/health_check.sh \
             root@${{ secrets.DEPLOY_HOST }}:/opt/knowlyr-crew/project/scripts/
 
       - name: Deploy static assets & reload
@@ -122,11 +123,13 @@ jobs:
             curl -sf http://localhost:8765/health
           '
 
-      - name: Install eval crontab
+      - name: Install crontabs (eval + health check)
         run: |
           ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
-            crontab -l 2>/dev/null | grep -v 'run_daily_eval\.sh' > /tmp/_cron_clean || true
+            chmod +x /opt/knowlyr-crew/project/scripts/health_check.sh
+            crontab -l 2>/dev/null | grep -v "run_daily_eval\.sh" | grep -v "health_check\.sh" > /tmp/_cron_clean || true
             echo "0 23 * * * /opt/knowlyr-crew/project/scripts/run_daily_eval.sh >> /var/log/knowlyr-crew-eval.log 2>&1" >> /tmp/_cron_clean
+            echo "*/10 * * * * /opt/knowlyr-crew/project/scripts/health_check.sh 2>&1" >> /tmp/_cron_clean
             crontab /tmp/_cron_clean
             rm -f /tmp/_cron_clean
           '
