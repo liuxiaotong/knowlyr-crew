@@ -36,7 +36,8 @@ CLAUDE.md
 Thumbs.db
 
 # Crew runtime (logs + user-created discussions/pipelines)
-.crew/
+.crew/*
+!.crew/mcp_servers.yaml
 
 # Private (proprietary employee definitions)
 private
