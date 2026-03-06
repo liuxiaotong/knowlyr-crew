@@ -213,10 +213,12 @@ async def _wecom_dispatch(
         await send_wecom_text(token_mgr, from_user, agent_id, reply_text)
 
     try:
-        discovery = discover_employees(project_dir=ctx.project_dir)
-
         wecom_config = ctx.wecom_ctx["config"]
         default_emp = wecom_config.default_employee
+        # 从企微 config 读取 tenant_id（空字符串视为 None → 走 admin 租户）
+        _tenant_id: str | None = getattr(wecom_config, "tenant_id", "") or None
+
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id)
 
         # 文本前缀匹配 + default_employee
         employee_name, task_text = resolve_employee_from_mention(

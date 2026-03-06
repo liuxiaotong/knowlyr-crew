@@ -257,6 +257,7 @@ async def _feishu_fast_reply(
     max_visibility: str = "open",
     extra_context: str | None = None,
     sender_name: str = "Kai",
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """闲聊快速路径 — 不加载工具，单轮回复.
 
@@ -315,7 +316,7 @@ async def _feishu_fast_reply(
         try:
             from crew.memory import get_memory_store
 
-            store = get_memory_store(project_dir=ctx.project_dir)
+            store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
             memory_text = store.format_for_prompt(
                 emp.name,
                 limit=5,
@@ -330,7 +331,7 @@ async def _feishu_fast_reply(
     try:
         from crew.discovery import discover_employees
 
-        _all = discover_employees(project_dir=ctx.project_dir)
+        _all = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
         _roster = []
         for _e in _all.employees.values():
             if _e.name == emp.name:
@@ -556,8 +557,11 @@ async def _feishu_dispatch(
         _config = ctx.feishu_config
         _token_mgr = ctx.feishu_token_mgr
 
+    # 从 bot config 读取 tenant_id（空字符串视为 None → 走 admin 租户）
+    _tenant_id: str | None = getattr(_config, "tenant_id", "") or None
+
     try:
-        discovery = discover_employees(project_dir=ctx.project_dir)
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id)
 
         # 群聊只响应 @mention，私聊可用 default_employee
         use_default = _config.default_employee if msg_event.chat_type != "group" else ""
@@ -882,6 +886,7 @@ async def _feishu_dispatch(
                         user_message=chat_message,
                         message_history=message_history,
                         sender_id=_sender_id,
+                        tenant_id=_tenant_id,
                     )
                     result = {
                         "reply": exec_result.get("output", ""),
@@ -931,6 +936,7 @@ async def _feishu_dispatch(
                 model=None,
                 user_message=user_msg,
                 message_history=message_history,
+                tenant_id=_tenant_id,
             )
             _elapsed = _time.monotonic() - _t0
             _path_label = "full"

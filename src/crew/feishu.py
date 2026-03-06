@@ -76,6 +76,7 @@ class FeishuBotConfig(FeishuConfig):
 
     bot_id: str = Field(default="default", description="Bot 短标识，用于 webhook URL 路由")
     primary: bool = Field(default=False, description="是否为主 Bot（工具调用使用此 Bot 的 token）")
+    tenant_id: str = Field(default="", description="绑定的租户 ID（空=admin 租户）")
 
 
 def load_feishu_config(project_dir: Path | None = None) -> FeishuConfig:

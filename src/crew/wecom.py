@@ -67,6 +67,7 @@ class WecomConfig(BaseModel):
     token: str = Field(default="", description="回调 Token（签名验证）")
     encoding_aes_key: str = Field(default="", description="回调 EncodingAESKey（消息加解密）")
     default_employee: str = Field(default="", description="默认员工名")
+    tenant_id: str = Field(default="", description="绑定的租户 ID（空=admin 租户）")
 
 
 def load_wecom_config(project_dir: Path | None = None) -> WecomConfig:
