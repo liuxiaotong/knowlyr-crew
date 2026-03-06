@@ -2165,7 +2165,12 @@ def resolve_effective_tools(employee: Employee) -> set[str]:  # noqa: F821
     2. permissions 存在 → 展开 roles + allow - deny，与 tools 取交集
     """
     if employee.permissions is None:
-        return set(employee.tools)
+        effective = set(employee.tools)
+        # Auto-include MCP Gateway tools
+        for tool_name in _TOOL_SCHEMAS:
+            if tool_name.startswith("mcp__"):
+                effective.add(tool_name)
+        return effective
 
     policy = employee.permissions
 
@@ -2183,6 +2188,11 @@ def resolve_effective_tools(employee: Employee) -> set[str]:  # noqa: F821
     # 与 tools 声明取交集（tools 是 LLM 可见的上限）
     if employee.tools:
         effective &= set(employee.tools)
+
+    # Auto-include MCP Gateway tools (available to all employees)
+    for tool_name in _TOOL_SCHEMAS:
+        if tool_name.startswith("mcp__"):
+            effective.add(tool_name)
 
     return effective
 
