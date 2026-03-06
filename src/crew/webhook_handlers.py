@@ -452,13 +452,14 @@ async def _handle_model_tiers(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
-    """返回所有员工基本信息列表（供外部服务获取员工花名册）."""
+    """返回所有员工基本信息列表（供外部服务获取员工花名册）.
+
+    Bearer token: 返回展示安全字段（蚁聚社区等下游需要）
+    Admin token: 返回全量字段（含 model/tags 等运营情报）
+    """
     from starlette.responses import JSONResponse
 
-    # 安全加固: 员工花名册含角色/模型/状态等运营情报，仅 admin 可读
-    admin_err = _require_admin_token(request)
-    if admin_err:
-        return JSONResponse({"error": admin_err}, status_code=403)
+    is_admin = _require_admin_token(request) is None
 
     from crew.discovery import discover_employees
 
@@ -466,20 +467,22 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
     items = []
     for emp in result.employees.values():
         avatar_url = f"/static/avatars/{emp.agent_id}.webp" if emp.agent_id else None
-        items.append(
-            {
-                "name": emp.name,
-                "character_name": emp.character_name,
-                "display_name": emp.display_name,
-                "description": emp.description,
-                "agent_id": emp.agent_id,
-                "agent_status": emp.agent_status,
-                "model": emp.model,
-                "model_tier": emp.model_tier,
-                "tags": emp.tags,
-                "avatar_url": avatar_url,
-            }
-        )
+        # 基础字段：所有 Bearer token 持有者可见
+        item: dict[str, Any] = {
+            "name": emp.name,
+            "character_name": emp.character_name,
+            "display_name": emp.display_name,
+            "agent_id": emp.agent_id,
+            "agent_status": emp.agent_status,
+            "avatar_url": avatar_url,
+        }
+        # 敏感字段：仅 admin 可见（模型/标签/描述含内部运营情报）
+        if is_admin:
+            item["description"] = emp.description
+            item["model"] = emp.model
+            item["model_tier"] = emp.model_tier
+            item["tags"] = emp.tags
+        items.append(item)
 
     return JSONResponse({"items": items})
 
