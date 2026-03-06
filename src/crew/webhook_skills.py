@@ -43,6 +43,10 @@ async def _handle_skill_create(request: Request, ctx: _AppContext) -> JSONRespon
     }
     """
     try:
+        tenant = get_current_tenant(request)
+        if not tenant.is_admin:
+            return JSONResponse({"error": "admin access required"}, status_code=403)
+
         employee_name = request.path_params.get("employee_name")
         if not employee_name:
             return JSONResponse({"error": "employee_name required"}, status_code=400)
@@ -153,6 +157,10 @@ async def _handle_skill_update(request: Request, ctx: _AppContext) -> JSONRespon
     }
     """
     try:
+        tenant = get_current_tenant(request)
+        if not tenant.is_admin:
+            return JSONResponse({"error": "admin access required"}, status_code=403)
+
         employee_name = request.path_params.get("employee_name")
         skill_name = request.path_params.get("skill_name")
 
@@ -186,6 +194,10 @@ async def _handle_skill_delete(request: Request, ctx: _AppContext) -> JSONRespon
     DELETE /api/employees/{employee_name}/skills/{skill_name}
     """
     try:
+        tenant = get_current_tenant(request)
+        if not tenant.is_admin:
+            return JSONResponse({"error": "admin access required"}, status_code=403)
+
         employee_name = request.path_params.get("employee_name")
         skill_name = request.path_params.get("skill_name")
 
