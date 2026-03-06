@@ -808,10 +808,12 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         for m in memories
     ]
 
+    # 租户上下文（一次获取，后续复用）
+    _state_tenant = get_current_tenant(request)
+
     # 读取最近笔记 — 仅 admin 租户可见，防止内部 notes 泄露
     recent_notes: list[dict] = []
-    _notes_tenant = get_current_tenant(request)
-    if _notes_tenant.is_admin:
+    if _state_tenant.is_admin:
         notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
         if notes_dir.is_dir():
             note_files = sorted(notes_dir.glob("*.md"), reverse=True)
@@ -824,8 +826,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
                     recent_notes.append({"filename": nf.name, "content": text[:500]})
 
     # soul 完整内容仅对 admin 租户返回，非 admin 只返回摘要
-    _soul_tenant = get_current_tenant(request)
-    if _soul_tenant.is_admin:
+    if _state_tenant.is_admin:
         soul_field = soul
     else:
         # 只返回基本信息，不暴露完整 prompt/内部 API 说明
@@ -846,12 +847,12 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         import json as _json
 
         budget_chars = max_tokens * 3  # 保守估计
-        # soul 优先保留，记忆按顺序截断
-        soul_chars = len(soul)
+        # soul 优先保留，记忆按顺序截断（必须用 soul_field，不能用原始 soul，否则非 admin 会泄露完整 soul）
+        soul_chars = len(soul_field)
         remaining = budget_chars - soul_chars
         if remaining < 200:
             # soul 已经超预算，截断 soul
-            response_data["soul"] = soul[:budget_chars] + "\n...(truncated)"
+            response_data["soul"] = soul_field[:budget_chars] + "\n...(truncated)"
             response_data["memories"] = []
             response_data["notes"] = []
         else:
