@@ -197,6 +197,94 @@ def list_tenants() -> list[dict[str, Any]]:
         ]
 
 
+def delete_tenant(tenant_id: str) -> bool:
+    """删除租户（仅删 tenants 表记录，不删关联数据）.
+
+    Returns:
+        是否成功删除（False 表示未找到）
+    """
+    if not is_pg():
+        raise RuntimeError("多租户仅支持 PG 模式")
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tenants WHERE id = %s", (tenant_id,))
+        return cur.rowcount > 0
+
+
+def update_tenant(
+    tenant_id: str,
+    name: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """更新租户信息（仅允许改 name 和 metadata）.
+
+    Returns:
+        更新后的租户信息，未找到返回 None
+    """
+    import json
+
+    if not is_pg():
+        raise RuntimeError("多租户仅支持 PG 模式")
+
+    if name is None and metadata is None:
+        raise ValueError("至少需要提供 name 或 metadata")
+
+    # 构建 SET 子句
+    sets: list[str] = []
+    params: list[Any] = []
+    if name is not None:
+        sets.append("name = %s")
+        params.append(name)
+    if metadata is not None:
+        sets.append("metadata = %s")
+        params.append(json.dumps(metadata, ensure_ascii=False))
+
+    params.append(tenant_id)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE tenants SET {', '.join(sets)} WHERE id = %s",  # noqa: S608
+            tuple(params),
+        )
+        if cur.rowcount == 0:
+            return None
+
+    # 返回更新后的信息
+    tenant = get_tenant_by_id(tenant_id)
+    if not tenant:
+        return None
+    return {
+        "id": tenant.tenant_id,
+        "name": tenant.tenant_name,
+        "is_admin": tenant.is_admin,
+    }
+
+
+def get_tenant_detail(tenant_id: str) -> dict[str, Any] | None:
+    """获取租户详细信息（含 metadata，不含 api_key）."""
+    if not is_pg():
+        return None
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, is_admin, created_at, metadata FROM tenants WHERE id = %s",
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "name": row[1],
+            "is_admin": row[2],
+            "created_at": row[3].isoformat() if row[3] else None,
+            "metadata": row[4],
+        }
+
+
 # ── 认证中间件 ──
 
 
@@ -260,12 +348,14 @@ class MultiTenantAuthMiddleware:
         *,
         admin_token: str,
         skip_paths: list[str] | None = None,
+        shared_cache: dict[str, TenantContext] | None = None,
     ):
         self.app = app
         self.admin_token = admin_token
         self.skip_paths = skip_paths or ["/health"]
         # 缓存：api_key -> TenantContext（避免每次查库）
-        self._cache: dict[str, TenantContext] = {}
+        # 支持外部传入共享 dict，方便 handler 清缓存
+        self._cache: dict[str, TenantContext] = shared_cache if shared_cache is not None else {}
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":

@@ -163,6 +163,11 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_trajectory_report,
     _handle_wiki_file_delete,
     _handle_wiki_spaces_list,
+    _handle_tenant_create,
+    _handle_tenant_delete,
+    _handle_tenant_get,
+    _handle_tenant_list,
+    _handle_tenant_update,
     _handle_work_log,
     _health,
     _metrics,
@@ -905,6 +910,32 @@ def create_webhook_app(
             endpoint=_make_handler(ctx, _handle_permission_respond),
             methods=["POST"],
         ),
+        # 租户管理端点
+        Route(
+            "/api/tenants",
+            endpoint=_make_handler(ctx, _handle_tenant_create),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/tenants",
+            endpoint=_make_handler(ctx, _handle_tenant_list),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/tenants/{tenant_id}",
+            endpoint=_make_handler(ctx, _handle_tenant_get),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/tenants/{tenant_id}",
+            endpoint=_make_handler(ctx, _handle_tenant_delete),
+            methods=["DELETE"],
+        ),
+        Route(
+            "/api/tenants/{tenant_id}",
+            endpoint=_make_handler(ctx, _handle_tenant_update),
+            methods=["PATCH"],
+        ),
         # Wiki 文件管理端点
         Route(
             "/api/wiki/spaces",
@@ -1086,7 +1117,15 @@ def create_webhook_app(
             "/api/team/agents",
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
-        app.add_middleware(MultiTenantAuthMiddleware, admin_token=token, skip_paths=skip_paths)
+        # 共享缓存 dict：middleware 和 handlers 共用同一实例
+        _shared_tenant_cache: dict = {}
+        ctx.tenant_auth_cache = _shared_tenant_cache
+        app.add_middleware(
+            MultiTenantAuthMiddleware,
+            admin_token=token,
+            skip_paths=skip_paths,
+            shared_cache=_shared_tenant_cache,
+        )
         app.add_middleware(
             RateLimitMiddleware,
             skip_paths=["/health", "/metrics", "/webhook/github", "/api/permissions"],
