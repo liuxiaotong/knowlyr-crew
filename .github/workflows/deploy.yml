@@ -66,6 +66,16 @@ jobs:
             && curl -sf http://localhost:8765/health
           '
 
+      - name: Verify public endpoints
+        run: |
+          sleep 5
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://crew.knowlyr.com/api/team/agents)
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::公开端点 /api/team/agents 返回 $STATUS（期望 200）— 官网 AI 头像可能不显示"
+          else
+            echo "✓ /api/team/agents 公开访问正常"
+          fi
+
       - name: Rollback on engine failure
         if: failure()
         run: |

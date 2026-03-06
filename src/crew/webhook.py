@@ -1146,7 +1146,7 @@ def create_webhook_app(
             "/webhook/github",
             "/feishu/event",
             "/wecom/event",
-            "/api/team/agents",
+            "/api/team/agents",  # 公开端点：官网+蚁聚匿名调用，不可删除（PR#35/36/41 三次教训）
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
         # 共享缓存 dict：middleware 和 handlers 共用同一实例

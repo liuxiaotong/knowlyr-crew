@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "knowlyr-crew"
-version = "0.1.43"
+version = "0.1.44"  # 每次发布前手动递增，避免 pip 缓存问题
 description = "AI Skill Loader - define professional skills in Markdown, load into Claude Code and other AI IDEs via MCP"
 readme = "README.md"
 license = "MIT"
