@@ -1089,7 +1089,7 @@ def create_webhook_app(
         app.add_middleware(MultiTenantAuthMiddleware, admin_token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
-            skip_paths=["/health", "/metrics", "/webhook/github"],
+            skip_paths=["/health", "/metrics", "/webhook/github", "/api/permissions"],
         )
 
     if cors_origins:
