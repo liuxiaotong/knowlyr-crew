@@ -5637,6 +5637,11 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
     """列出会议历史 — GET /api/meetings."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 会议日志含内部讨论/路线规划，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.meeting_log import MeetingLogger
 
     ml = MeetingLogger(project_dir=ctx.project_dir)
@@ -5649,6 +5654,11 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
 async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
     """获取会议详情 — GET /api/meetings/{meeting_id}."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 会议详情含完整 prompt/参数，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.meeting_log import MeetingLogger
 
@@ -5747,6 +5757,11 @@ async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
 async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
     """获取员工权限矩阵 — GET /api/permission-matrix."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 权限矩阵暴露所有 agent 工具清单和权限策略，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discovery import discover_employees
     from crew.tool_schema import resolve_effective_tools
@@ -5894,6 +5909,11 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
     """获取员工灵魂配置 — GET /api/souls/{employee_name}."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: soul 包含完整 prompt/指令，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.config_store import get_soul
 
     identifier = request.path_params.get("employee_name", "")
@@ -5951,6 +5971,11 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
 async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有员工灵魂配置 — GET /api/souls."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: soul 列表包含所有员工 prompt，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import list_souls
 
@@ -6080,6 +6105,11 @@ async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
     """获取流水线配置 — GET /api/config/pipelines/{name}."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 流水线含执行逻辑/工具/模型配置，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.config_store import get_pipeline
 
     name = request.path_params.get("name", "")
@@ -6096,6 +6126,11 @@ async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
 async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
     """创建流水线配置 — POST /api/config/pipelines."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 创建流水线是写操作，仅 admin 可执行
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import create_pipeline
 
@@ -6123,6 +6158,11 @@ async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
 async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
     """更新流水线配置 — PUT /api/config/pipelines/{name}."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 更新流水线是写操作，仅 admin 可执行
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import update_pipeline
 
@@ -6153,6 +6193,11 @@ async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
 async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
     """列出所有流水线配置 — GET /api/config/pipelines."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 流水线列表含执行逻辑，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.config_store import get_pipeline, list_pipelines
 
