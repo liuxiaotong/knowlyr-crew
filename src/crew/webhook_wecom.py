@@ -48,9 +48,18 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
         return PlainTextResponse("wecom not configured", status_code=501)
 
     config = wecom_ctx["config"]
-    crypto = wecom_ctx["crypto"]
-    token_mgr = wecom_ctx["token_mgr"]
     dedup = wecom_ctx["dedup"]
+
+    # 根据 app_id 选择密钥（contact = 通讯录同步独立密钥）
+    is_contact = app_id == "contact"
+    if is_contact and "contact_crypto" in wecom_ctx:
+        crypto = wecom_ctx["contact_crypto"]
+        callback_token = wecom_ctx["contact_token"]
+        token_mgr = wecom_ctx.get("contact_token_mgr", wecom_ctx["token_mgr"])
+    else:
+        crypto = wecom_ctx["crypto"]
+        callback_token = config.token
+        token_mgr = wecom_ctx["token_mgr"]
 
     # ── GET: URL 验证 ──
     if request.method == "GET":
@@ -61,7 +70,7 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
 
         from crew.wecom import verify_wecom_signature
 
-        if not verify_wecom_signature(config.token, timestamp, nonce, echostr, msg_signature):
+        if not verify_wecom_signature(callback_token, timestamp, nonce, echostr, msg_signature):
             return PlainTextResponse("signature mismatch", status_code=403)
 
         # 解密 echostr 返回明文
@@ -89,7 +98,7 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
         return PlainTextResponse("missing Encrypt", status_code=400)
 
     # 验证签名
-    if not verify_wecom_signature(config.token, timestamp, nonce, encrypt_content, msg_signature):
+    if not verify_wecom_signature(callback_token, timestamp, nonce, encrypt_content, msg_signature):
         return PlainTextResponse("signature mismatch", status_code=403)
 
     # 解密消息
