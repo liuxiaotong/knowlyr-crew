@@ -313,8 +313,12 @@ def _discover_employees_from_db(
         rows = list_employees_from_db(tenant_id=tid)
 
         if not rows:
-            logger.info("employees 表为空（tenant=%s），回退文件系统发现", tid)
-            return _discover_employees_uncached(root)
+            # 仅 admin 租户回退文件系统（保底），普通租户返回空集
+            if tid == DEFAULT_ADMIN_TENANT_ID:
+                logger.info("admin 租户 employees 表为空，回退文件系统发现")
+                return _discover_employees_uncached(root)
+            logger.debug("租户 %s 无员工，返回空集", tid)
+            return DiscoveryResult(employees={}, conflicts=[])
 
         employees: dict[str, Employee] = {}
         for row in rows:
