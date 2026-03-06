@@ -40,6 +40,24 @@ def _tenant_id_for_store(request: Any) -> str | None:
     return None if tenant.is_admin else tenant.tenant_id
 
 
+def _tenant_data_dir(request: Any, subdir: str) -> Path | None:
+    """返回租户隔离的数据子目录，admin 返回 None（使用默认路径）.
+
+    用法: _tenant_data_dir(request, "memory_archive") → Path("/data/tenants/{tid}/memory_archive") 或 None
+    """
+    tid = _tenant_id_for_store(request)
+    return Path(f"/data/tenants/{tid}/{subdir}") if tid else None
+
+
+def _tenant_base_dir(request: Any) -> Path:
+    """返回租户数据根目录：非 admin 为 /data/tenants/{tid}/，admin 为 /data/.
+
+    用于需要多个子目录的 store（如 MemoryFeedbackManager 同时需要 feedback + stats 目录）。
+    """
+    tid = _tenant_id_for_store(request)
+    return Path(f"/data/tenants/{tid}") if tid else Path("/data")
+
+
 def _tenant_id_for_config(request: Any) -> str:
     """从请求获取租户 ID，用于传给 config_store 等需要字符串的函数.
 
@@ -1670,8 +1688,7 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
     except (ValueError, TypeError):
         limit = 100
 
-    tenant_id = _tenant_id_for_store(request)
-    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+    drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
     try:
         store = MemoryDraftStore(drafts_dir=drafts_dir)
@@ -1713,8 +1730,7 @@ async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
     if not draft_id:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
-    tenant_id = _tenant_id_for_store(request)
-    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+    drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
     try:
         store = MemoryDraftStore(drafts_dir=drafts_dir)
@@ -1761,8 +1777,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     tenant = get_current_tenant(request)
     reviewed_by = tenant.tenant_id or "system"
 
-    tenant_id = _tenant_id_for_store(request)
-    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+    drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
     try:
         draft_store = MemoryDraftStore(drafts_dir=drafts_dir)
@@ -1837,8 +1852,7 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
     tenant = get_current_tenant(request)
     reviewed_by = tenant.tenant_id or "system"
 
-    tenant_id = _tenant_id_for_store(request)
-    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+    drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
     try:
         store = MemoryDraftStore(drafts_dir=drafts_dir)
@@ -1893,7 +1907,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
         _arc_tid = _tenant_id_for_store(request)
-        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        _arc_dir = _tenant_data_dir(request, "memory_archive")
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
         archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
@@ -1949,7 +1963,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
 
     try:
         _arc_tid = _tenant_id_for_store(request)
-        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        _arc_dir = _tenant_data_dir(request, "memory_archive")
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
         archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
@@ -1988,7 +2002,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
 
     try:
         _arc_tid = _tenant_id_for_store(request)
-        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        _arc_dir = _tenant_data_dir(request, "memory_archive")
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
         archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
@@ -2089,8 +2103,7 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
         return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     try:
-        _tid = _tenant_id_for_store(request)
-        _stats_dir = Path(f"/data/tenants/{_tid}/memory_shared_stats") if _tid else None
+        _stats_dir = _tenant_data_dir(request, "memory_shared_stats")
         stats = SharedMemoryStats(stats_dir=_stats_dir)
         stats.record_usage(memory_id, memory_owner, used_by, context)
 
@@ -2127,8 +2140,7 @@ async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
     popular = request.query_params.get("popular") == "true"
 
     try:
-        _tid = _tenant_id_for_store(request)
-        _stats_dir = Path(f"/data/tenants/{_tid}/memory_shared_stats") if _tid else None
+        _stats_dir = _tenant_data_dir(request, "memory_shared_stats")
         stats_manager = SharedMemoryStats(stats_dir=_stats_dir)
 
         if memory_id:
@@ -2528,11 +2540,7 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
         output_file = Path(exports_dir / f"trajectory_dataset_{timestamp}.jsonl")
 
         # 租户隔离
-        _exp_tenant_id = _tenant_id_for_store(request)
-        if _exp_tenant_id:
-            _exp_base = Path(f"/data/tenants/{_exp_tenant_id}")
-        else:
-            _exp_base = Path("/data")
+        _exp_base = _tenant_base_dir(request)
         exporter = TrajectoryExporter(
             archive_dir=_exp_base / "trajectory_archive",
             annotations_dir=_exp_base / "trajectory_annotations",
@@ -2613,11 +2621,7 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
             )
 
         # 租户隔离
-        _ann_tenant_id = _tenant_id_for_store(request)
-        if _ann_tenant_id:
-            _ann_base = Path(f"/data/tenants/{_ann_tenant_id}")
-        else:
-            _ann_base = Path("/data")
+        _ann_base = _tenant_base_dir(request)
         exporter = TrajectoryExporter(
             archive_dir=_ann_base / "trajectory_archive",
             annotations_dir=_ann_base / "trajectory_annotations",
@@ -2662,11 +2666,7 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
         min_quality = float(min_quality_str)
 
         # 租户隔离
-        _annl_tenant_id = _tenant_id_for_store(request)
-        if _annl_tenant_id:
-            _annl_base = Path(f"/data/tenants/{_annl_tenant_id}")
-        else:
-            _annl_base = Path("/data")
+        _annl_base = _tenant_base_dir(request)
         exporter = TrajectoryExporter(
             archive_dir=_annl_base / "trajectory_archive",
             annotations_dir=_annl_base / "trajectory_annotations",
@@ -2881,11 +2881,7 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
             )
 
         # 租户隔离: 按 tenant_id 分隔反馈数据目录
-        _fb_tenant_id = _tenant_id_for_store(request)
-        if _fb_tenant_id:
-            _fb_base = Path(f"/data/tenants/{_fb_tenant_id}")
-        else:
-            _fb_base = Path("/data")
+        _fb_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_fb_base / "memory_feedback",
             stats_dir=_fb_base / "memory_usage_stats",
@@ -2935,11 +2931,7 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
         memory_id = path.split("/")[-1]
 
         # 租户隔离
-        _fb_tenant_id = _tenant_id_for_store(request)
-        if _fb_tenant_id:
-            _fb_base = Path(f"/data/tenants/{_fb_tenant_id}")
-        else:
-            _fb_base = Path("/data")
+        _fb_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_fb_base / "memory_feedback",
             stats_dir=_fb_base / "memory_usage_stats",
@@ -2983,11 +2975,7 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
         memory_id = path.split("/")[-1]
 
         # 租户隔离
-        _stats_tenant_id = _tenant_id_for_store(request)
-        if _stats_tenant_id:
-            _stats_base = Path(f"/data/tenants/{_stats_tenant_id}")
-        else:
-            _stats_base = Path("/data")
+        _stats_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_stats_base / "memory_feedback",
             stats_dir=_stats_base / "memory_usage_stats",
@@ -3042,11 +3030,7 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
             )
 
         # 租户隔离
-        _rec_tenant_id = _tenant_id_for_store(request)
-        if _rec_tenant_id:
-            _rec_base = Path(f"/data/tenants/{_rec_tenant_id}")
-        else:
-            _rec_base = Path("/data")
+        _rec_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_rec_base / "memory_feedback",
             stats_dir=_rec_base / "memory_usage_stats",
@@ -3090,11 +3074,7 @@ async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
         max_helpful_ratio = float(request.query_params.get("max_helpful_ratio", "0.3"))
 
         # 租户隔离
-        _lq_tenant_id = _tenant_id_for_store(request)
-        if _lq_tenant_id:
-            _lq_base = Path(f"/data/tenants/{_lq_tenant_id}")
-        else:
-            _lq_base = Path("/data")
+        _lq_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_lq_base / "memory_feedback",
             stats_dir=_lq_base / "memory_usage_stats",
@@ -3142,11 +3122,7 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
         limit = int(request.query_params.get("limit", "10"))
 
         # 租户隔离
-        _pop_tenant_id = _tenant_id_for_store(request)
-        if _pop_tenant_id:
-            _pop_base = Path(f"/data/tenants/{_pop_tenant_id}")
-        else:
-            _pop_base = Path("/data")
+        _pop_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_pop_base / "memory_feedback",
             stats_dir=_pop_base / "memory_usage_stats",
@@ -3191,11 +3167,7 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
         employee = request.query_params.get("employee")
 
         # 租户隔离
-        _sum_tenant_id = _tenant_id_for_store(request)
-        if _sum_tenant_id:
-            _sum_base = Path(f"/data/tenants/{_sum_tenant_id}")
-        else:
-            _sum_base = Path("/data")
+        _sum_base = _tenant_base_dir(request)
         manager = MemoryFeedbackManager(
             feedback_dir=_sum_base / "memory_feedback",
             stats_dir=_sum_base / "memory_usage_stats",
@@ -4435,13 +4407,11 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
-    # 身份校验：至少需要有效的租户 token
-    try:
-        _traj_tenant = get_current_tenant(request)
-        if not _traj_tenant.tenant_id:
-            return _error_response("authentication required", 401)
-    except Exception:
-        return _error_response("authentication required", 401)
+    # 身份校验：必须经过多租户中间件认证（request.state.tenant 由中间件注入）
+    # 不依赖 get_current_tenant 的 fallback（fallback 返回 admin，会绕过认证）
+    _traj_tenant_obj = getattr(getattr(request, "state", None), "tenant", None)
+    if _traj_tenant_obj is None:
+        return _error_response("authentication required: valid Bearer token needed", 401)
 
     # payload 大小限制 2MB（大轨迹可能有数百步）
     body = await request.body()
