@@ -1073,7 +1073,10 @@ def create_webhook_app(
     app.add_middleware(RequestSizeLimitMiddleware)
 
     if token:
-        from crew.auth import BearerTokenMiddleware, RateLimitMiddleware
+        from crew.auth import RateLimitMiddleware
+        from crew.tenant import MultiTenantAuthMiddleware, ensure_admin_tenant
+
+        ensure_admin_tenant(token)
 
         skip_paths = [
             "/health",
@@ -1083,7 +1086,7 @@ def create_webhook_app(
             "/api/team/agents",
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
-        app.add_middleware(BearerTokenMiddleware, token=token, skip_paths=skip_paths)
+        app.add_middleware(MultiTenantAuthMiddleware, admin_token=token, skip_paths=skip_paths)
         app.add_middleware(
             RateLimitMiddleware,
             skip_paths=["/health", "/metrics", "/webhook/github"],
