@@ -1090,4 +1090,8 @@ def get_memory_store(project_dir=None, tenant_id: str | None = None):
             return MemoryStoreDB(project_dir=project_dir, tenant_id=tenant_id)
     except Exception as e:
         logging.getLogger(__name__).warning("MemoryStoreDB 初始化失败，降级到文件版: %s", e)
+    # 文件模式：tenant_id 非空时隔离到子目录
+    if tenant_id:
+        base = resolve_project_dir(project_dir) / ".crew" / "memory" / tenant_id
+        return MemoryStore(memory_dir=base, project_dir=project_dir)
     return MemoryStore(project_dir=project_dir)

@@ -823,12 +823,20 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
                 if employee.character_name in text or employee.name in text:
                     recent_notes.append({"filename": nf.name, "content": text[:500]})
 
+    # soul 完整内容仅对 admin 租户返回，非 admin 只返回摘要
+    _soul_tenant = get_current_tenant(request)
+    if _soul_tenant.is_admin:
+        soul_field = soul
+    else:
+        # 只返回基本信息，不暴露完整 prompt/内部 API 说明
+        soul_field = f"{employee.character_name} ({employee.display_name})" if soul else ""
+
     response_data = {
         "name": employee.name,
         "character_name": employee.character_name,
         "display_name": employee.display_name,
         "agent_status": employee.agent_status,
-        "soul": soul,
+        "soul": soul_field,
         "memories": memory_list,
         "notes": recent_notes,
     }
@@ -2177,6 +2185,11 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
         }
     """
     from starlette.responses import JSONResponse
+
+    # 仪表板包含所有员工隐私记忆统计，仅 admin 可访问
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return _error_response(admin_err, 403)
 
     from crew.memory import get_memory_store
 
@@ -4420,6 +4433,14 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     存储路径：/data/trajectory_archive/{date}/{employee}-{uuid}.jsonl
     """
     from starlette.responses import JSONResponse
+
+    # 身份校验：至少需要有效的租户 token
+    try:
+        _traj_tenant = get_current_tenant(request)
+        if not _traj_tenant.tenant_id:
+            return _error_response("authentication required", 401)
+    except Exception:
+        return _error_response("authentication required", 401)
 
     # payload 大小限制 2MB（大轨迹可能有数百步）
     body = await request.body()
