@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import threading
 import time
@@ -14,6 +15,7 @@ from typing import Any
 
 from crew.models import ToolCall, ToolExecutionResult
 from crew.providers import (
+    API_KEY_ENV_VARS,
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
     QWEN_BASE_URL,
@@ -26,6 +28,40 @@ from crew.providers import (
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
+
+# API 代理通用 key 环境变量名（当 base_url 指定时，优先用这个而非 provider 原生 key）
+_PROXY_KEY_ENV = "LLM_PROXY_API_KEY"
+
+
+def _resolve_key_for_context(
+    provider: Provider,
+    api_key: str | None,
+    base_url: str | None,
+) -> str:
+    """根据调用上下文解析 API key.
+
+    - 显式传入 api_key → 直接用
+    - base_url 指定（走代理）→ 依次尝试: provider 原生 key → LLM_PROXY_API_KEY → "sk-proxy"
+    - 无 base_url（直连）→ 要求 provider 原生 key（严格模式）
+    """
+    if api_key:
+        return api_key
+    if base_url:
+        # 走代理时宽松解析：先看 provider key，没有就看通用代理 key
+        env_var = API_KEY_ENV_VARS.get(provider, "")
+        key = os.environ.get(env_var, "") if env_var else ""
+        if key:
+            return key
+        proxy_key = os.environ.get(_PROXY_KEY_ENV, "")
+        if proxy_key:
+            return proxy_key
+        # 代理通常不校验 key 或使用内部认证，给一个占位值避免 SDK 报空 key
+        logger.info("base_url=%s 已指定但无 API key，使用占位值", base_url)
+        return "sk-proxy-placeholder"
+    # 直连模式：严格要求 provider key
+    return resolve_api_key(provider, api_key)
+
+
 # 注意: genai.configure() 修改全局状态，_gemini_lock 只保护 configure 调用。
 # 当前单 API key 安全；若需多 key 并发，应改为 per-request client 实例。
 _gemini_lock = threading.Lock()
@@ -638,7 +674,8 @@ def execute_prompt(
         ExecutionResult.
     """
     provider = detect_provider(model)
-    resolved_key = resolve_api_key(provider, api_key)
+    # base_url 指定时走 API 代理，不强制要求 provider 原生 key
+    resolved_key = _resolve_key_for_context(provider, api_key, base_url)
 
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
@@ -761,7 +798,8 @@ async def aexecute_prompt(
     当 full_events=True 时返回 AsyncIterator[dict[str, Any]]（完整事件流）。
     """
     provider = detect_provider(model)
-    resolved_key = resolve_api_key(provider, api_key)
+    # base_url 指定时走 API 代理，不强制要求 provider 原生 key
+    resolved_key = _resolve_key_for_context(provider, api_key, base_url)
 
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
@@ -1124,7 +1162,7 @@ def execute_with_tools(
         ToolExecutionResult — 包含文本内容和工具调用.
     """
     provider = detect_provider(model)
-    resolved_key = resolve_api_key(provider, api_key)
+    resolved_key = _resolve_key_for_context(provider, api_key, base_url)
 
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
@@ -1237,7 +1275,7 @@ async def aexecute_with_tools(
 ) -> ToolExecutionResult:
     """execute_with_tools 的异步版本."""
     provider = detect_provider(model)
-    resolved_key = resolve_api_key(provider, api_key)
+    resolved_key = _resolve_key_for_context(provider, api_key, base_url)
 
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
