@@ -95,6 +95,26 @@ def _safe_int(value: str | None, default: int = 0) -> int:
         return default
 
 
+_MAX_QUERY_LIMIT = 1000
+
+
+def _safe_limit(raw: str | int | None, default: int = 20) -> int:
+    """安全解析 limit 参数，不超过 _MAX_QUERY_LIMIT."""
+    if raw is None:
+        return default
+    try:
+        val = int(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return default
+    return max(1, min(val, _MAX_QUERY_LIMIT))
+
+
+def _sanitized_error(e: Exception, public_msg: str = "内部错误") -> str:
+    """对外返回安全错误信息，内部异常只写日志."""
+    logger.exception("Handler error: %s", e)
+    return public_msg
+
+
 def _find_employee(result: Any, identifier: str) -> Any:
     """按 agent_id 或 name（字符串）查找员工."""
     # 先按 name 查找
@@ -220,7 +240,7 @@ async def _handle_tenant_create(request: Any, ctx: _AppContext) -> Any:
         result = create_tenant(name=name, is_admin=is_admin, metadata=metadata)
     except Exception as e:
         logger.exception("创建租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("创建租户失败", 500)
 
     # 清除中间件缓存
     if ctx.tenant_auth_cache is not None:
@@ -270,7 +290,7 @@ async def _handle_tenant_delete(request: Any, ctx: _AppContext) -> Any:
         deleted = delete_tenant(tenant_id)
     except Exception as e:
         logger.exception("删除租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("删除租户失败", 500)
 
     if not deleted:
         return _error_response("tenant not found", 404)
@@ -309,7 +329,7 @@ async def _handle_tenant_update(request: Any, ctx: _AppContext) -> Any:
         return _error_response(str(e), 400)
     except Exception as e:
         logger.exception("更新租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("更新租户失败", 500)
 
     if result is None:
         return _error_response("tenant not found", 404)
@@ -584,7 +604,7 @@ async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
         return _error_response(str(e), 409)
     except Exception as e:
         logger.exception("创建员工失败")
-        return _error_response(str(e), 500)
+        return _error_response("创建员工失败", 500)
 
     # 6. 启动后台任务生成头像
     agent_id = result.get("agent_id")
@@ -662,7 +682,7 @@ async def _handle_employee_copy(request: Any, ctx: _AppContext) -> Any:
         return _error_response(err_msg, 400)
     except Exception as e:
         logger.exception("复制员工失败")
-        return _error_response(str(e), 500)
+        return _error_response("复制员工失败", 500)
 
     # 5. 构建响应
     metadata = result.get("metadata")
@@ -810,7 +830,10 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
     limit = _safe_int(request.query_params.get("memory_limit", "10"), 10)
+    _ALLOWED_SORT_FIELDS = {"created_at", "importance", "updated_at"}
     sort_by = request.query_params.get("sort_by", "created_at")
+    if sort_by not in _ALLOWED_SORT_FIELDS:
+        sort_by = "created_at"
     min_importance = _safe_int(request.query_params.get("min_importance", "0"), 0)
     max_tokens = _safe_int(request.query_params.get("max_tokens", "0"), 0)  # 0=不限
 
@@ -964,7 +987,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
             _write_yaml_field(employee.source_path, updates)
         except OSError as e:
             logger.exception("更新 employee.yaml 失败: %s", identifier)
-            return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
+            return _error_response("文件写入失败", 500)
     else:
         # DB 模式：更新 employees 表
         try:
@@ -979,7 +1002,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
                 return JSONResponse({"error": "Employee not found in DB"}, status_code=404)
         except Exception as e:
             logger.exception("更新 employees 表失败: %s", identifier)
-            return JSONResponse({"error": f"DB update failed: {e}"}, status_code=500)
+            return _error_response("数据库更新失败", 500)
 
     return JSONResponse(
         {
@@ -1328,10 +1351,7 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
 
     employee = request.query_params.get("employee", "")
     category = request.query_params.get("category") or None
-    try:
-        limit = int(request.query_params.get("limit", "20"))
-    except (ValueError, TypeError):
-        limit = 20
+    limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     if not employee:
         return JSONResponse({"error": "employee is required"}, status_code=400)
@@ -1401,7 +1421,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # DB 版：直接用 store.update()
     if hasattr(store, "update") and callable(getattr(store, "update", None)):
-        employee = store._resolve_to_character_name(employee)
+        employee = store._resolve_to_character_name(employee)  # TODO: 提升为公共方法
 
         # 构建更新标签
         update_tag = f"updated-by:{updated_by or 'unknown'}"
@@ -1446,7 +1466,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # 文件版：保留原有的 JSONL 操作逻辑
     employee = store._resolve_to_character_name(employee)
-    path = store._employee_file(employee)
+    path = store._employee_file(employee)  # TODO: 提升为公共方法
 
     if not path.exists():
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -1591,10 +1611,7 @@ async def _handle_memory_tags_search(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_tags import search_tags
 
     query = request.query_params.get("query", "")
-    try:
-        limit = int(request.query_params.get("limit", "10"))
-    except (ValueError, TypeError):
-        limit = 10
+    limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
 
     if not query:
         return JSONResponse({"error": "query is required"}, status_code=400)
@@ -1629,7 +1646,7 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
         )
     except (ValueError, TypeError, OSError) as e:
         logger.exception("记忆导入失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
@@ -1673,7 +1690,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
             )
     except Exception as e:
         logger.exception("记忆删除失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
@@ -1703,10 +1720,7 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
 
     status = request.query_params.get("status")
     employee = request.query_params.get("employee")
-    try:
-        limit = int(request.query_params.get("limit", "100"))
-    except (ValueError, TypeError):
-        limit = 100
+    limit = _safe_limit(request.query_params.get("limit", "100"), default=100)
 
     drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
@@ -1725,7 +1739,7 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("列出草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
@@ -1762,7 +1776,7 @@ async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "draft": draft.model_dump()})
     except Exception as e:
         logger.exception("获取草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
@@ -1833,7 +1847,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("批准草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
@@ -1886,7 +1900,7 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "draft": draft.model_dump()})
     except Exception as e:
         logger.exception("拒绝草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
@@ -1915,10 +1929,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
     end_date_str = request.query_params.get("end_date")
     category = request.query_params.get("category")
 
-    try:
-        limit = int(request.query_params.get("limit", "100"))
-    except (ValueError, TypeError):
-        limit = 100
+    limit = _safe_limit(request.query_params.get("limit", "100"), default=100)
 
     try:
         from datetime import datetime
@@ -1948,7 +1959,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("查询归档记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
@@ -1964,6 +1975,11 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         {"ok": true, "restored": 2, "not_found": 0}
     """
     from starlette.responses import JSONResponse
+
+    # 安全加固: 恢复归档记忆需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
@@ -1999,7 +2015,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, **stats})
     except Exception as e:
         logger.exception("恢复归档记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2031,7 +2047,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, **stats})
     except Exception as e:
         logger.exception("获取归档统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
@@ -2055,10 +2071,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
     category = request.query_params.get("category")
     exclude_employee = request.query_params.get("exclude_employee", "")
 
-    try:
-        limit = int(request.query_params.get("limit", "20"))
-    except (ValueError, TypeError):
-        limit = 20
+    limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     try:
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
@@ -2081,7 +2094,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("列出共享记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> Any:
@@ -2130,7 +2143,7 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.exception("记录共享记忆使用失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2198,7 +2211,7 @@ async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取共享记忆统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
@@ -2227,13 +2240,14 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
     from crew.memory import get_memory_store
 
     employee = request.query_params.get("employee")
+    limit = _safe_limit(request.query_params.get("limit", "200"), default=200)
 
     try:
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
         if employee:
             # 单个员工的统计
-            entries = memory_store.query(employee, limit=1000)
+            entries = memory_store.query(employee, limit=limit)
             total = len(entries)
 
             by_category = {}
@@ -2283,7 +2297,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
             quality_dist = {"high": 0, "medium": 0, "low": 0}
 
             for emp in employees:
-                entries = memory_store.query(emp, limit=1000)
+                entries = memory_store.query(emp, limit=min(limit, 200))
                 emp_count = len(entries)
                 by_employee[emp] = emp_count
                 total += emp_count
@@ -2320,7 +2334,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取仪表板数据失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
@@ -2457,7 +2471,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("批量更新记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
@@ -2508,7 +2522,7 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("批量删除记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
@@ -2591,7 +2605,7 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("导出轨迹数据集失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> Any:
@@ -2657,7 +2671,7 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
 
     except Exception as e:
         logger.exception("添加轨迹标注失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> Any:
@@ -2706,7 +2720,7 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
 
     except Exception as e:
         logger.exception("列出轨迹标注失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
@@ -2759,7 +2773,7 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("语义搜索失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
@@ -2809,7 +2823,7 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("推荐记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
@@ -2832,10 +2846,12 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
     try:
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
-        limit_str = request.query_params.get("limit", "5")
-        limit = int(limit_str)
+        limit = _safe_limit(request.query_params.get("limit", "5"), default=5)
 
         engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
         similar = engine.find_similar_memories(
@@ -2853,7 +2869,7 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("查找相似记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
@@ -2873,6 +2889,11 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
         {"ok": true, "feedback": {...}}
     """
     from starlette.responses import JSONResponse
+
+    # 安全加固: 提交反馈需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -2924,7 +2945,7 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("提交反馈失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
@@ -2948,7 +2969,10 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
 
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
         # 租户隔离
         _fb_base = _tenant_base_dir(request)
@@ -2968,7 +2992,7 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取反馈失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2992,7 +3016,10 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
 
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
         # 租户隔离
         _stats_base = _tenant_base_dir(request)
@@ -3017,7 +3044,7 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
@@ -3034,6 +3061,11 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
         {"ok": true}
     """
     from starlette.responses import JSONResponse
+
+    # 安全加固: 记录使用需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -3065,7 +3097,7 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("记录使用失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
@@ -3115,7 +3147,7 @@ async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取低质量记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
@@ -3139,7 +3171,7 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"error": admin_err}, status_code=403)
 
         employee = request.query_params.get("employee")
-        limit = int(request.query_params.get("limit", "10"))
+        limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
 
         # 租户隔离
         _pop_base = _tenant_base_dir(request)
@@ -3162,7 +3194,7 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取热门记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any:
@@ -3203,7 +3235,7 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
 
     except Exception as e:
         logger.exception("获取反馈汇总失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_github(request: Any, ctx: _AppContext) -> Any:
@@ -3249,6 +3281,9 @@ async def _handle_github(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+_ALLOWED_TARGET_TYPES = {"employee", "pipeline", "discussion", "chain"}
+
+
 async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
     """处理 OpenClaw 消息事件."""
     from starlette.responses import JSONResponse
@@ -3259,6 +3294,11 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
     target_name = payload.get("target_name", "")
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+
+    if target_type not in _ALLOWED_TARGET_TYPES:
+        return _error_response(
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+        )
 
     if not target_name:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
@@ -3286,6 +3326,11 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
     target_name = payload.get("target_name", "")
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+
+    if target_type not in _ALLOWED_TARGET_TYPES:
+        return _error_response(
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+        )
 
     if not target_name:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
@@ -3349,6 +3394,7 @@ async def _run_and_callback(
     callback_channel_id: int,
     callback_sender_id: str | None,
     callback_parent_id: int | None,
+    tenant_id: str | None = None,
 ) -> None:
     """后台执行员工 + 回调蚁聚发频道消息（异步回调模式）."""
     import time as _time
@@ -3394,7 +3440,7 @@ async def _run_and_callback(
         from crew.tool_schema import AGENT_TOOLS
         from crew.webhook_feishu import _needs_tools
 
-        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
         emp = discovery.get(name)
         has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
         use_fast_path = (
@@ -3429,7 +3475,7 @@ async def _run_and_callback(
                 model=model,
                 user_message=user_message,
                 message_history=message_history,
-                tenant_id=_tenant_id_for_config(request),
+                tenant_id=tenant_id,
             )
 
         _elapsed = _time.monotonic() - _t0
@@ -3716,6 +3762,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     callback_channel_id=callback_channel_id,
                     callback_sender_id=callback_sender_id,
                     callback_parent_id=callback_parent_id,
+                    tenant_id=_tenant_id_for_config(request),
                 )
             )
             _background_tasks.add(task)
@@ -4288,8 +4335,8 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
-    # limit=0 表示不限（向后兼容：客户端可传 limit=50 恢复旧行为）
-    limit = _safe_int(request.query_params.get("limit", "0"), 0)
+    # limit 上限 2000，默认 500（防止全量加载 OOM）
+    limit = min(int(request.query_params.get("limit", "500")), 2000) if request.query_params.get("limit") else 500
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
@@ -4306,8 +4353,8 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     }
 
     for emp_name in employee_names:
-        # limit=0 → 不截断每员工查询
-        entries = store.query(emp_name, category=category, limit=0, max_visibility="open")
+        # 每员工限制 limit 条，防止 OOM
+        entries = store.query(emp_name, category=category, limit=limit, max_visibility="open")
         for m in entries:
             stats[m.category] = stats.get(m.category, 0) + 1
             if not cutoff or m.created_at >= cutoff:
@@ -4448,7 +4495,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
     if not query:
         return JSONResponse({"error": "q is required"}, status_code=400)
 
-    limit = _safe_int(request.query_params.get("limit", "10"), 10)
+    limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
     if limit <= 0:
         limit = 10
     employee = request.query_params.get("employee", "").strip()
@@ -4478,7 +4525,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "entries": entries, "total": len(entries)})
     except Exception as e:
         logger.exception("记忆搜索失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
@@ -4684,7 +4731,7 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(resp_data)
     except Exception as e:
         logger.exception("轨迹上报处理失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
@@ -5143,7 +5190,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         import asyncio
 
         # 启动后台任务
-        asyncio.create_task(
+        task = asyncio.create_task(
             _run_and_callback(
                 ctx=ctx,
                 name=employee_id,
@@ -5158,8 +5205,11 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 callback_channel_id=callback_channel_id,
                 callback_sender_id=callback_sender_id,
                 callback_parent_id=None,
+                tenant_id=_tenant_id_for_config(request),
             )
         )
+        _background_tasks.add(task)
+        task.add_done_callback(_task_done_callback)
 
         return JSONResponse(
             {
@@ -5373,10 +5423,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         except Exception as e:
             logger.exception("chat() 异常: emp=%s channel=%s", employee_id, channel)
-            return JSONResponse(
-                {"ok": False, "error": f"内部错误: {e}"},
-                status_code=500,
-            )
+            return _error_response("内部错误", 500)
 
     # ── 流式响应（SSE）— SG Bridge 或 agent tools 路径的兼容模式 ──
     if stream and not context_only:
@@ -5686,7 +5733,7 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(_json.loads(plan.model_dump_json()))
     except Exception as exc:
         logger.exception("render_discussion_plan failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
@@ -5739,7 +5786,7 @@ async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"prompt": prompt})
     except Exception as exc:
         logger.exception("render_discussion failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
@@ -5755,7 +5802,7 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
 
     _mtg_dir = _tenant_data_dir(request, "meetings")
     ml = MeetingLogger(meetings_dir=_mtg_dir, project_dir=ctx.project_dir)
-    limit = _safe_int(request.query_params.get("limit"), default=20)
+    limit = _safe_limit(request.query_params.get("limit"), default=20)
     keyword = request.query_params.get("keyword") or None
     records = ml.list(limit=limit, keyword=keyword)
     return JSONResponse({"items": [r.model_dump() for r in records]})
@@ -5817,7 +5864,7 @@ async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(decision.model_dump())
     except Exception as exc:
         logger.exception("decision track failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
@@ -5854,7 +5901,7 @@ async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(decision.model_dump())
     except Exception as exc:
         logger.exception("decision evaluate failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
@@ -5870,7 +5917,7 @@ async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
 
     wl = WorkLogger(project_dir=ctx.project_dir)
     employee_name = request.query_params.get("employee_name") or None
-    limit = _safe_int(request.query_params.get("limit"), default=10)
+    limit = _safe_limit(request.query_params.get("limit"), default=10)
     sessions = wl.list_sessions(employee_name=employee_name, limit=limit)
     return JSONResponse({"items": sessions})
 
@@ -6086,7 +6133,7 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 soul 失败: employee=%s", employee_name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
@@ -6105,7 +6152,7 @@ async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 souls 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_get(request: Any, ctx: _AppContext) -> Any:
@@ -6154,7 +6201,7 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 discussion 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
@@ -6189,7 +6236,7 @@ async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 discussion 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
@@ -6219,7 +6266,7 @@ async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 discussions 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
@@ -6273,7 +6320,7 @@ async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 pipeline 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
@@ -6308,7 +6355,7 @@ async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 pipeline 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
@@ -6340,7 +6387,7 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 pipelines 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
@@ -6369,4 +6416,4 @@ async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as exc:
         logger.exception("evaluate scan failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
