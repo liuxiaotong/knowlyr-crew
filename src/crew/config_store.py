@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from crew.database import get_connection, is_pg
@@ -1022,7 +1023,7 @@ def copy_employee_to_tenant(
 
 
 def migrate_employees_to_db(
-    project_dir: "Path | None" = None,
+    project_dir: Path | None = None,
     tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """从文件系统 + employee_souls 表迁移数据到 employees 表.
@@ -1032,7 +1033,6 @@ def migrate_employees_to_db(
     Returns:
         迁移统计信息
     """
-    from pathlib import Path
 
     if not is_pg():
         return {"skipped": True, "reason": "not PG mode"}
