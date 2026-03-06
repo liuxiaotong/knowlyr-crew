@@ -4144,6 +4144,11 @@ async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
     """成本汇总 — GET /api/cost/summary?days=7&employee=xxx&source=work."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 成本数据含全员工 token 用量和计费信息，仅 admin 可访问
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.cost import query_cost_summary
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
@@ -4217,6 +4222,11 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse
 
+    # 安全加固: 组织级记忆聚合暴露全员工知识库，仅 admin 可访问
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory import get_memory_store
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
@@ -4274,6 +4284,11 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
     """POST /api/permissions/respond — 响应权限请求."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 权限审批是高危操作（可授权工具调用），仅 admin 可操作
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     try:
         payload = await request.json()
@@ -4338,6 +4353,11 @@ async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 权限请求列表暴露工具参数和请求 ID，仅 admin 可查看
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.permission_request import PermissionManager
 
     # 优先从 X-User-Id header 获取调用者身份，query param 作为向后兼容 fallback
@@ -4359,6 +4379,11 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         employee (optional): 限定搜索某个员工（不传则跨全员工搜索）
     """
     from starlette.responses import JSONResponse
+
+    # 安全加固: 跨员工搜索可泄露私有/受限记忆，仅 admin 可访问
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.memory import get_memory_store
 
