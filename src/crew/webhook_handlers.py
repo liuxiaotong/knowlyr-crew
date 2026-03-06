@@ -3589,6 +3589,95 @@ async def _run_and_callback(
         logger.exception("异步回调请求异常: emp=%s channel=%d", name, callback_channel_id)
 
 
+def _execute_skills(
+    *,
+    project_dir: Any,
+    tenant_id: str | None,
+    employee_id: str,
+    employee: Any,
+    message: str,
+    trigger_context: dict[str, Any],
+    log_prefix: str = "",
+) -> str | None:
+    """Skills 自动触发 — 返回注入用的记忆文本（或 None）.
+
+    共享逻辑：同时被 _handle_chat 和 _handle_run_employee 调用。
+    """
+    from crew.memory import get_memory_store
+    from crew.skills import SkillStore
+    from crew.skills_engine import SkillsEngine
+
+    skill_store = SkillStore(project_dir=project_dir)
+    memory_store = get_memory_store(project_dir=project_dir, tenant_id=tenant_id)
+    skills_engine = SkillsEngine(skill_store, memory_store)
+
+    employee_name = employee.character_name or employee_id
+
+    triggered = skills_engine.check_triggers(employee_name, message, trigger_context)
+    if not triggered:
+        return None
+
+    logger.info(
+        "Skills 触发%s: employee=%s task=%s triggered=%d",
+        log_prefix,
+        employee_name,
+        message[:50],
+        len(triggered),
+    )
+
+    enhanced_context: dict[str, Any] = {}
+    for skill, score in triggered[:3]:
+        try:
+            result = skills_engine.execute_skill(
+                skill,
+                employee_name,
+                {"task": message, **trigger_context},
+            )
+            if result.get("enhanced_context"):
+                for key, value in result["enhanced_context"].items():
+                    if key in enhanced_context:
+                        if isinstance(enhanced_context[key], list) and isinstance(
+                            value, list
+                        ):
+                            enhanced_context[key].extend(value)
+                        else:
+                            enhanced_context[key] = value
+                    else:
+                        enhanced_context[key] = value
+            skills_engine.record_trigger(
+                skill=skill,
+                employee=employee_name,
+                task=message,
+                match_score=score,
+                execution_result=result,
+            )
+        except Exception as skill_exec_error:
+            logger.warning(
+                "Skill 执行失败%s: skill=%s error=%s",
+                log_prefix,
+                skill.name,
+                skill_exec_error,
+            )
+
+    # 将 enhanced_context 中的 memories 格式化为文本
+    memories = enhanced_context.get("memories", [])
+    if not memories:
+        return None
+
+    memory_text = "【相关历史记忆】\n" + "\n".join(
+        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
+        for m in memories[:5]
+    )
+    logger.info(
+        "Skills 记忆注入%s: employee=%s memories=%d text_len=%d",
+        log_prefix,
+        employee_name,
+        len(memories),
+        len(memory_text),
+    )
+    return memory_text
+
+
 async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     """直接触发员工（支持 SSE 流式输出 + 对话模式）."""
     from starlette.responses import JSONResponse
@@ -3620,81 +3709,23 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
         emp = discovery.get(name)
 
-        enhanced_context = {}
-        employee_name = None
         if emp is not None and isinstance(user_message, str):
             try:
-                from crew.memory import get_memory_store
-                from crew.skills import SkillStore
-                from crew.skills_engine import SkillsEngine
-
-                skill_store = SkillStore(project_dir=ctx.project_dir)
-                memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-                engine = SkillsEngine(skill_store, memory_store)
-
-                employee_name = emp.character_name or name
-
-                # 检查触发
-                triggered = engine.check_triggers(employee_name, user_message, args)
-                if triggered:
-                    logger.info(
-                        "Skills 触发: employee=%s task=%s triggered=%d",
-                        employee_name,
-                        user_message[:50],
-                        len(triggered),
-                    )
-                    # 执行触发的 skills（按优先级排序）
-                    for skill, score in triggered[:3]:
-                        try:
-                            result = engine.execute_skill(
-                                skill,
-                                employee_name,
-                                {"task": user_message, "channel": channel, **args},
-                            )
-                            if result.get("enhanced_context"):
-                                for key, value in result["enhanced_context"].items():
-                                    if key in enhanced_context:
-                                        if isinstance(enhanced_context[key], list) and isinstance(
-                                            value, list
-                                        ):
-                                            enhanced_context[key].extend(value)
-                                        else:
-                                            enhanced_context[key] = value
-                                    else:
-                                        enhanced_context[key] = value
-                            engine.record_trigger(
-                                skill=skill,
-                                employee=employee_name,
-                                task=user_message,
-                                match_score=score,
-                                execution_result=result,
-                            )
-                        except Exception as skill_exec_error:
-                            logger.warning(
-                                "Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error
-                            )
+                _skills_memory_text = _execute_skills(
+                    project_dir=ctx.project_dir,
+                    tenant_id=_tenant_id_for_store(request),
+                    employee_id=name,
+                    employee=emp,
+                    message=user_message,
+                    trigger_context={"task": user_message, "channel": channel, **args},
+                )
+                if _skills_memory_text:
+                    if extra_context:
+                        extra_context = _skills_memory_text + "\n\n" + extra_context
+                    else:
+                        extra_context = _skills_memory_text
             except Exception as skills_error:
                 logger.warning("Skills 检查失败: %s", skills_error)
-
-        # 将 enhanced_context 注入到 extra_context
-        if enhanced_context:
-            memories = enhanced_context.get("memories", [])
-            if memories:
-                memory_text = "【相关历史记忆】\n" + "\n".join(
-                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
-                    for m in memories[:5]
-                )
-                if extra_context:
-                    extra_context = memory_text + "\n\n" + extra_context
-                else:
-                    extra_context = memory_text
-
-                logger.info(
-                    "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
-                    employee_name or name,
-                    len(memories),
-                    len(extra_context),
-                )
 
         # Phase 3：外部对话输出控制
         from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
@@ -5028,6 +5059,163 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _chat_via_sg_bridge(
+    *,
+    ctx: _AppContext,
+    effective_message: str,
+    raw_message: str,
+    employee_id: str,
+    message_history: list[dict[str, Any]] | None,
+    channel: str,
+    sender_type: str,
+) -> str | None:
+    """SG Bridge 通道尝试 — 返回回复文本或 None（表示 fallback）."""
+    # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
+    _sg_reply: str | None = None
+    try:
+        from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
+
+        _sg_reply = await sg_api_dispatch(
+            effective_message,
+            ctx=ctx,
+            project_dir=ctx.project_dir,
+            employee_name=employee_id,
+            message_history=message_history,
+            push_event_fn=None,  # TODO: 支持流式输出
+            channel=channel,
+            sender_type=sender_type,
+        )
+        logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
+    except SGAPIBridgeError as _sg_api_err:
+        logger.info("SG API Bridge fallback: %s → 尝试 SSH Bridge", _sg_api_err)
+        _sg_reply = None
+    except Exception as _sg_api_exc:
+        logger.warning("SG API Bridge 意外异常: %s → 尝试 SSH Bridge", _sg_api_exc)
+        _sg_reply = None
+
+    # Fallback: SSH Bridge（两阶段权限确认）
+    if _sg_reply is None:
+        try:
+            from crew.sg_bridge import sg_dispatch
+
+            # 定义权限回调函数
+            async def permission_callback(operations: list[dict]) -> bool:
+                """请求用户权限确认."""
+                from crew.permission_request import PermissionManager
+
+                manager = PermissionManager()
+
+                # 构建权限请求参数
+                tool_names = [op["tool"] for op in operations]
+                tool_params = {
+                    "operations": operations,
+                    "message": raw_message[:200],
+                }
+
+                # 请求权限（会推送事件到前端）
+                approved = await manager.request_permission(
+                    tool_name=f"SG执行: {', '.join(tool_names)}",
+                    tool_params=tool_params,
+                    timeout=60.0,
+                )
+
+                return approved
+
+            _sg_reply = await sg_dispatch(
+                effective_message,
+                project_dir=ctx.project_dir,
+                employee_name=employee_id,
+                message_history=message_history,
+                permission_callback=permission_callback,
+            )
+        except Exception as _sg_exc:
+            logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
+            _sg_reply = None
+
+    return _sg_reply
+
+
+async def _chat_via_agent_tools(
+    *,
+    ctx: _AppContext,
+    request: Any,
+    employee_id: str,
+    effective_message: str,
+    model: str | None,
+    message_history: list[dict[str, Any]] | None,
+    sender_id: str,
+    attachments: list[dict[str, Any]] | None,
+    sender_type: str,
+    channel: str,
+    stream: bool,
+) -> Any:
+    """Agent tools 执行路径 — 返回 Response（流式）或 dict（非流式）."""
+    import json as _json
+
+    import crew.webhook_executor as _wh_exec
+    from starlette.responses import StreamingResponse
+
+    _chat_tenant = get_current_tenant(request)
+    _tenant = _tenant_id_for_config(request)
+
+    if stream:
+        # 流式 agent tools 路径 — 真流式逐 token 推送
+        agent_stream = _wh_exec._stream_employee_with_tools(
+            ctx,
+            employee_id,
+            {},  # args
+            agent_id=None,
+            model=model,
+            user_message=effective_message,
+            message_history=message_history,
+            sender_id=sender_id,
+            attachments=attachments,
+            sender_type=sender_type,
+            channel=channel,
+            tenant_id=_tenant,
+            is_admin=_chat_tenant.is_admin,
+        )
+
+        async def _agent_sse_generator():
+            async for chunk in agent_stream:
+                chunk_data = _json.dumps(chunk, ensure_ascii=False)
+                yield f"data: {chunk_data}\n\n"
+
+        return StreamingResponse(
+            _agent_sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    else:
+        # 非流式 agent tools 路径
+        exec_result = await _wh_exec._execute_employee_with_tools(
+            ctx,
+            employee_id,
+            {},  # args
+            agent_id=None,
+            model=model,
+            user_message=effective_message,
+            message_history=message_history,
+            sender_id=sender_id,
+            attachments=attachments,
+            sender_type=sender_type,
+            channel=channel,
+            tenant_id=_tenant,
+            is_admin=_chat_tenant.is_admin,
+        )
+        return {
+            "reply": exec_result.get("output", ""),
+            "employee_id": employee_id,
+            "memory_updated": False,
+            "tokens_used": exec_result.get("input_tokens", 0)
+            + exec_result.get("output_tokens", 0),
+            "latency_ms": 0,
+        }
+
+
 async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     """统一对话接口 — 供蚁聚、飞书、外部渠道统一调用.
 
@@ -5098,75 +5286,20 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     _skills_memory_text: str | None = None
     try:
         from crew.discovery import discover_employees as _chat_discover
-        from crew.memory import get_memory_store
-        from crew.skills import SkillStore
-        from crew.skills_engine import SkillsEngine
 
         _chat_discovery = _chat_discover(project_dir=ctx.project_dir)
         _chat_emp = _chat_discovery.get(employee_id)
 
         if _chat_emp is not None and isinstance(message, str):
-            skill_store = SkillStore(project_dir=ctx.project_dir)
-            memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-            skills_engine = SkillsEngine(skill_store, memory_store)
-
-            _chat_employee_name = _chat_emp.character_name or employee_id
-
-            _skills_context = {"channel": channel, "sender_type": sender_type}
-            triggered = skills_engine.check_triggers(_chat_employee_name, message, _skills_context)
-            if triggered:
-                logger.info(
-                    "Skills 触发 (/api/chat): employee=%s task=%s triggered=%d",
-                    _chat_employee_name,
-                    message[:50],
-                    len(triggered),
-                )
-                enhanced_context: dict[str, Any] = {}
-                for skill, score in triggered[:3]:
-                    try:
-                        result = skills_engine.execute_skill(
-                            skill,
-                            _chat_employee_name,
-                            {"task": message, "channel": channel, "sender_type": sender_type},
-                        )
-                        if result.get("enhanced_context"):
-                            for key, value in result["enhanced_context"].items():
-                                if key in enhanced_context:
-                                    if isinstance(enhanced_context[key], list) and isinstance(
-                                        value, list
-                                    ):
-                                        enhanced_context[key].extend(value)
-                                    else:
-                                        enhanced_context[key] = value
-                                else:
-                                    enhanced_context[key] = value
-                        skills_engine.record_trigger(
-                            skill=skill,
-                            employee=_chat_employee_name,
-                            task=message,
-                            match_score=score,
-                            execution_result=result,
-                        )
-                    except Exception as _skill_exec_err:
-                        logger.warning(
-                            "Skill 执行失败 (/api/chat): skill=%s error=%s",
-                            skill.name,
-                            _skill_exec_err,
-                        )
-
-                # 将 enhanced_context 中的 memories 格式化为文本
-                memories = enhanced_context.get("memories", [])
-                if memories:
-                    _skills_memory_text = "【相关历史记忆】\n" + "\n".join(
-                        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
-                        for m in memories[:5]
-                    )
-                    logger.info(
-                        "Skills 记忆注入 (/api/chat): employee=%s memories=%d text_len=%d",
-                        _chat_employee_name,
-                        len(memories),
-                        len(_skills_memory_text),
-                    )
+            _skills_memory_text = _execute_skills(
+                project_dir=ctx.project_dir,
+                tenant_id=_tenant_id_for_store(request),
+                employee_id=employee_id,
+                employee=_chat_emp,
+                message=message,
+                trigger_context={"task": message, "channel": channel, "sender_type": sender_type},
+                log_prefix=" (/api/chat)",
+            )
     except Exception as _skills_err:
         logger.warning("Skills 检查失败 (/api/chat): %s", _skills_err)
 
@@ -5228,66 +5361,15 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
     _sg_reply: str | None = None
     if not stream and not context_only:
-        # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
-        try:
-            from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
-
-            _sg_reply = await sg_api_dispatch(
-                _effective_message,
-                ctx=ctx,
-                project_dir=ctx.project_dir,
-                employee_name=employee_id,
-                message_history=message_history,
-                push_event_fn=None,  # TODO: 支持流式输出
-                channel=channel,
-                sender_type=sender_type,
-            )
-            logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
-        except SGAPIBridgeError as _sg_api_err:
-            logger.info("SG API Bridge fallback: %s → 尝试 SSH Bridge", _sg_api_err)
-            _sg_reply = None
-        except Exception as _sg_api_exc:
-            logger.warning("SG API Bridge 意外异常: %s → 尝试 SSH Bridge", _sg_api_exc)
-            _sg_reply = None
-
-        # Fallback: SSH Bridge（两阶段权限确认）
-        if _sg_reply is None:
-            try:
-                from crew.sg_bridge import sg_dispatch
-
-                # 定义权限回调函数
-                async def permission_callback(operations: list[dict]) -> bool:
-                    """请求用户权限确认."""
-                    from crew.permission_request import PermissionManager
-
-                    manager = PermissionManager()
-
-                    # 构建权限请求参数
-                    tool_names = [op["tool"] for op in operations]
-                    tool_params = {
-                        "operations": operations,
-                        "message": message[:200],
-                    }
-
-                    # 请求权限（会推送事件到前端）
-                    approved = await manager.request_permission(
-                        tool_name=f"SG执行: {', '.join(tool_names)}",
-                        tool_params=tool_params,
-                        timeout=60.0,
-                    )
-
-                    return approved
-
-                _sg_reply = await sg_dispatch(
-                    _effective_message,
-                    project_dir=ctx.project_dir,
-                    employee_name=employee_id,
-                    message_history=message_history,
-                    permission_callback=permission_callback,
-                )
-            except Exception as _sg_exc:
-                logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
-                _sg_reply = None
+        _sg_reply = await _chat_via_sg_bridge(
+            ctx=ctx,
+            effective_message=_effective_message,
+            raw_message=message,
+            employee_id=employee_id,
+            message_history=message_history,
+            channel=channel,
+            sender_type=sender_type,
+        )
 
     if _sg_reply is not None:
         result: dict[str, Any] = {
@@ -5317,68 +5399,25 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
 
         try:
-            if has_agent_tools and not context_only and stream:
-                # 流式 agent tools 路径 — 真流式逐 token 推送
-                import crew.webhook_executor as _wh_exec
-
-                _chat_tenant = get_current_tenant(request)
-                agent_stream = _wh_exec._stream_employee_with_tools(
-                    ctx,
-                    employee_id,
-                    {},  # args
-                    agent_id=None,
+            if has_agent_tools and not context_only:
+                # agent tools 路径（流式或非流式）
+                agent_result = await _chat_via_agent_tools(
+                    ctx=ctx,
+                    request=request,
+                    employee_id=employee_id,
+                    effective_message=_effective_message,
                     model=model,
-                    user_message=_effective_message,
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
                     sender_type=sender_type,
                     channel=channel,
-                    tenant_id=_tenant_id_for_config(request),
-                    is_admin=_chat_tenant.is_admin,
+                    stream=stream,
                 )
-
-                async def _agent_sse_generator():
-                    async for chunk in agent_stream:
-                        chunk_data = _json.dumps(chunk, ensure_ascii=False)
-                        yield f"data: {chunk_data}\n\n"
-
-                return StreamingResponse(
-                    _agent_sse_generator(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "X-Accel-Buffering": "no",
-                    },
-                )
-            elif has_agent_tools and not context_only:
-                # 非流式 agent tools 路径
-                import crew.webhook_executor as _wh_exec
-
-                _chat_tenant2 = get_current_tenant(request)
-                exec_result = await _wh_exec._execute_employee_with_tools(
-                    ctx,
-                    employee_id,
-                    {},  # args
-                    agent_id=None,
-                    model=model,
-                    user_message=_effective_message,
-                    message_history=message_history,
-                    sender_id=sender_id,
-                    attachments=attachments,
-                    sender_type=sender_type,
-                    channel=channel,
-                    tenant_id=_tenant_id_for_config(request),
-                    is_admin=_chat_tenant2.is_admin,
-                )
-                result = {
-                    "reply": exec_result.get("output", ""),
-                    "employee_id": employee_id,
-                    "memory_updated": False,
-                    "tokens_used": exec_result.get("input_tokens", 0)
-                    + exec_result.get("output_tokens", 0),
-                    "latency_ms": 0,
-                }
+                # 流式时 _chat_via_agent_tools 返回 StreamingResponse，直接返回
+                if stream:
+                    return agent_result
+                result = agent_result
             else:
                 # 使用简单的 chat 路径（无工具）
                 engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
