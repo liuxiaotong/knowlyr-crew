@@ -1645,6 +1645,11 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 草稿列表需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory_drafts import MemoryDraftStore
 
     status = request.query_params.get("status")
@@ -1654,8 +1659,11 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
     except (ValueError, TypeError):
         limit = 100
 
+    tenant_id = _tenant_id_for_store(request)
+    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+
     try:
-        store = MemoryDraftStore()
+        store = MemoryDraftStore(drafts_dir=drafts_dir)
         drafts = store.list_drafts(status=status, employee=employee, limit=limit)
         counts = store.count_by_status()
 
@@ -1683,14 +1691,22 @@ async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 草稿详情需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory_drafts import MemoryDraftStore
 
     draft_id = request.path_params.get("draft_id", "")
     if not draft_id:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
+    tenant_id = _tenant_id_for_store(request)
+    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
+
     try:
-        store = MemoryDraftStore()
+        store = MemoryDraftStore(drafts_dir=drafts_dir)
         draft = store.get_draft(draft_id)
 
         if draft is None:
@@ -1718,6 +1734,11 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 草稿审批需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory import get_memory_store
     from crew.memory_drafts import MemoryDraftStore
 
@@ -1725,15 +1746,15 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     if not draft_id:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
-    payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
-    )
-    # P2: reviewed_by 优先从 header 获取，防止 payload 伪造
-    reviewed_by = request.headers.get("x-user-id") or payload.get("reviewed_by", "system")
-    # TODO: reviewed_by 应强制从认证 token 解析，payload fallback 仅为过渡方案
+    # 安全加固: reviewed_by 从认证的租户上下文获取，不接受用户传入
+    tenant = get_current_tenant(request)
+    reviewed_by = tenant.tenant_id or "system"
+
+    tenant_id = _tenant_id_for_store(request)
+    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
 
     try:
-        draft_store = MemoryDraftStore()
+        draft_store = MemoryDraftStore(drafts_dir=drafts_dir)
         draft = draft_store.approve_draft(draft_id, reviewed_by=reviewed_by)
 
         if draft is None:
@@ -1786,6 +1807,11 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 草稿拒绝需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.memory_drafts import MemoryDraftStore
 
     draft_id = request.path_params.get("draft_id", "")
@@ -1796,12 +1822,15 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         await request.json() if request.headers.get("content-type") == "application/json" else {}
     )
     reason = payload.get("reason", "")
-    # P2: reviewed_by 优先从 header 获取，防止 payload 伪造
-    reviewed_by = request.headers.get("x-user-id") or payload.get("reviewed_by", "system")
-    # TODO: reviewed_by 应强制从认证 token 解析，payload fallback 仅为过渡方案
+    # 安全加固: reviewed_by 从认证的租户上下文获取，不接受用户传入
+    tenant = get_current_tenant(request)
+    reviewed_by = tenant.tenant_id or "system"
+
+    tenant_id = _tenant_id_for_store(request)
+    drafts_dir = Path(ctx.project_dir) / "memory_drafts" / (tenant_id or "default")
 
     try:
-        store = MemoryDraftStore()
+        store = MemoryDraftStore(drafts_dir=drafts_dir)
         draft = store.reject_draft(draft_id, reason=reason, reviewed_by=reviewed_by)
 
         if draft is None:
@@ -2432,6 +2461,11 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 轨迹导出需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
@@ -2443,7 +2477,6 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     end_date_str = payload.get("end_date")
     min_quality = payload.get("min_quality", 0.0)
     max_samples = payload.get("max_samples", 0)
-    output_file_str = payload.get("output_file")
 
     try:
         from datetime import datetime
@@ -2452,12 +2485,11 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
         end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
-        # 生成输出文件名
-        if output_file_str:
-            output_file = Path(output_file_str)
-        else:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = Path(f"/tmp/trajectory_dataset_{timestamp}.jsonl")
+        # 安全加固: 强制输出到受控目录，不接受用户自定义路径
+        exports_dir = Path("/data/exports")
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = Path(exports_dir / f"trajectory_dataset_{timestamp}.jsonl")
 
         exporter = TrajectoryExporter()
         stats = exporter.export_dataset(
@@ -5102,10 +5134,18 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         reply_text: str = result.get("reply", "")
 
         async def _sse_generator():
-            # 兼容模式：将完整回复拆成字符逐个推送（模拟流式体验）
-            for ch in reply_text:
-                chunk_data = _json.dumps({"delta": ch, "done": False}, ensure_ascii=False)
+            # 兼容模式：将完整回复拆成小块推送（模拟流式体验）
+            # 每次推送 3-8 个字符，间隔 15-30ms，模拟真实 token 生成速度
+            import random as _rng
+
+            i = 0
+            while i < len(reply_text):
+                chunk_size = _rng.randint(3, 8)
+                chunk = reply_text[i : i + chunk_size]
+                i += chunk_size
+                chunk_data = _json.dumps({"delta": chunk, "done": False}, ensure_ascii=False)
                 yield f"data: {chunk_data}\n\n"
+                await asyncio.sleep(_rng.uniform(0.015, 0.030))
             done_data = _json.dumps(
                 {
                     "done": True,
