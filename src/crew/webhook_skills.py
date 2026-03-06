@@ -2,22 +2,31 @@
 
 import logging
 
+from typing import Any
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from crew.memory import get_memory_store
 from crew.skills import Skill, SkillAction, SkillMetadata, SkillStore, SkillTrigger
 from crew.skills_engine import SkillsEngine
+from crew.tenant import get_current_tenant
 from crew.webhook_context import _AppContext
 
 logger = logging.getLogger(__name__)
 
 
-def _get_skills_engine(ctx: _AppContext) -> SkillsEngine:
+def _tenant_id_for_store(request: Any) -> str | None:
+    """从请求获取租户 ID，admin 返回 None（向后兼容）."""
+    tenant = get_current_tenant(request)
+    return None if tenant.is_admin else tenant.tenant_id
+
+
+def _get_skills_engine(request: Any, ctx: _AppContext) -> SkillsEngine:
     """获取 SkillsEngine 实例."""
     # 每次都创建新实例，使用 ctx.project_dir
     skill_store = SkillStore(project_dir=ctx.project_dir)
-    memory_store = get_memory_store(project_dir=ctx.project_dir)
+    memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     return SkillsEngine(skill_store, memory_store)
 
 
@@ -53,7 +62,7 @@ async def _handle_skill_create(request: Request, ctx: _AppContext) -> JSONRespon
         )
 
         # 保存
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         created_skill = engine.skill_store.create_skill(skill)
 
         return JSONResponse(
@@ -82,7 +91,7 @@ async def _handle_skill_list(request: Request, ctx: _AppContext) -> JSONResponse
     try:
         employee_name = request.path_params.get("employee_name")
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         skills = engine.skill_store.list_skills(employee_name)
 
         return JSONResponse(
@@ -120,7 +129,7 @@ async def _handle_skill_get(request: Request, ctx: _AppContext) -> JSONResponse:
         if not employee_name or not skill_name:
             return JSONResponse({"error": "employee_name and skill_name required"}, status_code=400)
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         skill = engine.skill_store.get_skill(employee_name, skill_name)
 
         if not skill:
@@ -152,7 +161,7 @@ async def _handle_skill_update(request: Request, ctx: _AppContext) -> JSONRespon
 
         body = await request.json()
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         updated_skill = engine.skill_store.update_skill(employee_name, skill_name, body)
 
         return JSONResponse(
@@ -183,7 +192,7 @@ async def _handle_skill_delete(request: Request, ctx: _AppContext) -> JSONRespon
         if not employee_name or not skill_name:
             return JSONResponse({"error": "employee_name and skill_name required"}, status_code=400)
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         deleted = engine.skill_store.delete_skill(employee_name, skill_name)
 
         if not deleted:
@@ -215,7 +224,7 @@ async def _handle_skills_check_triggers(request: Request, ctx: _AppContext) -> J
         if not employee or not task:
             return JSONResponse({"error": "employee and task required"}, status_code=400)
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         triggered = engine.check_triggers(employee, task, context)
 
         return JSONResponse(
@@ -259,7 +268,7 @@ async def _handle_skills_execute(request: Request, ctx: _AppContext) -> JSONResp
         if not skill_id or not employee:
             return JSONResponse({"error": "skill_id and employee required"}, status_code=400)
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
 
         # 找到对应的 skill
         skills = engine.skill_store.list_skills(employee)
@@ -300,7 +309,7 @@ async def _handle_skills_stats(request: Request, ctx: _AppContext) -> JSONRespon
     GET /api/skills/stats
     """
     try:
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         stats = engine.skill_store.get_stats()
 
         return JSONResponse(stats)
@@ -322,7 +331,7 @@ async def _handle_skills_trigger_history(request: Request, ctx: _AppContext) -> 
         limit = int(params.get("limit", "50"))
         since = params.get("since")
 
-        engine = _get_skills_engine(ctx)
+        engine = _get_skills_engine(request, ctx)
         triggers = engine.skill_store.get_trigger_history(
             employee=employee,
             skill_name=skill_name,

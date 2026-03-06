@@ -42,6 +42,7 @@ async def _dispatch_task(
     agent_id: str | None = None,
     model: str | None = None,
     owner: str | None = None,
+    tenant_id: str | None = None,
 ) -> Any:
     """创建任务并调度执行."""
     from starlette.responses import JSONResponse
@@ -215,7 +216,7 @@ async def _execute_task(
                         if match and getattr(match, "auto_memory", False):
                             from crew.memory import get_memory_store
 
-                            _mem_store = get_memory_store(project_dir=ctx.project_dir)
+                            _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
                             summary = output_text[:300].strip()
                             if len(output_text) > 300:
                                 summary += "..."
@@ -242,7 +243,7 @@ async def _execute_task(
                             if _mem_store is None:
                                 from crew.memory import get_memory_store
 
-                                _mem_store = get_memory_store(project_dir=ctx.project_dir)
+                                _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
                             check_lines = check_match.group(1).strip().split("\n")
                             passed = []
                             failed = []
@@ -279,7 +280,7 @@ async def _execute_task(
                             if _mem_store is None:
                                 from crew.memory import get_memory_store
 
-                                _mem_store = get_memory_store(project_dir=ctx.project_dir)
+                                _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
                             pattern_block = pattern_match.group(1).strip()
                             # 解析结构化字段
                             p_name = ""
