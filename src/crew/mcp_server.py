@@ -376,6 +376,56 @@ async def _wiki_find_doc_by_slug(
         return None
 
 
+async def _wiki_list_docs(
+    base_url: str,
+    token: str,
+    *,
+    space_slug: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """列出 Wiki 文档页面，返回含 docs 数组的 dict."""
+    import httpx
+
+    params: dict[str, str] = {
+        "page": str(page),
+        "page_size": str(page_size),
+    }
+    if space_slug:
+        params["space_slug"] = space_slug
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/admin/wiki/docs",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _wiki_read_doc(
+    base_url: str,
+    token: str,
+    *,
+    doc_id: int,
+    view: str = "ai",
+) -> dict:
+    """读取单篇 Wiki 文档内容，返回文档 dict."""
+    import httpx
+
+    params: dict[str, str] = {}
+    if view:
+        params["view"] = view
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base_url}/api/admin/wiki/docs/{doc_id}",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ── 远程 KV API 客户端 ──────────────────────────────────────────
 
 
@@ -1473,8 +1523,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="wiki_upload",
-                description="上传文件到 Wiki — 支持本地文件路径或 base64 内容",
+                name="wiki_upload_attachment",
+                description="上传附件到 Wiki — 支持本地文件路径或 base64 内容（图片/PDF 等）",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1502,8 +1552,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="wiki_read_file",
-                description="读取 Wiki 文件 — 返回文本内容（如有）和签名 URL",
+                name="wiki_read_attachment",
+                description="读取 Wiki 附件 — 返回文本内容（如有）和签名 URL（图片/PDF 等）",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1519,8 +1569,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="wiki_list_files",
-                description="列出 Wiki 文件 — 支持按空间、文档、MIME 类型过滤",
+                name="wiki_list_attachments",
+                description="列出 Wiki 附件 — 支持按空间、文档、MIME 类型过滤（图片/PDF 等上传文件）",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1550,8 +1600,8 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 },
             ),
             Tool(
-                name="wiki_delete_file",
-                description="删除 Wiki 文件 — 按 file_id 删除 OSS 文件和数据库记录",
+                name="wiki_delete_attachment",
+                description="删除 Wiki 附件 — 按 file_id 删除 OSS 附件文件和数据库记录",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -1569,6 +1619,55 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 inputSchema={
                     "type": "object",
                     "properties": {},
+                },
+            ),
+            Tool(
+                name="wiki_list_docs",
+                description="列出 Wiki 文档页面 — 返回指定空间下的文档列表（标题、slug、更新时间等）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "space_slug": {
+                            "type": "string",
+                            "description": "Wiki 空间 slug（如 dev, company, internal, projects）",
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "页码（默认 1）",
+                            "default": 1,
+                        },
+                        "page_size": {
+                            "type": "integer",
+                            "description": "每页条数（默认 20）",
+                            "default": 20,
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="wiki_read_doc",
+                description="读取 Wiki 文档正文 — 按 doc_id 或 space_slug+doc_slug 获取文档内容",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "doc_id": {
+                            "type": "integer",
+                            "description": "文档 ID（与 space_slug+doc_slug 二选一）",
+                        },
+                        "space_slug": {
+                            "type": "string",
+                            "description": "Wiki 空间 slug（与 doc_id 二选一，需配合 doc_slug）",
+                        },
+                        "doc_slug": {
+                            "type": "string",
+                            "description": "文档 slug（与 space_slug 配合定位文档）",
+                        },
+                        "view": {
+                            "type": "string",
+                            "description": "视图模式：ai（AI 友好，默认）或空（原始内容）",
+                            "default": "ai",
+                        },
+                    },
                 },
             ),
             Tool(
@@ -1895,7 +1994,18 @@ def create_server(project_dir: Path | None = None) -> "Server":
             except Exception:
                 pass  # 埋点不能影响主流程
 
+    # 旧名 → 新名映射（向后兼容）
+    _WIKI_TOOL_ALIASES: dict[str, str] = {
+        "wiki_list_files": "wiki_list_attachments",
+        "wiki_read_file": "wiki_read_attachment",
+        "wiki_upload": "wiki_upload_attachment",
+        "wiki_delete_file": "wiki_delete_attachment",
+    }
+
     async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
+        # 向后兼容：旧名自动映射到新名
+        name = _WIKI_TOOL_ALIASES.get(name, name)
+
         if name == "list_employees":
             tag = arguments.get("tag")
             # 优先走远程 API
@@ -2941,7 +3051,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
 
-        elif name == "wiki_upload":
+        elif name == "wiki_upload_attachment":
             wiki_cfg = _get_wiki_config()
             if not wiki_cfg:
                 return [
@@ -3037,7 +3147,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
 
-        elif name == "wiki_read_file":
+        elif name == "wiki_read_attachment":
             wiki_cfg = _get_wiki_config()
             if not wiki_cfg:
                 return [
@@ -3152,7 +3262,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
 
-        elif name == "wiki_list_files":
+        elif name == "wiki_list_attachments":
             wiki_cfg = _get_wiki_config()
             if not wiki_cfg:
                 return [
@@ -3191,7 +3301,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     )
                 ]
 
-        elif name == "wiki_delete_file":
+        elif name == "wiki_delete_attachment":
             file_id_arg = arguments.get("file_id")
             if file_id_arg is None:
                 return [
@@ -3301,6 +3411,136 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     TextContent(
                         type="text",
                         text=json.dumps({"error": f"查询空间列表失败: {exc}"}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "wiki_list_docs":
+            admin_cfg = _get_wiki_admin_config()
+            if not admin_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, admin_token = admin_cfg
+            try:
+                result = await _wiki_list_docs(
+                    base_url,
+                    admin_token,
+                    space_slug=arguments.get("space_slug", ""),
+                    page=arguments.get("page", 1),
+                    page_size=arguments.get("page_size", 20),
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps({"error": f"列出文档失败: {exc}"}, ensure_ascii=False),
+                    )
+                ]
+
+        elif name == "wiki_read_doc":
+            admin_cfg = _get_wiki_admin_config()
+            if not admin_cfg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "error": "Wiki Admin API 未配置，请设置 WIKI_API_URL 和 WIKI_ADMIN_TOKEN（或 ANTGATHER_API_TOKEN）环境变量"
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+            base_url, admin_token = admin_cfg
+            doc_id = arguments.get("doc_id")
+            space_slug = arguments.get("space_slug", "")
+            doc_slug = arguments.get("doc_slug", "")
+            view = arguments.get("view", "ai")
+
+            # 定位文档：优先 doc_id，其次 space_slug + doc_slug
+            if doc_id is not None:
+                try:
+                    doc_id = int(doc_id)
+                except (ValueError, TypeError):
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"无效的 doc_id: {doc_id}"}, ensure_ascii=False
+                            ),
+                        )
+                    ]
+            elif space_slug and doc_slug:
+                try:
+                    doc = await _wiki_find_doc_by_slug(
+                        base_url, admin_token, space_slug=space_slug, doc_slug=doc_slug
+                    )
+                except Exception as exc:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": f"查找文档失败: {exc}"}, ensure_ascii=False),
+                        )
+                    ]
+                if doc is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {
+                                    "error": f"未找到文档: space='{space_slug}', doc_slug='{doc_slug}'"
+                                },
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
+                doc_id = doc["id"]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": "请提供 doc_id 或 space_slug+doc_slug 来定位文档"},
+                            ensure_ascii=False,
+                        ),
+                    )
+                ]
+
+            try:
+                result = await _wiki_read_doc(
+                    base_url,
+                    admin_token,
+                    doc_id=doc_id,
+                    view=view,
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(result, ensure_ascii=False, indent=2),
+                    )
+                ]
+            except Exception as exc:
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {"error": f"读取文档失败: {exc}"},
+                            ensure_ascii=False,
+                        ),
                     )
                 ]
 

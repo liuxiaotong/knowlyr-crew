@@ -2276,6 +2276,15 @@ def employee_tools_to_schemas(
         else:
             schemas.append(_TOOL_SCHEMAS[tool_name])
             seen.add(tool_name)
+    # Auto-include MCP Gateway tools (available to all employees)
+    for tool_name in _TOOL_SCHEMAS:
+        if tool_name.startswith("mcp__") and tool_name not in seen:
+            if defer and tool_name in DEFERRED_TOOLS:
+                deferred.add(tool_name)
+            else:
+                schemas.append(_TOOL_SCHEMAS[tool_name])
+                seen.add(tool_name)
+
     # 有延迟工具时加 load_tools 元工具
     if deferred:
         schemas.append(_make_load_tools_schema(deferred))

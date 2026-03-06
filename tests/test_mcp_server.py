@@ -785,3 +785,159 @@ class TestWikiDocTools:
         assert "space_slug" in props
         assert "slug" in props
         assert "new_slug" in props
+
+    def test_list_tools_includes_renamed_attachment_tools(self):
+        """list_tools 应包含重命名后的附件工具."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        tool_names = [t.name for t in result.root.tools]
+        assert "wiki_upload_attachment" in tool_names
+        assert "wiki_read_attachment" in tool_names
+        assert "wiki_list_attachments" in tool_names
+        assert "wiki_delete_attachment" in tool_names
+        # 旧名不应出现在 tool 定义中
+        assert "wiki_upload" not in tool_names
+        assert "wiki_read_file" not in tool_names
+        assert "wiki_list_files" not in tool_names
+        assert "wiki_delete_file" not in tool_names
+
+    def test_list_tools_includes_new_doc_tools(self):
+        """list_tools 应包含新增的文档读取工具."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        tool_names = [t.name for t in result.root.tools]
+        assert "wiki_list_docs" in tool_names
+        assert "wiki_read_doc" in tool_names
+
+    def test_wiki_list_docs_missing_config(self):
+        """未配置环境变量时应返回错误信息."""
+        handler = self.server.request_handlers[CallToolRequest]
+        import os
+
+        old_url = os.environ.pop("WIKI_API_URL", None)
+        old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
+        old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
+        try:
+            result = _run(
+                handler(
+                    CallToolRequest(
+                        method="tools/call",
+                        params=CallToolRequestParams(
+                            name="wiki_list_docs",
+                            arguments={"space_slug": "dev"},
+                        ),
+                    )
+                )
+            )
+            data = json.loads(result.root.content[0].text)
+            assert "error" in data
+            assert "未配置" in data["error"]
+        finally:
+            if old_url:
+                os.environ["WIKI_API_URL"] = old_url
+            if old_admin:
+                os.environ["WIKI_ADMIN_TOKEN"] = old_admin
+            if old_antgather:
+                os.environ["ANTGATHER_API_TOKEN"] = old_antgather
+
+    def test_wiki_read_doc_missing_config(self):
+        """未配置环境变量时应返回错误信息."""
+        handler = self.server.request_handlers[CallToolRequest]
+        import os
+
+        old_url = os.environ.pop("WIKI_API_URL", None)
+        old_admin = os.environ.pop("WIKI_ADMIN_TOKEN", None)
+        old_antgather = os.environ.pop("ANTGATHER_API_TOKEN", None)
+        try:
+            result = _run(
+                handler(
+                    CallToolRequest(
+                        method="tools/call",
+                        params=CallToolRequestParams(
+                            name="wiki_read_doc",
+                            arguments={"doc_id": 1},
+                        ),
+                    )
+                )
+            )
+            data = json.loads(result.root.content[0].text)
+            assert "error" in data
+            assert "未配置" in data["error"]
+        finally:
+            if old_url:
+                os.environ["WIKI_API_URL"] = old_url
+            if old_admin:
+                os.environ["WIKI_ADMIN_TOKEN"] = old_admin
+            if old_antgather:
+                os.environ["ANTGATHER_API_TOKEN"] = old_antgather
+
+    def test_wiki_read_doc_missing_locator(self):
+        """未提供 doc_id 也未提供 space_slug+doc_slug 时应返回错误."""
+        import os
+
+        os.environ.setdefault("WIKI_API_URL", "https://example.com")
+        os.environ.setdefault("ANTGATHER_API_TOKEN", "test-token")
+        handler = self.server.request_handlers[CallToolRequest]
+        result = _run(
+            handler(
+                CallToolRequest(
+                    method="tools/call",
+                    params=CallToolRequestParams(
+                        name="wiki_read_doc",
+                        arguments={"view": "ai"},  # 没有 doc_id 也没有 space_slug+doc_slug
+                    ),
+                )
+            )
+        )
+        data = json.loads(result.root.content[0].text)
+        assert "error" in data
+        assert "doc_id" in data["error"] or "space_slug" in data["error"]
+
+    def test_wiki_list_docs_tool_schema(self):
+        """wiki_list_docs 工具定义应有 space_slug 属性."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        tool = next(t for t in result.root.tools if t.name == "wiki_list_docs")
+        props = tool.inputSchema["properties"]
+        assert "space_slug" in props
+        assert "page" in props
+        assert "page_size" in props
+
+    def test_wiki_read_doc_tool_schema(self):
+        """wiki_read_doc 工具定义应有 doc_id、space_slug、doc_slug 属性."""
+        handler = self.server.request_handlers[ListToolsRequest]
+        result = _run(handler(ListToolsRequest(method="tools/list")))
+        tool = next(t for t in result.root.tools if t.name == "wiki_read_doc")
+        props = tool.inputSchema["properties"]
+        assert "doc_id" in props
+        assert "space_slug" in props
+        assert "doc_slug" in props
+        assert "view" in props
+
+    def test_wiki_tool_aliases_backward_compat(self):
+        """旧名 wiki_upload 等应通过别名映射正常工作（返回配置错误而非未知工具）."""
+        handler = self.server.request_handlers[CallToolRequest]
+        import os
+
+        old_url = os.environ.pop("WIKI_API_URL", None)
+        old_token = os.environ.pop("WIKI_API_TOKEN", None)
+        try:
+            # 用旧名 wiki_upload 调用，期望得到"未配置"而非"未知工具"
+            result = _run(
+                handler(
+                    CallToolRequest(
+                        method="tools/call",
+                        params=CallToolRequestParams(
+                            name="wiki_upload",
+                            arguments={"file_path": "/tmp/test.txt"},
+                        ),
+                    )
+                )
+            )
+            text = result.root.content[0].text
+            assert "未知工具" not in text
+        finally:
+            if old_url:
+                os.environ["WIKI_API_URL"] = old_url
+            if old_token:
+                os.environ["WIKI_API_TOKEN"] = old_token
