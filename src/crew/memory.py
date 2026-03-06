@@ -1074,15 +1074,20 @@ class MemoryStore:
         return False
 
 
-def get_memory_store(project_dir=None):
-    """工厂函数：PG 可用时返回 MemoryStoreDB，否则降级到文件版 MemoryStore。"""
+def get_memory_store(project_dir=None, tenant_id: str | None = None):
+    """工厂函数：PG 可用时返回 MemoryStoreDB，否则降级到文件版 MemoryStore.
+
+    Args:
+        project_dir: 项目目录
+        tenant_id: 租户 ID（None 则使用默认管理员租户，向后兼容）
+    """
     try:
         from crew.database import is_pg
 
         if is_pg():
             from crew.memory_store_db import MemoryStoreDB
 
-            return MemoryStoreDB(project_dir=project_dir)
+            return MemoryStoreDB(project_dir=project_dir, tenant_id=tenant_id)
     except Exception as e:
         logging.getLogger(__name__).warning("MemoryStoreDB 初始化失败，降级到文件版: %s", e)
     return MemoryStore(project_dir=project_dir)

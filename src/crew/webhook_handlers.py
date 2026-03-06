@@ -26,7 +26,26 @@ def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
 
 import re as _re
 
+from crew.tenant import TenantContext, get_current_tenant
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
+
+
+def _tenant_id_for_store(request: Any) -> str | None:
+    """从请求获取租户 ID，用于传给 MemoryStoreDB 等接受 None 的 store.
+
+    admin 租户返回 None（让 store 使用默认的 tenant_admin，向后兼容）。
+    非 admin 租户返回具体 tenant_id 做数据隔离。
+    """
+    tenant = get_current_tenant(request)
+    return None if tenant.is_admin else tenant.tenant_id
+
+
+def _tenant_id_for_config(request: Any) -> str:
+    """从请求获取租户 ID，用于传给 config_store 等需要字符串的函数.
+
+    始终返回具体的 tenant_id 字符串。
+    """
+    return get_current_tenant(request).tenant_id
 
 
 def _require_admin_token(request: Any) -> str | None:
@@ -382,6 +401,7 @@ async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
             soul_content=soul_content,
             agent_status=agent_status,
             avatar_prompt=avatar_prompt,
+            tenant_id=_tenant_id_for_config(request),
         )
     except ValueError as e:
         return _error_response(str(e), 409)
@@ -533,7 +553,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             soul = soul_path.read_text(encoding="utf-8")
 
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     memories = store.query(
         employee.name,
         limit=limit,
@@ -694,7 +714,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
         character_name = employee.character_name
     else:
         # 尝试用 identifier 作为 character_name 查询数据库
-        if get_soul(identifier):
+        if get_soul(identifier, tenant_id=_tenant_id_for_config(request)):
             character_name = identifier
         else:
             return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -721,8 +741,8 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
             with get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    "DELETE FROM employee_souls WHERE employee_name = %s",
-                    (character_name,),
+                    "DELETE FROM employee_souls WHERE employee_name = %s AND tenant_id = %s",
+                    (character_name, _tenant_id_for_config(request)),
                 )
                 if cur.rowcount > 0:
                     deleted_items.append(f"soul: {character_name}")
@@ -924,7 +944,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
                 }
             )
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
     # 幂等检查：同 employee + source_session + category 不重复写入
     if source_session:
@@ -1018,7 +1038,7 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     _classification_levels = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
     max_level = _classification_levels.get(classification_max, 1)
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     entries = store.query(
         employee=employee,
         category=category,
@@ -1074,7 +1094,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
     if not entry_id or not employee or not content:
         return JSONResponse({"error": "entry_id, employee, content are required"}, status_code=400)
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
     # DB 版：直接用 store.update()
     if hasattr(store, "update") and callable(getattr(store, "update", None)):
@@ -1338,7 +1358,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     # 从查询参数获取可选的 employee
     employee = request.query_params.get("employee")
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
     try:
         deleted = store.delete(entry_id, employee=employee)
@@ -1466,7 +1486,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
 
         # 写入正式记忆
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         entry = memory_store.add(
             employee=draft.employee,
             category=draft.category,
@@ -1578,7 +1598,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
         end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         archive = MemoryArchive(memory_store=memory_store)
 
         entries = archive.query_archive(
@@ -1632,7 +1652,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "entry_ids is required"}, status_code=400)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         archive = MemoryArchive(memory_store=memory_store)
 
         stats = archive.restore_from_archive(employee, entry_ids)
@@ -1669,7 +1689,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         archive = MemoryArchive(memory_store=memory_store)
 
         stats = archive.get_archive_stats(employee)
@@ -1707,7 +1727,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         limit = 20
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         entries = memory_store.query_shared(
             tags=tags,
             exclude_employee=exclude_employee,
@@ -1858,7 +1878,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
     employee = request.query_params.get("employee")
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
         if employee:
             # 单个员工的统计
@@ -1995,7 +2015,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
         # DB 版：直接用 store.update()
         if hasattr(memory_store, "update") and callable(getattr(memory_store, "update", None)):
@@ -2124,7 +2144,7 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir)
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
         deleted_count = 0
 
         for entry_id in entry_ids:
@@ -2327,6 +2347,7 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
@@ -2340,7 +2361,7 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
         if not query:
             return JSONResponse({"ok": False, "error": "query 参数必填"}, status_code=400)
 
-        engine = SemanticSearchEngine()
+        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
         results = engine.search(
             query=query,
             employee=employee,
@@ -2377,6 +2398,7 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
@@ -2391,7 +2413,7 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
                 status_code=400,
             )
 
-        engine = SemanticSearchEngine()
+        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
         recommendations = engine.recommend_for_task(
             task_description=task_description,
             employee=employee,
@@ -2425,6 +2447,7 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
     """
     from starlette.responses import JSONResponse
 
+    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
@@ -2435,7 +2458,7 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
         limit_str = request.query_params.get("limit", "5")
         limit = int(limit_str)
 
-        engine = SemanticSearchEngine()
+        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
         similar = engine.find_similar_memories(
             memory_id=memory_id,
             limit=limit,
@@ -2783,6 +2806,7 @@ async def _handle_github(request: Any, ctx: _AppContext) -> Any:
         target_name=route.target.name,
         args=args,
         sync=False,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -2809,6 +2833,7 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
         target_name=target_name,
         args=args,
         sync=sync,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -2835,6 +2860,7 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
         target_name=target_name,
         args=args,
         sync=sync,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -2859,6 +2885,7 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
         args=args,
         sync=sync,
         agent_id=agent_id,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -3107,7 +3134,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 from crew.skills_engine import SkillsEngine
 
                 skill_store = SkillStore(project_dir=ctx.project_dir)
-                memory_store = get_memory_store(project_dir=ctx.project_dir)
+                memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
                 engine = SkillsEngine(skill_store, memory_store)
 
                 employee_name = emp.character_name or name
@@ -3387,6 +3414,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         agent_id=agent_id,
         model=model,
         owner=_owner or None,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -3458,6 +3486,7 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
         target_name=chain_name,
         args={"steps_json": _json.dumps(steps, ensure_ascii=False)},
         sync=sync,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -3614,6 +3643,7 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         args=record.args,
         sync=False,
         owner=record.owner,
+        tenant_id=_tenant_id_for_store(request),
     )
 
 
@@ -3761,7 +3791,7 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     # limit=0 表示不限（向后兼容：客户端可传 limit=50 恢复旧行为）
     limit = _safe_int(request.query_params.get("limit", "0"), 0)
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
     employee_names = store.list_employees()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat() if days > 0 else ""
@@ -3908,7 +3938,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         limit = 10
     employee = request.query_params.get("employee", "").strip()
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
     try:
         idx = store._get_semantic_index()
@@ -4208,7 +4238,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     # 预加载所有员工的记忆数量
     from crew.memory import get_memory_store
 
-    store = get_memory_store(project_dir=ctx.project_dir)
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     memory_counts: dict[str, int] = {}
     for name in result.employees:
         memory_counts[name] = store.count(name)
@@ -4502,7 +4532,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
 
         if _chat_emp is not None and isinstance(message, str):
             skill_store = SkillStore(project_dir=ctx.project_dir)
-            memory_store = get_memory_store(project_dir=ctx.project_dir)
+            memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
             skills_engine = SkillsEngine(skill_store, memory_store)
 
             _chat_employee_name = _chat_emp.character_name or employee_id
@@ -5397,7 +5427,7 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
     # 将 slug 转换为中文名
     employee_name = _resolve_employee_name(identifier, ctx)
 
-    result = get_soul(employee_name)
+    result = get_soul(employee_name, tenant_id=_tenant_id_for_config(request))
     if not result:
         return JSONResponse({"error": f"soul not found: {identifier}"}, status_code=404)
 
@@ -5435,7 +5465,7 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_soul(employee_name, content, updated_by, metadata)
+        result = update_soul(employee_name, content, updated_by, metadata, tenant_id=_tenant_id_for_config(request))
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 soul 失败: employee=%s", employee_name)
@@ -5449,7 +5479,7 @@ async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
     from crew.config_store import list_souls
 
     try:
-        items = list_souls()
+        items = list_souls(tenant_id=_tenant_id_for_config(request))
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 souls 失败")
@@ -5466,7 +5496,7 @@ async def _handle_discussion_get(request: Any, ctx: _AppContext) -> Any:
     if not name:
         return JSONResponse({"error": "name is required"}, status_code=400)
 
-    result = get_discussion(name)
+    result = get_discussion(name, tenant_id=_tenant_id_for_config(request))
     if not result:
         return JSONResponse({"error": f"discussion not found: {name}"}, status_code=404)
 
@@ -5498,7 +5528,7 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = create_discussion(name, yaml_content, description, metadata)
+        result = create_discussion(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 discussion 失败: name=%s", name)
@@ -5533,7 +5563,7 @@ async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_discussion(name, yaml_content, description, metadata)
+        result = update_discussion(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 discussion 失败: name=%s", name)
@@ -5547,11 +5577,12 @@ async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
     from crew.config_store import get_discussion, list_discussions
 
     try:
-        items = list_discussions()
+        _cfg_tid = _tenant_id_for_config(request)
+        items = list_discussions(tenant_id=_cfg_tid)
         # 增强：添加 participants 和 rounds 信息
         for item in items:
             try:
-                full_config = get_discussion(item["name"])
+                full_config = get_discussion(item["name"], tenant_id=_cfg_tid)
                 if full_config and full_config.get("yaml_content"):
                     import yaml
 
@@ -5579,7 +5610,7 @@ async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
     if not name:
         return JSONResponse({"error": "name is required"}, status_code=400)
 
-    result = get_pipeline(name)
+    result = get_pipeline(name, tenant_id=_tenant_id_for_config(request))
     if not result:
         return JSONResponse({"error": f"pipeline not found: {name}"}, status_code=404)
 
@@ -5606,7 +5637,7 @@ async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = create_pipeline(name, yaml_content, description, metadata)
+        result = create_pipeline(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 pipeline 失败: name=%s", name)
@@ -5636,7 +5667,7 @@ async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_pipeline(name, yaml_content, description, metadata)
+        result = update_pipeline(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 pipeline 失败: name=%s", name)
@@ -5650,11 +5681,12 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
     from crew.config_store import get_pipeline, list_pipelines
 
     try:
-        items = list_pipelines()
+        _cfg_tid = _tenant_id_for_config(request)
+        items = list_pipelines(tenant_id=_cfg_tid)
         # 增强：添加 steps 信息
         for item in items:
             try:
-                full_config = get_pipeline(item["name"])
+                full_config = get_pipeline(item["name"], tenant_id=_cfg_tid)
                 if full_config and full_config.get("yaml_content"):
                     import yaml
 
