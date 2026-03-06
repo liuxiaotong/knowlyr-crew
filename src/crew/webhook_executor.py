@@ -1099,9 +1099,9 @@ async def _stream_employee_with_tools(
 
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
-    from crew.executor import aexecute_with_tools
+    from crew.executor import _resolve_key_for_context, aexecute_with_tools
     from crew.models import ToolCall
-    from crew.providers import Provider, detect_provider, resolve_api_key
+    from crew.providers import Provider, detect_provider
     from crew.tool_schema import (
         AGENT_TOOLS,
         employee_tools_to_schemas,
@@ -1190,7 +1190,8 @@ async def _stream_employee_with_tools(
 
     use_model = model or match.model or "claude-sonnet-4-20250514"
     provider = detect_provider(use_model)
-    is_anthropic = provider == Provider.ANTHROPIC
+    # base_url 指定时走 OpenAI 兼容路径，不走 Anthropic 原生 SDK
+    is_anthropic = provider == Provider.ANTHROPIC and not match.base_url
 
     messages: list[dict[str, Any]] = []
     if message_history:
@@ -1259,7 +1260,7 @@ async def _stream_employee_with_tools(
     if anthropic is None:
         raise ImportError("anthropic SDK 未安装。请运行: pip install knowlyr-crew[execute]")
 
-    resolved_key = resolve_api_key(provider, match.api_key or None)
+    resolved_key = _resolve_key_for_context(provider, match.api_key or None, match.base_url)
     client_kwargs = {"api_key": resolved_key}
     if match.base_url:
         # Anthropic SDK 会自动加 /v1/messages，去掉 base_url 末尾的 /v1 避免重复
