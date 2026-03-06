@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import threading
 import time
@@ -14,6 +15,7 @@ from typing import Any
 
 from crew.models import ToolCall, ToolExecutionResult
 from crew.providers import (
+    API_KEY_ENV_VARS,
     DEEPSEEK_BASE_URL,
     MOONSHOT_BASE_URL,
     QWEN_BASE_URL,
@@ -46,8 +48,6 @@ def _resolve_key_for_context(
         return api_key
     if base_url:
         # 走代理时宽松解析：先看 provider key，没有就看通用代理 key
-        import os
-        from crew.providers import API_KEY_ENV_VARS
         env_var = API_KEY_ENV_VARS.get(provider, "")
         key = os.environ.get(env_var, "") if env_var else ""
         if key:
