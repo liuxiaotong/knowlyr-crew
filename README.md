@@ -18,8 +18,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml/badge.svg)](https://github.com/liuxiaotong/knowlyr-crew/actions/workflows/test.yml)
 <br/>
-[![Tests](https://img.shields.io/badge/tests-1868_passed-brightgreen.svg)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP_Tools-37-purple.svg)](#mcp-primitive-mapping)
+[![Tests](https://img.shields.io/badge/tests-2025_passed-brightgreen.svg)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP_Tools-40-purple.svg)](#mcp-primitive-mapping)
 [![Providers](https://img.shields.io/badge/LLM_Providers-7-orange.svg)](#pipeline-orchestration)
 [![Modes](https://img.shields.io/badge/Deliberation_Modes-9-red.svg)](#structured-dialectical-deliberation)
 
@@ -31,11 +31,15 @@
 
 ## Abstract
 
-The primary failure modes of multi-agent collaboration systems are threefold: **groupthink** (Janis, 1972), **shared information bias** (Stasser & Titus, 1985), and **framework lock-in**. knowlyr-crew proposes a declarative multi-agent deliberation framework that breaks information sampling bias through structured dialectical protocols, achieves cognitive accumulation and natural attrition through exponentially decaying persistent memory (inspired by the Ebbinghaus forgetting curve), and eliminates toolchain coupling through protocol-native MCP integration.
+Existing AI Agent frameworks treat agents as stateless function calls — each interaction starts from scratch, cognitive outcomes cannot accumulate, and the same errors recur across contexts. knowlyr-crew proposes a three-layer architecture to address this fundamental contradiction:
 
-The system implements a self-correcting closed loop of "**define -> deliberate -> decide -> evaluate -> update memory**", feeding human feedback directly into agents' persistent memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human evaluation outcomes shape subsequent inference behavior.
+1. **Specification Layer** — Declarative employee specs (Soul + YAML + Markdown), decoupling "who the employee is" from runtime
+2. **Deliberation Layer** — Structured dialectical deliberation against groupthink (Janis, 1972) and shared information bias (Stasser & Titus, 1985), 9 interaction modes + pipeline orchestration + async delegation
+3. **Evolution Layer** — Exponential-decay persistent memory (Ebbinghaus) + evaluation feedback loop (RLHF-isomorphic, Christiano et al., 2017) + Skills auto-trigger, enabling employees to evolve from experience
 
-> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 37 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
+All three layers are unified as MCP protocol, implementing a self-correcting closed loop: "**define -> deliberate -> decide -> evaluate -> update memory -> auto-trigger**" — human feedback feeds directly into agents' persistent memory, shaping subsequent inference behavior.
+
+> **knowlyr-crew** is not just another orchestration framework — it's the **capability definition layer**, **collaborative execution layer**, and **experience accumulation layer** for AI digital employees. Exposes 40 MCP tools, 3 transport protocols, routes to 7 LLM providers, multi-channel reach via Feishu, WeCom, and Web.
 
 ---
 
@@ -49,8 +53,9 @@ The failure mechanisms of multi-agent collaboration have a solid empirical found
 | **Shared Information Bias** | In group discussions, commonly known information is exchanged at significantly higher rates than individually held information (Stasser & Titus, 1985); task-focused cognitive conflict improves decision quality (Amason, 1996) | Unstructured multi-agent conversations reinforce known information, drowning out individual perspectives | Role-based participants + `focus` constraints + `must_challenge` forcing cross-perspective exchange |
 | **Stateless Inference** | Each session starts from scratch; the same cognitive errors recur $\forall t: s_t \perp s_{t-1}$ | LangChain memory is a sliding-window buffer, not semantically structured persistent storage | Exponentially decaying persistent memory + evaluation loop: decision -> execution -> retrospective -> correction -> evolution |
 | **Framework Lock-in** | Agent definitions are bound to specific SDKs/IDEs; migration cost $\propto$ definition complexity | Each framework uses its own incompatible format -- switching IDEs renders definitions useless | Protocol-native MCP: declarative YAML/Markdown, zero-modification cross-IDE portability |
+| **Experience Fragmentation** | Employees lose all accumulated context when switching scenarios; same errors recur across contexts | No context-aware auto-trigger mechanism; memory disconnected from scenarios | Skills auto-trigger (semantic/keyword/always modes) + Soul persistent identity + cross-context memory injection |
 
-> Crew is not yet another orchestration framework. It is the **capability definition layer** and **experience accumulation layer** for AI digital employees -- "who does what, how they deliberate, and what they've learned" -- while delegating identity management and runtime interactions to [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id).
+> Crew is not yet another orchestration framework. It is the **capability definition layer**, **collaborative execution layer**, and **experience accumulation layer** for AI digital employees -- "who does what, how they deliberate, and what they've learned" -- while delegating identity management and runtime interactions to [knowlyr-id](https://github.com/liuxiaotong/knowlyr-id).
 
 ---
 
@@ -60,12 +65,14 @@ The failure mechanisms of multi-agent collaboration have a solid empirical found
 
 Each AI employee is a **declarative specification** $e \in \mathcal{E}$, decoupled from code, version-trackable, and IDE-agnostic:
 
-$$e = \langle \text{name}, \text{model}, \text{tools}, \text{prompt}, \text{args}, \text{output} \rangle$$
+$$e = \langle \text{soul}, \text{name}, \text{model}, \text{tools}, \text{prompt}, \text{args}, \text{output}, \text{skills} \rangle$$
 
 Where:
+- $\text{soul} \in \Sigma^*$ — Soul configuration (Markdown), defining persistent identity, personality, and behavioral principles; auto-versioned
 - $\text{model} \in \mathcal{M}$ = {`claude-*`, `gpt-*`, `deepseek-*`, `kimi-*`, `gemini-*`, `glm-*`, `qwen-*`} -- unified routing across 7 providers
 - $\text{tools} \subseteq \mathcal{T}$ -- available tool set, constrained by `PermissionPolicy`
 - $\text{prompt}: \Sigma^* \to \Sigma^*$ -- Markdown template function supporting variable substitution and context injection
+- $\text{skills} \subseteq \mathcal{S}$ — Auto-trigger rule set, defining scenario matching conditions and memory loading strategies
 
 ### Structured Dialectical Deliberation
 
@@ -136,15 +143,17 @@ graph LR
 
 | Layer | Module | Responsibility |
 |:---|:---|:---|
-| **Specification** | Parser · Discovery · Models | Declarative employee definition parsing; YAML/Markdown dual format; priority-based discovery |
-| **Protocol** | MCP Server · Skill Converter | 37 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support |
+| **Specification** | Parser · Discovery · Models · Soul Store | Declarative employee definition parsing; YAML/Markdown dual format; Soul configuration (auto-versioning + history tracking); priority-based discovery |
+| **Protocol** | MCP Server · Skill Converter · MCP Gateway | 40 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support; dynamic injection of external MCP tools |
+| **Skills** | Trigger Engine · Action Executor | Semantic/keyword/always triple trigger modes; automatic loading of relevant memories into prompt; trigger rate statistics and history |
 | **Deliberation** | Discussion Engine | 9 structured interaction modes; cognitive conflict constraints; topologically sorted execution plans |
 | **Orchestration** | Pipeline · Route · Task Registry | Parallel/sequential/conditional/loop orchestration; checkpoint recovery; multi-model routing |
-| **Memory** | Memory Store · Semantic Index | Semantic search; exponential decay; importance ranking; access tracking; cross-employee pattern sharing; multi-backend embedding fallback |
-| **Evaluation** | Evaluation Engine | Decision tracking; retrospective evaluation; automatic memory correction |
+| **Memory** | Memory Store · Semantic Index · PostgreSQL | Remote persistent storage; semantic search; exponential decay; importance ranking; drafts/archives/sharing/feedback; cross-employee pattern sharing; multi-backend embedding fallback |
+| **Evaluation** | Evaluation Engine | Decision tracking; retrospective evaluation; automatic memory correction; overdue decision reminders |
 | **Execution** | Providers · Output Sanitizer · Cost Tracker | Unified invocation across 7 providers; retry/fallback/per-task cost metering; dual-layer output sanitization (source + egress) |
-| **Integration** | ID Client · Webhook · Cron | Identity federation (circuit breaker); GitHub event routing; scheduled tasks (patrol/retrospective/KPI/knowledge digest); trigger-based auto-delegation |
+| **Integration** | ID Client · Webhook · Cron · Feishu · WeCom | Identity federation (circuit breaker); Feishu/WeCom/GitHub multi-channel event routing; scheduled tasks (patrol/retrospective/KPI/knowledge digest); trigger-based auto-delegation |
 | **Observability** | Trajectory · Metrics · Audit | Zero-intrusion trajectory recording (contextvars); permission matrix queries; tool invocation audit logs; post-deployment CI audit; Feishu alerting on audit failure |
+| **Wiki** | Wiki Client · Attachment Store | Knowledge base space management; document CRUD; attachment upload/read/delete; AI-friendly views |
 | **CLI** | `cli/` modular package (8 submodules) | employee · pipeline · route · discuss · memory · server · ops; lazy command registration |
 
 ### MCP Primitive Mapping
@@ -153,77 +162,80 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | Each employee = one callable prompt template with typed parameters | 1 per employee |
 | **Resources** | Raw Markdown definitions, directly readable by AI IDEs | 1 per employee |
-| **Tools** | Employee/discussion/pipeline/memory/evaluation/permission/audit/metrics/project detection, etc. | 37 |
+| **Tools** | Employee/soul/deliberation/pipeline/memory/evaluation/permission/audit/metrics/config/Wiki, etc. | 40 |
 
 <details>
-<summary>Full list of 37 MCP Tools</summary>
+<summary>40 MCP Tools details</summary>
 
-**Core Management**
+**Employee Management** (7)
 
 | Tool | Description |
 |:---|:---|
 | `list_employees` | List all employees (filterable by tag) |
 | `get_employee` | Get complete employee definition |
 | `run_employee` | Generate an executable prompt |
-| `get_work_log` | View employee work logs |
 | `create_employee` | Create a new AI employee (with avatar generation) |
-| `get_soul` | Read employee soul configuration |
-| `update_soul` | Update employee soul configuration (auto-versioned) |
-| `detect_project` | Detect project type, framework, and package manager |
+| `get_work_log` | View employee work logs |
+| `get_soul` | Read employee soul configuration (soul.md) |
+| `update_soul` | Update employee soul configuration (auto-versioning + history tracking) |
 
-**Deliberation & Pipeline**
+**Deliberation & Pipeline** (8)
 
 | Tool | Description |
 |:---|:---|
-| `list_pipelines` | List all pipelines |
-| `run_pipeline` | Execute a pipeline |
-| `create_pipeline` | Create a pipeline configuration |
-| `update_pipeline` | Update a pipeline configuration |
 | `list_discussions` | List all discussion meetings |
-| `run_discussion` | Generate a discussion meeting prompt |
+| `run_discussion` | Generate a discussion meeting prompt (supports orchestrated mode) |
 | `create_discussion` | Create a discussion configuration |
 | `update_discussion` | Update a discussion configuration |
+| `list_pipelines` | List all pipelines |
+| `run_pipeline` | Execute a pipeline (prompt-only or execute mode) |
+| `create_pipeline` | Create a pipeline configuration |
+| `update_pipeline` | Update a pipeline configuration |
 
-**Memory & Evaluation**
+**Memory & Evaluation** (7)
 
 | Tool | Description |
 |:---|:---|
-| `add_memory` | Add persistent memory for an employee |
-| `query_memory` | Query an employee's persistent memory |
-| `track_decision` | Record a decision pending evaluation |
-| `evaluate_decision` | Evaluate a decision and write lessons learned to employee memory |
+| `add_memory` | Add persistent memory for an employee (supports categories, tags, classification, TTL) |
+| `query_memory` | Query an employee's persistent memory (semantic search + keyword hybrid) |
+| `track_decision` | Record a decision pending evaluation (estimate / recommendation / commitment) |
+| `evaluate_decision` | Evaluate a decision and automatically write lessons learned to employee memory |
+| `list_overdue_decisions` | List overdue unevaluated decisions |
 | `list_meeting_history` | View discussion meeting history |
 | `get_meeting_detail` | Get complete meeting transcript |
 
-**Observability & Governance**
+**Observability & Governance** (5)
 
 | Tool | Description |
 |:---|:---|
 | `list_tool_schemas` | List all available tool definitions (filterable by role) |
 | `get_permission_matrix` | View employee permission matrix and policies |
 | `get_audit_log` | Query tool invocation audit logs |
-| `get_tool_metrics` | Query tool usage statistics |
-| `query_events` | Query unified event stream |
+| `get_tool_metrics` | Query tool usage statistics (invocation count, success/failure, avg latency) |
+| `query_events` | Query unified event stream (filter by type/name/time range) |
 
-**Configuration**
+**Configuration & Project** (4)
 
 | Tool | Description |
 |:---|:---|
-| `put_config` | Write config to KV store |
+| `put_config` | Write config to KV store (cross-machine sync) |
 | `get_config` | Read config from KV store |
-| `list_configs` | List all config keys |
+| `list_configs` | List all config keys under a given prefix |
+| `detect_project` | Detect project type, framework, package manager, test framework |
 
-**Wiki**
+**Wiki** (9)
 
 | Tool | Description |
 |:---|:---|
-| `wiki_create_doc` | Create a Wiki document |
-| `wiki_update_doc` | Update a Wiki document |
-| `wiki_upload` | Upload a file to Wiki |
-| `wiki_read_file` | Read a Wiki file |
-| `wiki_list_files` | List Wiki files |
-| `wiki_list_spaces` | List Wiki spaces |
-| `wiki_delete_file` | Delete a Wiki file |
+| `wiki_list_spaces` | List all Wiki spaces |
+| `wiki_list_docs` | List document pages under a given space |
+| `wiki_read_doc` | Read document content (supports AI-friendly view) |
+| `wiki_create_doc` | Create a Wiki document page |
+| `wiki_update_doc` | Update an existing Wiki document page |
+| `wiki_upload_attachment` | Upload attachment (local file or base64) |
+| `wiki_read_attachment` | Read attachment (text content + signed URL) |
+| `wiki_list_attachments` | List attachments (filter by space/document/MIME type) |
+| `wiki_delete_attachment` | Delete attachment |
 
 </details>
 
@@ -240,149 +252,20 @@ knowlyr-crew mcp -t sse --api-token SECRET      # Enable Bearer authentication
 
 ## Key Innovations
 
-### 1. Structured Dialectical Deliberation
+The following innovations are organized by the three-layer architecture:
 
-The central challenge of multi-agent collaboration lies in maintaining **epistemic diversity**. Stasser & Titus (1985) demonstrated experimentally that in unstructured group discussions, commonly shared information is discussed at significantly higher rates than individually held information, causing optimal decisions to be systematically overlooked. Nemeth (1994) further found that even incorrect minority opinions, when persistently expressed, improve majority decision quality -- because they force the majority to more carefully examine their own assumptions.
-
-Crew implements 9 structured interaction modes, each imposing distinct argumentative constraints on participants:
-
-| Mode | Description | Mechanism |
+| Layer | Innovations | Core Question |
 |:---|:---|:---|
-| `round-robin` | Round-robin speaking | Equal expression rights, preventing discourse imbalance |
-| `challenge` | Challenge | Each participant must raise evidence-based challenges to at least one other's conclusions |
-| `response` | Response & defense | Structured responses; vague evasion prohibited; must explicitly accept/partially accept/rebut |
-| `cross-examine` | Cross-examination | Three-dimensional deep examination: factual challenge / logical derivation / alternative proposals |
-| `steelman-then-attack` | Steelman then attack | First construct the strongest form of the opposing argument (steel-manning), then attack its residual weaknesses |
-| `debate` | Structured debate | Adversarial pro/con format requiring citation of specific facts and data |
-| `brainstorm` | Brainstorm | Suspend judgment, maximize creative space |
-| `vote` | Vote | Force explicit stance + brief rationale |
-| `free` | Free discussion | Open-ended exchange without structural constraints |
+| **Specification** | 1. Declarative Employee Specification · 2. Soul — Persistent Identity · 3. Organization Governance & Adaptive Authority | Who the employee is |
+| **Deliberation** | 4. Structured Dialectical Deliberation · 5. Pipeline Orchestration | How employees work together |
+| **Evolution** | 6. Persistent Memory with Exponential Decay · 7. Evaluation Feedback Loop · 8. Skills — Context-Aware Auto-Trigger | How employees evolve |
+| **Infrastructure** | 9. Cost-Aware Orchestration · 10. Output Sanitization · 11. Zero-Intrusion Trajectory Recording | Cross-layer support |
 
-**Dialectical Constraints** -- a computational implementation of Schwenk's (1990) Devil's Advocacy methodology:
+---
 
-- **`stance`** -- Pre-assigned position, forcing participants to argue from a specific perspective
-- **`must_challenge`** -- Must challenge designated participants, counteracting shared information bias
-- **`max_agree_ratio`** -- Disagreement quota $\rho_{max} \in [0, 1]$, quantitatively controlling cognitive conflict density
-- **`tension_seeds`** -- Controversy seed injection, ensuring the issue space covers critical tension dimensions
-- **`min_disagreements`** -- Minimum number of disagreements per round, quantifying deliberation output
+### Definition Layer — "Who the Employee Is"
 
-**Discussion -> Execution bridging**: Setting `action_output: true` automatically generates a structured ActionPlan JSON, which is converted via `pipeline_from_action_plan()` into an executable Pipeline through dependency-aware topological sorting.
-
-<details>
-<summary>Discussion YAML example</summary>
-
-```yaml
-name: architecture-review
-topic: Review $target design
-goal: Produce improvement decisions
-mode: auto
-participants:
-  - employee: product-manager
-    role: moderator
-    focus: 需求完整性
-    stance: 偏用户体验
-  - employee: code-reviewer
-    role: speaker
-    focus: 安全性
-    must_challenge: [product-manager]
-    max_agree_ratio: 0.6
-tension_seeds:
-  - 安全性 vs 开发效率
-rounds:
-  - name: 各抒己见
-    interaction: round-robin
-  - name: 交叉盘问
-    interaction: cross-examine
-    require_direct_reply: true
-    min_disagreements: 2
-  - name: Decision
-    interaction: vote
-output_format: decision
-```
-
-</details>
-
-```bash
-# Pre-defined discussion
-knowlyr-crew discuss run architecture-review --arg target=auth.py
-
-# Ad-hoc discussion (no YAML required)
-knowlyr-crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块质量"
-
-# Orchestrated mode: each participant reasons independently
-knowlyr-crew discuss run architecture-review --orchestrated
-```
-
-### 2. Persistent Memory with Exponential Decay
-
-Ebbinghaus (1885) demonstrated that memory strength decays exponentially over time, and that spaced repetition effectively counteracts forgetting. Crew incorporates this cognitive science principle into the knowledge persistence mechanism of agent systems:
-
-**Five memory categories**:
-
-| Category | Description | Example |
-|:---|:---|:---|
-| `decision` | Decision record | "Chose JWT over Session-based approach" |
-| `estimate` | Estimation record | "CSS refactoring estimated at 2 days" |
-| `finding` | Discovery record | "main.css has 2,057 lines, exceeding maintainability threshold" |
-| `correction` | Correction record | "CSS refactoring actually took 5 days; cross-module dependencies were underestimated" |
-| `pattern` | Work pattern | "API changes must be accompanied by SDK documentation updates" (automatically shared across employees) |
-
-**Embedding fallback chain** (Graceful Degradation):
-
-```
-OpenAI text-embedding-3-small -> Gemini text-embedding-004 -> TF-IDF (zero-dependency fallback)
-```
-
-When any upstream provider is unavailable, the system automatically degrades to the next tier, ensuring semantic search remains functional even in environments without API keys.
-
-**Importance & access tracking**: Each memory entry carries an `importance` weight (1-5) and a `last_accessed` timestamp. Queries support importance-based sorting and minimum importance filtering; API calls automatically update access timestamps.
-
-**Cross-employee work patterns** (`pattern`): Reusable work patterns distilled from individual experience, automatically marked as shared (`shared: true`), with configurable trigger conditions (`trigger_condition`) and applicability scope (`applicability`). Other employees automatically acquire these patterns in matching scenarios.
-
-**Correction chains** correspond to the reconsolidation mechanism in memory science: $\text{correct}(m_{\text{old}}, m_{\text{new}})$ does not delete the old memory but instead zeros its confidence and creates a new entry with a provenance link, preserving the cognitive evolution trajectory.
-
-**Self-check learning loop**: Through the shared template `_templates/selfcheck.md`, employees automatically output a self-check checklist at the end of each task. The system extracts self-check results from the output, writes them as `correction` memories, and automatically injects them on the next execution -- forming a continuous learning loop of **execution -> self-check -> memory -> improvement**.
-
-**Auto-memory** (`auto_memory: true`): After task execution, employees automatically save a summary to persistent memory (`category=finding`) without manual invocation.
-
-```bash
-knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
-knowlyr-crew memory show code-reviewer
-knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天"
-```
-
-Storage: `.crew/memory/{employee}.jsonl` (memories) + `.crew/memory/embeddings.db` (vector index, SQLite WAL)
-
-### 3. Evaluation Feedback Loop
-
-Track decision quality, and after retrospective evaluation, automatically write lessons learned into employee memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human preference feedback directly influences subsequent model behavior; here, human evaluation results directly influence subsequent inference context:
-
-```mermaid
-graph LR
-    D["track()<br/>记录决策"] --> E["执行"]
-    E --> O["观察<br/>实际结果"]
-    O --> V["evaluate()<br/>回溯评估"]
-    V --> M["correction<br/>写入记忆"]
-    M --> I["下次推理<br/>自动注入"]
-    I --> D
-
-    style D fill:#0969da,color:#fff,stroke:#0969da
-    style V fill:#8b5cf6,color:#fff,stroke:#8b5cf6
-    style M fill:#2da44e,color:#fff,stroke:#2da44e
-```
-
-Three decision categories: `estimate` / `recommendation` / `commitment`. Evaluation conclusions are automatically written as `correction` entries into the employee's persistent memory and automatically injected during subsequent inference -- the agent updates its cognition from its own decision errors.
-
-```bash
-# Record a decision
-knowlyr-crew eval track pm estimate "CSS 拆分需要 2 天"
-
-# Evaluate (conclusions automatically written to memory)
-knowlyr-crew eval run <id> "实际花了 5 天" \
-  --evaluation "低估了跨模块依赖的复杂度，未来 ×2.5"
-```
-
-### 4. Declarative Employee Specification
+### 1. Declarative Employee Specification
 
 By analogy with **Infrastructure as Code** (Morris, 2016) -- Terraform uses declarative HCL to define infrastructure, Kubernetes uses YAML to define desired service state -- Crew uses declarative specifications to define the capability boundaries of AI employees. Configuration is separated from prompts, version-trackable, and IDE-agnostic:
 
@@ -392,6 +275,7 @@ By analogy with **Infrastructure as Code** (Morris, 2016) -- Terraform uses decl
 security-auditor/
 ├── employee.yaml    # Metadata, parameters, tools, output format
 ├── prompt.md        # Role definition + core instructions
+├── soul.md          # Soul configuration: persistent identity, personality, behavioral principles
 ├── workflows/       # Scenario-specific workflows
 │   ├── scan.md
 │   └── report.md
@@ -467,47 +351,22 @@ output:
 
 </details>
 
-### 5. Pipeline Orchestration
+### 2. Soul — Persistent Identity
 
-Multi-employee DAG (Directed Acyclic Graph) orchestration with four step types:
+Each AI employee has an independent **soul configuration** (`soul.md`) — defining their persistent identity, personality traits, and behavioral principles. Soul is the only component in the employee specification that is **cross-session persistent** and **auto-versioned**, solving the "identity fragmentation" problem in Agent frameworks: building personality from scratch each session vs. restoring full identity from a soul file.
 
-| Step Type | Description |
-|:---|:---|
-| **Sequential** | Serial execution; `{prev}` references previous step output |
-| **Parallel Group** | `asyncio.gather` concurrent execution with 600s timeout |
-| **Conditional** | `contains` / `matches` / `equals` conditional branching |
-| **Loop** | Loop execution with state passing |
-
-**Multi-Provider Routing**:
-
-| Provider | Model Prefix | Example |
-|:---|:---|:---|
-| Anthropic | `claude-` | `claude-opus-4-6`, `claude-sonnet-4-5` |
-| OpenAI | `gpt-`, `o1-`, `o3-` | `gpt-4o`, `o3-mini` |
-| DeepSeek | `deepseek-` | `deepseek-chat`, `deepseek-reasoner` |
-| Moonshot | `kimi-`, `moonshot-` | `kimi-k2.5` |
-| Google | `gemini-` | `gemini-2.5-pro` |
-| Zhipu | `glm-` | `glm-4-plus` |
-| Alibaba | `qwen-` | `qwen-max` |
-
-Automatic routing to the corresponding provider API by model name prefix, with primary model + fallback support.
+$$\text{soul}(e) = \langle \text{identity}, \text{principles}, \text{style}, \text{boundaries} \rangle$$
 
 | Feature | Description |
 |:---|:---|
-| **Output passing** | `{prev}` (previous step), `{steps.<id>.output}` (reference by ID) |
-| **Checkpoint recovery** | Resume from last completed step after mid-run failure (`pipeline checkpoint resume`) |
-| **Fallback** | Automatic switch to fallback model after primary model retries are exhausted |
-| **Mermaid visualization** | Automatic flowchart generation from pipeline definitions |
+| **Auto-versioning** | Each update automatically increments the version number, preserving complete history |
+| **Change tracking** | Records the updater and timestamp for each modification |
+| **Four-layer loading** | Soul (L0) -> Global Instructions (L1) -> Skills (L1.5) -> Memory (L2) -> Wiki (L3) |
+| **MCP Tools** | `get_soul` / `update_soul` — any AI IDE can read and update employee souls |
 
-```bash
-# Generate per-step prompts
-knowlyr-crew pipeline run review-test-pr --arg target=main
+The distinction between Soul and Memory: memory is **experience accumulation** (decays over time, can be corrected); Soul is **identity definition** (does not decay, requires deliberate updates). Analogous to personality vs. memory in humans — personality is stable while memory flows.
 
-# Execute mode: automatically invoke LLMs for chained execution
-knowlyr-crew pipeline run full-review --execute --model claude-opus-4-6
-```
-
-### 6. Organization Governance & Adaptive Authority
+### 3. Organization Governance & Adaptive Authority
 
 Declarative organization structure defining team groupings, authority levels, and collaboration routing templates -- enabling delegation decisions to be evidence-based rather than reliant on AI guesswork. The permission system features **adaptive degradation** capability:
 
@@ -551,7 +410,233 @@ routing_templates:
 | **KPI metrics** | Each employee declares KPI metrics; weekly report cron auto-evaluates and generates A/B/C/D ratings |
 | **Manual recovery** | One-click API to restore degraded authority |
 
-### 7. Cost-Aware Orchestration
+---
+
+### Collaboration Layer — "How Employees Work Together"
+
+### 4. Structured Dialectical Deliberation
+
+The central challenge of multi-agent collaboration lies in maintaining **epistemic diversity**. Stasser & Titus (1985) demonstrated experimentally that in unstructured group discussions, commonly shared information is discussed at significantly higher rates than individually held information, causing optimal decisions to be systematically overlooked. Nemeth (1994) further found that even incorrect minority opinions, when persistently expressed, improve majority decision quality -- because they force the majority to more carefully examine their own assumptions.
+
+Crew implements 9 structured interaction modes, each imposing distinct argumentative constraints on participants:
+
+| Mode | Description | Mechanism |
+|:---|:---|:---|
+| `round-robin` | Round-robin speaking | Equal expression rights, preventing discourse imbalance |
+| `challenge` | Challenge | Each participant must raise evidence-based challenges to at least one other's conclusions |
+| `response` | Response & defense | Structured responses; vague evasion prohibited; must explicitly accept/partially accept/rebut |
+| `cross-examine` | Cross-examination | Three-dimensional deep examination: factual challenge / logical derivation / alternative proposals |
+| `steelman-then-attack` | Steelman then attack | First construct the strongest form of the opposing argument (steel-manning), then attack its residual weaknesses |
+| `debate` | Structured debate | Adversarial pro/con format requiring citation of specific facts and data |
+| `brainstorm` | Brainstorm | Suspend judgment, maximize creative space |
+| `vote` | Vote | Force explicit stance + brief rationale |
+| `free` | Free discussion | Open-ended exchange without structural constraints |
+
+**Dialectical Constraints** -- a computational implementation of Schwenk's (1990) Devil's Advocacy methodology:
+
+- **`stance`** -- Pre-assigned position, forcing participants to argue from a specific perspective
+- **`must_challenge`** -- Must challenge designated participants, counteracting shared information bias
+- **`max_agree_ratio`** -- Disagreement quota $\rho_{max} \in [0, 1]$, quantitatively controlling cognitive conflict density
+- **`tension_seeds`** -- Controversy seed injection, ensuring the issue space covers critical tension dimensions
+- **`min_disagreements`** -- Minimum number of disagreements per round, quantifying deliberation output
+
+**Discussion -> Execution bridging**: Setting `action_output: true` automatically generates a structured ActionPlan JSON, which is converted via `pipeline_from_action_plan()` into an executable Pipeline through dependency-aware topological sorting.
+
+<details>
+<summary>Discussion YAML example</summary>
+
+```yaml
+name: architecture-review
+topic: Review $target design
+goal: Produce improvement decisions
+mode: auto
+participants:
+  - employee: product-manager
+    role: moderator
+    focus: 需求完整性
+    stance: 偏用户体验
+  - employee: code-reviewer
+    role: speaker
+    focus: 安全性
+    must_challenge: [product-manager]
+    max_agree_ratio: 0.6
+tension_seeds:
+  - 安全性 vs 开发效率
+rounds:
+  - name: 各抒己见
+    interaction: round-robin
+  - name: 交叉盘问
+    interaction: cross-examine
+    require_direct_reply: true
+    min_disagreements: 2
+  - name: Decision
+    interaction: vote
+output_format: decision
+```
+
+</details>
+
+```bash
+# Pre-defined discussion
+knowlyr-crew discuss run architecture-review --arg target=auth.py
+
+# Ad-hoc discussion (no YAML required)
+knowlyr-crew discuss adhoc -e "code-reviewer,test-engineer" -t "auth 模块质量"
+
+# Orchestrated mode: each participant reasons independently
+knowlyr-crew discuss run architecture-review --orchestrated
+```
+
+### 5. Pipeline Orchestration
+
+Multi-employee DAG (Directed Acyclic Graph) orchestration with four step types:
+
+| Step Type | Description |
+|:---|:---|
+| **Sequential** | Serial execution; `{prev}` references previous step output |
+| **Parallel Group** | `asyncio.gather` concurrent execution with 600s timeout |
+| **Conditional** | `contains` / `matches` / `equals` conditional branching |
+| **Loop** | Loop execution with state passing |
+
+**Multi-Provider Routing**:
+
+| Provider | Model Prefix | Example |
+|:---|:---|:---|
+| Anthropic | `claude-` | `claude-opus-4-6`, `claude-sonnet-4-5` |
+| OpenAI | `gpt-`, `o1-`, `o3-` | `gpt-4o`, `o3-mini` |
+| DeepSeek | `deepseek-` | `deepseek-chat`, `deepseek-reasoner` |
+| Moonshot | `kimi-`, `moonshot-` | `kimi-k2.5` |
+| Google | `gemini-` | `gemini-2.5-pro` |
+| Zhipu | `glm-` | `glm-4-plus` |
+| Alibaba | `qwen-` | `qwen-max` |
+
+Automatic routing to the corresponding provider API by model name prefix, with primary model + fallback support.
+
+| Feature | Description |
+|:---|:---|
+| **Output passing** | `{prev}` (previous step), `{steps.<id>.output}` (reference by ID) |
+| **Checkpoint recovery** | Resume from last completed step after mid-run failure (`pipeline checkpoint resume`) |
+| **Fallback** | Automatic switch to fallback model after primary model retries are exhausted |
+| **Mermaid visualization** | Automatic flowchart generation from pipeline definitions |
+
+```bash
+# Generate per-step prompts
+knowlyr-crew pipeline run review-test-pr --arg target=main
+
+# Execute mode: automatically invoke LLMs for chained execution
+knowlyr-crew pipeline run full-review --execute --model claude-opus-4-6
+```
+
+---
+
+### Evolution Layer — "How Employees Evolve"
+
+### 6. Persistent Memory with Exponential Decay
+
+Ebbinghaus (1885) demonstrated that memory strength decays exponentially over time, and that spaced repetition effectively counteracts forgetting. Crew incorporates this cognitive science principle into the knowledge persistence mechanism of agent systems:
+
+**Five memory categories**:
+
+| Category | Description | Example |
+|:---|:---|:---|
+| `decision` | Decision record | "Chose JWT over Session-based approach" |
+| `estimate` | Estimation record | "CSS refactoring estimated at 2 days" |
+| `finding` | Discovery record | "main.css has 2,057 lines, exceeding maintainability threshold" |
+| `correction` | Correction record | "CSS refactoring actually took 5 days; cross-module dependencies were underestimated" |
+| `pattern` | Work pattern | "API changes must be accompanied by SDK documentation updates" (automatically shared across employees) |
+
+**Storage & retrieval**: Memories are persisted in a remote PostgreSQL database, supporting semantic search (vector-keyword hybrid scoring) + multi-dimensional filtering (category, tags, classification, importance).
+
+**Embedding fallback chain** (Graceful Degradation):
+
+```
+OpenAI text-embedding-3-small -> Gemini text-embedding-004 -> TF-IDF (zero-dependency fallback)
+```
+
+When any upstream provider is unavailable, the system automatically degrades to the next tier, ensuring semantic search remains functional even in environments without API keys.
+
+**Importance & access tracking**: Each memory entry carries an `importance` weight (1-5) and a `last_accessed` timestamp. Queries support importance-based sorting and minimum importance filtering; API calls automatically update access timestamps.
+
+**Cross-employee work patterns** (`pattern`): Reusable work patterns distilled from individual experience, automatically marked as shared (`shared: true`), with configurable trigger conditions (`trigger_condition`) and applicability scope (`applicability`). Other employees automatically acquire these patterns in matching scenarios.
+
+**Correction chains** correspond to the reconsolidation mechanism in memory science: $\text{correct}(m_{\text{old}}, m_{\text{new}})$ does not delete the old memory but instead zeros its confidence and creates a new entry with a provenance link, preserving the cognitive evolution trajectory.
+
+**Self-check learning loop**: Through the shared template `_templates/selfcheck.md`, employees automatically output a self-check checklist at the end of each task. The system extracts self-check results from the output, writes them as `correction` memories, and automatically injects them on the next execution -- forming a continuous learning loop of **execution -> self-check -> memory -> improvement**.
+
+**Auto-memory** (`auto_memory: true`): After task execution, employees automatically save a summary to persistent memory (`category=finding`) without manual invocation.
+
+**Advanced memory management**: Supports memory drafts (draft -> approve/reject), archiving and restoration (archive -> restore), shared pool (cross-employee visible shared memories), and usage feedback (quality scoring and popularity tracking).
+
+```bash
+knowlyr-crew memory add code-reviewer finding "main.css 有 2057 行，超出维护阈值"
+knowlyr-crew memory show code-reviewer
+knowlyr-crew memory correct code-reviewer <old_id> "CSS 拆分实际花了 5 天"
+```
+
+### 7. Evaluation Feedback Loop
+
+Track decision quality, and after retrospective evaluation, automatically write lessons learned into employee memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human preference feedback directly influences subsequent model behavior; here, human evaluation results directly influence subsequent inference context:
+
+```mermaid
+graph LR
+    D["track()<br/>记录决策"] --> E["执行"]
+    E --> O["观察<br/>实际结果"]
+    O --> V["evaluate()<br/>回溯评估"]
+    V --> M["correction<br/>写入记忆"]
+    M --> I["下次推理<br/>自动注入"]
+    I --> D
+
+    style D fill:#0969da,color:#fff,stroke:#0969da
+    style V fill:#8b5cf6,color:#fff,stroke:#8b5cf6
+    style M fill:#2da44e,color:#fff,stroke:#2da44e
+```
+
+Three decision categories: `estimate` / `recommendation` / `commitment`. Evaluation conclusions are automatically written as `correction` entries into the employee's persistent memory and automatically injected during subsequent inference -- the agent updates its cognition from its own decision errors. The `list_overdue_decisions` tool automatically reminds of overdue unevaluated decisions, preventing the feedback loop from breaking.
+
+```bash
+# Record a decision
+knowlyr-crew eval track pm estimate "CSS 拆分需要 2 天"
+
+# Evaluate (conclusions automatically written to memory)
+knowlyr-crew eval run <id> "实际花了 5 天" \
+  --evaluation "低估了跨模块依赖的复杂度，未来 ×2.5"
+```
+
+### 8. Skills — Context-Aware Auto-Trigger
+
+Skills solve the **last mile** problem of the evolution layer: memories have been accumulated, but how do they get automatically injected at the right moment? The "conditioned reflexes" of human experts — seeing SQL and immediately thinking of injection risks, seeing a deadline and recalling last time's underestimate — are automatic trigger patterns formed through internalized experience. Skills computationalize this mechanism:
+
+$$\text{trigger}(task, s) = \begin{cases} \text{execute}(s.\text{actions}) & \text{if } \text{match}(task, s.\text{condition}) \\ \emptyset & \text{otherwise} \end{cases}$$
+
+**Three trigger modes**:
+
+| Mode | Matching Method | Typical Scenario |
+|:---|:---|:---|
+| `semantic` | Semantic similarity >= threshold | "Write API" -> load API-related pitfall memories |
+| `keyword` | Keyword hit | "Deploy" -> load deployment checklist |
+| `always` | Triggered on every execution | Load shared knowledge base |
+
+**Trigger -> Load -> Inject** flow:
+
+```
+Employee receives task -> Server checks Skills trigger conditions -> If matched, execute Actions (query_memory / load_checklist / read_wiki)
+-> Inject results into prompt's extra_context -> Employee "automatically recalls" relevant experience
+```
+
+**Full-scenario coverage**: Feishu @employee, WeCom conversation, Web interface, API call, Claude Code `/pull` — tasks triggered through any channel go through Skills checking, ensuring no blind spots in experience injection.
+
+| Feature | Description |
+|:---|:---|
+| **Priority** | critical > high > medium > low; higher-priority Skills execute first |
+| **Action types** | `query_memory` (retrieve memories) / `load_checklist` (load checklists) / `read_wiki` (read documents) / `custom` |
+| **Trigger statistics** | Trigger rate, hit rate, history; supports continuous optimization of trigger conditions |
+| **API authentication** | Read/execute are open; create/update/delete require admin permissions |
+
+---
+
+### Infrastructure
+
+### 9. Cost-Aware Orchestration
 
 Built-in model pricing tables (7 providers) with per-task cost calculation, supporting aggregation by employee / model / time period for **ROI per Decision** analysis:
 
@@ -571,7 +656,7 @@ query_cost(days=30, employee="code-reviewer")
 curl /api/cost/summary?days=7
 ```
 
-### 8. Output Sanitization -- Defense in Depth
+### 10. Output Sanitization -- Defense in Depth
 
 Raw LLM output may contain internal reasoning tags (`<thinking>`, `<reflection>`, `<inner_monologue>`) and tool invocation XML blocks -- these are the model's "working drafts" and should not be exposed to end users. The Output Sanitizer implements **defense in depth**:
 
@@ -582,7 +667,7 @@ Raw LLM output may contain internal reasoning tags (`<thinking>`, `<reflection>`
 
 Sanitization rules cover 5 tag pattern categories (regex matching + content removal), handling nested tags and multiline residual whitespace. When either layer misses something, the other provides a safety net -- drawing on the defense-in-depth principle from cybersecurity (Schneier, 2000).
 
-### 9. Zero-Intrusion Trajectory Recording
+### 11. Zero-Intrusion Trajectory Recording
 
 **Zero-intrusion trajectory recording** via `contextvars.ContextVar` -- no modification to any business code required; automatically captures agent reasoning, tool invocations, execution results, and token consumption:
 
@@ -683,23 +768,42 @@ knowlyr-crew serve --port 8765 --token YOUR_SECRET
 
 ### API Endpoints
 
-| Path | Method | Description |
-|:---|:---|:---|
-| `/health` | GET | Health check (no authentication required) |
-| `/webhook/github` | POST | GitHub webhook (HMAC-SHA256 signature verification) |
-| `/webhook/openclaw` | POST | OpenClaw message events |
-| `/run/pipeline/{name}` | POST | Trigger pipeline (async/sync/SSE streaming) |
-| `/run/employee/{name}` | POST | Trigger employee (supports SSE streaming) |
-| `/api/employees/{id}/prompt` | GET | Employee capability definition (includes team, authority, 7-day cost) |
-| `/api/employees/{id}/state` | GET | Runtime state (personality, memory, notes) |
-| `/api/employees/{id}` | PUT | Update configuration (model/temperature/max_tokens) |
-| `/api/employees/{id}/authority/restore` | POST | Restore auto-degraded authority |
-| `/api/cost/summary` | GET | Cost summary |
-| `/api/project/status` | GET | Project status overview |
-| `/api/memory/ingest` | POST | Import external discussion data into employee memory |
-| `/tasks/{task_id}` | GET | Query task status and results |
-| `/metrics` | GET | Invocation/latency/token/error statistics |
-| `/cron/status` | GET | Cron scheduler status |
+| Category | Path | Method | Description |
+|:---|:---|:---|:---|
+| **Basics** | `/health` | GET | Health check (no authentication required) |
+| | `/metrics` | GET | Invocation/latency/token/error statistics |
+| | `/cron/status` | GET | Cron scheduler status |
+| **Event Ingress** | `/webhook/github` | POST | GitHub webhook (HMAC-SHA256 signature verification) |
+| | `/webhook/openclaw` | POST | OpenClaw message events |
+| | `/feishu/event` | POST | Feishu event callback (@employee trigger) |
+| | `/wecom/event/{app_id}` | GET/POST | WeCom event callback |
+| **Execution** | `/run/pipeline/{name}` | POST | Trigger pipeline (async/sync/SSE streaming) |
+| | `/run/route/{name}` | POST | Trigger collaboration route |
+| | `/run/employee/{name}` | POST | Trigger employee (supports SSE streaming) |
+| | `/tasks/{task_id}` | GET | Query task status and results |
+| **Employee Management** | `/api/employees` | GET/POST | List/create employees |
+| | `/api/employees/{id}` | GET/PUT/DELETE | Employee CRUD |
+| | `/api/employees/{id}/prompt` | GET | Employee capability definition (includes team, authority, 7-day cost) |
+| | `/api/employees/{id}/state` | GET | Runtime state (personality, memory, notes) |
+| | `/api/employees/{id}/authority/restore` | POST | Restore auto-degraded authority |
+| **Soul** | `/api/souls` | GET | List all employee souls |
+| | `/api/souls/{name}` | GET/PUT | Read/update soul configuration |
+| **Skills** | `/api/employees/{name}/skills` | GET/POST | List/create Skills |
+| | `/api/employees/{name}/skills/{skill}` | GET/PUT/DELETE | Skill CRUD |
+| | `/api/skills/check-triggers` | POST | Check Skills trigger conditions |
+| | `/api/skills/execute` | POST | Execute Skill Actions |
+| | `/api/skills/stats` | GET | Skill usage statistics |
+| **Memory** | `/api/memory/*` | — | Full memory API (add/query/archive/draft/share/semantic search/feedback) |
+| **Decisions** | `/api/decisions/*` | — | Decision tracking/evaluation/batch scanning |
+| **Wiki** | `/api/wiki/spaces` | GET | List Wiki spaces |
+| | `/api/wiki/files/*` | — | Attachment upload/read/delete |
+| **Configuration** | `/api/kv/*` | GET/PUT | KV store (cross-machine sync for CLAUDE.md, etc.) |
+| | `/api/config/*` | — | Discussion/pipeline configuration CRUD |
+| **Governance** | `/api/cost/summary` | GET | Cost summary |
+| | `/api/permission-matrix` | GET | Permission matrix |
+| | `/api/audit/trends` | GET | Audit trends |
+| | `/api/project/status` | GET | Project status overview |
+| **Multi-tenant** | `/api/tenants` | CRUD | Tenant isolation (data, memory independent) |
 
 <details>
 <summary>Production features</summary>
@@ -776,6 +880,19 @@ knowlyr-id fetches employee prompt / model / temperature / team / authority / co
 # Deploy via CI (git push triggers GitHub Actions)
 make deploy
 ```
+
+### Feishu · WeCom — Multi-Channel Reach
+
+AI employees don't just work in IDEs — through Feishu and WeCom, employees can directly respond to team needs in instant messaging:
+
+| Channel | Trigger Method | Description |
+|:---|:---|:---|
+| **Feishu** | @employee name in message | Auto-routes to corresponding employee; supports Skills auto-trigger and memory injection |
+| **WeCom** | @employee name in message | Multi-app support; automatic cleanup of bindings when employees are deactivated |
+| **Web / API** | HTTP POST | Standard REST API; supports SSE streaming output |
+| **Claude Code** | `/pull employee_name` | MCP protocol invocation; interaction within local IDE |
+
+All channels undergo unified Skills trigger checking + output sanitization + audit logging, ensuring behavioral consistency.
 
 ### Claude Code Skills Interoperability
 
@@ -955,7 +1072,7 @@ graph LR
 git clone https://github.com/liuxiaotong/knowlyr-crew.git
 cd knowlyr-crew
 pip install -e ".[all]"
-uv run --extra dev --extra mcp pytest tests/ -q    # 1868 test cases
+uv run --extra dev --extra mcp pytest tests/ -q    # 2025 test cases
 ```
 
 ---
