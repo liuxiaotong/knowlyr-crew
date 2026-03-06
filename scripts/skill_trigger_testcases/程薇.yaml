@@ -1,0 +1,35 @@
+# 程薇 Skills 触发率测试用例
+employee: 程薇
+
+skills:
+  - skill: query-test-patterns
+    trigger_type: keyword
+    positive_cases:
+      - "write tests for the new auth module"
+      - "add test coverage for the API endpoints"
+      - "fix flaky tests in the CI pipeline"
+      - "写一个测试验证用户登录流程"
+      - "提高测试覆盖率到 80%"
+      - "debug test failures in test_webhook.py"
+    negative_cases:
+      - "帮我写一个 API 接口"
+      - "今天项目进度怎么样"
+      - "部署到生产环境"
+      - "查看 Wiki 文档"
+      - "帮我审查代码"
+
+  - skill: track-decisions
+    trigger_type: keyword
+    positive_cases:
+      - "建议采用 pytest-asyncio 框架"
+      - "评估一下测试策略的方案"
+      - "推荐用 factory_boy 做测试数据"
+      - "我们来决策测试架构"
+      - "选择 mock 还是 integration 的取舍"
+      - "这个实现方案的测试方案"
+    negative_cases:
+      - "跑一下所有测试"
+      - "看看哪些测试挂了"
+      - "修复这个 flaky test"
+      - "查看测试报告"
+      - "更新 pytest 版本"

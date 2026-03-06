@@ -1,0 +1,35 @@
+# 林锐 Skills 触发率测试用例
+employee: 林锐
+
+skills:
+  - skill: query-review-history
+    trigger_type: keyword
+    positive_cases:
+      - "review this PR #42"
+      - "check this code for security issues"
+      - "审查这个提交的代码质量"
+      - "look at this diff and find bugs"
+      - "code review for the new auth module"
+      - "帮我审查一下 webhook_handlers.py 的改动"
+    negative_cases:
+      - "帮我写一个接口"
+      - "今天项目进度怎么样"
+      - "部署到生产环境"
+      - "测试跑不过"
+      - "这个页面的样式有问题"
+
+  - skill: track-decisions
+    trigger_type: keyword
+    positive_cases:
+      - "建议采用更严格的 lint 规则"
+      - "我们来评估一下代码规范方案"
+      - "推荐使用 pre-commit hooks"
+      - "这个架构设计需要讨论"
+      - "选用 ruff 还是 flake8"
+      - "权衡代码覆盖率和开发速度"
+    negative_cases:
+      - "帮我看看这个 bug"
+      - "修复 CI 管道"
+      - "更新依赖版本"
+      - "跑一下测试"
+      - "查看部署状态"

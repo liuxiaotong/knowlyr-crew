@@ -1,0 +1,35 @@
+# 卫子昂 Skills 触发率测试用例
+employee: 卫子昂
+
+skills:
+  - skill: query-before-refactor
+    trigger_type: keyword
+    positive_cases:
+      - "refactor this component to use hooks"
+      - "restructure the layout for mobile"
+      - "重构这个页面的组件结构"
+      - "change the routing to support nested paths"
+      - "rewrite this page using the new design system"
+      - "extract common components from these pages"
+    negative_cases:
+      - "今天的项目状态怎么样"
+      - "帮我查一下 Wiki"
+      - "明天开会讨论什么"
+      - "帮我写个后端接口"
+      - "部署前端到 CDN"
+
+  - skill: track-decisions
+    trigger_type: keyword
+    positive_cases:
+      - "我们来讨论一下前端技术方案"
+      - "用哪个组件库比较好"
+      - "建议迁移到 Next.js"
+      - "评估一下 Tailwind 和 CSS Modules 的取舍"
+      - "推荐采用 SSR 架构"
+      - "这个实现方案需要评审"
+    negative_cases:
+      - "修复这个样式问题"
+      - "页面加载太慢了"
+      - "这个按钮点不了"
+      - "帮我切个图"
+      - "查看页面的错误日志"

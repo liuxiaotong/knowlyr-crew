@@ -1,0 +1,35 @@
+# 赵云帆 Skills 触发率测试用例
+employee: 赵云帆
+
+skills:
+  - skill: query-before-code
+    trigger_type: keyword
+    positive_cases:
+      - "帮我写一个新的 API endpoint 处理用户注册"
+      - "modify the schema to add a new field"
+      - "create a migration for the new table"
+      - "update webhook handlers to support the new event"
+      - "写一个数据导出的 endpoint"
+      - "change database models to support multi-tenancy"
+    negative_cases:
+      - "今天的项目状态怎么样"
+      - "帮我查一下 Wiki 里的部署文档"
+      - "明天开会讨论什么"
+      - "给林锐看一下这个 PR"
+      - "这个月的调用量统计"
+
+  - skill: track-decisions
+    trigger_type: keyword
+    positive_cases:
+      - "我们来讨论一下技术方案"
+      - "用哪个数据库比较好"
+      - "这个架构需要重构"
+      - "建议采用微服务架构"
+      - "evaluate the tradeoff between speed and safety"
+      - "推荐用 FastAPI 替代 Starlette"
+    negative_cases:
+      - "帮我写一个 API"
+      - "修复这个 500 错误"
+      - "跑一下测试"
+      - "部署到生产环境"
+      - "查看日志"

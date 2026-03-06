@@ -1,0 +1,110 @@
+# 姜墨言 Skills 触发率测试用例
+employee: 姜墨言
+
+skills:
+  - skill: moyan-start
+    trigger_type: always
+    positive_cases:
+      - "早上好"
+      - "hi"
+      - "继续昨天的工作"
+      - "帮我看一下项目进度"
+      - "今天有什么安排"
+      - "随便聊聊"
+    negative_cases: []  # always 类型没有反例
+
+  - skill: wiki-url-resolve
+    trigger_type: keyword
+    positive_cases:
+      - "帮我看下 antgather.knowlyr.com/docs 里的部署文档"
+      - "antgather.knowlyr.com 上这个页面打不开"
+      - "检查一下 antgather.knowlyr.com/docs/api 的内容"
+      - "把 antgather.knowlyr.com 的文档链接发给我"
+      - "antgather.knowlyr.com/docs 的格式需要调整"
+    negative_cases:
+      - "帮我查一下 Wiki 里的内容"
+      - "今天项目状态怎么样"
+      - "文档在哪里可以看到"
+      - "帮我写个 API 文档"
+      - "知识库需要更新"
+
+  - skill: query-on-failure
+    trigger_type: keyword
+    positive_cases:
+      - "that didn't work either, try something else"
+      - "you're going in circles, 停下来想想"
+      - "stop and think before you continue"
+      - "calm down, 你太急了"
+      - "this is the third time you've tried this"
+      - "不行，这个方案不行"
+      - "slow down, 先理清思路"
+    negative_cases:
+      - "帮我写一个新接口"
+      - "今天的项目进度怎么样"
+      - "继续上次的工作"
+      - "看看这个 PR 怎么样"
+      - "部署到生产环境"
+
+  - skill: query-before-dispatch
+    trigger_type: keyword
+    positive_cases:
+      - "派赵云帆来处理这个后端问题"
+      - "找程薇写个测试"
+      - "拉云帆来看看这个 bug"
+      - "let 卫子昂 handle this frontend issue"
+      - "get 卫子昂 to fix the layout"
+      - "派林锐审查一下代码"
+    negative_cases:
+      - "这个 API 有个 bug"
+      - "帮我看一下项目进度"
+      - "今天天气怎么样"
+      - "代码需要重构"
+      - "帮我写个文档"
+
+  - skill: query-before-decision
+    trigger_type: keyword
+    positive_cases:
+      - "should we use PostgreSQL or MySQL for this"
+      - "which framework is better for our use case"
+      - "X or Y, 哪个更合适"
+      - "how do we choose between these two approaches"
+      - "what's the best approach to handle file uploads"
+      - "我们要决定用哪个消息队列"
+    negative_cases:
+      - "帮我写一个接口"
+      - "这个测试跑不过"
+      - "部署到生产环境"
+      - "帮我看看这个 PR"
+      - "更新一下文档"
+
+  - skill: query-before-solution
+    trigger_type: keyword
+    positive_cases:
+      - "how do we fix this memory leak issue"
+      - "what's your suggestion for improving performance"
+      - "how should we handle this edge case"
+      - "how to implement the notification system"
+      - "any ideas on how to approach this refactor"
+      - "我们怎么实现这个功能"
+    negative_cases:
+      - "早上好"
+      - "帮我派赵云帆"
+      - "should we use Redis or Memcached"
+      - "审查这个 PR"
+      - "项目状态怎么样"
+
+  - skill: query-on-problem
+    trigger_type: keyword
+    positive_cases:
+      - "API returns 500 when I try to upload"
+      - "deployment failed, 看一下日志"
+      - "tests are failing on the CI pipeline"
+      - "getting an error when connecting to the database"
+      - "this is broken, the page won't load"
+      - "database connection error after the update"
+    negative_cases:
+      - "帮我写一个新的接口"
+      - "今天开会讨论什么"
+      - "项目进度更新一下"
+      - "给我看一下架构图"
+      - "明天的计划是什么"
