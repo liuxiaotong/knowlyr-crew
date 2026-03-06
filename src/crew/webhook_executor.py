@@ -410,7 +410,7 @@ async def _delegate_employee(
         available = ", ".join(sorted(discovery.employees.keys()))
         return f"错误：未找到员工 '{employee_name}'。可用员工：{available}"
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
     prompt = engine.prompt(target, args={"task": task})
 
     try:
@@ -537,7 +537,7 @@ async def _execute_chain(
     from crew.executor import aexecute_prompt
 
     discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
 
     if step_results is None:
         step_results = []
@@ -760,7 +760,7 @@ async def _execute_employee_with_tools(
             "skipped": True,
         }
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
 
@@ -1129,7 +1129,7 @@ async def _stream_employee_with_tools(
         yield {"done": True, "employee_id": name, "tokens_used": 0, "latency_ms": 0}
         return
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
 
     # 信息分级：计算有效许可
@@ -1828,7 +1828,7 @@ async def _execute_employee(
             tenant_id=tenant_id,
         )
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
     # 从 args 中提取 _max_visibility（飞书 dispatch 传入）
     max_visibility = args.pop("_max_visibility", "open") if isinstance(args, dict) else "open"
     prompt = engine.prompt(match, args=args, max_visibility=max_visibility)
@@ -1901,7 +1901,7 @@ async def _stream_employee(
 
         return StreamingResponse(_error(), media_type="text/event-stream")
 
-    engine = CrewEngine(project_dir=ctx.project_dir)
+    engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=tenant_id)
     prompt = engine.prompt(match, args=args)
 
     async def _generate():

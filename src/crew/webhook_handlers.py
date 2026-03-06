@@ -352,7 +352,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    engine = CrewEngine(ctx.project_dir)
+    engine = CrewEngine(ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     system_prompt = engine.prompt(employee)
     tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
@@ -4465,7 +4465,9 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         # ── 独立轨迹存储（不使用 TrajectoryCollector，避免写入 .crew/trajectories） ──
         trajectory_id = f"traj_{uuid.uuid4().hex[:12]}"
         date_str = dt_date.today().isoformat()
-        archive_base = Path("/data/trajectory_archive")
+        # 租户隔离：按 tenant 分目录存储轨迹
+        _traj_base = _tenant_base_dir(request)
+        archive_base = _traj_base / "trajectory_archive"
         date_dir = archive_base / date_str
         date_dir.mkdir(parents=True, exist_ok=True)
 
@@ -5242,7 +5244,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 }
             else:
                 # 使用简单的 chat 路径（无工具）
-                engine = CrewEngine(project_dir=ctx.project_dir)
+                engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
                 chat_result = await engine.chat(
                     employee_id=employee_id,
                     message=_effective_message,
@@ -5644,7 +5646,8 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
 
     from crew.meeting_log import MeetingLogger
 
-    ml = MeetingLogger(project_dir=ctx.project_dir)
+    _mtg_dir = _tenant_data_dir(request, "meetings")
+    ml = MeetingLogger(meetings_dir=_mtg_dir, project_dir=ctx.project_dir)
     limit = _safe_int(request.query_params.get("limit"), default=20)
     keyword = request.query_params.get("keyword") or None
     records = ml.list(limit=limit, keyword=keyword)
@@ -5662,7 +5665,8 @@ async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
 
     from crew.meeting_log import MeetingLogger
 
-    ml = MeetingLogger(project_dir=ctx.project_dir)
+    _mtg_dir = _tenant_data_dir(request, "meetings")
+    ml = MeetingLogger(meetings_dir=_mtg_dir, project_dir=ctx.project_dir)
     meeting_id = request.path_params["meeting_id"]
     result = ml.get(meeting_id)
     if result is None:
@@ -5675,6 +5679,11 @@ async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
 async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
     """追踪决策 — POST /api/decisions/track."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 决策追踪涉及写入记忆，需要 admin 权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.evaluation import EvaluationEngine
 
@@ -5689,7 +5698,7 @@ async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
     if not employee or not category or not content:
         return JSONResponse({"error": "employee, category, content are required"}, status_code=400)
 
-    engine = EvaluationEngine(project_dir=ctx.project_dir)
+    engine = EvaluationEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     try:
         decision = engine.track(
             employee=employee,
@@ -5708,6 +5717,11 @@ async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
     """评估决策 — POST /api/decisions/{decision_id}/evaluate."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 决策评估写入纠正记忆，需要 admin 权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.evaluation import EvaluationEngine
 
     decision_id = request.path_params["decision_id"]
@@ -5721,7 +5735,7 @@ async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
     if not actual_outcome:
         return JSONResponse({"error": "actual_outcome is required"}, status_code=400)
 
-    engine = EvaluationEngine(project_dir=ctx.project_dir)
+    engine = EvaluationEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     try:
         decision = engine.evaluate(
             decision_id=decision_id,
