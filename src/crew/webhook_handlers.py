@@ -3939,6 +3939,11 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse, StreamingResponse
 
+    # 安全加固: agent run 涉及沙箱远程执行，仅 admin 可用
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     name = request.path_params["name"]
     payload = (
         await request.json() if request.headers.get("content-type") == "application/json" else {}
@@ -3948,10 +3953,11 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "缺少 task 参数"}, status_code=400)
 
     model = payload.get("model", "claude-sonnet-4-5-20250929")
-    max_steps = payload.get("max_steps", 30)
+    max_steps = min(int(payload.get("max_steps", 30)), 100)  # 上限 100 步
     repo = payload.get("repo", "")
     base_commit = payload.get("base_commit", "")
-    sandbox_cfg = payload.get("sandbox", {})
+    # 安全加固: 忽略用户传入的 sandbox 参数，硬编码安全配置
+    sandbox_cfg = {}
 
     try:
         from agentsandbox import Sandbox, SandboxEnv  # noqa: F401
@@ -3981,11 +3987,12 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
                 on_step=on_step,
             )
 
+            # 安全加固: 沙箱参数硬编码，不接受用户输入
             s_config = SandboxConfig(
-                image=sandbox_cfg.get("image", "python:3.11-slim"),
-                memory_limit=sandbox_cfg.get("memory_limit", "512m"),
-                cpu_limit=sandbox_cfg.get("cpu_limit", 1.0),
-                network_enabled=sandbox_cfg.get("network_enabled", False),
+                image="python:3.11-slim",
+                memory_limit="512m",
+                cpu_limit=1.0,
+                network_enabled=False,
             )
             t_config = TaskConfig(
                 repo_url=repo,
@@ -4035,12 +4042,15 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
     """查询任务状态."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 任务含 args/outputs/token 统计，owner 为空时默认需要 admin
+    admin_err = _require_admin_token(request)
+
     task_id = request.path_params["task_id"]
     record = ctx.registry.get(task_id)
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
 
-    # 归属校验：如果 task 有 owner，请求方须提供匹配的 user_id
+    # 归属校验：有 owner 时检查 user_id，无 owner 时必须 admin
     user_id = request.query_params.get("user_id") or request.headers.get("x-user-id", "")
     if record.owner:
         if not user_id:
@@ -4049,6 +4059,10 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse(
                 {"error": "forbidden: task does not belong to this user"}, status_code=403
             )
+    else:
+        # 无 owner 的任务只有 admin 可查看
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
 
     return JSONResponse(record.model_dump(mode="json"))
 
@@ -4057,12 +4071,15 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
     """重放已完成/失败的任务."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: replay 重新执行任务，owner 为空时需要 admin
+    admin_err = _require_admin_token(request)
+
     task_id = request.path_params["task_id"]
     record = ctx.registry.get(task_id)
     if record is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
 
-    # 归属校验
+    # 归属校验：有 owner 时检查 user_id，无 owner 时必须 admin
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
     if record.owner:
@@ -4072,6 +4089,9 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse(
                 {"error": "forbidden: task does not belong to this user"}, status_code=403
             )
+    else:
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
 
     if record.status not in ("completed", "failed"):
         return JSONResponse({"error": "只能重放已完成或失败的任务"}, status_code=400)
@@ -4096,6 +4116,8 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
 
     from starlette.responses import JSONResponse
 
+    # 安全加固: owner 为空时默认需要 admin
+    admin_err = _require_admin_token(request)
     task_id = request.path_params["task_id"]
     body = await request.json()
     action = body.get("action", "approve")
@@ -4115,6 +4137,10 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse(
                 {"error": "forbidden: task does not belong to this user"}, status_code=403
             )
+    else:
+        # 无 owner 的任务只有 admin 可审批
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
 
     if record.status != "awaiting_approval":
         return JSONResponse(
