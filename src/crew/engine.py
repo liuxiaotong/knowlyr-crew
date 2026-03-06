@@ -42,8 +42,9 @@ class CrewEngine:
     3. validate_args() — 校验参数
     """
 
-    def __init__(self, project_dir: Path | None = None):
+    def __init__(self, project_dir: Path | None = None, tenant_id: str | None = None):
         self.project_dir = resolve_project_dir(project_dir)
+        self.tenant_id = tenant_id
 
     def validate_args(
         self,
@@ -298,7 +299,7 @@ class CrewEngine:
         from crew.memory import get_memory_store
         from crew.memory_cache import get_prompt_cached
 
-        memory_store = get_memory_store(project_dir=self.project_dir)
+        memory_store = get_memory_store(project_dir=self.project_dir, tenant_id=self.tenant_id)
         parts: list[str] = []
 
         # classification 参数包
@@ -440,7 +441,7 @@ class CrewEngine:
         from crew.memory import get_memory_store
         from crew.memory_cache import get_prompt_cached
 
-        memory_store = get_memory_store(project_dir=self.project_dir)
+        memory_store = get_memory_store(project_dir=self.project_dir, tenant_id=self.tenant_id)
         parts: list[str] = []
 
         # classification 参数包
@@ -681,7 +682,7 @@ class CrewEngine:
             try:
                 from crew.memory import get_memory_store
 
-                mem_store = get_memory_store(project_dir=self.project_dir)
+                mem_store = get_memory_store(project_dir=self.project_dir, tenant_id=self.tenant_id)
                 raw_memories = mem_store.query(
                     employee_id,
                     limit=10,
@@ -951,7 +952,7 @@ class CrewEngine:
 
             async def _write_memory() -> None:
                 try:
-                    mem_store = get_memory_store(project_dir=self.project_dir)
+                    mem_store = get_memory_store(project_dir=self.project_dir, tenant_id=self.tenant_id)
 
                     # 基础对话记录
                     mem_store.add(
