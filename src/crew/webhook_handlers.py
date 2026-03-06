@@ -26,6 +26,9 @@ def _task_done_callback(task: asyncio.Task) -> None:  # type: ignore[type-arg]
 
 import re as _re
 
+from starlette.responses import JSONResponse, StreamingResponse
+
+from crew.memory import get_memory_store
 from crew.tenant import TenantContext, get_current_tenant
 from crew.webhook_context import _EMPLOYEE_UPDATABLE_FIELDS, _AppContext
 
@@ -95,6 +98,26 @@ def _safe_int(value: str | None, default: int = 0) -> int:
         return default
 
 
+_MAX_QUERY_LIMIT = 1000
+
+
+def _safe_limit(raw: str | int | None, default: int = 20) -> int:
+    """安全解析 limit 参数，不超过 _MAX_QUERY_LIMIT."""
+    if raw is None:
+        return default
+    try:
+        val = int(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return default
+    return max(1, min(val, _MAX_QUERY_LIMIT))
+
+
+def _sanitized_error(e: Exception, public_msg: str = "内部错误") -> str:
+    """对外返回安全错误信息，内部异常只写日志."""
+    logger.exception("Handler error: %s", e)
+    return public_msg
+
+
 def _find_employee(result: Any, identifier: str) -> Any:
     """按 agent_id 或 name（字符串）查找员工."""
     # 先按 name 查找
@@ -110,7 +133,6 @@ def _find_employee(result: Any, identifier: str) -> Any:
 
 def _ok_response(data: dict | None = None, status_code: int = 200) -> Any:
     """统一成功响应格式 — 后续逐步迁移各端点使用."""
-    from starlette.responses import JSONResponse
 
     body: dict[str, Any] = {"ok": True}
     if data:
@@ -120,7 +142,6 @@ def _ok_response(data: dict | None = None, status_code: int = 200) -> Any:
 
 def _error_response(message: str, status_code: int = 400) -> Any:
     """统一错误响应格式 — 后续逐步迁移各端点使用."""
-    from starlette.responses import JSONResponse
 
     return JSONResponse({"ok": False, "error": message}, status_code=status_code)
 
@@ -143,6 +164,7 @@ def _write_yaml_field(emp_dir: Path, updates: dict) -> None:
     fd_closed = False
     try:
         os.write(fd, content.encode("utf-8"))
+        os.fsync(fd)
         os.close(fd)
         fd_closed = True
         os.replace(tmp, config_path)
@@ -220,7 +242,7 @@ async def _handle_tenant_create(request: Any, ctx: _AppContext) -> Any:
         result = create_tenant(name=name, is_admin=is_admin, metadata=metadata)
     except Exception as e:
         logger.exception("创建租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("创建租户失败", 500)
 
     # 清除中间件缓存
     if ctx.tenant_auth_cache is not None:
@@ -270,7 +292,7 @@ async def _handle_tenant_delete(request: Any, ctx: _AppContext) -> Any:
         deleted = delete_tenant(tenant_id)
     except Exception as e:
         logger.exception("删除租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("删除租户失败", 500)
 
     if not deleted:
         return _error_response("tenant not found", 404)
@@ -309,7 +331,7 @@ async def _handle_tenant_update(request: Any, ctx: _AppContext) -> Any:
         return _error_response(str(e), 400)
     except Exception as e:
         logger.exception("更新租户失败")
-        return _error_response(str(e), 500)
+        return _error_response("更新租户失败", 500)
 
     if result is None:
         return _error_response("tenant not found", 404)
@@ -323,14 +345,12 @@ async def _handle_tenant_update(request: Any, ctx: _AppContext) -> Any:
 
 async def _health(request: Any) -> Any:
     """健康检查."""
-    from starlette.responses import JSONResponse
 
     return JSONResponse({"status": "ok", "service": "crew-webhook"})
 
 
 async def _metrics(request: Any) -> Any:
     """运行时指标."""
-    from starlette.responses import JSONResponse
 
     from crew.metrics import get_collector
 
@@ -339,7 +359,6 @@ async def _metrics(request: Any) -> Any:
 
 async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     """返回员工配置和渲染后的 system_prompt."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: prompt 含完整指令/工具/成本数据，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -386,7 +405,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
                 temperature = db_row.get("temperature")
                 max_tokens = db_row.get("max_tokens")
         except Exception:
-            pass
+            logger.debug("读取员工 DB 额外字段失败", exc_info=True)
 
     # 组织架构信息（团队、权限、成本）
     from crew.organization import get_effective_authority, load_organization
@@ -406,37 +425,42 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     if any(_model.startswith(p) for p in _REASONING_PREFIXES):
         temperature = 1
 
-    return JSONResponse(
-        {
-            "name": employee.name,
-            "character_name": employee.character_name,
-            "display_name": employee.display_name,
-            "description": employee.description,
-            "bio": bio,
-            "version": employee.version,
-            "model": employee.model,
-            "model_tier": employee.model_tier,
-            "base_url": employee.base_url,
-            "fallback_model": employee.fallback_model,
-            "fallback_base_url": employee.fallback_base_url,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": employee.tools,
-            "tool_schemas": tool_schemas,
-            "system_prompt": system_prompt,
-            "agent_id": employee.agent_id,
-            "team": team,
-            "authority": authority,
-            "cost_7d": cost_summary,
-            "kpi": employee.kpi,
-            "auto_memory": employee.auto_memory,
-        }
-    )
+    # fields 过滤：?fields=system_prompt 可省略 tool_schemas 等大字段
+    fields_param = request.query_params.get("fields", "")
+    requested_fields = {f.strip() for f in fields_param.split(",") if f.strip()} if fields_param else set()
+
+    resp: dict[str, Any] = {
+        "name": employee.name,
+        "character_name": employee.character_name,
+        "display_name": employee.display_name,
+        "description": employee.description,
+        "bio": bio,
+        "version": employee.version,
+        "model": employee.model,
+        "model_tier": employee.model_tier,
+        "base_url": employee.base_url,
+        "fallback_model": employee.fallback_model,
+        "fallback_base_url": employee.fallback_base_url,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tools": employee.tools,
+        "system_prompt": system_prompt,
+        "agent_id": employee.agent_id,
+        "team": team,
+        "authority": authority,
+        "cost_7d": cost_summary,
+        "kpi": employee.kpi,
+        "auto_memory": employee.auto_memory,
+    }
+    # tool_schemas 可能很大，仅在未指定 fields 或显式请求时返回
+    if not requested_fields or "tool_schemas" in requested_fields:
+        resp["tool_schemas"] = tool_schemas
+
+    return JSONResponse(resp)
 
 
 async def _handle_model_tiers(request: Any, ctx: _AppContext) -> Any:
     """返回可用的模型档位列表（不含密钥和内部 URL）."""
-    from starlette.responses import JSONResponse
 
     from crew.organization import load_organization
 
@@ -457,7 +481,6 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
     Bearer token: 返回展示安全字段（蚁聚社区等下游需要）
     Admin token: 返回全量字段（含 model/tags 等运营情报）
     """
-    from starlette.responses import JSONResponse
 
     is_admin = _require_admin_token(request) is None
 
@@ -584,7 +607,7 @@ async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
         return _error_response(str(e), 409)
     except Exception as e:
         logger.exception("创建员工失败")
-        return _error_response(str(e), 500)
+        return _error_response("创建员工失败", 500)
 
     # 6. 启动后台任务生成头像
     agent_id = result.get("agent_id")
@@ -662,7 +685,7 @@ async def _handle_employee_copy(request: Any, ctx: _AppContext) -> Any:
         return _error_response(err_msg, 400)
     except Exception as e:
         logger.exception("复制员工失败")
-        return _error_response(str(e), 500)
+        return _error_response("复制员工失败", 500)
 
     # 5. 构建响应
     metadata = result.get("metadata")
@@ -694,11 +717,12 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
     安全策略：匿名只返回展示安全字段，admin 返回全量（含 domains/expertise）。
     """
     import yaml as _yaml
-    from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees
 
     # 判断是否 admin（不阻断，仅决定返回字段范围）
+    # 注意：匿名访问（通过 skip_paths）时 tenant middleware 会分配默认租户，
+    # _tenant_id_for_config 返回该默认值，这是预期行为（展示所有公开员工）。
     is_admin = _require_admin_token(request) is None
 
     result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
@@ -720,7 +744,7 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
                     raw_domains = raw.get("domains", [])
                     domains = raw_domains if isinstance(raw_domains, list) else []
             except Exception:
-                pass
+                logger.debug("读取 employee.yaml bio/domains 失败", exc_info=True)
         elif not emp.source_path:
             # DB 模式：从 employees 表读取
             try:
@@ -732,7 +756,7 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
                     raw_domains = db_row.get("domains") or []
                     domains = raw_domains if isinstance(raw_domains, list) else []
             except Exception:
-                pass
+                logger.debug("读取员工 DB bio/domains 失败", exc_info=True)
 
         # agent_id 已经是 "AI3050" 格式的字符串
         public_id = emp.agent_id if emp.agent_id else None
@@ -772,7 +796,6 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_employee_get(request: Any, ctx: _AppContext) -> Any:
     """返回单个员工的完整定义（对应 MCP get_employee）."""
-    from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees
 
@@ -797,10 +820,8 @@ async def _handle_employee_get(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     """返回员工完整运行时状态：角色设定 + 最近记忆 + 最近笔记."""
-    from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees
-    from crew.memory import get_memory_store
 
     identifier = request.path_params["identifier"]
     result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
@@ -810,7 +831,10 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
     limit = _safe_int(request.query_params.get("memory_limit", "10"), 10)
+    _ALLOWED_SORT_FIELDS = {"created_at", "importance", "updated_at"}
     sort_by = request.query_params.get("sort_by", "created_at")
+    if sort_by not in _ALLOWED_SORT_FIELDS:
+        sort_by = "created_at"
     min_importance = _safe_int(request.query_params.get("min_importance", "0"), 0)
     max_tokens = _safe_int(request.query_params.get("max_tokens", "0"), 0)  # 0=不限
 
@@ -829,7 +853,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             if db_row:
                 soul = db_row.get("soul_content", "")
         except Exception:
-            pass
+            logger.debug("读取员工 DB soul_content 失败", exc_info=True)
 
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
@@ -850,6 +874,8 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     _state_tenant = get_current_tenant(request)
 
     # 读取最近笔记 — 仅 admin 租户可见，防止内部 notes 泄露
+    # 注意：notes_dir 路径硬编码为 .crew/notes，这是设计选择——笔记是项目级资源，
+    # 不做租户隔离（与记忆系统不同），仅通过 admin 权限控制可见性。
     recent_notes: list[dict] = []
     if _state_tenant.is_admin:
         notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
@@ -923,7 +949,6 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     """更新员工配置（model 等）— employee.yaml 是唯一真相源."""
-    from starlette.responses import JSONResponse
 
     # P2: 员工修改需要管理员权限
     admin_err = _require_admin_token(request)
@@ -964,7 +989,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
             _write_yaml_field(employee.source_path, updates)
         except OSError as e:
             logger.exception("更新 employee.yaml 失败: %s", identifier)
-            return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
+            return _error_response("文件写入失败", 500)
     else:
         # DB 模式：更新 employees 表
         try:
@@ -979,7 +1004,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
                 return JSONResponse({"error": "Employee not found in DB"}, status_code=404)
         except Exception as e:
             logger.exception("更新 employees 表失败: %s", identifier)
-            return JSONResponse({"error": f"DB update failed: {e}"}, status_code=500)
+            return _error_response("数据库更新失败", 500)
 
     return JSONResponse(
         {
@@ -995,7 +1020,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     import shutil
     from pathlib import Path
 
-    from starlette.responses import JSONResponse
 
     # 管理员权限校验
     admin_err = _require_admin_token(request)
@@ -1028,7 +1052,11 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     if employee and employee.source_path:
         source = employee.source_path
         try:
-            if source.is_dir():
+            if source.is_symlink():
+                # 符号链接安全：不用 rmtree，只移除链接本身
+                source.unlink()
+                deleted_items.append(f"symlink: {source}")
+            elif source.is_dir():
                 shutil.rmtree(source)
                 deleted_items.append(f"directory: {source}")
             elif source.is_file():
@@ -1100,9 +1128,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
     幂等：同 employee + source_session + category 不重复写入。
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
 
     try:
         payload = await request.json()
@@ -1210,6 +1236,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         )
 
     # 相似度检测（2026-03-02 记忆去重）
+    # TODO: 考虑将相似度检测改为后台异步检查，避免热路径上的 embedding 计算阻塞写入
     from crew.memory_similarity import find_similar_memories
 
     # 检查是否强制写入
@@ -1250,6 +1277,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
     # 幂等检查：同 employee + source_session + category 不重复写入
+    # TODO: 改用 DB 层 EXISTS 查询提升性能（当前遍历内存中最近 50 条）
     if source_session:
         existing = store.query(employee, limit=50)
         for entry in existing:
@@ -1300,7 +1328,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
         invalidate(result_employee)
     except Exception:
-        pass
+        logger.debug("记忆缓存失效失败", exc_info=True)
 
     return JSONResponse(
         {
@@ -1322,16 +1350,11 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
         category (optional): 按类别过滤
         limit (optional): 最大返回条数，默认 20
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
 
     employee = request.query_params.get("employee", "")
     category = request.query_params.get("category") or None
-    try:
-        limit = int(request.query_params.get("limit", "20"))
-    except (ValueError, TypeError):
-        limit = 20
+    limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     if not employee:
         return JSONResponse({"error": "employee is required"}, status_code=400)
@@ -1379,9 +1402,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
     import json
     from datetime import datetime
 
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
 
     try:
         payload = await request.json()
@@ -1401,7 +1422,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # DB 版：直接用 store.update()
     if hasattr(store, "update") and callable(getattr(store, "update", None)):
-        employee = store._resolve_to_character_name(employee)
+        employee = store._resolve_to_character_name(employee)  # TODO: 提升为公共方法
 
         # 构建更新标签
         update_tag = f"updated-by:{updated_by or 'unknown'}"
@@ -1434,7 +1455,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
             invalidate(employee)
         except Exception:
-            pass
+            logger.debug("记忆缓存失效失败", exc_info=True)
 
         return JSONResponse(
             {
@@ -1446,7 +1467,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # 文件版：保留原有的 JSONL 操作逻辑
     employee = store._resolve_to_character_name(employee)
-    path = store._employee_file(employee)
+    path = store._employee_file(employee)  # TODO: 提升为公共方法
 
     if not path.exists():
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -1508,7 +1529,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
         invalidate(employee)
     except Exception:
-        pass
+        logger.debug("记忆缓存失效失败", exc_info=True)
 
     # 更新 embedding 缓存
     try:
@@ -1540,7 +1561,6 @@ async def _handle_memory_tags_list(request: Any, ctx: _AppContext) -> Any:
 
     返回所有标签词典，用于前端展示和自动补全。
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_tags import get_all_predefined_tags
 
@@ -1556,7 +1576,6 @@ async def _handle_memory_tags_suggest(request: Any, ctx: _AppContext) -> Any:
         content (required): 记忆内容
         existing_tags (optional): 已有标签（逗号分隔）
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_tags import suggest_tags
 
@@ -1586,15 +1605,11 @@ async def _handle_memory_tags_search(request: Any, ctx: _AppContext) -> Any:
         query (required): 搜索关键词
         limit (optional): 最多返回数量，默认 10
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_tags import search_tags
 
     query = request.query_params.get("query", "")
-    try:
-        limit = int(request.query_params.get("limit", "10"))
-    except (ValueError, TypeError):
-        limit = 10
+    limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
 
     if not query:
         return JSONResponse({"error": "query is required"}, status_code=400)
@@ -1605,7 +1620,6 @@ async def _handle_memory_tags_search(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
     """接收外部讨论数据，写入参与者记忆和会议记录."""
-    from starlette.responses import JSONResponse
 
     try:
         payload = await request.json()
@@ -1629,7 +1643,7 @@ async def _handle_memory_ingest(request: Any, ctx: _AppContext) -> Any:
         )
     except (ValueError, TypeError, OSError) as e:
         logger.exception("记忆导入失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
@@ -1644,14 +1658,12 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "deleted": true} 或 {"ok": false, "error": "..."}
     """
-    from starlette.responses import JSONResponse
 
     # P2: 记忆删除需要管理员权限（所有权校验）
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
 
     # 从路径参数获取 entry_id
     entry_id = request.path_params.get("entry_id", "")
@@ -1673,7 +1685,7 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
             )
     except Exception as e:
         logger.exception("记忆删除失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
@@ -1692,7 +1704,6 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
             "counts": {"pending": 5, "approved": 3, "rejected": 2}
         }
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 草稿列表需要管理员权限
     admin_err = _require_admin_token(request)
@@ -1703,10 +1714,7 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
 
     status = request.query_params.get("status")
     employee = request.query_params.get("employee")
-    try:
-        limit = int(request.query_params.get("limit", "100"))
-    except (ValueError, TypeError):
-        limit = 100
+    limit = _safe_limit(request.query_params.get("limit", "100"), default=100)
 
     drafts_dir = _tenant_data_dir(request, "memory_drafts") or Path("/data/memory_drafts")
 
@@ -1725,7 +1733,7 @@ async def _handle_memory_drafts_list(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("列出草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
@@ -1737,7 +1745,6 @@ async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "draft": {...}} 或 {"ok": false, "error": "..."}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 草稿详情需要管理员权限
     admin_err = _require_admin_token(request)
@@ -1762,7 +1769,7 @@ async def _handle_memory_drafts_get(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "draft": draft.model_dump()})
     except Exception as e:
         logger.exception("获取草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
@@ -1779,14 +1786,12 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "draft": {...}, "memory_id": "..."} 或 {"ok": false, "error": "..."}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 草稿审批需要管理员权限
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
     from crew.memory_drafts import MemoryDraftStore
 
     draft_id = request.path_params.get("draft_id", "")
@@ -1833,7 +1838,7 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("批准草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
@@ -1851,7 +1856,6 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "draft": {...}} 或 {"ok": false, "error": "..."}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 草稿拒绝需要管理员权限
     admin_err = _require_admin_token(request)
@@ -1865,7 +1869,7 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
     reason = payload.get("reason", "")
     # 安全加固: reviewed_by 从认证的租户上下文获取，不接受用户传入
@@ -1886,7 +1890,7 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "draft": draft.model_dump()})
     except Exception as e:
         logger.exception("拒绝草稿失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
@@ -1902,9 +1906,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "entries": [...], "total": 10}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
 
     employee = request.query_params.get("employee", "")
@@ -1915,10 +1917,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
     end_date_str = request.query_params.get("end_date")
     category = request.query_params.get("category")
 
-    try:
-        limit = int(request.query_params.get("limit", "100"))
-    except (ValueError, TypeError):
-        limit = 100
+    limit = _safe_limit(request.query_params.get("limit", "100"), default=100)
 
     try:
         from datetime import datetime
@@ -1948,7 +1947,7 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("查询归档记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
@@ -1963,13 +1962,16 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "restored": 2, "not_found": 0}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
+    # 安全加固: 恢复归档记忆需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
+
     from crew.memory_archive import MemoryArchive
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     employee = payload.get("employee", "")
@@ -1999,7 +2001,7 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, **stats})
     except Exception as e:
         logger.exception("恢复归档记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2011,9 +2013,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "total": 100, "by_year": {"2026": 50, "2025": 50}}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
     from crew.memory_archive import MemoryArchive
 
     employee = request.query_params.get("employee", "")
@@ -2031,7 +2031,7 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, **stats})
     except Exception as e:
         logger.exception("获取归档统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
@@ -2046,19 +2046,14 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "entries": [...], "total": 10}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
 
     tags_str = request.query_params.get("tags", "")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
     category = request.query_params.get("category")
     exclude_employee = request.query_params.get("exclude_employee", "")
 
-    try:
-        limit = int(request.query_params.get("limit", "20"))
-    except (ValueError, TypeError):
-        limit = 20
+    limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     try:
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
@@ -2069,6 +2064,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         )
 
         # 按类别过滤（query_shared 不支持 category 参数）
+        # TODO: 给 query_shared 添加 category 参数支持，在存储层过滤而非查询后过滤
         if category:
             entries = [e for e in entries if e.category == category]
 
@@ -2081,7 +2077,7 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as e:
         logger.exception("列出共享记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> Any:
@@ -2098,12 +2094,11 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
     返回:
         {"ok": true}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_shared_stats import SharedMemoryStats
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     memory_id = payload.get("memory_id", "")
@@ -2130,7 +2125,7 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.exception("记录共享记忆使用失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2145,7 +2140,6 @@ async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
     返回:
         根据查询参数返回不同的统计信息
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_shared_stats import SharedMemoryStats
 
@@ -2198,7 +2192,7 @@ async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取共享记忆统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
@@ -2217,23 +2211,22 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
             "top_tags": [{"tag": "api", "count": 15}, ...]
         }
     """
-    from starlette.responses import JSONResponse
 
     # 仪表板包含所有员工隐私记忆统计，仅 admin 可访问
     admin_err = _require_admin_token(request)
     if admin_err:
         return _error_response(admin_err, 403)
 
-    from crew.memory import get_memory_store
 
     employee = request.query_params.get("employee")
+    limit = _safe_limit(request.query_params.get("limit", "200"), default=200)
 
     try:
         memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
 
         if employee:
             # 单个员工的统计
-            entries = memory_store.query(employee, limit=1000)
+            entries = memory_store.query(employee, limit=limit)
             total = len(entries)
 
             by_category = {}
@@ -2283,7 +2276,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
             quality_dist = {"high": 0, "medium": 0, "low": 0}
 
             for emp in employees:
-                entries = memory_store.query(emp, limit=1000)
+                entries = memory_store.query(emp, limit=min(limit, 200))
                 emp_count = len(entries)
                 by_employee[emp] = emp_count
                 total += emp_count
@@ -2320,7 +2313,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取仪表板数据失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
@@ -2340,17 +2333,15 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "updated": 2, "failed": 0}
     """
-    from starlette.responses import JSONResponse
 
     # P2: 批量记忆操作需要管理员权限
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     employee = payload.get("employee", "")
@@ -2386,6 +2377,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
                     else:
                         failed_count += 1
                 except Exception:
+                    logger.debug("批量更新记忆单条失败: eid=%s", eid, exc_info=True)
                     failed_count += 1
 
             logger.info(
@@ -2457,7 +2449,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("批量更新记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
@@ -2472,17 +2464,15 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "deleted": 2}
     """
-    from starlette.responses import JSONResponse
 
     # P2: 批量删除需要管理员权限
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     employee = payload.get("employee", "")
@@ -2508,7 +2498,7 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("批量删除记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
@@ -2527,7 +2517,6 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "total": 100, "exported": 95, "output_file": "..."}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 轨迹导出需要管理员权限
     admin_err = _require_admin_token(request)
@@ -2537,7 +2526,7 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     employee = payload.get("employee")
@@ -2591,7 +2580,7 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("导出轨迹数据集失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> Any:
@@ -2608,7 +2597,6 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
     返回:
         {"ok": true, "annotation": {...}}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 标注接口需要管理员权限
     admin_err = _require_admin_token(request)
@@ -2618,7 +2606,7 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
 
     trajectory_id = payload.get("trajectory_id", "")
@@ -2657,7 +2645,7 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
 
     except Exception as e:
         logger.exception("添加轨迹标注失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> Any:
@@ -2670,7 +2658,6 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
     返回:
         {"ok": true, "annotations": [...], "total": 10}
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 列出标注需要管理员权限
     admin_err = _require_admin_token(request)
@@ -2706,7 +2693,7 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
 
     except Exception as e:
         logger.exception("列出轨迹标注失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
@@ -2724,9 +2711,7 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "results": [...], "total": 5}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
@@ -2759,7 +2744,7 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("语义搜索失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
@@ -2775,9 +2760,7 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "recommendations": [...], "total": 3}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
@@ -2809,7 +2792,7 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("推荐记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
@@ -2824,18 +2807,18 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "similar": [...], "total": 3}
     """
-    from starlette.responses import JSONResponse
 
-    from crew.memory import get_memory_store
     from crew.memory_semantic import SemanticSearchEngine
 
     try:
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
-        limit_str = request.query_params.get("limit", "5")
-        limit = int(limit_str)
+        limit = _safe_limit(request.query_params.get("limit", "5"), default=5)
 
         engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
         similar = engine.find_similar_memories(
@@ -2853,7 +2836,7 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("查找相似记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
@@ -2872,7 +2855,11 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "feedback": {...}}
     """
-    from starlette.responses import JSONResponse
+
+    # 安全加固: 提交反馈需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -2924,7 +2911,7 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("提交反馈失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
@@ -2936,7 +2923,6 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "feedback": [...], "total": 5}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -2948,7 +2934,10 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
 
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
         # 租户隔离
         _fb_base = _tenant_base_dir(request)
@@ -2968,7 +2957,7 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取反馈失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
@@ -2980,7 +2969,6 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "stats": {...}}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -2992,7 +2980,10 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
 
         # 从路径中提取 memory_id
         path = request.url.path
-        memory_id = path.split("/")[-1]
+        parts = path.rstrip("/").split("/")
+        memory_id = parts[-1] if parts else ""
+        if not memory_id:
+            return _error_response("missing memory_id", 400)
 
         # 租户隔离
         _stats_base = _tenant_base_dir(request)
@@ -3017,7 +3008,7 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取统计失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
@@ -3033,7 +3024,11 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true}
     """
-    from starlette.responses import JSONResponse
+
+    # 安全加固: 记录使用需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -3065,7 +3060,7 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("记录使用失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
@@ -3079,7 +3074,6 @@ async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "memories": [...], "total": 3}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -3115,7 +3109,7 @@ async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取低质量记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
@@ -3128,7 +3122,6 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "memories": [...], "total": 10}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -3139,7 +3132,7 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"error": admin_err}, status_code=403)
 
         employee = request.query_params.get("employee")
-        limit = int(request.query_params.get("limit", "10"))
+        limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
 
         # 租户隔离
         _pop_base = _tenant_base_dir(request)
@@ -3162,7 +3155,7 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
 
     except Exception as e:
         logger.exception("获取热门记忆失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any:
@@ -3174,7 +3167,6 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
     返回:
         {"ok": true, "summary": {...}}
     """
-    from starlette.responses import JSONResponse
 
     from crew.memory_feedback import MemoryFeedbackManager
 
@@ -3203,12 +3195,11 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
 
     except Exception as e:
         logger.exception("获取反馈汇总失败")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_github(request: Any, ctx: _AppContext) -> Any:
     """处理 GitHub webhook."""
-    from starlette.responses import JSONResponse
 
     from crew.webhook_config import (
         match_route,
@@ -3249,9 +3240,11 @@ async def _handle_github(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+_ALLOWED_TARGET_TYPES = {"employee", "pipeline", "discussion", "chain"}
+
+
 async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
     """处理 OpenClaw 消息事件."""
-    from starlette.responses import JSONResponse
 
     payload = await request.json()
 
@@ -3259,6 +3252,11 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
     target_name = payload.get("target_name", "")
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+
+    if target_type not in _ALLOWED_TARGET_TYPES:
+        return _error_response(
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+        )
 
     if not target_name:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
@@ -3278,7 +3276,6 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
     """处理通用 JSON webhook."""
-    from starlette.responses import JSONResponse
 
     payload = await request.json()
 
@@ -3286,6 +3283,11 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
     target_name = payload.get("target_name", "")
     args = payload.get("args", {})
     sync = payload.get("sync", False)
+
+    if target_type not in _ALLOWED_TARGET_TYPES:
+        return _error_response(
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+        )
 
     if not target_name:
         return JSONResponse({"error": "missing target_name"}, status_code=400)
@@ -3305,7 +3307,6 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
     """直接触发 pipeline."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: pipeline 配置是全局共享的，租户不应直接调用
     admin_err = _require_admin_token(request)
@@ -3314,7 +3315,7 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
     args = payload.get("args", {})
     sync = payload.get("sync", False)
@@ -3349,6 +3350,7 @@ async def _run_and_callback(
     callback_channel_id: int,
     callback_sender_id: str | None,
     callback_parent_id: int | None,
+    tenant_id: str | None = None,
 ) -> None:
     """后台执行员工 + 回调蚁聚发频道消息（异步回调模式）."""
     import time as _time
@@ -3394,7 +3396,7 @@ async def _run_and_callback(
         from crew.tool_schema import AGENT_TOOLS
         from crew.webhook_feishu import _needs_tools
 
-        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
         emp = discovery.get(name)
         has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
         use_fast_path = (
@@ -3429,7 +3431,7 @@ async def _run_and_callback(
                 model=model,
                 user_message=user_message,
                 message_history=message_history,
-                tenant_id=_tenant_id_for_config(request),
+                tenant_id=tenant_id,
             )
 
         _elapsed = _time.monotonic() - _t0
@@ -3471,7 +3473,7 @@ async def _run_and_callback(
         )
         ctx.registry.update(record.task_id, "completed", result=result)
     except Exception:
-        pass
+        logger.debug("任务注册表更新失败", exc_info=True)
 
     # 回复后记忆写回（fire-and-forget）
     if isinstance(result, dict) and result.get("output"):
@@ -3543,13 +3545,100 @@ async def _run_and_callback(
         logger.exception("异步回调请求异常: emp=%s channel=%d", name, callback_channel_id)
 
 
+def _execute_skills(
+    *,
+    project_dir: Any,
+    tenant_id: str | None,
+    employee_id: str,
+    employee: Any,
+    message: str,
+    trigger_context: dict[str, Any],
+    log_prefix: str = "",
+) -> str | None:
+    """Skills 自动触发 — 返回注入用的记忆文本（或 None）.
+
+    共享逻辑：同时被 _handle_chat 和 _handle_run_employee 调用。
+    """
+    from crew.skills import SkillStore
+    from crew.skills_engine import SkillsEngine
+
+    skill_store = SkillStore(project_dir=project_dir)
+    memory_store = get_memory_store(project_dir=project_dir, tenant_id=tenant_id)
+    skills_engine = SkillsEngine(skill_store, memory_store)
+
+    employee_name = employee.character_name or employee_id
+
+    triggered = skills_engine.check_triggers(employee_name, message, trigger_context)
+    if not triggered:
+        return None
+
+    logger.info(
+        "Skills 触发%s: employee=%s task=%s triggered=%d",
+        log_prefix,
+        employee_name,
+        message[:50],
+        len(triggered),
+    )
+
+    enhanced_context: dict[str, Any] = {}
+    for skill, score in triggered[:3]:
+        try:
+            result = skills_engine.execute_skill(
+                skill,
+                employee_name,
+                {"task": message, **trigger_context},
+            )
+            if result.get("enhanced_context"):
+                for key, value in result["enhanced_context"].items():
+                    if key in enhanced_context:
+                        if isinstance(enhanced_context[key], list) and isinstance(
+                            value, list
+                        ):
+                            enhanced_context[key].extend(value)
+                        else:
+                            enhanced_context[key] = value
+                    else:
+                        enhanced_context[key] = value
+            skills_engine.record_trigger(
+                skill=skill,
+                employee=employee_name,
+                task=message,
+                match_score=score,
+                execution_result=result,
+            )
+        except Exception as skill_exec_error:
+            logger.warning(
+                "Skill 执行失败%s: skill=%s error=%s",
+                log_prefix,
+                skill.name,
+                skill_exec_error,
+            )
+
+    # 将 enhanced_context 中的 memories 格式化为文本
+    memories = enhanced_context.get("memories", [])
+    if not memories:
+        return None
+
+    memory_text = "【相关历史记忆】\n" + "\n".join(
+        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
+        for m in memories[:5]
+    )
+    logger.info(
+        "Skills 记忆注入%s: employee=%s memories=%d text_len=%d",
+        log_prefix,
+        employee_name,
+        len(memories),
+        len(memory_text),
+    )
+    return memory_text
+
+
 async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     """直接触发员工（支持 SSE 流式输出 + 对话模式）."""
-    from starlette.responses import JSONResponse
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
     args = payload.get("args", {})
     # 兼容：顶层 task 自动塞入 args（旧版调用方式）
@@ -3574,81 +3663,23 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
         emp = discovery.get(name)
 
-        enhanced_context = {}
-        employee_name = None
         if emp is not None and isinstance(user_message, str):
             try:
-                from crew.memory import get_memory_store
-                from crew.skills import SkillStore
-                from crew.skills_engine import SkillsEngine
-
-                skill_store = SkillStore(project_dir=ctx.project_dir)
-                memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-                engine = SkillsEngine(skill_store, memory_store)
-
-                employee_name = emp.character_name or name
-
-                # 检查触发
-                triggered = engine.check_triggers(employee_name, user_message, args)
-                if triggered:
-                    logger.info(
-                        "Skills 触发: employee=%s task=%s triggered=%d",
-                        employee_name,
-                        user_message[:50],
-                        len(triggered),
-                    )
-                    # 执行触发的 skills（按优先级排序）
-                    for skill, score in triggered[:3]:
-                        try:
-                            result = engine.execute_skill(
-                                skill,
-                                employee_name,
-                                {"task": user_message, "channel": channel, **args},
-                            )
-                            if result.get("enhanced_context"):
-                                for key, value in result["enhanced_context"].items():
-                                    if key in enhanced_context:
-                                        if isinstance(enhanced_context[key], list) and isinstance(
-                                            value, list
-                                        ):
-                                            enhanced_context[key].extend(value)
-                                        else:
-                                            enhanced_context[key] = value
-                                    else:
-                                        enhanced_context[key] = value
-                            engine.record_trigger(
-                                skill=skill,
-                                employee=employee_name,
-                                task=user_message,
-                                match_score=score,
-                                execution_result=result,
-                            )
-                        except Exception as skill_exec_error:
-                            logger.warning(
-                                "Skill 执行失败: skill=%s error=%s", skill.name, skill_exec_error
-                            )
+                _skills_memory_text = _execute_skills(
+                    project_dir=ctx.project_dir,
+                    tenant_id=_tenant_id_for_store(request),
+                    employee_id=name,
+                    employee=emp,
+                    message=user_message,
+                    trigger_context={"task": user_message, "channel": channel, **args},
+                )
+                if _skills_memory_text:
+                    if extra_context:
+                        extra_context = _skills_memory_text + "\n\n" + extra_context
+                    else:
+                        extra_context = _skills_memory_text
             except Exception as skills_error:
                 logger.warning("Skills 检查失败: %s", skills_error)
-
-        # 将 enhanced_context 注入到 extra_context
-        if enhanced_context:
-            memories = enhanced_context.get("memories", [])
-            if memories:
-                memory_text = "【相关历史记忆】\n" + "\n".join(
-                    f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
-                    for m in memories[:5]
-                )
-                if extra_context:
-                    extra_context = memory_text + "\n\n" + extra_context
-                else:
-                    extra_context = memory_text
-
-                logger.info(
-                    "Skills 记忆注入: employee=%s memories=%d extra_context_len=%d",
-                    employee_name or name,
-                    len(memories),
-                    len(extra_context),
-                )
 
         # Phase 3：外部对话输出控制
         from crew.classification import CHANNEL_SOURCE_TYPE, EXTERNAL_OUTPUT_CONTROL_PROMPT
@@ -3716,6 +3747,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                     callback_channel_id=callback_channel_id,
                     callback_sender_id=callback_sender_id,
                     callback_parent_id=callback_parent_id,
+                    tenant_id=_tenant_id_for_config(request),
                 )
             )
             _background_tasks.add(task)
@@ -3881,7 +3913,6 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     """直接触发路由模板 — 展开为 delegate_chain 执行."""
     import json as _json
 
-    from starlette.responses import JSONResponse
 
     # 安全加固: 路由模板是全局共享的，租户不应直接调用
     admin_err = _require_admin_token(request)
@@ -3892,7 +3923,7 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
     task = payload.get("args", {}).get("task", "") or payload.get("task", "")
     overrides = payload.get("overrides", {})
@@ -3958,7 +3989,6 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
     """Agent 模式执行员工 — 在 Docker 沙箱中自主完成任务 (SSE 流式)."""
     import json as _json
 
-    from starlette.responses import JSONResponse, StreamingResponse
 
     # 安全加固: agent run 涉及沙箱远程执行，仅 admin 可用
     admin_err = _require_admin_token(request)
@@ -3967,7 +3997,7 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if request.headers.get("content-type") == "application/json" else {}
+        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     )
     task_desc = payload.get("task", "")
     if not task_desc:
@@ -4061,7 +4091,6 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
     """查询任务状态."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 任务含 args/outputs/token 统计，owner 为空时默认需要 admin
     admin_err = _require_admin_token(request)
@@ -4090,7 +4119,6 @@ async def _handle_task_status(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
     """重放已完成/失败的任务."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: replay 重新执行任务，owner 为空时需要 admin
     admin_err = _require_admin_token(request)
@@ -4101,7 +4129,7 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "task not found"}, status_code=404)
 
     # 归属校验：有 owner 时检查 user_id，无 owner 时必须 admin
-    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    body = await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
     if record.owner:
         if not user_id:
@@ -4135,7 +4163,6 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
     """POST /api/tasks/{task_id}/approve — 批准或拒绝等待审批的任务."""
     import asyncio
 
-    from starlette.responses import JSONResponse
 
     # 安全加固: owner 为空时默认需要 admin
     admin_err = _require_admin_token(request)
@@ -4184,7 +4211,6 @@ async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
     """查询 cron 调度器状态."""
-    from starlette.responses import JSONResponse
 
     if ctx.scheduler is None:
         return JSONResponse({"enabled": False, "schedules": []})
@@ -4199,7 +4225,6 @@ async def _handle_cron_status(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
     """成本汇总 — GET /api/cost/summary?days=7&employee=xxx&source=work."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 成本数据含全员工 token 用量和计费信息，仅 admin 可访问
     admin_err = _require_admin_token(request)
@@ -4218,7 +4243,6 @@ async def _handle_cost_summary(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     """恢复员工权限 — POST /api/employees/{identifier}/authority/restore."""
-    from starlette.responses import JSONResponse
 
     # P2: 权限恢复需要管理员权限
     admin_err = _require_admin_token(request)
@@ -4277,19 +4301,17 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     """
     from datetime import datetime, timedelta
 
-    from starlette.responses import JSONResponse
 
     # 安全加固: 组织级记忆聚合暴露全员工知识库，仅 admin 可访问
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
-    # limit=0 表示不限（向后兼容：客户端可传 limit=50 恢复旧行为）
-    limit = _safe_int(request.query_params.get("limit", "0"), 0)
+    # limit 上限 2000，默认 500（防止全量加载 OOM）
+    limit = min(int(request.query_params.get("limit", "500")), 2000) if request.query_params.get("limit") else 500
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
@@ -4306,8 +4328,8 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     }
 
     for emp_name in employee_names:
-        # limit=0 → 不截断每员工查询
-        entries = store.query(emp_name, category=category, limit=0, max_visibility="open")
+        # 每员工限制 limit 条，防止 OOM
+        entries = store.query(emp_name, category=category, limit=limit, max_visibility="open")
         for m in entries:
             stats[m.category] = stats.get(m.category, 0) + 1
             if not cutoff or m.created_at >= cutoff:
@@ -4340,7 +4362,6 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_permission_respond(request: Any, ctx: _AppContext) -> Any:
     """POST /api/permissions/respond — 响应权限请求."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 权限审批是高危操作（可授权工具调用），仅 admin 可操作
     admin_err = _require_admin_token(request)
@@ -4408,7 +4429,6 @@ async def _handle_permission_list(request: Any, ctx: _AppContext) -> Any:
 
     支持 ?user_id=xxx 查询参数进行用户隔离过滤。
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 权限请求列表暴露工具参数和请求 ID，仅 admin 可查看
     admin_err = _require_admin_token(request)
@@ -4435,20 +4455,18 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         limit (optional): 最大返回条数，默认 10
         employee (optional): 限定搜索某个员工（不传则跨全员工搜索）
     """
-    from starlette.responses import JSONResponse
 
     # 安全加固: 跨员工搜索可泄露私有/受限记忆，仅 admin 可访问
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-    from crew.memory import get_memory_store
 
     query = request.query_params.get("q", "").strip()
     if not query:
         return JSONResponse({"error": "q is required"}, status_code=400)
 
-    limit = _safe_int(request.query_params.get("limit", "10"), 10)
+    limit = _safe_limit(request.query_params.get("limit", "10"), default=10)
     if limit <= 0:
         limit = 10
     employee = request.query_params.get("employee", "").strip()
@@ -4478,7 +4496,7 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": True, "entries": entries, "total": len(entries)})
     except Exception as e:
         logger.exception("记忆搜索失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
@@ -4487,7 +4505,6 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     轨迹数据存储到独立的文件系统，不写入永久记忆。
     存储路径：/data/trajectory_archive/{date}/{employee}-{uuid}.jsonl
     """
-    from starlette.responses import JSONResponse
 
     # 身份校验：必须经过多租户中间件认证（request.state.tenant 由中间件注入）
     # 不依赖 get_current_tenant 的 fallback（fallback 返回 admin，会绕过认证）
@@ -4515,7 +4532,7 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
 
         employee_name = resolve_character_name(employee_name, project_dir=ctx.project_dir)
     except Exception:
-        pass
+        logger.debug("轨迹上报: 员工名解析失败, 使用原始值: %s", employee_name, exc_info=True)
     steps = payload.get("steps")
     if not employee_name or not steps:
         return JSONResponse(
@@ -4638,32 +4655,36 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
 
         total_steps = len(processed_steps)
 
-        # ── 更新元数据索引 ──
+        # ── 更新元数据索引（加文件锁防并发写入冲突） ──
+        from crew.paths import file_lock
+
         index_file = archive_base / "index.json"
-        index_data = {}
-        if index_file.exists():
-            try:
-                with open(index_file, encoding="utf-8") as f:
-                    index_data = _json.load(f)
-            except Exception:
-                pass
 
         from datetime import datetime
 
-        index_data[trajectory_id] = {
-            "trajectory_id": trajectory_id,
-            "employee": employee_name,
-            "task": task_description[:500],
-            "model": model,
-            "channel": channel,
-            "success": success,
-            "total_steps": total_steps,
-            "created_at": datetime.now().isoformat(),
-            "file_path": str(trajectory_file),
-        }
+        with file_lock(index_file):
+            index_data = {}
+            if index_file.exists():
+                try:
+                    with open(index_file, encoding="utf-8") as f:
+                        index_data = _json.load(f)
+                except Exception:
+                    logger.debug("轨迹索引文件解析失败: %s", index_file, exc_info=True)
 
-        with open(index_file, "w", encoding="utf-8") as f:
-            _json.dump(index_data, f, ensure_ascii=False, indent=2)
+            index_data[trajectory_id] = {
+                "trajectory_id": trajectory_id,
+                "employee": employee_name,
+                "task": task_description[:500],
+                "model": model,
+                "channel": channel,
+                "success": success,
+                "total_steps": total_steps,
+                "created_at": datetime.now().isoformat(),
+                "file_path": str(trajectory_file),
+            }
+
+            with open(index_file, "w", encoding="utf-8") as f:
+                _json.dump(index_data, f, ensure_ascii=False, indent=2)
 
         logger.info(
             "轨迹已存储: %s (employee=%s, steps=%d, id=%s)",
@@ -4684,12 +4705,11 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(resp_data)
     except Exception as e:
         logger.exception("轨迹上报处理失败")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     """项目状态概览 — 组织架构 + 成本 + 员工列表."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 含组织架构/计费余额/API key 间接暴露，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -4714,26 +4734,57 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     org = load_organization(project_dir=ctx.project_dir)
     cost = query_cost_summary(ctx.registry, days=days)
 
-    # 从任意员工配置提取 aiberm API key
-    aiberm_billing = None
+    # 并发获取外部余额/账单（P2-6: 避免串行 HTTP 请求）
+    _billing_coro = None
+    _billing_api_key = None
+    _billing_base_url = None
     for emp in result.employees.values():
         if emp.api_key and "aiberm.com" in (emp.base_url or ""):
-            aiberm_billing = await fetch_aiberm_billing(
-                api_key=emp.api_key,
-                base_url=emp.base_url,
+            _billing_api_key = emp.api_key
+            _billing_base_url = emp.base_url
+            _billing_coro = fetch_aiberm_billing(
+                api_key=_billing_api_key,
+                base_url=_billing_base_url,
                 days=days,
             )
             break
 
-    # aiberm 余额（需要系统访问令牌 + 用户 ID）
-    aiberm_balance = None
     aiberm_token = os.environ.get("AIBERM_ACCESS_TOKEN", "")
     aiberm_user_id = os.environ.get("AIBERM_USER_ID", "")
-    if aiberm_token:
-        aiberm_balance = await fetch_aiberm_balance(
-            access_token=aiberm_token,
-            user_id=aiberm_user_id,
-        )
+    _balance_coro = (
+        fetch_aiberm_balance(access_token=aiberm_token, user_id=aiberm_user_id)
+        if aiberm_token
+        else None
+    )
+
+    moonshot_key = os.environ.get("MOONSHOT_API_KEY") or os.environ.get("KIMI_API_KEY", "")
+    _moonshot_coro = fetch_moonshot_balance(api_key=moonshot_key) if moonshot_key else None
+
+    # 收集需要并发执行的协程
+    _coros: list[Any] = []
+    _coro_keys: list[str] = []
+    if _billing_coro:
+        _coros.append(_billing_coro)
+        _coro_keys.append("billing")
+    if _balance_coro:
+        _coros.append(_balance_coro)
+        _coro_keys.append("balance")
+    if _moonshot_coro:
+        _coros.append(_moonshot_coro)
+        _coro_keys.append("moonshot")
+
+    _results_map: dict[str, Any] = {}
+    if _coros:
+        _gathered = await asyncio.gather(*_coros, return_exceptions=True)
+        for key, val in zip(_coro_keys, _gathered):
+            if isinstance(val, Exception):
+                logger.warning("外部计费请求失败 (%s): %s", key, val)
+                _results_map[key] = None
+            else:
+                _results_map[key] = val
+
+    aiberm_billing = _results_map.get("billing")
+    aiberm_balance = _results_map.get("balance")
     if aiberm_billing is None:
         aiberm_billing = {}
     if aiberm_balance:
@@ -4742,9 +4793,8 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
 
     # Moonshot/Kimi 余额 + 7日估算成本
     moonshot_billing = None
-    moonshot_key = os.environ.get("MOONSHOT_API_KEY") or os.environ.get("KIMI_API_KEY", "")
-    if moonshot_key:
-        balance = await fetch_moonshot_balance(api_key=moonshot_key)
+    _moonshot_balance = _results_map.get("moonshot")
+    if _moonshot_balance is not None:
         # 从 cost_7d 提取 kimi 相关模型的估算成本
         kimi_cost_usd = 0.0
         kimi_tasks = 0
@@ -4753,7 +4803,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
                 kimi_cost_usd += model_cost.get("cost_usd", 0)
                 kimi_tasks += model_cost.get("tasks", 0)
         moonshot_billing = {
-            "balance": balance,
+            "balance": _moonshot_balance,
             "cost_7d_usd": round(kimi_cost_usd, 4),
             "cost_7d_tasks": kimi_tasks,
         }
@@ -4764,7 +4814,6 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     cost = calibrate_employee_costs(cost, aiberm_real_usd=aiberm_real, moonshot_real_usd=kimi_real)
 
     # 预加载所有员工的记忆数量
-    from crew.memory import get_memory_store
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     memory_counts: dict[str, int] = {}
@@ -4912,7 +4961,6 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     from collections import defaultdict
     from datetime import datetime, timedelta
 
-    from starlette.responses import JSONResponse
 
     days = _safe_int(request.query_params.get("days", "7"), 7)
     cutoff = datetime.now() - timedelta(days=days)
@@ -4927,6 +4975,7 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     total_failed = 0
     total_cost = 0.0
 
+    # TODO: 给 registry.snapshot() 添加 since 参数，在存储层过滤，避免遍历全量任务快照
     for t in ctx.registry.snapshot():
         if not t.created_at or t.created_at.isoformat() < cutoff_str:
             continue
@@ -4981,6 +5030,162 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _chat_via_sg_bridge(
+    *,
+    ctx: _AppContext,
+    effective_message: str,
+    raw_message: str,
+    employee_id: str,
+    message_history: list[dict[str, Any]] | None,
+    channel: str,
+    sender_type: str,
+) -> str | None:
+    """SG Bridge 通道尝试 — 返回回复文本或 None（表示 fallback）."""
+    # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
+    _sg_reply: str | None = None
+    try:
+        from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
+
+        _sg_reply = await sg_api_dispatch(
+            effective_message,
+            ctx=ctx,
+            project_dir=ctx.project_dir,
+            employee_name=employee_id,
+            message_history=message_history,
+            push_event_fn=None,  # TODO: 支持流式输出
+            channel=channel,
+            sender_type=sender_type,
+        )
+        logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
+    except SGAPIBridgeError as _sg_api_err:
+        logger.info("SG API Bridge fallback: %s → 尝试 SSH Bridge", _sg_api_err)
+        _sg_reply = None
+    except Exception as _sg_api_exc:
+        logger.warning("SG API Bridge 意外异常: %s → 尝试 SSH Bridge", _sg_api_exc)
+        _sg_reply = None
+
+    # Fallback: SSH Bridge（两阶段权限确认）
+    if _sg_reply is None:
+        try:
+            from crew.sg_bridge import sg_dispatch
+
+            # 定义权限回调函数
+            async def permission_callback(operations: list[dict]) -> bool:
+                """请求用户权限确认."""
+                from crew.permission_request import PermissionManager
+
+                manager = PermissionManager()
+
+                # 构建权限请求参数
+                tool_names = [op["tool"] for op in operations]
+                tool_params = {
+                    "operations": operations,
+                    "message": raw_message[:200],
+                }
+
+                # 请求权限（会推送事件到前端）
+                approved = await manager.request_permission(
+                    tool_name=f"SG执行: {', '.join(tool_names)}",
+                    tool_params=tool_params,
+                    timeout=60.0,
+                )
+
+                return approved
+
+            _sg_reply = await sg_dispatch(
+                effective_message,
+                project_dir=ctx.project_dir,
+                employee_name=employee_id,
+                message_history=message_history,
+                permission_callback=permission_callback,
+            )
+        except Exception as _sg_exc:
+            logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
+            _sg_reply = None
+
+    return _sg_reply
+
+
+async def _chat_via_agent_tools(
+    *,
+    ctx: _AppContext,
+    request: Any,
+    employee_id: str,
+    effective_message: str,
+    model: str | None,
+    message_history: list[dict[str, Any]] | None,
+    sender_id: str,
+    attachments: list[dict[str, Any]] | None,
+    sender_type: str,
+    channel: str,
+    stream: bool,
+) -> Any:
+    """Agent tools 执行路径 — 返回 Response（流式）或 dict（非流式）."""
+    import json as _json
+
+    import crew.webhook_executor as _wh_exec
+
+    _chat_tenant = get_current_tenant(request)
+    _tenant = _tenant_id_for_config(request)
+
+    if stream:
+        # 流式 agent tools 路径 — 真流式逐 token 推送
+        agent_stream = _wh_exec._stream_employee_with_tools(
+            ctx,
+            employee_id,
+            {},  # args
+            agent_id=None,
+            model=model,
+            user_message=effective_message,
+            message_history=message_history,
+            sender_id=sender_id,
+            attachments=attachments,
+            sender_type=sender_type,
+            channel=channel,
+            tenant_id=_tenant,
+            is_admin=_chat_tenant.is_admin,
+        )
+
+        async def _agent_sse_generator():
+            async for chunk in agent_stream:
+                chunk_data = _json.dumps(chunk, ensure_ascii=False)
+                yield f"data: {chunk_data}\n\n"
+
+        return StreamingResponse(
+            _agent_sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    else:
+        # 非流式 agent tools 路径
+        exec_result = await _wh_exec._execute_employee_with_tools(
+            ctx,
+            employee_id,
+            {},  # args
+            agent_id=None,
+            model=model,
+            user_message=effective_message,
+            message_history=message_history,
+            sender_id=sender_id,
+            attachments=attachments,
+            sender_type=sender_type,
+            channel=channel,
+            tenant_id=_tenant,
+            is_admin=_chat_tenant.is_admin,
+        )
+        return {
+            "reply": exec_result.get("output", ""),
+            "employee_id": employee_id,
+            "memory_updated": False,
+            "tokens_used": exec_result.get("input_tokens", 0)
+            + exec_result.get("output_tokens", 0),
+            "latency_ms": 0,
+        }
+
+
 async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     """统一对话接口 — 供蚁聚、飞书、外部渠道统一调用.
 
@@ -4997,7 +5202,6 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     """
     import json as _json
 
-    from starlette.responses import JSONResponse, StreamingResponse
 
     # ── 解析请求体 ──
     try:
@@ -5051,75 +5255,20 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     _skills_memory_text: str | None = None
     try:
         from crew.discovery import discover_employees as _chat_discover
-        from crew.memory import get_memory_store
-        from crew.skills import SkillStore
-        from crew.skills_engine import SkillsEngine
 
         _chat_discovery = _chat_discover(project_dir=ctx.project_dir)
         _chat_emp = _chat_discovery.get(employee_id)
 
         if _chat_emp is not None and isinstance(message, str):
-            skill_store = SkillStore(project_dir=ctx.project_dir)
-            memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-            skills_engine = SkillsEngine(skill_store, memory_store)
-
-            _chat_employee_name = _chat_emp.character_name or employee_id
-
-            _skills_context = {"channel": channel, "sender_type": sender_type}
-            triggered = skills_engine.check_triggers(_chat_employee_name, message, _skills_context)
-            if triggered:
-                logger.info(
-                    "Skills 触发 (/api/chat): employee=%s task=%s triggered=%d",
-                    _chat_employee_name,
-                    message[:50],
-                    len(triggered),
-                )
-                enhanced_context: dict[str, Any] = {}
-                for skill, score in triggered[:3]:
-                    try:
-                        result = skills_engine.execute_skill(
-                            skill,
-                            _chat_employee_name,
-                            {"task": message, "channel": channel, "sender_type": sender_type},
-                        )
-                        if result.get("enhanced_context"):
-                            for key, value in result["enhanced_context"].items():
-                                if key in enhanced_context:
-                                    if isinstance(enhanced_context[key], list) and isinstance(
-                                        value, list
-                                    ):
-                                        enhanced_context[key].extend(value)
-                                    else:
-                                        enhanced_context[key] = value
-                                else:
-                                    enhanced_context[key] = value
-                        skills_engine.record_trigger(
-                            skill=skill,
-                            employee=_chat_employee_name,
-                            task=message,
-                            match_score=score,
-                            execution_result=result,
-                        )
-                    except Exception as _skill_exec_err:
-                        logger.warning(
-                            "Skill 执行失败 (/api/chat): skill=%s error=%s",
-                            skill.name,
-                            _skill_exec_err,
-                        )
-
-                # 将 enhanced_context 中的 memories 格式化为文本
-                memories = enhanced_context.get("memories", [])
-                if memories:
-                    _skills_memory_text = "【相关历史记忆】\n" + "\n".join(
-                        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
-                        for m in memories[:5]
-                    )
-                    logger.info(
-                        "Skills 记忆注入 (/api/chat): employee=%s memories=%d text_len=%d",
-                        _chat_employee_name,
-                        len(memories),
-                        len(_skills_memory_text),
-                    )
+            _skills_memory_text = _execute_skills(
+                project_dir=ctx.project_dir,
+                tenant_id=_tenant_id_for_store(request),
+                employee_id=employee_id,
+                employee=_chat_emp,
+                message=message,
+                trigger_context={"task": message, "channel": channel, "sender_type": sender_type},
+                log_prefix=" (/api/chat)",
+            )
     except Exception as _skills_err:
         logger.warning("Skills 检查失败 (/api/chat): %s", _skills_err)
 
@@ -5143,7 +5292,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         import asyncio
 
         # 启动后台任务
-        asyncio.create_task(
+        task = asyncio.create_task(
             _run_and_callback(
                 ctx=ctx,
                 name=employee_id,
@@ -5158,8 +5307,11 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 callback_channel_id=callback_channel_id,
                 callback_sender_id=callback_sender_id,
                 callback_parent_id=None,
+                tenant_id=_tenant_id_for_config(request),
             )
         )
+        _background_tasks.add(task)
+        task.add_done_callback(_task_done_callback)
 
         return JSONResponse(
             {
@@ -5178,66 +5330,15 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     # ── SG Bridge 主通道尝试（非 stream / 非 context_only 时） ──
     _sg_reply: str | None = None
     if not stream and not context_only:
-        # 优先尝试 SG API Bridge（直接用 Claude API + 本地工具执行）
-        try:
-            from crew.sg_api_bridge import SGAPIBridgeError, sg_api_dispatch
-
-            _sg_reply = await sg_api_dispatch(
-                _effective_message,
-                ctx=ctx,
-                project_dir=ctx.project_dir,
-                employee_name=employee_id,
-                message_history=message_history,
-                push_event_fn=None,  # TODO: 支持流式输出
-                channel=channel,
-                sender_type=sender_type,
-            )
-            logger.info("SG API Bridge 成功: reply_len=%d", len(_sg_reply))
-        except SGAPIBridgeError as _sg_api_err:
-            logger.info("SG API Bridge fallback: %s → 尝试 SSH Bridge", _sg_api_err)
-            _sg_reply = None
-        except Exception as _sg_api_exc:
-            logger.warning("SG API Bridge 意外异常: %s → 尝试 SSH Bridge", _sg_api_exc)
-            _sg_reply = None
-
-        # Fallback: SSH Bridge（两阶段权限确认）
-        if _sg_reply is None:
-            try:
-                from crew.sg_bridge import sg_dispatch
-
-                # 定义权限回调函数
-                async def permission_callback(operations: list[dict]) -> bool:
-                    """请求用户权限确认."""
-                    from crew.permission_request import PermissionManager
-
-                    manager = PermissionManager()
-
-                    # 构建权限请求参数
-                    tool_names = [op["tool"] for op in operations]
-                    tool_params = {
-                        "operations": operations,
-                        "message": message[:200],
-                    }
-
-                    # 请求权限（会推送事件到前端）
-                    approved = await manager.request_permission(
-                        tool_name=f"SG执行: {', '.join(tool_names)}",
-                        tool_params=tool_params,
-                        timeout=60.0,
-                    )
-
-                    return approved
-
-                _sg_reply = await sg_dispatch(
-                    _effective_message,
-                    project_dir=ctx.project_dir,
-                    employee_name=employee_id,
-                    message_history=message_history,
-                    permission_callback=permission_callback,
-                )
-            except Exception as _sg_exc:
-                logger.info("SG Bridge fallback (/api/chat): %s → 走 crew 引擎", _sg_exc)
-                _sg_reply = None
+        _sg_reply = await _chat_via_sg_bridge(
+            ctx=ctx,
+            effective_message=_effective_message,
+            raw_message=message,
+            employee_id=employee_id,
+            message_history=message_history,
+            channel=channel,
+            sender_type=sender_type,
+        )
 
     if _sg_reply is not None:
         result: dict[str, Any] = {
@@ -5267,68 +5368,25 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         has_agent_tools = any(t in AGENT_TOOLS for t in (emp.tools or []))
 
         try:
-            if has_agent_tools and not context_only and stream:
-                # 流式 agent tools 路径 — 真流式逐 token 推送
-                import crew.webhook_executor as _wh_exec
-
-                _chat_tenant = get_current_tenant(request)
-                agent_stream = _wh_exec._stream_employee_with_tools(
-                    ctx,
-                    employee_id,
-                    {},  # args
-                    agent_id=None,
+            if has_agent_tools and not context_only:
+                # agent tools 路径（流式或非流式）
+                agent_result = await _chat_via_agent_tools(
+                    ctx=ctx,
+                    request=request,
+                    employee_id=employee_id,
+                    effective_message=_effective_message,
                     model=model,
-                    user_message=_effective_message,
                     message_history=message_history,
                     sender_id=sender_id,
                     attachments=attachments,
                     sender_type=sender_type,
                     channel=channel,
-                    tenant_id=_tenant_id_for_config(request),
-                    is_admin=_chat_tenant.is_admin,
+                    stream=stream,
                 )
-
-                async def _agent_sse_generator():
-                    async for chunk in agent_stream:
-                        chunk_data = _json.dumps(chunk, ensure_ascii=False)
-                        yield f"data: {chunk_data}\n\n"
-
-                return StreamingResponse(
-                    _agent_sse_generator(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "X-Accel-Buffering": "no",
-                    },
-                )
-            elif has_agent_tools and not context_only:
-                # 非流式 agent tools 路径
-                import crew.webhook_executor as _wh_exec
-
-                _chat_tenant2 = get_current_tenant(request)
-                exec_result = await _wh_exec._execute_employee_with_tools(
-                    ctx,
-                    employee_id,
-                    {},  # args
-                    agent_id=None,
-                    model=model,
-                    user_message=_effective_message,
-                    message_history=message_history,
-                    sender_id=sender_id,
-                    attachments=attachments,
-                    sender_type=sender_type,
-                    channel=channel,
-                    tenant_id=_tenant_id_for_config(request),
-                    is_admin=_chat_tenant2.is_admin,
-                )
-                result = {
-                    "reply": exec_result.get("output", ""),
-                    "employee_id": employee_id,
-                    "memory_updated": False,
-                    "tokens_used": exec_result.get("input_tokens", 0)
-                    + exec_result.get("output_tokens", 0),
-                    "latency_ms": 0,
-                }
+                # 流式时 _chat_via_agent_tools 返回 StreamingResponse，直接返回
+                if stream:
+                    return agent_result
+                result = agent_result
             else:
                 # 使用简单的 chat 路径（无工具）
                 engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
@@ -5373,10 +5431,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         except Exception as e:
             logger.exception("chat() 异常: emp=%s channel=%s", employee_id, channel)
-            return JSONResponse(
-                {"ok": False, "error": f"内部错误: {e}"},
-                status_code=500,
-            )
+            return _error_response("内部错误", 500)
 
     # ── 流式响应（SSE）— SG Bridge 或 agent tools 路径的兼容模式 ──
     if stream and not context_only:
@@ -5451,7 +5506,6 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
     - text/plain / application/octet-stream: body 就是文件内容
     - application/json: {"content": "文件内容"}
     """
-    from starlette.responses import JSONResponse
 
     # P2: KV 写入需要管理员权限 + 审计日志
     # 当前方案：admin_token 校验 + X-User-Id 审计日志记录
@@ -5508,7 +5562,7 @@ async def _handle_kv_put(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
     """KV 读取 — GET /api/kv/{key:path}."""
-    from starlette.responses import JSONResponse, Response
+    from starlette.responses import Response
 
     # 安全加固: KV 读取需要管理员权限（与写接口对齐）
     admin_err = _require_admin_token(request)
@@ -5536,7 +5590,6 @@ async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
     """KV 列表 — GET /api/kv/ (可选 ?prefix=...)."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: KV 列表需要管理员权限（与写接口对齐）
     admin_err = _require_admin_token(request)
@@ -5565,14 +5618,21 @@ async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
     except ValueError:
         return JSONResponse({"ok": False, "error": "path traversal detected"}, status_code=400)
 
+    limit = _safe_limit(request.query_params.get("limit", "500"), default=500)
+    limit = min(limit, 2000)  # 硬上限
+
     keys: list[str] = []
     if scan_dir.is_dir():
+        count = 0
         for p in sorted(scan_dir.rglob("*")):
+            if count >= limit:
+                break
             if p.is_file():
                 rel = p.relative_to(base_dir)
                 keys.append(str(rel))
+                count += 1
 
-    return JSONResponse({"ok": True, "keys": keys})
+    return JSONResponse({"ok": True, "keys": keys, "truncated": len(keys) >= limit})
 
 
 # ── Pipeline / Discussion / Meeting / Decision / WorkLog / Permission API ──
@@ -5580,7 +5640,6 @@ async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有流水线 — GET /api/pipelines."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 流水线列表含执行逻辑，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5608,7 +5667,6 @@ async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_discussion_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有讨论会 — GET /api/discussions."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 讨论配置含流程/角色/策略，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5640,7 +5698,6 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
     """获取编排模式讨论计划 — GET /api/discussions/{name}/plan."""
     import json as _json
 
-    from starlette.responses import JSONResponse
 
     # 安全加固: 讨论计划含完整编排流程，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5686,14 +5743,13 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(_json.loads(plan.model_dump_json()))
     except Exception as exc:
         logger.exception("render_discussion_plan failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
     """获取非编排模式讨论 prompt — GET /api/discussions/{name}/prompt."""
     import json as _json
 
-    from starlette.responses import JSONResponse
 
     # 安全加固: 讨论 prompt 含完整指令，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5739,12 +5795,11 @@ async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"prompt": prompt})
     except Exception as exc:
         logger.exception("render_discussion failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
     """列出会议历史 — GET /api/meetings."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 会议日志含内部讨论/路线规划，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5755,7 +5810,7 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
 
     _mtg_dir = _tenant_data_dir(request, "meetings")
     ml = MeetingLogger(meetings_dir=_mtg_dir, project_dir=ctx.project_dir)
-    limit = _safe_int(request.query_params.get("limit"), default=20)
+    limit = _safe_limit(request.query_params.get("limit"), default=20)
     keyword = request.query_params.get("keyword") or None
     records = ml.list(limit=limit, keyword=keyword)
     return JSONResponse({"items": [r.model_dump() for r in records]})
@@ -5763,7 +5818,6 @@ async def _handle_meeting_list(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
     """获取会议详情 — GET /api/meetings/{meeting_id}."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 会议详情含完整 prompt/参数，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5785,7 +5839,6 @@ async def _handle_meeting_detail(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
     """追踪决策 — POST /api/decisions/track."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 决策追踪涉及写入记忆，需要 admin 权限
     admin_err = _require_admin_token(request)
@@ -5817,12 +5870,11 @@ async def _handle_decision_track(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(decision.model_dump())
     except Exception as exc:
         logger.exception("decision track failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
     """评估决策 — POST /api/decisions/{decision_id}/evaluate."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 决策评估写入纠正记忆，需要 admin 权限
     admin_err = _require_admin_token(request)
@@ -5854,12 +5906,11 @@ async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(decision.model_dump())
     except Exception as exc:
         logger.exception("decision evaluate failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
     """获取工作日志 — GET /api/work-log."""
-    from starlette.responses import JSONResponse
 
     # 权限校验：工作日志包含所有 session，需要 admin 权限
     admin_err = _require_admin_token(request)
@@ -5870,14 +5921,13 @@ async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
 
     wl = WorkLogger(project_dir=ctx.project_dir)
     employee_name = request.query_params.get("employee_name") or None
-    limit = _safe_int(request.query_params.get("limit"), default=10)
+    limit = _safe_limit(request.query_params.get("limit"), default=10)
     sessions = wl.list_sessions(employee_name=employee_name, limit=limit)
     return JSONResponse({"items": sessions})
 
 
 async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
     """获取员工权限矩阵 — GET /api/permission-matrix."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 权限矩阵暴露所有 agent 工具清单和权限策略，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5921,7 +5971,6 @@ async def _handle_wiki_file_delete(request: Any, ctx: _AppContext) -> Any:
     返回:
         {"ok": true, "deleted_file_id": N} 或 404
     """
-    from starlette.responses import JSONResponse
 
     # P2: Wiki 文件删除需要管理员权限
     admin_err = _require_admin_token(request)
@@ -5973,7 +6022,6 @@ async def _handle_wiki_spaces_list(request: Any, ctx: _AppContext) -> Any:
 
     返回所有可用的 Wiki 空间，包含 slug、名称、ID 等信息。
     """
-    from starlette.responses import JSONResponse
 
     wiki_api_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
     wiki_admin_token = os.environ.get("WIKI_ADMIN_TOKEN", "") or os.environ.get(
@@ -6028,7 +6076,6 @@ def _resolve_employee_name(identifier: str, ctx: _AppContext, *, tenant_id: str 
 
 async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
     """获取员工灵魂配置 — GET /api/souls/{employee_name}."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: soul 包含完整 prompt/指令，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -6053,7 +6100,6 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
     """更新员工灵魂配置 — PUT /api/souls/{employee_name}."""
-    from starlette.responses import JSONResponse
 
     # 管理员权限校验
     admin_err = _require_admin_token(request)
@@ -6086,12 +6132,11 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 soul 失败: employee=%s", employee_name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有员工灵魂配置 — GET /api/souls."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: soul 列表包含所有员工 prompt，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -6105,12 +6150,11 @@ async def _handle_soul_list(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 souls 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_get(request: Any, ctx: _AppContext) -> Any:
     """获取讨论会配置 — GET /api/config/discussions/{name}."""
-    from starlette.responses import JSONResponse
 
     from crew.config_store import get_discussion
 
@@ -6127,7 +6171,6 @@ async def _handle_discussion_get(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
     """创建讨论会配置 — POST /api/config/discussions."""
-    from starlette.responses import JSONResponse
 
     # P2: 讨论会创建需要管理员权限
     admin_err = _require_admin_token(request)
@@ -6154,12 +6197,11 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 discussion 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
     """更新讨论会配置 — PUT /api/config/discussions/{name}."""
-    from starlette.responses import JSONResponse
 
     # P2: 讨论会更新需要管理员权限
     admin_err = _require_admin_token(request)
@@ -6189,12 +6231,11 @@ async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 discussion 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
     """列出所有讨论会配置 — GET /api/config/discussions."""
-    from starlette.responses import JSONResponse
 
     from crew.config_store import get_discussion, list_discussions
 
@@ -6215,16 +6256,15 @@ async def _handle_discussion_list_config(request: Any, ctx: _AppContext) -> Any:
                         if "rounds" in parsed:
                             item["rounds"] = parsed["rounds"]
             except Exception:
-                pass  # 解析失败不影响列表
+                logger.debug("讨论会配置解析失败: %s", item.get("name"), exc_info=True)
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 discussions 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
     """获取流水线配置 — GET /api/config/pipelines/{name}."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 流水线含执行逻辑/工具/模型配置，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -6246,7 +6286,6 @@ async def _handle_pipeline_get_config(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
     """创建流水线配置 — POST /api/config/pipelines."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 创建流水线是写操作，仅 admin 可执行
     admin_err = _require_admin_token(request)
@@ -6273,12 +6312,11 @@ async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result, status_code=201)
     except Exception as exc:
         logger.exception("创建 pipeline 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
     """更新流水线配置 — PUT /api/config/pipelines/{name}."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 更新流水线是写操作，仅 admin 可执行
     admin_err = _require_admin_token(request)
@@ -6308,12 +6346,11 @@ async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("更新 pipeline 失败: name=%s", name)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
     """列出所有流水线配置 — GET /api/config/pipelines."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 流水线列表含执行逻辑，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -6336,16 +6373,15 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
                     if parsed and "steps" in parsed:
                         item["steps"] = len(parsed["steps"])
             except Exception:
-                pass  # 解析失败不影响列表
+                logger.debug("流水线配置解析失败: %s", item.get("name"), exc_info=True)
         return JSONResponse({"items": items})
     except Exception as exc:
         logger.exception("列出 pipelines 失败")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
 
 
 async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
     """手动触发过期决策扫描 — POST /api/evaluate/scan."""
-    from starlette.responses import JSONResponse
 
     # 安全加固: 扫描会批量写入记忆和评估结论，仅 admin 可触发
     admin_err = _require_admin_token(request)
@@ -6369,4 +6405,4 @@ async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as exc:
         logger.exception("evaluate scan failed: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _error_response("内部错误", 500)
