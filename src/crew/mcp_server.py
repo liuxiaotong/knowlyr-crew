@@ -3075,6 +3075,18 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if file_path_arg:
                 # 从本地文件读取
                 fp = Path(file_path_arg).expanduser().resolve()
+                # 安全加固: 校验路径必须在项目目录内，防止任意文件读取
+                project_dir_resolved = Path(_project_dir).resolve() if _project_dir else None
+                if project_dir_resolved is None or not str(fp).startswith(str(project_dir_resolved) + "/"):
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"error": f"拒绝访问: 文件路径必须在项目目录内，不允许读取 {file_path_arg}"},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
                 if not fp.is_file():
                     return [
                         TextContent(
