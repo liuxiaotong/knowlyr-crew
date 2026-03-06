@@ -8,9 +8,9 @@
 
 <h1>knowlyr-crew</h1>
 
-<h2>Structured Dialectical Deliberation Engine<br/>for AI Workforces</h2>
+<h2>The Operating System for Digital Civilization's Organizational Layer</h2>
 
-<p>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</p>
+<p>Effective Agent = Identity + Experience + Deliberation. 40 MCP tools · 16 memory modules · 9 deliberation modes · 7 LLM providers.</p>
 
 <p>
 <a href="https://github.com/liuxiaotong/knowlyr-crew">GitHub</a> ·
@@ -23,11 +23,13 @@
 
 ## Abstract
 
-The primary failure modes of multi-agent collaboration systems are threefold: **groupthink** (Janis, 1972), **shared information bias** (Stasser & Titus, 1985), and **framework lock-in**. knowlyr-crew proposes a declarative multi-agent deliberation framework that breaks information sampling bias through structured dialectical protocols, achieves cognitive accumulation and natural attrition through exponentially decaying persistent memory (inspired by the Ebbinghaus forgetting curve), and eliminates toolchain coupling through protocol-native MCP integration.
+Most frameworks define an agent as `Model + Tools + Prompt` — stateless, memoryless, structurally incapable of sustained collaboration. This is a "no-organization assumption." knowlyr-crew proposes an alternative formulation:
 
-The system implements a self-correcting closed loop of "**define -> deliberate -> decide -> evaluate -> update memory**", feeding human feedback directly into agents' persistent memory -- functionally isomorphic to the core mechanism of RLHF (Christiano et al., 2017): human evaluation outcomes shape subsequent inference behavior.
+$$\text{Effective Agent} = \text{Identity}(t) + \text{Experience}(t) + \text{Deliberation}(\mathcal{P}, \Phi, \Psi)$$
 
-> **knowlyr-crew** formalizes AI workforce capabilities as declarative specifications (YAML + Markdown), implements structured dialectical deliberation with 9 interaction modes and devil's advocacy constraints, and provides persistent semantic memory with exponential confidence decay. The system exposes 20 MCP tools across 3 transport protocols, routes across 7 LLM providers, and maintains a complete evaluation-to-memory feedback loop.
+An agent's effectiveness derives not merely from single-inference quality, but from the consistency of **persistent identity** (Soul system), the depth of **accumulated experience** (16-module memory ecosystem), and the capacity for **structured deliberation** that breaks groupthink (9 modes + 4 dialectical templates).
+
+> **knowlyr-crew is not another orchestration framework. It is an operating system for the organizational layer of digital civilization** — formalizing millennia of human organizational wisdom into AI-executable declarative specifications. 40 MCP tools, 3 transport protocols, 7 LLM providers, multi-channel reach via Feishu, WeCom, and Web.
 
 ## Problem Statement
 
@@ -123,7 +125,7 @@ graph LR
 | Layer | Module | Responsibility |
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | Declarative employee definition parsing; YAML/Markdown dual format; priority-based discovery |
-| **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support |
+| **Protocol** | MCP Server · Skill Converter | 40 Tools + Prompts + Resources; stdio/SSE/HTTP triple-protocol support |
 | **Deliberation** | Discussion Engine | 9 structured interaction modes; cognitive conflict constraints; topologically sorted execution plans |
 | **Orchestration** | Pipeline · Route · Task Registry | Parallel/sequential/conditional/loop orchestration; checkpoint recovery; multi-model routing |
 | **Memory** | Memory Store · Semantic Index | Semantic search; exponential decay; importance ranking; access tracking; cross-employee pattern sharing; multi-backend embedding fallback |
@@ -139,10 +141,10 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | Each employee = one callable prompt template with typed parameters | 1 per employee |
 | **Resources** | Raw Markdown definitions, directly readable by AI IDEs | 1 per employee |
-| **Tools** | Employee/discussion/pipeline/memory/evaluation/permission/audit/metrics/project detection, etc. | 20 |
+| **Tools** | Employee Management · Deliberation & Pipeline · Memory & Evaluation · Observability · Configuration · Wiki | 40 |
 
 <details>
-<summary>Full list of 20 MCP Tools</summary>
+<summary>Full list of 40 MCP Tools</summary>
 
 | Tool | Description |
 |:---|:---|
@@ -166,6 +168,26 @@ graph LR
 | `get_audit_log` | Query tool invocation audit logs |
 | `get_tool_metrics` | Query tool invocation statistics |
 | `query_events` | Query system event stream |
+| `put_config` | Write config to KV store |
+| `get_config` | Read config from KV store |
+| `list_configs` | List keys in KV store |
+| `list_overdue_decisions` | List overdue unevaluated decisions |
+| `wiki_upload_attachment` | Upload attachment to Wiki |
+| `wiki_read_attachment` | Read Wiki attachment |
+| `wiki_list_attachments` | List Wiki attachments |
+| `wiki_delete_attachment` | Delete Wiki attachment |
+| `wiki_list_spaces` | List Wiki spaces |
+| `wiki_list_docs` | List Wiki documents |
+| `wiki_read_doc` | Read Wiki document content |
+| `wiki_create_doc` | Create Wiki document |
+| `wiki_update_doc` | Update Wiki document |
+| `get_soul` | Read employee soul config |
+| `update_soul` | Update employee soul config (auto-versioning) |
+| `create_employee` | Create new AI employee (with avatar generation) |
+| `create_discussion` | Create discussion config |
+| `update_discussion` | Update discussion config |
+| `create_pipeline` | Create pipeline config |
+| `update_pipeline` | Update pipeline config |
 
 </details>
 
@@ -872,7 +894,7 @@ graph LR
 | Audit | **ModelAudit** | Distillation detection, model fingerprinting | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | Identity | **knowlyr-id** | Identity system + AI employee runtime | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
 | Accounting | **knowlyr-ledger** | Unified ledger · double-entry bookkeeping · row-lock safety · idempotent transactions | [GitHub](https://github.com/liuxiaotong/knowlyr-ledger) |
-| Deliberation | **Crew** | Structured dialectical deliberation · persistent memory accumulation · MCP-native | You are here |
+| Deliberation | **Crew** | AI workforce engine · Identity + Experience + Deliberation · 40 MCP tools | You are here |
 | Agent Training | **knowlyr-gym** | Gymnasium-style RL framework · process reward model · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
 ## References

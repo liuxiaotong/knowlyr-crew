@@ -8,9 +8,9 @@
 
 <h1>knowlyr-crew</h1>
 
-<h2>AI 数字员工的结构化辩证协商引擎</h2>
+<h2>数字文明组织层的操作系统</h2>
 
-<p>声明式 AI 员工引擎 — 结构化辩证协商 · MCP 协议原生 · 持续经验积累</p>
+<p>有效 Agent = 身份 + 经验 + 协商。40 MCP 工具 · 16 记忆模块 · 9 协商模式 · 7 LLM 供应商</p>
 
 <p>
 <a href="https://github.com/liuxiaotong/knowlyr-crew">GitHub</a> ·
@@ -23,11 +23,13 @@
 
 ## 摘要 (Abstract)
 
-多智能体协作系统的主要失效模式有三：**群体偏见** (groupthink，Janis, 1972)、**共享信息偏差** (shared information bias，Stasser & Titus, 1985) 和**框架锁定** (framework lock-in)。knowlyr-crew 提出一种声明式多智能体协商框架：通过结构化辩证协议打破信息采样偏差，通过指数衰减持久记忆（受 Ebbinghaus 遗忘曲线启发）实现认知积累与自然淘汰，通过 MCP 协议原生集成消除工具链耦合。
+主流框架将 Agent 定义为 `Model + Tools + Prompt`——无状态、无记忆、无结构化协商。这是"无组织假设"：将每个 Agent 视为无状态函数调用，孤立时强大，但结构性地无法维持长期协作。knowlyr-crew 提出替代公式：
 
-系统实现「**定义 → 协商 → 决策 → 评估 → 记忆更新**」的自校正闭环，将人类反馈直接反馈为 Agent 的持久化记忆——这与 RLHF 的核心机制（Christiano et al., 2017）在功能上同构：人工评估结果塑造后续推理行为。
+$$\text{Effective Agent} = \text{Identity}(t) + \text{Experience}(t) + \text{Deliberation}(\mathcal{P}, \Phi, \Psi)$$
 
-> **knowlyr-crew** 将 AI 员工能力形式化为声明式规范（YAML + Markdown），实现包含 9 种交互模式和魔鬼辩护人约束的结构化辩证协商，并提供具有指数置信度衰减的持久语义记忆。系统暴露 20 个 MCP 工具、支持 3 种传输协议，路由至 7 个 LLM 供应商，维护从评估到记忆的完整反馈闭环。
+Agent 的有效性不仅来自单次推理的质量，更来自**持久身份**的一致性（Soul 系统）、**经验积累**的深度（16 模块记忆生态）、以及**结构化协商**打破群体偏见的能力（9 种模式 + 4 种辩证模板）。
+
+> **knowlyr-crew 不是又一个编排框架。它是为数字文明的组织层写操作系统**——将人类几千年的组织智慧形式化为 AI 可执行的声明式规范。系统暴露 40 个 MCP 工具，支持 3 种传输协议，路由至 7 个 LLM 供应商，通过飞书、企微、Web 多端触达。
 
 ## 问题陈述 (Problem Statement)
 
@@ -123,7 +125,7 @@ graph LR
 | 层 | 模块 | 职责 |
 |:---|:---|:---|
 | **Specification** | Parser · Discovery · Models | 声明式员工定义解析，YAML/Markdown 双格式，优先级发现 |
-| **Protocol** | MCP Server · Skill Converter | 20 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
+| **Protocol** | MCP Server · Skill Converter | 40 Tools + Prompts + Resources，stdio/SSE/HTTP 三协议 |
 | **Deliberation** | Discussion Engine | 9 种结构化交互模式，认知冲突约束，拓扑排序执行计划 |
 | **Orchestration** | Pipeline · Route · Task Registry | 并行/串行/条件/循环编排，断点恢复，多模型路由 |
 | **Memory** | Memory Store · Semantic Index | 语义搜索，指数衰减，重要性排序，访问追踪，跨员工 Pattern 共享，多后端 Embedding 降级 |
@@ -139,10 +141,10 @@ graph LR
 |:---|:---|:---|
 | **Prompts** | 每位员工 = 一个可调用的 prompt 模板，带类型化参数 | 1 per employee |
 | **Resources** | 原始 Markdown 定义，AI IDE 可直接读取 | 1 per employee |
-| **Tools** | 员工/讨论/流水线/记忆/评估/权限/审计/指标/项目检测等 | 20 |
+| **Tools** | 员工管理 · 协商与流水线 · 记忆与评估 · 可观测性 · 配置 · Wiki | 40 |
 
 <details>
-<summary>20 个 MCP Tools 详情</summary>
+<summary>40 个 MCP Tools 详情</summary>
 
 | Tool | 描述 |
 |:---|:---|
@@ -166,6 +168,26 @@ graph LR
 | `get_audit_log` | 查询工具调用审计日志 |
 | `get_tool_metrics` | 查询工具调用统计指标 |
 | `query_events` | 查询系统事件流 |
+| `put_config` | 写入配置文件到 KV 存储 |
+| `get_config` | 从 KV 存储读取配置文件 |
+| `list_configs` | 列出 KV 存储中的 key |
+| `list_overdue_decisions` | 列出已过期且未评估的决策 |
+| `wiki_upload_attachment` | 上传附件到 Wiki |
+| `wiki_read_attachment` | 读取 Wiki 附件 |
+| `wiki_list_attachments` | 列出 Wiki 附件 |
+| `wiki_delete_attachment` | 删除 Wiki 附件 |
+| `wiki_list_spaces` | 列出 Wiki 空间 |
+| `wiki_list_docs` | 列出 Wiki 文档 |
+| `wiki_read_doc` | 读取 Wiki 文档正文 |
+| `wiki_create_doc` | 创建 Wiki 文档 |
+| `wiki_update_doc` | 更新 Wiki 文档 |
+| `get_soul` | 读取员工灵魂配置 |
+| `update_soul` | 更新员工灵魂配置（自动版本化） |
+| `create_employee` | 创建新 AI 员工（含头像生成） |
+| `create_discussion` | 创建讨论会配置 |
+| `update_discussion` | 更新讨论会配置 |
+| `create_pipeline` | 创建流水线配置 |
+| `update_pipeline` | 更新流水线配置 |
 
 </details>
 
@@ -871,7 +893,7 @@ graph LR
 | 审计 | **ModelAudit** | 蒸馏检测、模型指纹 | [GitHub](https://github.com/liuxiaotong/model-audit) |
 | 身份 | **knowlyr-id** | 身份系统 + AI 员工运行时 | [GitHub](https://github.com/liuxiaotong/knowlyr-id) |
 | 账本 | **knowlyr-ledger** | 统一账本 · 复式记账 · 行锁安全 · 幂等交易 | [GitHub](https://github.com/liuxiaotong/knowlyr-ledger) |
-| 协商 | **Crew** | 结构化辩证协商 · 持久记忆积累 · MCP 原生 | 当前项目 |
+| 协商 | **Crew** | AI 员工引擎 · 身份 + 经验 + 协商 · 40 MCP 工具 | 当前项目 |
 | Agent 训练 | **knowlyr-gym** | Gymnasium 风格 RL 框架 · 过程奖励模型 · SFT/DPO/GRPO | [GitHub](https://github.com/liuxiaotong/knowlyr-gym) |
 
 ## 参考文献 (References)
