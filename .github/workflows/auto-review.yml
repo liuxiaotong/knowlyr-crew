@@ -256,10 +256,12 @@ jobs:
             gh label create "review-round-${ROUND}" --color "0E8A16" 2>/dev/null && \
             gh pr edit "$PR_NUMBER" --add-label "review-round-${ROUND}"
 
+          # 用 comment + exit code 控制 status check，不依赖 gh pr review --approve/--request-changes
+          # （GITHUB_TOKEN 无权 approve PR，--request-changes 会阻塞合并）
           if [ "$APPROVED" = "skip" ]; then
             echo "Review skipped (timeout or submit failure) — not blocking PR"
             gh pr comment "$PR_NUMBER" --body "$(cat <<EOF
-          **Auto Review (Round ${ROUND}) — Skipped**
+          **Auto Review (Round ${ROUND}) — ⏭️ Skipped**
 
           ${SUMMARY}
 
@@ -269,16 +271,17 @@ jobs:
             exit 0
           elif [ "$APPROVED" = "True" ] || [ "$APPROVED" = "true" ]; then
             echo "PR approved by code reviewer"
-            gh pr review "$PR_NUMBER" --approve --body "$(cat <<EOF
-          **Auto Review (Round ${ROUND}) — Approved**
+            gh pr comment "$PR_NUMBER" --body "$(cat <<EOF
+          **Auto Review (Round ${ROUND}) — ✅ Approved**
 
           ${SUMMARY}
           EOF
           )"
+            exit 0
           else
-            echo "PR not approved — leaving review comments"
-            gh pr review "$PR_NUMBER" --request-changes --body "$(cat <<EOF
-          **Auto Review (Round ${ROUND}) — Changes Requested**
+            echo "PR not approved — review has issues"
+            gh pr comment "$PR_NUMBER" --body "$(cat <<EOF
+          **Auto Review (Round ${ROUND}) — ❌ Changes Requested**
 
           ${SUMMARY}
 
@@ -347,4 +350,7 @@ jobs:
                 rm -f /tmp/escalate_payload.json
               fi
             fi
+
+            # 审查不通过 → exit 1 让 status check 变红，阻塞 PR 合并
+            exit 1
           fi
