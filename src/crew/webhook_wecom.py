@@ -48,9 +48,18 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
         return PlainTextResponse("wecom not configured", status_code=501)
 
     config = wecom_ctx["config"]
-    crypto = wecom_ctx["crypto"]
-    token_mgr = wecom_ctx["token_mgr"]
     dedup = wecom_ctx["dedup"]
+
+    # 根据 app_id 选择密钥（contact = 通讯录同步独立密钥）
+    is_contact = app_id == "contact"
+    if is_contact and "contact_crypto" in wecom_ctx:
+        crypto = wecom_ctx["contact_crypto"]
+        callback_token = wecom_ctx["contact_token"]
+        token_mgr = wecom_ctx.get("contact_token_mgr", wecom_ctx["token_mgr"])
+    else:
+        crypto = wecom_ctx["crypto"]
+        callback_token = config.token
+        token_mgr = wecom_ctx["token_mgr"]
 
     # ── GET: URL 验证 ──
     if request.method == "GET":
@@ -61,7 +70,7 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
 
         from crew.wecom import verify_wecom_signature
 
-        if not verify_wecom_signature(config.token, timestamp, nonce, echostr, msg_signature):
+        if not verify_wecom_signature(callback_token, timestamp, nonce, echostr, msg_signature):
             return PlainTextResponse("signature mismatch", status_code=403)
 
         # 解密 echostr 返回明文
@@ -89,7 +98,7 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
         return PlainTextResponse("missing Encrypt", status_code=400)
 
     # 验证签名
-    if not verify_wecom_signature(config.token, timestamp, nonce, encrypt_content, msg_signature):
+    if not verify_wecom_signature(callback_token, timestamp, nonce, encrypt_content, msg_signature):
         return PlainTextResponse("signature mismatch", status_code=403)
 
     # 解密消息
@@ -107,6 +116,26 @@ async def handle_wecom_event(request: Any, ctx: Any) -> Any:
     msg_id = msg.get("MsgId", "")
     from_user = msg.get("FromUserName", "")
     content = msg.get("Content", "").strip()
+
+    # ── 通讯录变更事件 ──
+    if msg_type == "event" and msg.get("Event") == "change_contact":
+        change_type = msg.get("ChangeType", "")
+        logger.info("企微通讯录变更: change_type=%s UserID=%s", change_type, msg.get("UserID", ""))
+
+        if change_type in ("delete_user", "update_user"):
+            task = asyncio.create_task(
+                _handle_contact_change(
+                    ctx,
+                    change_type=change_type,
+                    wecom_userid=msg.get("UserID", ""),
+                    token_mgr=wecom_ctx["token_mgr"],
+                    msg=msg,
+                )
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_task_done_callback)
+
+        return PlainTextResponse("success")
 
     # 群聊判断：企微自建应用的群聊回调 XML 中没有标准 chatid 字段，
     # 但消息内容会以 "@应用名" 开头。这里同时检查可能存在的扩展字段。
@@ -296,3 +325,114 @@ async def _wecom_dispatch(
             await _reply("处理时出了点问题，请稍后再试。")
         except Exception:
             logger.warning("企微错误回复发送失败", exc_info=True)
+
+
+async def _handle_contact_change(
+    ctx: Any,
+    *,
+    change_type: str,
+    wecom_userid: str,
+    token_mgr: Any,
+    msg: dict[str, str],
+) -> None:
+    """处理企微通讯录变更事件 — 离职员工自动清除 staff 身份.
+
+    企微通讯录回调 XML 格式:
+      MsgType=event, Event=change_contact
+      ChangeType=delete_user (离职删除) / update_user (信息变更)
+
+    流程:
+      1. 从企微 API 获取用户详情（含手机号）
+      2. 通过手机号调 knowlyr-id 清除 staff_badge + about_section
+      3. 官网 about 页自动更新（因为 team.js 动态读取 about_section）
+
+    Args:
+        ctx: 应用上下文
+        change_type: delete_user 或 update_user
+        wecom_userid: 企微 UserID
+        token_mgr: WecomTokenManager
+        msg: 解析后的完整 XML 字段
+    """
+    from crew.wecom import get_wecom_user_info, offboard_user_by_phone
+
+    logger.info(
+        "处理通讯录变更: change_type=%s userid=%s",
+        change_type,
+        wecom_userid,
+    )
+
+    if not wecom_userid:
+        logger.warning("通讯录变更事件缺少 UserID，跳过")
+        return
+
+    # ── delete_user: 直接走离职流程 ──
+    if change_type == "delete_user":
+        # 离职用户可能已从企微删除，先尝试查询
+        user_info = await get_wecom_user_info(token_mgr, wecom_userid)
+        mobile = ""
+        if user_info:
+            mobile = user_info.get("mobile", "")
+
+        if not mobile:
+            # 企微已删除该用户，无法获取手机号
+            # 记录日志，后续可人工处理
+            logger.warning(
+                "企微离职用户 %s 无法获取手机号（可能已被删除），需人工处理",
+                wecom_userid,
+            )
+            return
+
+        result = await offboard_user_by_phone(mobile)
+        if result.get("ok"):
+            logger.info(
+                "离职同步完成: wecom_userid=%s phone=***%s user_id=%s cleared=%s",
+                wecom_userid,
+                mobile[-4:],
+                result.get("user_id"),
+                result.get("cleared"),
+            )
+        else:
+            logger.warning(
+                "离职同步失败: wecom_userid=%s phone=***%s detail=%s",
+                wecom_userid,
+                mobile[-4:],
+                result.get("detail", "unknown"),
+            )
+        return
+
+    # ── update_user: 检查是否禁用（status=2 表示已禁用/离职） ──
+    if change_type == "update_user":
+        user_info = await get_wecom_user_info(token_mgr, wecom_userid)
+        if not user_info:
+            logger.info("update_user: 无法获取用户 %s 信息，跳过", wecom_userid)
+            return
+
+        # 企微 status: 1=已激活, 2=已禁用, 4=未激活, 5=退出企业
+        status = user_info.get("status", 1)
+        if status in (2, 5):
+            mobile = user_info.get("mobile", "")
+            if not mobile:
+                logger.warning(
+                    "企微用户 %s 已禁用/退出(status=%d) 但无手机号，需人工处理",
+                    wecom_userid,
+                    status,
+                )
+                return
+
+            result = await offboard_user_by_phone(mobile)
+            if result.get("ok"):
+                logger.info(
+                    "用户禁用同步完成: wecom_userid=%s status=%d phone=***%s cleared=%s",
+                    wecom_userid,
+                    status,
+                    mobile[-4:],
+                    result.get("cleared"),
+                )
+            else:
+                logger.warning(
+                    "用户禁用同步失败: wecom_userid=%s detail=%s",
+                    wecom_userid,
+                    result.get("detail", "unknown"),
+                )
+        else:
+            logger.debug("update_user: 用户 %s status=%d，非离职状态，跳过", wecom_userid, status)
