@@ -331,7 +331,11 @@ class MemoryStoreDB:
         employee = self._resolve_to_character_name(employee)
 
         # 构建查询（租户隔离）
-        conditions = ["employee = %s", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        conditions = [
+            "employee = %s",
+            "tenant_id = %s",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+        ]
         params: list[Any] = [employee, self._tenant_id]
 
         if category:
@@ -464,7 +468,11 @@ class MemoryStoreDB:
         """
         exclude_employee = self._resolve_to_character_name(exclude_employee)
 
-        conditions = ["shared = TRUE", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        conditions = [
+            "shared = TRUE",
+            "tenant_id = %s",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+        ]
         params: list[Any] = [self._tenant_id]
 
         if exclude_employee:
@@ -524,7 +532,11 @@ class MemoryStoreDB:
         Returns:
             pattern 列表（MemoryEntry）
         """
-        conditions = ["category = 'pattern'", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        conditions = [
+            "category = 'pattern'",
+            "tenant_id = %s",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+        ]
         params: list[Any] = [self._tenant_id]
 
         if employee:

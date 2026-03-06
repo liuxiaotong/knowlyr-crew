@@ -184,9 +184,7 @@ def list_tenants() -> list[dict[str, Any]]:
 
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name, is_admin, created_at FROM tenants ORDER BY created_at"
-        )
+        cur.execute("SELECT id, name, is_admin, created_at FROM tenants ORDER BY created_at")
         rows = cur.fetchall()
         return [
             {

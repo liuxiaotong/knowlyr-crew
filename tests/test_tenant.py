@@ -82,11 +82,13 @@ def _make_tenant_app():
 
     async def hello(request: Request):
         tenant = get_current_tenant(request)
-        return JSONResponse({
-            "msg": "ok",
-            "tenant_id": tenant.tenant_id,
-            "is_admin": tenant.is_admin,
-        })
+        return JSONResponse(
+            {
+                "msg": "ok",
+                "tenant_id": tenant.tenant_id,
+                "is_admin": tenant.is_admin,
+            }
+        )
 
     async def health(request: Request):
         return JSONResponse({"status": "ok"})
