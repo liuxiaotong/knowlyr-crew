@@ -8,10 +8,10 @@
 
 <h1>knowlyr-crew</h1>
 
-<h3>Structured Dialectical Deliberation Engine for AI Workforces<br/>with Persistent Episodic Memory</h3>
+<h3>数字文明组织层的操作系统</h3>
 
-<p><strong>声明式 AI 员工引擎 — 结构化辩证协商 · MCP 协议原生 · 持续经验积累</strong><br/>
-<em>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</em></p>
+<p><strong>有效 Agent = 身份 + 经验 + 协商。40 MCP 工具 · 16 记忆模块 · 9 协商模式 · 7 LLM 供应商</strong><br/>
+<em>Effective Agent = Identity + Experience + Deliberation</em></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)

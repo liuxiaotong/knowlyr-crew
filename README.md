@@ -8,9 +8,9 @@
 
 <h1>knowlyr-crew</h1>
 
-<h3>Structured Dialectical Deliberation Engine for AI Workforces<br/>with Persistent Episodic Memory</h3>
+<h3>The Operating System for Digital Civilization's Organizational Layer</h3>
 
-<p><strong>Declarative AI workforce engine — structured dialectical deliberation, protocol-native interoperability, evolving through experience</strong></p>
+<p><strong>Effective Agent = Identity + Experience + Deliberation. 40 MCP tools · 16 memory modules · 9 deliberation modes · 7 LLM providers.</strong></p>
 
 [![PyPI](https://img.shields.io/pypi/v/knowlyr-crew?color=blue)](https://pypi.org/project/knowlyr-crew/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
