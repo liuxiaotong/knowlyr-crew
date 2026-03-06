@@ -341,6 +341,11 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     """返回员工配置和渲染后的 system_prompt."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: prompt 含完整指令/工具/成本数据，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
     from crew.tool_schema import employee_tools_to_schemas
@@ -449,6 +454,11 @@ async def _handle_model_tiers(request: Any, ctx: _AppContext) -> Any:
 async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
     """返回所有员工基本信息列表（供外部服务获取员工花名册）."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 员工花名册含角色/模型/状态等运营情报，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discovery import discover_employees
 
@@ -4633,6 +4643,11 @@ async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
 async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     """项目状态概览 — 组织架构 + 成本 + 员工列表."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 含组织架构/计费余额/API key 间接暴露，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.cost import (
         calibrate_employee_costs,
