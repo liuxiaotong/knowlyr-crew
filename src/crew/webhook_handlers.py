@@ -2491,7 +2491,16 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = Path(exports_dir / f"trajectory_dataset_{timestamp}.jsonl")
 
-        exporter = TrajectoryExporter()
+        # 租户隔离
+        _exp_tenant_id = _tenant_id_for_store(request)
+        if _exp_tenant_id:
+            _exp_base = Path(f"/data/tenants/{_exp_tenant_id}")
+        else:
+            _exp_base = Path("/data")
+        exporter = TrajectoryExporter(
+            archive_dir=_exp_base / "trajectory_archive",
+            annotations_dir=_exp_base / "trajectory_annotations",
+        )
         stats = exporter.export_dataset(
             output_file=output_file,
             employee=employee,
@@ -2537,6 +2546,11 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 标注接口需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
@@ -2562,7 +2576,16 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
                 status_code=400,
             )
 
-        exporter = TrajectoryExporter()
+        # 租户隔离
+        _ann_tenant_id = _tenant_id_for_store(request)
+        if _ann_tenant_id:
+            _ann_base = Path(f"/data/tenants/{_ann_tenant_id}")
+        else:
+            _ann_base = Path("/data")
+        exporter = TrajectoryExporter(
+            archive_dir=_ann_base / "trajectory_archive",
+            annotations_dir=_ann_base / "trajectory_annotations",
+        )
         annotation = exporter.add_annotation(
             trajectory_id=trajectory_id,
             quality_score=quality_score,
@@ -2589,6 +2612,11 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
     """
     from starlette.responses import JSONResponse
 
+    # 安全加固: 列出标注需要管理员权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.trajectory_export import TrajectoryExporter
 
     min_quality_str = request.query_params.get("min_quality", "0.0")
@@ -2597,7 +2625,16 @@ async def _handle_trajectory_annotation_list(request: Any, ctx: _AppContext) -> 
     try:
         min_quality = float(min_quality_str)
 
-        exporter = TrajectoryExporter()
+        # 租户隔离
+        _annl_tenant_id = _tenant_id_for_store(request)
+        if _annl_tenant_id:
+            _annl_base = Path(f"/data/tenants/{_annl_tenant_id}")
+        else:
+            _annl_base = Path("/data")
+        exporter = TrajectoryExporter(
+            archive_dir=_annl_base / "trajectory_archive",
+            annotations_dir=_annl_base / "trajectory_annotations",
+        )
         annotations = exporter.list_annotations(
             min_quality=min_quality,
             annotator=annotator,
@@ -2807,7 +2844,16 @@ async def _handle_memory_feedback_submit(request: Any, ctx: _AppContext) -> Any:
                 status_code=400,
             )
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离: 按 tenant_id 分隔反馈数据目录
+        _fb_tenant_id = _tenant_id_for_store(request)
+        if _fb_tenant_id:
+            _fb_base = Path(f"/data/tenants/{_fb_tenant_id}")
+        else:
+            _fb_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_fb_base / "memory_feedback",
+            stats_dir=_fb_base / "memory_usage_stats",
+        )
         feedback = manager.submit_feedback(
             memory_id=memory_id,
             employee=employee,
@@ -2843,11 +2889,25 @@ async def _handle_memory_feedback_get(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_feedback import MemoryFeedbackManager
 
     try:
+        # 安全加固: 读取反馈需要管理员权限
+        admin_err = _require_admin_token(request)
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
+
         # 从路径中提取 memory_id
         path = request.url.path
         memory_id = path.split("/")[-1]
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _fb_tenant_id = _tenant_id_for_store(request)
+        if _fb_tenant_id:
+            _fb_base = Path(f"/data/tenants/{_fb_tenant_id}")
+        else:
+            _fb_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_fb_base / "memory_feedback",
+            stats_dir=_fb_base / "memory_usage_stats",
+        )
         feedback = manager.get_feedback(memory_id)
 
         return JSONResponse(
@@ -2877,11 +2937,25 @@ async def _handle_memory_usage_stats(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_feedback import MemoryFeedbackManager
 
     try:
+        # 安全加固: 读取统计需要管理员权限
+        admin_err = _require_admin_token(request)
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
+
         # 从路径中提取 memory_id
         path = request.url.path
         memory_id = path.split("/")[-1]
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _stats_tenant_id = _tenant_id_for_store(request)
+        if _stats_tenant_id:
+            _stats_base = Path(f"/data/tenants/{_stats_tenant_id}")
+        else:
+            _stats_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_stats_base / "memory_feedback",
+            stats_dir=_stats_base / "memory_usage_stats",
+        )
         stats = manager.get_stats(memory_id)
 
         if stats is None:
@@ -2931,7 +3005,16 @@ async def _handle_memory_usage_record(request: Any, ctx: _AppContext) -> Any:
                 status_code=400,
             )
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _rec_tenant_id = _tenant_id_for_store(request)
+        if _rec_tenant_id:
+            _rec_base = Path(f"/data/tenants/{_rec_tenant_id}")
+        else:
+            _rec_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_rec_base / "memory_feedback",
+            stats_dir=_rec_base / "memory_usage_stats",
+        )
         manager.record_usage(
             memory_id=memory_id,
             employee=employee,
@@ -2961,11 +3044,25 @@ async def _handle_memory_low_quality(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_feedback import MemoryFeedbackManager
 
     try:
+        # 安全加固: 需要管理员权限
+        admin_err = _require_admin_token(request)
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
+
         employee = request.query_params.get("employee")
         min_uses = int(request.query_params.get("min_uses", "5"))
         max_helpful_ratio = float(request.query_params.get("max_helpful_ratio", "0.3"))
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _lq_tenant_id = _tenant_id_for_store(request)
+        if _lq_tenant_id:
+            _lq_base = Path(f"/data/tenants/{_lq_tenant_id}")
+        else:
+            _lq_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_lq_base / "memory_feedback",
+            stats_dir=_lq_base / "memory_usage_stats",
+        )
         memories = manager.get_low_quality_memories(
             employee=employee,
             min_uses=min_uses,
@@ -3000,10 +3097,24 @@ async def _handle_memory_popular(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_feedback import MemoryFeedbackManager
 
     try:
+        # 安全加固: 需要管理员权限
+        admin_err = _require_admin_token(request)
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
+
         employee = request.query_params.get("employee")
         limit = int(request.query_params.get("limit", "10"))
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _pop_tenant_id = _tenant_id_for_store(request)
+        if _pop_tenant_id:
+            _pop_base = Path(f"/data/tenants/{_pop_tenant_id}")
+        else:
+            _pop_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_pop_base / "memory_feedback",
+            stats_dir=_pop_base / "memory_usage_stats",
+        )
         memories = manager.get_popular_memories(
             employee=employee,
             limit=limit,
@@ -3036,9 +3147,23 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
     from crew.memory_feedback import MemoryFeedbackManager
 
     try:
+        # 安全加固: 需要管理员权限
+        admin_err = _require_admin_token(request)
+        if admin_err:
+            return JSONResponse({"error": admin_err}, status_code=403)
+
         employee = request.query_params.get("employee")
 
-        manager = MemoryFeedbackManager()
+        # 租户隔离
+        _sum_tenant_id = _tenant_id_for_store(request)
+        if _sum_tenant_id:
+            _sum_base = Path(f"/data/tenants/{_sum_tenant_id}")
+        else:
+            _sum_base = Path("/data")
+        manager = MemoryFeedbackManager(
+            feedback_dir=_sum_base / "memory_feedback",
+            stats_dir=_sum_base / "memory_usage_stats",
+        )
         summary = manager.get_feedback_summary(employee=employee)
 
         return JSONResponse(
@@ -5026,6 +5151,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 # 流式 agent tools 路径 — 真流式逐 token 推送
                 import crew.webhook_executor as _wh_exec
 
+                _chat_tenant = get_current_tenant(request)
                 agent_stream = _wh_exec._stream_employee_with_tools(
                     ctx,
                     employee_id,
@@ -5039,6 +5165,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     sender_type=sender_type,
                     channel=channel,
                     tenant_id=_tenant_id_for_config(request),
+                    is_admin=_chat_tenant.is_admin,
                 )
 
                 async def _agent_sse_generator():
@@ -5058,6 +5185,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 # 非流式 agent tools 路径
                 import crew.webhook_executor as _wh_exec
 
+                _chat_tenant2 = get_current_tenant(request)
                 exec_result = await _wh_exec._execute_employee_with_tools(
                     ctx,
                     employee_id,
@@ -5071,6 +5199,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     sender_type=sender_type,
                     channel=channel,
                     tenant_id=_tenant_id_for_config(request),
+                    is_admin=_chat_tenant2.is_admin,
                 )
                 result = {
                     "reply": exec_result.get("output", ""),
@@ -5261,6 +5390,11 @@ async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
     """KV 读取 — GET /api/kv/{key:path}."""
     from starlette.responses import JSONResponse, Response
 
+    # 安全加固: KV 读取需要管理员权限（与写接口对齐）
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     key = request.path_params.get("key", "")
     err = _validate_kv_key(key)
     if err:
@@ -5283,6 +5417,11 @@ async def _handle_kv_get(request: Any, ctx: _AppContext) -> Any:
 async def _handle_kv_list(request: Any, ctx: _AppContext) -> Any:
     """KV 列表 — GET /api/kv/ (可选 ?prefix=...)."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: KV 列表需要管理员权限（与写接口对齐）
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     prefix = request.query_params.get("prefix", "")
 
