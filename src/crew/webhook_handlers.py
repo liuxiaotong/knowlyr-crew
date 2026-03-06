@@ -685,15 +685,18 @@ async def _handle_employee_copy(request: Any, ctx: _AppContext) -> Any:
 
 
 async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
-    """返回 active 状态的 AI 员工展示数据（供官网 about 页面使用）.
+    """返回 active 状态的 AI 员工展示数据（供官网 about 页面 + 蚁聚社区使用）.
 
-    返回格式兼容官网模板，每个元素包含:
-    id, nickname, title, avatar_url, is_agent, staff_badge, bio, expertise, domains
+    此端点在 middleware skip_paths 中，允许匿名访问。
+    安全策略：匿名只返回展示安全字段，admin 返回全量（含 domains/expertise）。
     """
     import yaml as _yaml
     from starlette.responses import JSONResponse
 
     from crew.discovery import discover_employees
+
+    # 判断是否 admin（不阻断，仅决定返回字段范围）
+    is_admin = _require_admin_token(request) is None
 
     result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
     agents = []
@@ -740,19 +743,23 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
             if avatar_path.exists():
                 avatar_url = f"/static/avatars/{public_id}.webp"
 
-        agents.append(
-            {
-                "id": public_id,
-                "nickname": emp.character_name,
-                "title": emp.display_name,
-                "avatar_url": avatar_url,
-                "is_agent": True,
-                "staff_badge": "集识光年",
-                "bio": bio,
-                "expertise": emp.tags,
-                "domains": domains,
-            }
-        )
+        # 公开安全字段（官网 + 蚁聚社区展示用）
+        agent_data: dict[str, Any] = {
+            "id": public_id,
+            "nickname": emp.character_name,
+            "title": emp.display_name,
+            "avatar_url": avatar_url,
+            "is_agent": True,
+            "staff_badge": "集识光年",
+            "bio": bio,
+        }
+
+        # 敏感字段仅 admin 可见（内部能力标签、领域覆盖）
+        if is_admin:
+            agent_data["expertise"] = emp.tags
+            agent_data["domains"] = domains
+
+        agents.append(agent_data)
 
     # 按 id 升序排列，None 排最后
     agents.sort(key=lambda a: (a["id"] is None, a["id"] or ""))
