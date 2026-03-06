@@ -3106,6 +3106,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         await request.json() if request.headers.get("content-type") == "application/json" else {}
     )
     args = payload.get("args", {})
+    # 兼容：顶层 task 自动塞入 args（旧版调用方式）
+    if not args and "task" in payload:
+        args = {"task": payload["task"]}
     sync = payload.get("sync", False)
     stream = payload.get("stream", False)
     agent_id = payload.get("agent_id")
