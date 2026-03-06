@@ -1135,7 +1135,6 @@ def create_webhook_app(
             "/webhook/github",
             "/feishu/event",
             "/wecom/event",
-            "/api/team/agents",
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
         # 共享缓存 dict：middleware 和 handlers 共用同一实例

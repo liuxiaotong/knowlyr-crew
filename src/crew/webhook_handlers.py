@@ -3295,6 +3295,12 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
 
 async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
     """直接触发 pipeline."""
+    from starlette.responses import JSONResponse
+
+    # 安全加固: pipeline 配置是全局共享的，租户不应直接调用
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     name = request.path_params["name"]
     payload = (
@@ -3866,6 +3872,11 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     import json as _json
 
     from starlette.responses import JSONResponse
+
+    # 安全加固: 路由模板是全局共享的，租户不应直接调用
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.organization import load_organization
 
