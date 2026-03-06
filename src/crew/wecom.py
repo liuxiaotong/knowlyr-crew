@@ -68,6 +68,10 @@ class WecomConfig(BaseModel):
     encoding_aes_key: str = Field(default="", description="回调 EncodingAESKey（消息加解密）")
     default_employee: str = Field(default="", description="默认员工名")
     tenant_id: str = Field(default="", description="绑定的租户 ID（空=admin 租户）")
+    # 通讯录同步（独立密钥）
+    contact_secret: str = Field(default="", description="通讯录同步 Secret")
+    contact_token: str = Field(default="", description="通讯录同步回调 Token")
+    contact_encoding_aes_key: str = Field(default="", description="通讯录同步回调 EncodingAESKey")
 
 
 def load_wecom_config(project_dir: Path | None = None) -> WecomConfig:

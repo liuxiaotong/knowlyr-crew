@@ -308,6 +308,17 @@ def create_webhook_app(
             "token_mgr": WecomTokenManager(wecom_config.corp_id, wecom_config.secret),
             "dedup": EventDeduplicator(),
         }
+        # 通讯录同步独立密钥（如已配置）
+        if wecom_config.contact_token and wecom_config.contact_encoding_aes_key:
+            ctx.wecom_ctx["contact_crypto"] = WecomCrypto(
+                wecom_config.contact_encoding_aes_key, wecom_config.corp_id
+            )
+            ctx.wecom_ctx["contact_token"] = wecom_config.contact_token
+            logger.info("企微通讯录同步回调密钥已加载")
+        if wecom_config.contact_secret:
+            ctx.wecom_ctx["contact_token_mgr"] = WecomTokenManager(
+                wecom_config.corp_id, wecom_config.contact_secret
+            )
         logger.info(
             "企微 Bot 已启用: corp_id=%s agent_id=%d default=%s",
             wecom_config.corp_id,
