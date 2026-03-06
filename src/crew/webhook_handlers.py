@@ -5495,6 +5495,11 @@ async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有流水线 — GET /api/pipelines."""
     from starlette.responses import JSONResponse
 
+    # 安全加固: 流水线列表含执行逻辑，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
     from crew.pipeline import discover_pipelines, load_pipeline
 
     pipelines = discover_pipelines(project_dir=ctx.project_dir)
@@ -5517,6 +5522,11 @@ async def _handle_pipeline_list(request: Any, ctx: _AppContext) -> Any:
 async def _handle_discussion_list(request: Any, ctx: _AppContext) -> Any:
     """列出所有讨论会 — GET /api/discussions."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 讨论配置含流程/角色/策略，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discussion import discover_discussions, load_discussion
 
@@ -5544,6 +5554,11 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
     import json as _json
 
     from starlette.responses import JSONResponse
+
+    # 安全加固: 讨论计划含完整编排流程，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discussion import (
         discover_discussions,
@@ -5592,6 +5607,11 @@ async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
     import json as _json
 
     from starlette.responses import JSONResponse
+
+    # 安全加固: 讨论 prompt 含完整指令，仅 admin 可读
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.discussion import (
         discover_discussions,
@@ -6239,6 +6259,11 @@ async def _handle_pipeline_list_config(request: Any, ctx: _AppContext) -> Any:
 async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
     """手动触发过期决策扫描 — POST /api/evaluate/scan."""
     from starlette.responses import JSONResponse
+
+    # 安全加固: 扫描会批量写入记忆和评估结论，仅 admin 可触发
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.cron_evaluate import format_scan_report, scan_overdue_decisions
 
