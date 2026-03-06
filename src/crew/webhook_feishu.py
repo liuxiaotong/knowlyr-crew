@@ -276,6 +276,16 @@ async def _feishu_fast_reply(
         soul_path = emp.source_path / "soul.md"
         if soul_path.exists():
             soul_text = soul_path.read_text(encoding="utf-8")
+    if not soul_text:
+        # DB 模式回退
+        try:
+            from crew.config_store import get_employee_from_db
+
+            db_row = get_employee_from_db(emp.name)
+            if db_row:
+                soul_text = db_row.get("soul_content") or ""
+        except Exception:
+            pass
 
     # 去掉 soul.md 中包含工具调用指令的段落（如"你的内心习惯"提到 read_notes/add_memory）
     import re as _re

@@ -87,7 +87,7 @@ class Employee(BaseModel):
     permissions: PermissionPolicy | None = Field(default=None, description="权限策略")
     body: str = Field(description="Markdown 正文（自然语言指令）")
     source_path: Path | None = Field(default=None, description="来源文件路径")
-    source_layer: Literal["builtin", "global", "skill", "project", "private"] = Field(
+    source_layer: Literal["builtin", "global", "skill", "project", "private", "db"] = Field(
         default="builtin", description="来源层"
     )
 

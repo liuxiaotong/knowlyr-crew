@@ -4129,12 +4129,21 @@ def create_server(project_dir: Path | None = None) -> "Server":
         parts.append("")
         parts.append(f"**状态**: {emp.agent_status} | **模型**: {emp.model or '默认'}")
 
-        # Soul（人设）
+        # Soul（人设）— 文件系统或 DB
         soul = ""
         if emp.source_path:
             soul_path = emp.source_path / "soul.md"
             if soul_path.exists():
                 soul = soul_path.read_text(encoding="utf-8").strip()
+        if not soul:
+            try:
+                from crew.config_store import get_employee_from_db
+
+                db_row = get_employee_from_db(emp.name)
+                if db_row:
+                    soul = (db_row.get("soul_content") or "").strip()
+            except Exception:
+                pass
         if soul:
             parts.append("")
             parts.append("## Soul")

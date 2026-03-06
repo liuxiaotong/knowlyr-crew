@@ -1,16 +1,26 @@
-"""发现机制 — 内置 + .claude/skills + private/employees."""
+"""发现机制 — 内置 + .claude/skills + private/employees.
 
+支持两种数据源（由 CREW_EMPLOYEE_SOURCE 环境变量控制）：
+- ``db``（默认）：从 PostgreSQL employees 表读取
+- ``filesystem``：原有文件系统扫描逻辑
+"""
+
+import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from crew.employees import builtin_dir
-from crew.models import DiscoveryResult, Employee
+from crew.models import DiscoveryResult, Employee, PermissionPolicy
 from crew.parser import parse_employee, parse_employee_dir, parse_skill, validate_employee
 
 logger = logging.getLogger(__name__)
+
+# Feature flag: db (默认) 或 filesystem
+EMPLOYEE_SOURCE = os.environ.get("CREW_EMPLOYEE_SOURCE", "db")
 
 # ── TTL 缓存 ──
 _cache: dict[str, tuple[float, DiscoveryResult]] = {}
@@ -192,13 +202,18 @@ def discover_employees(
     project_dir: Path | None = None,
     *,
     cache_ttl: float | None = None,
+    tenant_id: str | None = None,
 ) -> DiscoveryResult:
-    """执行员工发现（内置 + skills + private/employees）.
+    """执行员工发现.
 
-    带 TTL 缓存（默认 30s），按 project_dir 分 key。
+    数据源由 CREW_EMPLOYEE_SOURCE 环境变量控制：
+    - ``db``（默认）：PG 可用时从 employees 表查询
+    - ``filesystem``：原有文件系统扫描
+
+    带 TTL 缓存（默认 30s），按 project_dir + tenant_id 分 key。
     cache_ttl=0 禁用缓存（适合 CLI / 测试场景）。
 
-    优先级（高覆盖低）:
+    优先级（filesystem 模式，高覆盖低）:
     1. 内置层: 包内 employees/*.md
     2. 技能层: {project_dir}/.claude/skills/<name>/SKILL.md
     3. private 层: {project_dir}/private/employees/
@@ -208,7 +223,8 @@ def discover_employees(
     root = resolve_project_dir(project_dir)
 
     ttl = cache_ttl if cache_ttl is not None else _CACHE_TTL
-    key = str(root)
+    tid = tenant_id or ""
+    key = f"{root}:{tid}"
     now = time.monotonic()
 
     with _cache_lock:
@@ -217,13 +233,108 @@ def discover_employees(
             if now - ts < ttl:
                 return result
 
-    result = _discover_employees_uncached(root)
+    # 选择数据源
+    source = os.environ.get("CREW_EMPLOYEE_SOURCE", "db")
+    if source == "db":
+        result = _discover_employees_from_db(root, tenant_id=tenant_id)
+    else:
+        result = _discover_employees_uncached(root)
 
     if ttl > 0:
         with _cache_lock:
             _cache[key] = (now, result)
 
     return result
+
+
+def _db_row_to_employee(row: dict[str, Any]) -> Employee:
+    """将 employees 表的字典转换为 Employee 对象."""
+    # 解析 permissions
+    permissions = None
+    perm_json = row.get("permissions_json")
+    if perm_json:
+        try:
+            permissions = PermissionPolicy(**json.loads(perm_json))
+        except Exception:
+            pass
+
+    return Employee(
+        name=row["name"],
+        display_name=row.get("display_name", ""),
+        character_name=row.get("character_name", ""),
+        summary=row.get("summary", ""),
+        version=row.get("version", "1.0"),
+        description=row.get("description", ""),
+        tags=row.get("tags") or [],
+        author=row.get("author", ""),
+        triggers=row.get("triggers") or [],
+        args=[],  # args 暂不存入 DB，从 body 中解析
+        tools=row.get("tools") or [],
+        context=row.get("context") or [],
+        model_tier=row.get("model_tier", ""),
+        model=row.get("model", ""),
+        api_key=row.get("api_key", ""),
+        base_url=row.get("base_url", ""),
+        fallback_model=row.get("fallback_model", ""),
+        fallback_api_key=row.get("fallback_api_key", ""),
+        fallback_base_url=row.get("fallback_base_url", ""),
+        agent_id=row.get("agent_id"),
+        agent_status=row.get("agent_status", "active"),
+        avatar_prompt=row.get("avatar_prompt", ""),
+        research_instructions=row.get("research_instructions", ""),
+        auto_memory=bool(row.get("auto_memory", False)),
+        kpi=row.get("kpi") or [],
+        permissions=permissions,
+        body=row.get("body", ""),
+        source_path=None,  # DB 模式下没有文件路径
+        source_layer=row.get("source_layer", "db"),
+    )
+
+
+def _discover_employees_from_db(
+    root: Path,
+    tenant_id: str | None = None,
+) -> DiscoveryResult:
+    """从 PostgreSQL employees 表查询员工.
+
+    如果 PG 不可用，自动回退到文件系统扫描。
+    """
+    try:
+        from crew.database import is_pg
+
+        if not is_pg():
+            logger.debug("非 PG 模式，回退文件系统发现")
+            return _discover_employees_uncached(root)
+
+        from crew.config_store import list_employees_from_db
+        from crew.tenant import DEFAULT_ADMIN_TENANT_ID
+
+        tid = tenant_id or DEFAULT_ADMIN_TENANT_ID
+        rows = list_employees_from_db(tenant_id=tid)
+
+        if not rows:
+            logger.info("employees 表为空（tenant=%s），回退文件系统发现", tid)
+            return _discover_employees_uncached(root)
+
+        employees: dict[str, Employee] = {}
+        for row in rows:
+            try:
+                emp = _db_row_to_employee(row)
+                employees[emp.name] = emp
+            except Exception as e:
+                logger.warning("从 DB 构造 Employee 失败 %s: %s", row.get("name"), e)
+
+        # 按 model_tier 填充模型默认值
+        from crew.organization import apply_model_defaults, load_organization
+
+        org = load_organization(project_dir=root)
+        apply_model_defaults(employees, org)
+
+        return DiscoveryResult(employees=employees, conflicts=[])
+
+    except Exception as e:
+        logger.warning("DB 员工发现失败，回退文件系统: %s", e, exc_info=True)
+        return _discover_employees_uncached(root)
 
 
 def _discover_employees_uncached(root: Path) -> DiscoveryResult:

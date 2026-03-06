@@ -338,7 +338,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     system_prompt = engine.prompt(employee)
     tool_schemas, _ = employee_tools_to_schemas(employee.tools, defer=False)
 
-    # 从 YAML 读取 Employee model 之外的字段（bio, temperature 等）
+    # 从 YAML 或 DB 读取 Employee model 之外的字段（bio, temperature 等）
     bio = ""
     temperature = None
     max_tokens = None
@@ -352,6 +352,18 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
             bio = yaml_config.get("bio", "")
             temperature = yaml_config.get("temperature")
             max_tokens = yaml_config.get("max_tokens")
+    else:
+        # DB 模式：source_path 为空，从 employees 表读取额外字段
+        try:
+            from crew.config_store import get_employee_from_db
+
+            db_row = get_employee_from_db(employee.name, tenant_id=_tenant_id_for_config(request))
+            if db_row:
+                bio = db_row.get("bio", "")
+                temperature = db_row.get("temperature")
+                max_tokens = db_row.get("max_tokens")
+        except Exception:
+            pass
 
     # 组织架构信息（团队、权限、成本）
     from crew.organization import get_effective_authority, load_organization
@@ -588,7 +600,7 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
         if emp.agent_status != "active":
             continue
 
-        # 从 employee.yaml 读取 bio 和 domains（Employee 模型未收录这两个字段）
+        # 从 employee.yaml 或 DB 读取 bio 和 domains（Employee 模型未收录这两个字段）
         bio = ""
         domains: list[str] = []
         if emp.source_path and (emp.source_path / "employee.yaml").exists():
@@ -599,6 +611,18 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
                 if isinstance(raw, dict):
                     bio = raw.get("bio", "")
                     raw_domains = raw.get("domains", [])
+                    domains = raw_domains if isinstance(raw_domains, list) else []
+            except Exception:
+                pass
+        elif not emp.source_path:
+            # DB 模式：从 employees 表读取
+            try:
+                from crew.config_store import get_employee_from_db
+
+                db_row = get_employee_from_db(emp.name, tenant_id=_tenant_id_for_config(request))
+                if db_row:
+                    bio = db_row.get("bio", "")
+                    raw_domains = db_row.get("domains") or []
                     domains = raw_domains if isinstance(raw_domains, list) else []
             except Exception:
                 pass
@@ -679,12 +703,22 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     min_importance = _safe_int(request.query_params.get("min_importance", "0"), 0)
     max_tokens = _safe_int(request.query_params.get("max_tokens", "0"), 0)  # 0=不限
 
-    # 读取 soul.md
+    # 读取 soul.md（文件系统或 DB）
     soul = ""
     if employee.source_path:
         soul_path = employee.source_path / "soul.md"
         if soul_path.exists():
             soul = soul_path.read_text(encoding="utf-8")
+    else:
+        # DB 模式：从 employees 表读取 soul_content
+        try:
+            from crew.config_store import get_employee_from_db
+
+            db_row = get_employee_from_db(employee.name, tenant_id=_tenant_id_for_config(request))
+            if db_row:
+                soul = db_row.get("soul_content", "")
+        except Exception:
+            pass
 
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
@@ -783,9 +817,6 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     if not employee:
         return JSONResponse({"error": "Employee not found"}, status_code=404)
 
-    if not employee.source_path:
-        return JSONResponse({"error": "Employee source path unknown"}, status_code=400)
-
     try:
         payload = await request.json()
     except (ValueError, TypeError):
@@ -805,12 +836,28 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
             status_code=400,
         )
 
-    # 写回 employee.yaml
-    try:
-        _write_yaml_field(employee.source_path, updates)
-    except OSError as e:
-        logger.exception("更新 employee.yaml 失败: %s", identifier)
-        return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
+    if employee.source_path:
+        # 文件系统模式：写回 employee.yaml
+        try:
+            _write_yaml_field(employee.source_path, updates)
+        except OSError as e:
+            logger.exception("更新 employee.yaml 失败: %s", identifier)
+            return JSONResponse({"error": f"Write failed: {e}"}, status_code=500)
+    else:
+        # DB 模式：更新 employees 表
+        try:
+            from crew.config_store import get_employee_from_db, upsert_employee_to_db
+
+            tenant = _tenant_id_for_config(request)
+            db_row = get_employee_from_db(employee.name, tenant_id=tenant)
+            if db_row:
+                db_row.update(updates)
+                upsert_employee_to_db(db_row, tenant_id=tenant)
+            else:
+                return JSONResponse({"error": "Employee not found in DB"}, status_code=404)
+        except Exception as e:
+            logger.exception("更新 employees 表失败: %s", identifier)
+            return JSONResponse({"error": f"DB update failed: {e}"}, status_code=500)
 
     return JSONResponse(
         {

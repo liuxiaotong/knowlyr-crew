@@ -86,6 +86,51 @@ CREATE TABLE IF NOT EXISTS memories (
 )
 """
 
+_PG_CREATE_EMPLOYEES = """\
+CREATE TABLE IF NOT EXISTS employees (
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'tenant_admin',
+    name VARCHAR(255) NOT NULL,
+    character_name VARCHAR(255) NOT NULL DEFAULT '',
+    display_name VARCHAR(255) DEFAULT '',
+    description TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    version VARCHAR(20) DEFAULT '1.0',
+    tags TEXT[],
+    author VARCHAR(255) DEFAULT '',
+    triggers TEXT[],
+    model VARCHAR(255) DEFAULT '',
+    model_tier VARCHAR(50) DEFAULT '',
+    agent_id VARCHAR(20),
+    agent_status VARCHAR(20) DEFAULT 'active',
+    avatar_prompt TEXT DEFAULT '',
+    auto_memory BOOLEAN DEFAULT FALSE,
+    kpi TEXT[],
+    bio TEXT DEFAULT '',
+    domains TEXT[],
+    temperature DOUBLE PRECISION,
+    max_tokens INTEGER,
+    tools TEXT[],
+    context TEXT[],
+    permissions_json TEXT,
+    api_key VARCHAR(512) DEFAULT '',
+    base_url VARCHAR(512) DEFAULT '',
+    fallback_model VARCHAR(255) DEFAULT '',
+    fallback_api_key VARCHAR(512) DEFAULT '',
+    fallback_base_url VARCHAR(512) DEFAULT '',
+    research_instructions TEXT DEFAULT '',
+    body TEXT DEFAULT '',
+    soul_content TEXT DEFAULT '',
+    soul_version INTEGER DEFAULT 1,
+    soul_updated_at TIMESTAMP,
+    soul_updated_by VARCHAR(255),
+    source_layer VARCHAR(20) DEFAULT 'builtin',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT,
+    PRIMARY KEY (tenant_id, name)
+)
+"""
+
 _PG_CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_soul_history_employee ON employee_soul_history(employee_name)",
     "CREATE INDEX IF NOT EXISTS idx_discussions_updated ON discussions(updated_at)",
@@ -95,6 +140,10 @@ _PG_CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_memories_shared ON memories(shared)",
     "CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags)",
+    "CREATE INDEX IF NOT EXISTS idx_employees_agent_id ON employees(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_employees_agent_status ON employees(agent_status)",
+    "CREATE INDEX IF NOT EXISTS idx_employees_tags ON employees USING GIN(tags)",
+    "CREATE INDEX IF NOT EXISTS idx_employees_triggers ON employees USING GIN(triggers)",
 ]
 
 
@@ -111,6 +160,7 @@ def init_config_tables() -> None:
         cur.execute(_PG_CREATE_PIPELINES)
         cur.execute(_PG_CREATE_SOUL_HISTORY)
         cur.execute(_PG_CREATE_MEMORIES)
+        cur.execute(_PG_CREATE_EMPLOYEES)
         for sql in _PG_CREATE_INDEXES:
             cur.execute(sql)
 
@@ -211,6 +261,22 @@ def update_soul(
                 """,
                 (employee_name, content, new_version, now, updated_by, metadata_json, tenant_id),
             )
+
+    # 同步到 employees 表（如果存在对应记录）
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE employees
+                SET soul_content = %s, soul_version = %s, soul_updated_at = %s,
+                    soul_updated_by = %s, updated_at = %s
+                WHERE tenant_id = %s AND (name = %s OR character_name = %s)
+                """,
+                (content, new_version, now, updated_by, now, tenant_id, employee_name, employee_name),
+            )
+    except Exception as e:
+        logger.debug("同步 soul 到 employees 表跳过: %s", e)
 
     return {
         "employee_name": employee_name,
@@ -620,3 +686,395 @@ def list_pipelines(tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> list[dict[str, A
             }
             for row in rows
         ]
+
+
+# ── Employees 统一表操作 ──
+
+# employees 表列名（INSERT 顺序）
+_EMPLOYEE_COLUMNS = (
+    "tenant_id", "name", "character_name", "display_name", "description",
+    "summary", "version", "tags", "author", "triggers",
+    "model", "model_tier", "agent_id", "agent_status", "avatar_prompt",
+    "auto_memory", "kpi", "bio", "domains", "temperature",
+    "max_tokens", "tools", "context", "permissions_json",
+    "api_key", "base_url", "fallback_model", "fallback_api_key", "fallback_base_url",
+    "research_instructions", "body", "soul_content", "soul_version",
+    "soul_updated_at", "soul_updated_by", "source_layer",
+    "created_at", "updated_at", "metadata",
+)
+
+
+def _employee_row_to_dict(row: tuple, columns: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """将 employees 表的一行转换为字典."""
+    cols = columns or _EMPLOYEE_COLUMNS
+    d: dict[str, Any] = {}
+    for i, col in enumerate(cols):
+        val = row[i]
+        if col in ("created_at", "updated_at", "soul_updated_at") and val is not None:
+            val = val.isoformat() if hasattr(val, "isoformat") else val
+        d[col] = val
+    return d
+
+
+def get_employee_from_db(
+    name: str,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+) -> dict[str, Any] | None:
+    """从 employees 表读取单个员工."""
+    if not is_pg():
+        return None
+
+    cols = ", ".join(_EMPLOYEE_COLUMNS)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT {cols} FROM employees WHERE tenant_id = %s AND name = %s",  # noqa: S608
+            (tenant_id, name),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return _employee_row_to_dict(row)
+
+
+def list_employees_from_db(
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+    *,
+    active_only: bool = False,
+) -> list[dict[str, Any]]:
+    """从 employees 表列出员工."""
+    if not is_pg():
+        return []
+
+    cols = ", ".join(_EMPLOYEE_COLUMNS)
+    sql = f"SELECT {cols} FROM employees WHERE tenant_id = %s"  # noqa: S608
+    params: list[Any] = [tenant_id]
+    if active_only:
+        sql += " AND agent_status = %s"
+        params.append("active")
+    sql += " ORDER BY name"
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+        return [_employee_row_to_dict(row) for row in rows]
+
+
+def upsert_employee_to_db(
+    data: dict[str, Any],
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+) -> dict[str, Any]:
+    """插入或更新 employees 表记录（UPSERT）.
+
+    Args:
+        data: 员工数据字典（至少包含 name）
+        tenant_id: 租户 ID
+
+    Returns:
+        更新后的员工数据
+    """
+    if not is_pg():
+        raise RuntimeError("employees 表仅支持 PG 模式")
+
+    now = datetime.now(timezone.utc)
+    name = data["name"]
+
+    # 构建完整数据
+    row_data = {
+        "tenant_id": tenant_id,
+        "name": name,
+        "character_name": data.get("character_name", ""),
+        "display_name": data.get("display_name", ""),
+        "description": data.get("description", ""),
+        "summary": data.get("summary", ""),
+        "version": data.get("version", "1.0"),
+        "tags": data.get("tags") or [],
+        "author": data.get("author", ""),
+        "triggers": data.get("triggers") or [],
+        "model": data.get("model", ""),
+        "model_tier": data.get("model_tier", ""),
+        "agent_id": data.get("agent_id"),
+        "agent_status": data.get("agent_status", "active"),
+        "avatar_prompt": data.get("avatar_prompt", ""),
+        "auto_memory": bool(data.get("auto_memory", False)),
+        "kpi": data.get("kpi") or [],
+        "bio": data.get("bio", ""),
+        "domains": data.get("domains") or [],
+        "temperature": data.get("temperature"),
+        "max_tokens": data.get("max_tokens"),
+        "tools": data.get("tools") or [],
+        "context": data.get("context") or [],
+        "permissions_json": json.dumps(data["permissions"], ensure_ascii=False) if data.get("permissions") else None,
+        "api_key": data.get("api_key", ""),
+        "base_url": data.get("base_url", ""),
+        "fallback_model": data.get("fallback_model", ""),
+        "fallback_api_key": data.get("fallback_api_key", ""),
+        "fallback_base_url": data.get("fallback_base_url", ""),
+        "research_instructions": data.get("research_instructions", ""),
+        "body": data.get("body", ""),
+        "soul_content": data.get("soul_content", ""),
+        "soul_version": data.get("soul_version", 1),
+        "soul_updated_at": data.get("soul_updated_at") or now,
+        "soul_updated_by": data.get("soul_updated_by", ""),
+        "source_layer": data.get("source_layer", "builtin"),
+        "created_at": now,
+        "updated_at": now,
+        "metadata": json.dumps(data.get("metadata") or {}, ensure_ascii=False),
+    }
+
+    cols = ", ".join(_EMPLOYEE_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(_EMPLOYEE_COLUMNS))
+    values = tuple(row_data[c] for c in _EMPLOYEE_COLUMNS)
+
+    # ON CONFLICT 更新所有非主键字段
+    update_cols = [c for c in _EMPLOYEE_COLUMNS if c not in ("tenant_id", "name", "created_at")]
+    update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO employees ({cols}) VALUES ({placeholders}) "  # noqa: S608
+            f"ON CONFLICT (tenant_id, name) DO UPDATE SET {update_set}",
+            values,
+        )
+
+    row_data["created_at"] = now.isoformat()
+    row_data["updated_at"] = now.isoformat()
+    return row_data
+
+
+def update_employee_soul_in_db(
+    name: str,
+    content: str,
+    updated_by: str = "",
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+) -> dict[str, Any]:
+    """更新 employees 表中的 soul 内容（自动版本递增 + 写入 soul_history）.
+
+    Returns:
+        更新后的信息字典
+    """
+    if not is_pg():
+        raise RuntimeError("employees 表仅支持 PG 模式")
+
+    now = datetime.now(timezone.utc)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # 读取当前版本
+        cur.execute(
+            "SELECT soul_version, soul_content FROM employees WHERE tenant_id = %s AND name = %s",
+            (tenant_id, name),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Employee not found: {name}")
+
+        old_version = row[0] or 1
+        old_content = row[1] or ""
+        new_version = old_version + 1
+
+        # 保存历史版本到 employee_soul_history
+        cur.execute(
+            """
+            INSERT INTO employee_soul_history (employee_name, version, content, updated_at, updated_by, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, employee_name, version) DO NOTHING
+            """,
+            (name, old_version, old_content, now, updated_by, tenant_id),
+        )
+
+        # 更新 employees 表
+        cur.execute(
+            """
+            UPDATE employees
+            SET soul_content = %s, soul_version = %s, soul_updated_at = %s,
+                soul_updated_by = %s, updated_at = %s
+            WHERE tenant_id = %s AND name = %s
+            """,
+            (content, new_version, now, updated_by, now, tenant_id, name),
+        )
+
+    return {
+        "employee_name": name,
+        "version": new_version,
+        "updated_at": now.isoformat(),
+        "updated_by": updated_by,
+    }
+
+
+def delete_employee_from_db(
+    name: str,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+) -> bool:
+    """从 employees 表删除员工.
+
+    Returns:
+        是否成功删除
+    """
+    if not is_pg():
+        return False
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM employees WHERE tenant_id = %s AND name = %s",
+            (tenant_id, name),
+        )
+        return cur.rowcount > 0
+
+
+def migrate_employees_to_db(
+    project_dir: "Path | None" = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+) -> dict[str, Any]:
+    """从文件系统 + employee_souls 表迁移数据到 employees 表.
+
+    幂等操作：已存在的记录不覆盖（ON CONFLICT DO NOTHING）。
+
+    Returns:
+        迁移统计信息
+    """
+    from pathlib import Path
+
+    if not is_pg():
+        return {"skipped": True, "reason": "not PG mode"}
+
+    from crew.discovery import _discover_employees_uncached
+    from crew.paths import resolve_project_dir
+
+    root = resolve_project_dir(project_dir)
+    result = _discover_employees_uncached(root)
+
+    now = datetime.now(timezone.utc)
+    migrated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for emp in result.employees.values():
+        try:
+            # 读取 employee.yaml 中的额外字段（bio, temperature, max_tokens, domains）
+            bio = ""
+            temperature = None
+            max_tokens = None
+            domains: list[str] = []
+            if emp.source_path and emp.source_path.is_dir():
+                yaml_path = emp.source_path / "employee.yaml"
+                if yaml_path.exists():
+                    import yaml
+
+                    with open(yaml_path) as f:
+                        yaml_config = yaml.safe_load(f) or {}
+                    bio = yaml_config.get("bio", "")
+                    temperature = yaml_config.get("temperature")
+                    max_tokens = yaml_config.get("max_tokens")
+                    raw_domains = yaml_config.get("domains", [])
+                    domains = raw_domains if isinstance(raw_domains, list) else []
+
+            # 读取 soul.md 内容
+            soul_content = ""
+            if emp.source_path:
+                if emp.source_path.is_dir():
+                    soul_path = emp.source_path / "soul.md"
+                else:
+                    soul_path = emp.source_path
+                if soul_path.exists():
+                    soul_content = soul_path.read_text(encoding="utf-8")
+
+            # 从 employee_souls 表获取 soul 版本信息
+            soul_version = 1
+            soul_updated_at = now
+            soul_updated_by = ""
+            soul_row = get_soul(emp.character_name or emp.name, tenant_id=tenant_id)
+            if soul_row:
+                soul_content = soul_row.get("content") or soul_content
+                soul_version = soul_row.get("version", 1)
+                soul_updated_at_str = soul_row.get("updated_at")
+                if soul_updated_at_str:
+                    try:
+                        soul_updated_at = datetime.fromisoformat(soul_updated_at_str)
+                    except (ValueError, TypeError):
+                        pass
+                soul_updated_by = soul_row.get("updated_by", "")
+
+            # 构建 permissions JSON
+            permissions = None
+            if emp.permissions:
+                permissions = emp.permissions.model_dump()
+
+            # 组装数据
+            data = {
+                "name": emp.name,
+                "character_name": emp.character_name,
+                "display_name": emp.display_name,
+                "description": emp.description,
+                "summary": emp.summary,
+                "version": emp.version,
+                "tags": emp.tags,
+                "author": emp.author,
+                "triggers": emp.triggers,
+                "model": emp.model,
+                "model_tier": emp.model_tier,
+                "agent_id": emp.agent_id,
+                "agent_status": emp.agent_status,
+                "avatar_prompt": emp.avatar_prompt,
+                "auto_memory": emp.auto_memory,
+                "kpi": emp.kpi,
+                "bio": bio,
+                "domains": domains,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "tools": emp.tools,
+                "context": emp.context,
+                "permissions": permissions,
+                "api_key": emp.api_key,
+                "base_url": emp.base_url,
+                "fallback_model": emp.fallback_model,
+                "fallback_api_key": emp.fallback_api_key,
+                "fallback_base_url": emp.fallback_base_url,
+                "research_instructions": emp.research_instructions,
+                "body": emp.body,
+                "soul_content": soul_content,
+                "soul_version": soul_version,
+                "soul_updated_at": soul_updated_at,
+                "soul_updated_by": soul_updated_by,
+                "source_layer": emp.source_layer,
+            }
+
+            # ON CONFLICT DO NOTHING — 幂等
+            cols = ", ".join(_EMPLOYEE_COLUMNS)
+            placeholders = ", ".join(["%s"] * len(_EMPLOYEE_COLUMNS))
+            row_data = {
+                **data,
+                "tenant_id": tenant_id,
+                "created_at": now,
+                "updated_at": now,
+                "metadata": json.dumps({}, ensure_ascii=False),
+            }
+            values = tuple(row_data.get(c) for c in _EMPLOYEE_COLUMNS)
+
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"INSERT INTO employees ({cols}) VALUES ({placeholders}) "  # noqa: S608
+                    "ON CONFLICT (tenant_id, name) DO NOTHING",
+                    values,
+                )
+                if cur.rowcount > 0:
+                    migrated += 1
+                else:
+                    skipped += 1
+
+        except Exception as e:
+            errors.append(f"{emp.name}: {e}")
+            logger.warning("迁移员工 %s 失败: %s", emp.name, e, exc_info=True)
+
+    logger.info("员工迁移完成: migrated=%d, skipped=%d, errors=%d", migrated, skipped, len(errors))
+    return {
+        "migrated": migrated,
+        "skipped": skipped,
+        "errors": errors,
+        "total": len(result.employees),
+    }

@@ -1026,6 +1026,21 @@ def create_webhook_app(
         except Exception as _init_err:
             logger.warning("memories 表初始化跳过: %s", _init_err)
 
+        # ── 员工数据迁移到 employees 表（幂等）──
+        try:
+            from crew.config_store import migrate_employees_to_db
+
+            _migrate_result = migrate_employees_to_db(project_dir=ctx.project_dir)
+            if not _migrate_result.get("skipped"):
+                logger.info(
+                    "员工迁移: migrated=%d, skipped=%d, errors=%d",
+                    _migrate_result.get("migrated", 0),
+                    _migrate_result.get("skipped", 0),
+                    len(_migrate_result.get("errors", [])),
+                )
+        except Exception as _migrate_err:
+            logger.warning("员工迁移跳过: %s", _migrate_err)
+
         if scheduler:
             await scheduler.start()
         _task = asyncio.create_task(_resume_incomplete_pipelines(ctx))
