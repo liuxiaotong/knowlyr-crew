@@ -69,13 +69,13 @@ async def _dispatch_task(
 
     if sync:
         await _wh._execute_task(
-            ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id
+            ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id, tenant_id=tenant_id
         )
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
     task = asyncio.create_task(
-        _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id)
+        _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id, tenant_id=tenant_id)
     )
     _background_tasks.add(task)
     task.add_done_callback(_task_done_callback)
@@ -91,6 +91,7 @@ async def _execute_task(
     agent_id: str | None = None,
     model: str | None = None,
     trace_id: str = "",
+    tenant_id: str | None = None,
 ) -> None:
     """执行任务."""
     record = ctx.registry.get(task_id)
@@ -136,6 +137,7 @@ async def _execute_task(
                 record.args,
                 agent_id=agent_id,
                 model=model,
+                tenant_id=tenant_id,
             )
         elif record.target_type == "meeting":
             logger.info("执行 meeting [trace=%s] %s", trace_id, record.target_name)
@@ -155,7 +157,7 @@ async def _execute_task(
             import json as _json
 
             steps = _json.loads(record.args.get("steps_json", "[]"))
-            result = await _wh._execute_chain(ctx, task_id, steps)
+            result = await _wh._execute_chain(ctx, task_id, steps, tenant_id=tenant_id)
         else:
             ctx.registry.update(task_id, "failed", error=f"未知目标类型: {record.target_type}")
             return
@@ -208,7 +210,7 @@ async def _execute_task(
                     try:
                         from crew.discovery import discover_employees
 
-                        disc = discover_employees(project_dir=ctx.project_dir)
+                        disc = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
                         match = disc.get(record.target_name)
                         task_desc = record.args.get("task", "")[:100]
                         _mem_store = None
@@ -396,12 +398,13 @@ async def _delegate_employee(
     task: str,
     *,
     model: str | None = None,
+    tenant_id: str | None = None,
 ) -> str:
     """执行被委派的员工（纯文本输入/输出，不支持递归委派）."""
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    discovery = discover_employees(project_dir=ctx.project_dir)
+    discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     target = discovery.get(employee_name)
     if target is None:
         available = ", ".join(sorted(discovery.employees.keys()))
@@ -522,6 +525,7 @@ async def _execute_chain(
     start_index: int = 0,
     prev_output: str = "",
     step_results: list[dict[str, str]] | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """按顺序执行委派链，前一步结果传给下一步.
 
@@ -532,7 +536,7 @@ async def _execute_chain(
     from crew.engine import CrewEngine
     from crew.executor import aexecute_prompt
 
-    discovery = discover_employees(project_dir=ctx.project_dir)
+    discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     engine = CrewEngine(project_dir=ctx.project_dir)
 
     if step_results is None:
@@ -640,7 +644,7 @@ async def _notify_approval_needed(
         logger.warning("审批通知发送异常 (task=%s): %s", task_id, e)
 
 
-async def _resume_chain(ctx: _AppContext, task_id: str) -> None:
+async def _resume_chain(ctx: _AppContext, task_id: str, *, tenant_id: str | None = None) -> None:
     """从审批检查点恢复链执行."""
     record = ctx.registry.get(task_id)
     if not record or record.status != "awaiting_approval":
@@ -665,6 +669,7 @@ async def _resume_chain(ctx: _AppContext, task_id: str) -> None:
             start_index=start_index,
             prev_output=prev_output,
             step_results=step_results,
+            tenant_id=tenant_id,
         )
         # 如果又遇到审批检查点，_execute_chain 已处理，不需要再 update
         if result.get("status") == "awaiting_approval":
@@ -729,6 +734,7 @@ async def _execute_employee_with_tools(
     attachments: list[dict[str, Any]] | None = None,
     sender_type: str = "",
     channel: str = "",
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
@@ -740,7 +746,7 @@ async def _execute_employee_with_tools(
         employee_tools_to_schemas,
     )
 
-    discovery = discover_employees(project_dir=ctx.project_dir)
+    discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     match = discovery.get(name)
     if match is None:
         raise EmployeeNotFoundError(name)
@@ -951,6 +957,7 @@ async def _execute_employee_with_tools(
                     max_visibility=max_visibility,
                     push_event_fn=None,
                     target_user_id=sender_id or "",
+                    tenant_id=tenant_id,
                 )
                 if tool_output is None:
                     # finish tool
@@ -1019,6 +1026,7 @@ async def _execute_employee_with_tools(
                     max_visibility=max_visibility,
                     push_event_fn=None,
                     target_user_id=sender_id or "",
+                    tenant_id=tenant_id,
                 )
                 if tool_output is None:
                     final_content = tc.arguments.get("result", result.content)
@@ -1091,6 +1099,7 @@ async def _stream_employee_with_tools(
     attachments: list[dict[str, Any]] | None = None,
     sender_type: str = "",
     channel: str = "",
+    tenant_id: str | None = None,
 ) -> Any:
     """流式版 agent loop — 每一轮都用原生流式 API，逐 token 输出.
 
@@ -1108,7 +1117,7 @@ async def _stream_employee_with_tools(
         employee_tools_to_schemas,
     )
 
-    discovery = discover_employees(project_dir=ctx.project_dir)
+    discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     match = discovery.get(name)
     if match is None:
         raise EmployeeNotFoundError(name)
@@ -1449,6 +1458,7 @@ async def _stream_employee_with_tools(
                 max_visibility=max_visibility,
                 push_event_fn=None,
                 target_user_id=sender_id or "",
+                tenant_id=tenant_id,
             )
             if tool_output is None:
                 final_content = tc.arguments.get("result", full_text)
@@ -1583,6 +1593,7 @@ async def _stream_employee_with_tools_fallback(
                 max_visibility=max_visibility,
                 push_event_fn=None,
                 target_user_id=sender_id or "",
+                tenant_id=tenant_id,
             )
             if tool_output is None:
                 final_content = tc.arguments.get("result", result.content)
@@ -1633,6 +1644,7 @@ async def _handle_tool_call(
     max_visibility: str = "open",
     push_event_fn: Any = None,
     target_user_id: str = "",
+    tenant_id: str | None = None,
 ) -> str | None:
     """处理单个 tool call，返回结果字符串。返回 None 表示 finish tool."""
     from crew.tool_schema import is_finish_tool
@@ -1747,6 +1759,7 @@ async def _handle_tool_call(
             ctx,
             arguments.get("employee_name", ""),
             arguments.get("task", ""),
+            tenant_id=tenant_id,
         )
 
     # 注入 _max_visibility 到 read_notes / create_note 工具
@@ -1775,12 +1788,13 @@ async def _execute_employee(
     model: str | None = None,
     user_message: str | list[dict[str, Any]] | None = None,
     message_history: list[dict[str, Any]] | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """执行单个员工."""
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    discovery = discover_employees(project_dir=ctx.project_dir)
+    discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     match = discovery.get(name)
 
     if match is None:
@@ -1808,6 +1822,7 @@ async def _execute_employee(
             model=model,
             user_message=user_message,
             message_history=message_history,
+            tenant_id=tenant_id,
         )
 
     engine = CrewEngine(project_dir=ctx.project_dir)
@@ -1860,6 +1875,7 @@ async def _stream_employee(
     args: dict[str, str],
     agent_id: str | None = None,
     model: str | None = None,
+    tenant_id: str | None = None,
 ) -> Any:
     """SSE 流式执行单个员工."""
     import json as _json
@@ -1872,7 +1888,7 @@ async def _stream_employee(
     from crew.discovery import discover_employees
     from crew.engine import CrewEngine
 
-    result = discover_employees(project_dir=ctx.project_dir)
+    result = discover_employees(project_dir=ctx.project_dir, tenant_id=tenant_id)
     match = result.get(name)
 
     if match is None:
