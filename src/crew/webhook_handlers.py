@@ -583,6 +583,79 @@ async def _handle_employee_create(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+async def _handle_employee_copy(request: Any, ctx: _AppContext) -> Any:
+    """复制员工到当前租户 — POST /api/employees/copy."""
+    from crew.config_store import copy_employee_to_tenant
+    from crew.tenant import DEFAULT_ADMIN_TENANT_ID
+
+    # 1. 解析请求
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("invalid JSON body", 400)
+
+    source_name = (body.get("source_name") or "").strip()
+    if not source_name:
+        return _error_response("source_name is required", 400)
+
+    source_tenant_id = (body.get("source_tenant_id") or DEFAULT_ADMIN_TENANT_ID).strip()
+    new_name = (body.get("new_name") or "").strip() or None
+    new_character_name = (body.get("new_character_name") or "").strip() or None
+    customizations = body.get("customizations") or {}
+
+    # 2. 验证 new_name 格式（如果提供）
+    if new_name and not _re.match(r"^[a-z0-9-]+$", new_name):
+        return _error_response("new_name must match [a-z0-9-]", 400)
+
+    # 3. 权限检查：非 admin 只能从 admin 租户复制
+    tenant = get_current_tenant(request)
+    if not tenant.is_admin and source_tenant_id != DEFAULT_ADMIN_TENANT_ID:
+        return _error_response("non-admin tenants can only copy from admin tenant", 403)
+
+    # 4. 执行复制
+    try:
+        result = copy_employee_to_tenant(
+            source_name=source_name,
+            target_tenant_id=tenant.tenant_id,
+            source_tenant_id=source_tenant_id,
+            new_name=new_name,
+            new_character_name=new_character_name,
+            customizations=customizations,
+        )
+    except ValueError as e:
+        err_msg = str(e)
+        if "not found" in err_msg:
+            return _error_response(err_msg, 404)
+        if "already exists" in err_msg:
+            return _error_response(err_msg, 409)
+        return _error_response(err_msg, 400)
+    except Exception as e:
+        logger.exception("复制员工失败")
+        return _error_response(str(e), 500)
+
+    # 5. 构建响应
+    metadata = result.get("metadata")
+    if isinstance(metadata, str):
+        import json as _json
+        try:
+            metadata = _json.loads(metadata)
+        except Exception:
+            metadata = {}
+
+    return _ok_response(
+        {
+            "employee": {
+                "name": result.get("name"),
+                "tenant_id": result.get("tenant_id"),
+                "character_name": result.get("character_name"),
+                "agent_id": result.get("agent_id"),
+                "source_copied_from": (metadata or {}).get("source_copied_from", ""),
+            },
+        },
+        status_code=201,
+    )
+
+
 async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
     """返回 active 状态的 AI 员工展示数据（供官网 about 页面使用）.
 

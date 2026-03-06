@@ -926,6 +926,101 @@ def delete_employee_from_db(
         return cur.rowcount > 0
 
 
+def copy_employee_to_tenant(
+    source_name: str,
+    target_tenant_id: str,
+    source_tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
+    new_name: str | None = None,
+    new_character_name: str | None = None,
+    customizations: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """从来源租户复制员工到目标租户.
+
+    Args:
+        source_name: 来源员工 slug
+        target_tenant_id: 目标租户 ID
+        source_tenant_id: 来源租户 ID（默认 admin）
+        new_name: 新员工名（可选，默认同原名）
+        new_character_name: 新角色名（可选）
+        customizations: 覆盖字段（可选），支持 description, model, tags 等
+
+    Returns:
+        复制后的员工数据字典
+
+    Raises:
+        ValueError: 来源员工不存在 / 目标租户内名字重复
+        RuntimeError: 非 PG 模式
+    """
+    if not is_pg():
+        raise RuntimeError("employees 表仅支持 PG 模式")
+
+    # 1. 读取来源员工
+    source = get_employee_from_db(source_name, tenant_id=source_tenant_id)
+    if not source:
+        raise ValueError(f"source employee not found: {source_tenant_id}/{source_name}")
+
+    # 2. 确定目标名字
+    target_name = new_name or source_name
+
+    # 3. 检查目标租户内名字是否已存在
+    existing = get_employee_from_db(target_name, tenant_id=target_tenant_id)
+    if existing:
+        raise ValueError(f"employee already exists in target tenant: {target_tenant_id}/{target_name}")
+
+    # 4. 生成新的 agent_id
+    agent_id = _generate_unique_agent_id()
+
+    # 5. 构建复制数据
+    now = datetime.now(timezone.utc)
+    customs = customizations or {}
+
+    copy_data = {
+        "name": target_name,
+        "character_name": new_character_name or source.get("character_name", ""),
+        "display_name": customs.get("display_name", source.get("display_name", "")),
+        "description": customs.get("description", source.get("description", "")),
+        "summary": customs.get("summary", source.get("summary", "")),
+        "version": "1.0",
+        "tags": customs.get("tags", source.get("tags") or []),
+        "author": customs.get("author", source.get("author", "")),
+        "triggers": customs.get("triggers", source.get("triggers") or []),
+        "model": customs.get("model", source.get("model", "")),
+        "model_tier": customs.get("model_tier", source.get("model_tier", "")),
+        "agent_id": agent_id,
+        "agent_status": customs.get("agent_status", "active"),
+        "avatar_prompt": customs.get("avatar_prompt", source.get("avatar_prompt", "")),
+        "auto_memory": source.get("auto_memory", False),
+        "kpi": source.get("kpi") or [],
+        "bio": customs.get("bio", source.get("bio", "")),
+        "domains": customs.get("domains", source.get("domains") or []),
+        "temperature": customs.get("temperature", source.get("temperature")),
+        "max_tokens": customs.get("max_tokens", source.get("max_tokens")),
+        "tools": source.get("tools") or [],
+        "context": source.get("context") or [],
+        "permissions": json.loads(source["permissions_json"]) if source.get("permissions_json") else None,
+        "api_key": source.get("api_key", ""),
+        "base_url": source.get("base_url", ""),
+        "fallback_model": source.get("fallback_model", ""),
+        "fallback_api_key": source.get("fallback_api_key", ""),
+        "fallback_base_url": source.get("fallback_base_url", ""),
+        "research_instructions": customs.get("research_instructions", source.get("research_instructions", "")),
+        "body": customs.get("body", source.get("body", "")),
+        "soul_content": customs.get("soul_content", source.get("soul_content", "")),
+        "soul_version": 1,
+        "soul_updated_at": now,
+        "soul_updated_by": "copy_employee",
+        "source_layer": "db",
+        "metadata": {
+            "source_copied_from": f"{source_tenant_id}/{source_name}",
+        },
+    }
+
+    # 6. 写入目标租户
+    result = upsert_employee_to_db(copy_data, tenant_id=target_tenant_id)
+
+    return result
+
+
 def migrate_employees_to_db(
     project_dir: "Path | None" = None,
     tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
