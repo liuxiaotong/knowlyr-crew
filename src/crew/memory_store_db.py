@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from crew.database import get_connection, is_pg
 from crew.memory import MemoryEntry
+from crew.tenant import DEFAULT_ADMIN_TENANT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,15 @@ class MemoryStoreDB:
     提供与文件版本相同的接口，但数据存储在 PostgreSQL 中。
     """
 
-    def __init__(self, project_dir: Any = None):
+    def __init__(self, project_dir: Any = None, tenant_id: str | None = None):
         """初始化数据库存储.
 
         Args:
             project_dir: 项目目录（兼容参数，数据库版不使用）
+            tenant_id: 租户 ID（None 则使用默认管理员租户，向后兼容）
         """
         self._project_dir = project_dir
+        self._tenant_id = tenant_id or DEFAULT_ADMIN_TENANT_ID
         if not is_pg():
             raise RuntimeError("MemoryStoreDB 仅支持 PostgreSQL 模式")
         import psycopg2.extras
@@ -206,13 +209,13 @@ class MemoryStoreDB:
                     source_session, confidence, superseded_by, ttl_days,
                     importance, last_accessed, tags, shared, visibility,
                     trigger_condition, applicability, origin_employee, verified_count,
-                    classification, domain
+                    classification, domain, tenant_id
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s
                 )
                 """,
                 (
@@ -236,14 +239,15 @@ class MemoryStoreDB:
                     0,
                     classification,
                     domain_list,
+                    self._tenant_id,
                 ),
             )
 
-            # [W10] 容量管理：每个员工最多保留 500 条
+            # [W10] 容量管理：每个租户每个员工最多保留 500 条
             MAX_ENTRIES = 500
             cur.execute(
-                "SELECT count(*) FROM memories WHERE employee = %s AND (superseded_by = '' OR superseded_by IS NULL)",
-                (employee,),
+                "SELECT count(*) FROM memories WHERE employee = %s AND tenant_id = %s AND (superseded_by = '' OR superseded_by IS NULL)",
+                (employee, self._tenant_id),
             )
             count = cur.fetchone()[0]
             if count > MAX_ENTRIES:
@@ -252,12 +256,12 @@ class MemoryStoreDB:
                     """
                     DELETE FROM memories WHERE id IN (
                         SELECT id FROM memories
-                        WHERE employee = %s AND (superseded_by = '' OR superseded_by IS NULL)
+                        WHERE employee = %s AND tenant_id = %s AND (superseded_by = '' OR superseded_by IS NULL)
                         ORDER BY created_at ASC
                         LIMIT %s
                     )
                     """,
-                    (employee, count - MAX_ENTRIES),
+                    (employee, self._tenant_id, count - MAX_ENTRIES),
                 )
 
         return MemoryEntry(
@@ -326,9 +330,9 @@ class MemoryStoreDB:
         """
         employee = self._resolve_to_character_name(employee)
 
-        # 构建查询
-        conditions = ["employee = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
-        params: list[Any] = [employee]
+        # 构建查询（租户隔离）
+        conditions = ["employee = %s", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        params: list[Any] = [employee, self._tenant_id]
 
         if category:
             conditions.append("category = %s")
@@ -435,9 +439,9 @@ class MemoryStoreDB:
                 """
                 UPDATE memories
                 SET last_accessed = %s
-                WHERE id = ANY(%s) AND employee = %s
+                WHERE id = ANY(%s) AND employee = %s AND tenant_id = %s
                 """,
-                (now, entry_ids, employee),
+                (now, entry_ids, employee, self._tenant_id),
             )
 
     def query_shared(
@@ -460,8 +464,8 @@ class MemoryStoreDB:
         """
         exclude_employee = self._resolve_to_character_name(exclude_employee)
 
-        conditions = ["shared = TRUE", "(superseded_by = '' OR superseded_by IS NULL)"]
-        params: list[Any] = []
+        conditions = ["shared = TRUE", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        params: list[Any] = [self._tenant_id]
 
         if exclude_employee:
             conditions.append("employee != %s")
@@ -520,8 +524,8 @@ class MemoryStoreDB:
         Returns:
             pattern 列表（MemoryEntry）
         """
-        conditions = ["category = 'pattern'", "(superseded_by = '' OR superseded_by IS NULL)"]
-        params: list[Any] = []
+        conditions = ["category = 'pattern'", "tenant_id = %s", "(superseded_by = '' OR superseded_by IS NULL)"]
+        params: list[Any] = [self._tenant_id]
 
         if employee:
             employee = self._resolve_to_character_name(employee)
@@ -578,11 +582,14 @@ class MemoryStoreDB:
             if employee:
                 employee = self._resolve_to_character_name(employee)
                 cur.execute(
-                    "DELETE FROM memories WHERE id = %s AND employee = %s",
-                    (entry_id, employee),
+                    "DELETE FROM memories WHERE id = %s AND employee = %s AND tenant_id = %s",
+                    (entry_id, employee, self._tenant_id),
                 )
             else:
-                cur.execute("DELETE FROM memories WHERE id = %s", (entry_id,))
+                cur.execute(
+                    "DELETE FROM memories WHERE id = %s AND tenant_id = %s",
+                    (entry_id, self._tenant_id),
+                )
 
             return cur.rowcount > 0
 
@@ -599,8 +606,8 @@ class MemoryStoreDB:
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE memories SET confidence = %s WHERE id = %s",
-                (confidence, entry_id),
+                "UPDATE memories SET confidence = %s WHERE id = %s AND tenant_id = %s",
+                (confidence, entry_id, self._tenant_id),
             )
             return cur.rowcount > 0
 
@@ -614,20 +621,23 @@ class MemoryStoreDB:
                 """
                 SELECT COUNT(*)
                 FROM memories
-                WHERE employee = %s
+                WHERE employee = %s AND tenant_id = %s
                   AND (superseded_by = '' OR superseded_by IS NULL)
                   AND (ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())
                 """,
-                (employee,),
+                (employee, self._tenant_id),
             )
             row = cur.fetchone()
             return row[0] if row else 0
 
     def list_employees(self) -> list[str]:
-        """列出有记忆的员工."""
+        """列出有记忆的员工（当前租户）."""
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT DISTINCT employee FROM memories ORDER BY employee")
+            cur.execute(
+                "SELECT DISTINCT employee FROM memories WHERE tenant_id = %s ORDER BY employee",
+                (self._tenant_id,),
+            )
             rows = cur.fetchall()
             return [row[0] for row in rows]
 
@@ -662,9 +672,9 @@ class MemoryStoreDB:
                 """
                 UPDATE memories
                 SET superseded_by = %s, confidence = 0.0
-                WHERE id = %s AND employee = %s
+                WHERE id = %s AND employee = %s AND tenant_id = %s
                 """,
-                (new_id, old_id, employee),
+                (new_id, old_id, employee, self._tenant_id),
             )
             if cur.rowcount == 0:
                 return None
@@ -677,16 +687,16 @@ class MemoryStoreDB:
                     source_session, confidence, superseded_by, ttl_days,
                     importance, last_accessed, tags, shared, visibility,
                     trigger_condition, applicability, origin_employee, verified_count,
-                    classification, domain
+                    classification, domain, tenant_id
                 ) VALUES (
                     %s, %s, %s, 'correction', %s,
                     %s, 1.0, '', 0,
                     3, NULL, '{}', FALSE, 'open',
                     '', '{}', %s, 0,
-                    'internal', '{}'
+                    'internal', '{}', %s
                 )
                 """,
-                (new_id, employee, now, new_content, source_session, employee),
+                (new_id, employee, now, new_content, source_session, employee, self._tenant_id),
             )
 
         return MemoryEntry(
@@ -838,11 +848,12 @@ class MemoryStoreDB:
 
         conditions = [
             "employee = ANY(%s)",
+            "tenant_id = %s",
             "(superseded_by = '' OR superseded_by IS NULL)",
             "visibility = 'open'",
             "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())",
         ]
-        params: list[Any] = [list(member_set)]
+        params: list[Any] = [list(member_set), self._tenant_id]
 
         if min_confidence > 0:
             conditions.append("confidence >= %s")
@@ -879,9 +890,9 @@ class MemoryStoreDB:
                 """
                 UPDATE memories
                 SET verified_count = verified_count + 1
-                WHERE id = %s AND category = 'pattern'
+                WHERE id = %s AND category = 'pattern' AND tenant_id = %s
                 """,
-                (pattern_id,),
+                (pattern_id, self._tenant_id),
             )
             return cur.rowcount > 0
 
@@ -916,8 +927,8 @@ class MemoryStoreDB:
         with get_connection() as conn:
             cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
             cur.execute(
-                "SELECT id, tags FROM memories WHERE id = %s AND employee = %s",
-                (entry_id, employee),
+                "SELECT id, tags FROM memories WHERE id = %s AND employee = %s AND tenant_id = %s",
+                (entry_id, employee, self._tenant_id),
             )
             row = cur.fetchone()
             if not row:
@@ -955,9 +966,9 @@ class MemoryStoreDB:
             if not sets:
                 return True  # 没有需要更新的字段
 
-            params.extend([entry_id, employee])
+            params.extend([entry_id, employee, self._tenant_id])
             cur.execute(
-                f"UPDATE memories SET {', '.join(sets)} WHERE id = %s AND employee = %s",
+                f"UPDATE memories SET {', '.join(sets)} WHERE id = %s AND employee = %s AND tenant_id = %s",
                 tuple(params),
             )
             return cur.rowcount > 0

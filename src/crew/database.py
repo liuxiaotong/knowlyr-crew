@@ -255,6 +255,14 @@ def init_db() -> None:
     except Exception as e:
         logger.warning("配置存储表初始化失败（非致命）: %s", e)
 
+    # 初始化多租户表
+    try:
+        from crew.tenant import init_tenant_tables
+
+        init_tenant_tables()
+    except Exception as e:
+        logger.warning("tenants 表初始化失败（非致命）: %s", e)
+
     logger.info("PG init_db() 完成")
 
 

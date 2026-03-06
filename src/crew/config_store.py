@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from crew.database import get_connection, is_pg
+from crew.tenant import DEFAULT_ADMIN_TENANT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def init_config_tables() -> None:
 # ── Employee Soul 操作 ──
 
 
-def get_soul(employee_name: str) -> dict[str, Any] | None:
+def get_soul(employee_name: str, tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> dict[str, Any] | None:
     """读取员工灵魂配置.
 
     Returns:
@@ -131,8 +132,8 @@ def get_soul(employee_name: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT content, version, updated_at, updated_by, metadata FROM employee_souls WHERE employee_name = %s",
-            (employee_name,),
+            "SELECT content, version, updated_at, updated_by, metadata FROM employee_souls WHERE employee_name = %s AND tenant_id = %s",
+            (employee_name, tenant_id),
         )
         row = cur.fetchone()
         if not row:
@@ -152,6 +153,7 @@ def update_soul(
     content: str,
     updated_by: str = "",
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """更新员工灵魂配置（自动版本递增 + 历史记录）.
 
@@ -169,8 +171,8 @@ def update_soul(
 
         # 获取当前版本
         cur.execute(
-            "SELECT version, content FROM employee_souls WHERE employee_name = %s",
-            (employee_name,),
+            "SELECT version, content FROM employee_souls WHERE employee_name = %s AND tenant_id = %s",
+            (employee_name, tenant_id),
         )
         row = cur.fetchone()
 
@@ -183,11 +185,11 @@ def update_soul(
             # 保存历史版本
             cur.execute(
                 """
-                INSERT INTO employee_soul_history (employee_name, version, content, updated_at, updated_by)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (employee_name, version) DO NOTHING
+                INSERT INTO employee_soul_history (employee_name, version, content, updated_at, updated_by, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, employee_name, version) DO NOTHING
                 """,
-                (employee_name, old_version, old_content, now, updated_by),
+                (employee_name, old_version, old_content, now, updated_by, tenant_id),
             )
 
             # 更新当前版本
@@ -195,19 +197,19 @@ def update_soul(
                 """
                 UPDATE employee_souls
                 SET content = %s, version = %s, updated_at = %s, updated_by = %s, metadata = %s
-                WHERE employee_name = %s
+                WHERE employee_name = %s AND tenant_id = %s
                 """,
-                (content, new_version, now, updated_by, metadata_json, employee_name),
+                (content, new_version, now, updated_by, metadata_json, employee_name, tenant_id),
             )
         else:
             # 插入新记录
             new_version = 1
             cur.execute(
                 """
-                INSERT INTO employee_souls (employee_name, content, version, updated_at, updated_by, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO employee_souls (employee_name, content, version, updated_at, updated_by, metadata, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (employee_name, content, new_version, now, updated_by, metadata_json),
+                (employee_name, content, new_version, now, updated_by, metadata_json, tenant_id),
             )
 
     return {
@@ -218,7 +220,7 @@ def update_soul(
     }
 
 
-def list_souls() -> list[dict[str, Any]]:
+def list_souls(tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> list[dict[str, Any]]:
     """列出所有员工灵魂配置（不含 content）."""
     if not is_pg():
         return []
@@ -226,7 +228,8 @@ def list_souls() -> list[dict[str, Any]]:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT employee_name, version, updated_at, updated_by FROM employee_souls ORDER BY employee_name"
+            "SELECT employee_name, version, updated_at, updated_by FROM employee_souls WHERE tenant_id = %s ORDER BY employee_name",
+            (tenant_id,),
         )
         rows = cur.fetchall()
         return [
@@ -312,6 +315,7 @@ def create_employee(
     soul_content: str = "",
     agent_status: str = "active",
     avatar_prompt: str = "",
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """创建新员工（数据库 + 文件系统）.
 
@@ -337,8 +341,8 @@ def create_employee(
     if not is_pg():
         raise RuntimeError("配置存储仅支持 PG 模式")
 
-    # 1. 检查员工是否已存在
-    if get_soul(character_name):
+    # 1. 检查员工是否已存在（同一租户内）
+    if get_soul(character_name, tenant_id=tenant_id):
         raise ValueError(f"employee already exists: {character_name}")
 
     # 2. 生成唯一的 agent_id
@@ -363,6 +367,7 @@ def create_employee(
         content=soul_content,
         updated_by="create_employee",
         metadata=metadata,
+        tenant_id=tenant_id,
     )
 
     # 5. 创建文件系统
@@ -380,7 +385,7 @@ def create_employee(
 # ── Discussion 操作 ──
 
 
-def get_discussion(name: str) -> dict[str, Any] | None:
+def get_discussion(name: str, tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> dict[str, Any] | None:
     """读取讨论会配置."""
     if not is_pg():
         return None
@@ -388,8 +393,8 @@ def get_discussion(name: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT yaml_content, description, created_at, updated_at, metadata FROM discussions WHERE name = %s",
-            (name,),
+            "SELECT yaml_content, description, created_at, updated_at, metadata FROM discussions WHERE name = %s AND tenant_id = %s",
+            (name, tenant_id),
         )
         row = cur.fetchone()
         if not row:
@@ -409,6 +414,7 @@ def create_discussion(
     yaml_content: str,
     description: str = "",
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """创建讨论会配置."""
     if not is_pg():
@@ -421,10 +427,10 @@ def create_discussion(
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO discussions (name, yaml_content, description, created_at, updated_at, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO discussions (name, yaml_content, description, created_at, updated_at, metadata, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (name, yaml_content, description, now, now, metadata_json),
+            (name, yaml_content, description, now, now, metadata_json, tenant_id),
         )
 
     return {
@@ -440,6 +446,7 @@ def update_discussion(
     yaml_content: str,
     description: str | None = None,
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """更新讨论会配置."""
     if not is_pg():
@@ -462,17 +469,17 @@ def update_discussion(
             updates.append("metadata = %s")
             params.append(json.dumps(metadata, ensure_ascii=False))
 
-        params.append(name)
+        params.extend([name, tenant_id])
 
         cur.execute(
-            f"UPDATE discussions SET {', '.join(updates)} WHERE name = %s",
+            f"UPDATE discussions SET {', '.join(updates)} WHERE name = %s AND tenant_id = %s",
             tuple(params),
         )
 
     return {"name": name, "updated_at": now.isoformat()}
 
 
-def list_discussions() -> list[dict[str, Any]]:
+def list_discussions(tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> list[dict[str, Any]]:
     """列出所有讨论会配置（不含 yaml_content）."""
     if not is_pg():
         return []
@@ -480,7 +487,8 @@ def list_discussions() -> list[dict[str, Any]]:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT name, description, created_at, updated_at FROM discussions ORDER BY name"
+            "SELECT name, description, created_at, updated_at FROM discussions WHERE tenant_id = %s ORDER BY name",
+            (tenant_id,),
         )
         rows = cur.fetchall()
         return [
@@ -497,7 +505,7 @@ def list_discussions() -> list[dict[str, Any]]:
 # ── Pipeline 操作 ──
 
 
-def get_pipeline(name: str) -> dict[str, Any] | None:
+def get_pipeline(name: str, tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> dict[str, Any] | None:
     """读取流水线配置."""
     if not is_pg():
         return None
@@ -505,8 +513,8 @@ def get_pipeline(name: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT yaml_content, description, created_at, updated_at, metadata FROM pipelines WHERE name = %s",
-            (name,),
+            "SELECT yaml_content, description, created_at, updated_at, metadata FROM pipelines WHERE name = %s AND tenant_id = %s",
+            (name, tenant_id),
         )
         row = cur.fetchone()
         if not row:
@@ -526,6 +534,7 @@ def create_pipeline(
     yaml_content: str,
     description: str = "",
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """创建流水线配置."""
     if not is_pg():
@@ -538,10 +547,10 @@ def create_pipeline(
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO pipelines (name, yaml_content, description, created_at, updated_at, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO pipelines (name, yaml_content, description, created_at, updated_at, metadata, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (name, yaml_content, description, now, now, metadata_json),
+            (name, yaml_content, description, now, now, metadata_json, tenant_id),
         )
 
     return {
@@ -557,6 +566,7 @@ def update_pipeline(
     yaml_content: str,
     description: str | None = None,
     metadata: dict[str, Any] | None = None,
+    tenant_id: str = DEFAULT_ADMIN_TENANT_ID,
 ) -> dict[str, Any]:
     """更新流水线配置."""
     if not is_pg():
@@ -579,24 +589,27 @@ def update_pipeline(
             updates.append("metadata = %s")
             params.append(json.dumps(metadata, ensure_ascii=False))
 
-        params.append(name)
+        params.extend([name, tenant_id])
 
         cur.execute(
-            f"UPDATE pipelines SET {', '.join(updates)} WHERE name = %s",
+            f"UPDATE pipelines SET {', '.join(updates)} WHERE name = %s AND tenant_id = %s",
             tuple(params),
         )
 
     return {"name": name, "updated_at": now.isoformat()}
 
 
-def list_pipelines() -> list[dict[str, Any]]:
+def list_pipelines(tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> list[dict[str, Any]]:
     """列出所有流水线配置（不含 yaml_content）."""
     if not is_pg():
         return []
 
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT name, description, created_at, updated_at FROM pipelines ORDER BY name")
+        cur.execute(
+            "SELECT name, description, created_at, updated_at FROM pipelines WHERE tenant_id = %s ORDER BY name",
+            (tenant_id,),
+        )
         rows = cur.fetchall()
         return [
             {
