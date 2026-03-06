@@ -68,6 +68,10 @@ class WecomConfig(BaseModel):
     encoding_aes_key: str = Field(default="", description="回调 EncodingAESKey（消息加解密）")
     default_employee: str = Field(default="", description="默认员工名")
     tenant_id: str = Field(default="", description="绑定的租户 ID（空=admin 租户）")
+    # 通讯录同步（独立密钥）
+    contact_secret: str = Field(default="", description="通讯录同步 Secret")
+    contact_token: str = Field(default="", description="通讯录同步回调 Token")
+    contact_encoding_aes_key: str = Field(default="", description="通讯录同步回调 EncodingAESKey")
 
 
 def load_wecom_config(project_dir: Path | None = None) -> WecomConfig:
@@ -349,6 +353,83 @@ def strip_wecom_at_prefix(content: str, app_name: str = "") -> str:
         return remaining if remaining else content
 
     return content
+
+
+# ── 通讯录 API ──
+
+
+async def get_wecom_user_info(
+    token_manager: WecomTokenManager,
+    userid: str,
+) -> dict[str, Any] | None:
+    """获取企微用户详情（含手机号）.
+
+    GET /cgi-bin/user/get?access_token=TOKEN&userid=USERID
+
+    注意：离职用户可能已被删除，此时 API 会返回 errcode=60111（userid 不存在）。
+
+    Returns:
+        用户信息 dict（含 mobile 等字段），或查询失败返回 None
+    """
+    token = await token_manager.get_token()
+    url = f"{WECOM_API_BASE}/user/get"
+    params = {"access_token": token, "userid": userid}
+
+    client = get_wecom_client()
+    try:
+        resp = await client.get(url, params=params)
+        data = resp.json()
+    except Exception as exc:
+        logger.error("企微用户查询失败: userid=%s err=%s", userid, exc)
+        return None
+
+    errcode = data.get("errcode", -1)
+    if errcode != 0:
+        errmsg = data.get("errmsg", "unknown")
+        logger.warning("企微用户查询失败: userid=%s errcode=%d errmsg=%s", userid, errcode, errmsg)
+        return None
+
+    return data
+
+
+# ── knowlyr-id 联动 ──
+
+
+async def offboard_user_by_phone(phone: str) -> dict[str, Any]:
+    """通过手机号调用 knowlyr-id 清除员工身份.
+
+    POST {KNOWLYR_ID_API}/api/internal/offboard-by-phone
+    Headers: Authorization: Bearer {AGENT_API_TOKEN}
+
+    Returns:
+        API 返回的 JSON（含 ok, user_id, cleared 等字段）
+    """
+    id_api_base = os.environ.get("KNOWLYR_ID_API", "https://id.knowlyr.com")
+    id_api_token = os.environ.get("AGENT_API_TOKEN", "")
+
+    if not id_api_token:
+        logger.error("offboard_user_by_phone: AGENT_API_TOKEN 未配置")
+        return {"ok": False, "detail": "AGENT_API_TOKEN 未配置"}
+
+    url = f"{id_api_base}/api/internal/offboard-by-phone"
+    headers = {"Authorization": f"Bearer {id_api_token}"}
+    body = {"phone": phone}
+
+    client = get_wecom_client()
+    try:
+        resp = await client.post(url, json=body, headers=headers)
+        data = resp.json()
+        if not data.get("ok"):
+            logger.warning("offboard_user_by_phone: phone=***%s resp=%s", phone[-4:], data)
+        else:
+            logger.info("offboard_user_by_phone: phone=***%s -> %s", phone[-4:], data.get("msg", ""))
+        return data
+    except Exception as exc:
+        logger.error("offboard_user_by_phone 调用失败: %s", exc)
+        return {"ok": False, "detail": str(exc)}
+
+
+# ── 消息发送 ──
 
 
 async def send_wecom_text(

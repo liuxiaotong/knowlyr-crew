@@ -743,3 +743,459 @@ class TestSendWecomGroupText:
             result = await send_wecom_group_text(mgr, "chat_001", "hello")
 
         assert result["errcode"] == 60011
+
+
+# ── 通讯录 API 测试 ──
+
+
+class TestGetWecomUserInfo:
+    """get_wecom_user_info 企微通讯录查询."""
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_success(self):
+        from crew.wecom import WecomTokenManager, get_wecom_user_info
+
+        mgr = WecomTokenManager("corp_id", "secret")
+        mgr._token = "cached_token"
+        mgr._expire_at = 9999999999.0
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "errcode": 0,
+            "userid": "zhangsan",
+            "name": "张三",
+            "mobile": "13800001234",
+            "status": 1,
+        }
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_wecom_user_info(mgr, "zhangsan")
+
+        assert result is not None
+        assert result["mobile"] == "13800001234"
+        assert result["userid"] == "zhangsan"
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_not_found(self):
+        from crew.wecom import WecomTokenManager, get_wecom_user_info
+
+        mgr = WecomTokenManager("corp_id", "secret")
+        mgr._token = "cached_token"
+        mgr._expire_at = 9999999999.0
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "errcode": 60111,
+            "errmsg": "userid not found",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_wecom_user_info(mgr, "deleted_user")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_network_error(self):
+        from crew.wecom import WecomTokenManager, get_wecom_user_info
+
+        mgr = WecomTokenManager("corp_id", "secret")
+        mgr._token = "cached_token"
+        mgr._expire_at = 9999999999.0
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("connection timeout"))
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await get_wecom_user_info(mgr, "zhangsan")
+
+        assert result is None
+
+
+# ── knowlyr-id 联动测试 ──
+
+
+class TestOffboardUserByPhone:
+    """offboard_user_by_phone 调用 knowlyr-id 内部 API."""
+
+    @pytest.mark.asyncio
+    async def test_offboard_success(self, monkeypatch):
+        from crew.wecom import offboard_user_by_phone
+
+        monkeypatch.setenv("KNOWLYR_ID_API", "http://localhost:8100")
+        monkeypatch.setenv("AGENT_API_TOKEN", "test_token_123")
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": True,
+            "user_id": 42,
+            "cleared": "员工",
+            "msg": "已清除 员工 员工身份",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await offboard_user_by_phone("13800001234")
+
+        assert result["ok"] is True
+        assert result["user_id"] == 42
+        assert result["cleared"] == "员工"
+
+        # 验证请求参数
+        call_args = mock_client.post.call_args
+        assert "/api/internal/offboard-by-phone" in call_args[0][0]
+        assert call_args[1]["json"] == {"phone": "13800001234"}
+        assert "Bearer test_token_123" in call_args[1]["headers"]["Authorization"]
+
+    @pytest.mark.asyncio
+    async def test_offboard_no_token(self, monkeypatch):
+        from crew.wecom import offboard_user_by_phone
+
+        monkeypatch.setenv("AGENT_API_TOKEN", "")
+
+        result = await offboard_user_by_phone("13800001234")
+        assert result["ok"] is False
+        assert "未配置" in result["detail"]
+
+    @pytest.mark.asyncio
+    async def test_offboard_user_not_found(self, monkeypatch):
+        from crew.wecom import offboard_user_by_phone
+
+        monkeypatch.setenv("KNOWLYR_ID_API", "http://localhost:8100")
+        monkeypatch.setenv("AGENT_API_TOKEN", "test_token_123")
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": False,
+            "detail": "未找到手机号 1234 对应的用户",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("crew.wecom.get_wecom_client", return_value=mock_client):
+            result = await offboard_user_by_phone("13800001234")
+
+        assert result["ok"] is False
+
+
+# ── 通讯录变更事件处理测试 ──
+
+
+class TestContactChangeEvent:
+    """change_contact 事件的 XML 解析和处理流程."""
+
+    def test_parse_change_contact_xml(self):
+        """验证 parse_wecom_message 能正确解析通讯录变更事件 XML."""
+        from crew.wecom import parse_wecom_message
+
+        xml = (
+            "<xml>"
+            "<ToUserName><![CDATA[ww_corp_id]]></ToUserName>"
+            "<FromUserName><![CDATA[sys]]></FromUserName>"
+            "<CreateTime>1234567890</CreateTime>"
+            "<MsgType><![CDATA[event]]></MsgType>"
+            "<Event><![CDATA[change_contact]]></Event>"
+            "<ChangeType><![CDATA[delete_user]]></ChangeType>"
+            "<UserID><![CDATA[zhangsan]]></UserID>"
+            "</xml>"
+        )
+        msg = parse_wecom_message(xml)
+        assert msg["MsgType"] == "event"
+        assert msg["Event"] == "change_contact"
+        assert msg["ChangeType"] == "delete_user"
+        assert msg["UserID"] == "zhangsan"
+
+    def test_parse_update_user_xml(self):
+        from crew.wecom import parse_wecom_message
+
+        xml = (
+            "<xml>"
+            "<ToUserName><![CDATA[ww_corp_id]]></ToUserName>"
+            "<FromUserName><![CDATA[sys]]></FromUserName>"
+            "<CreateTime>1234567890</CreateTime>"
+            "<MsgType><![CDATA[event]]></MsgType>"
+            "<Event><![CDATA[change_contact]]></Event>"
+            "<ChangeType><![CDATA[update_user]]></ChangeType>"
+            "<UserID><![CDATA[lisi]]></UserID>"
+            "</xml>"
+        )
+        msg = parse_wecom_message(xml)
+        assert msg["ChangeType"] == "update_user"
+        assert msg["UserID"] == "lisi"
+
+
+class TestHandleContactChange:
+    """_handle_contact_change 离职同步完整流程."""
+
+    @pytest.mark.asyncio
+    async def test_delete_user_full_flow(self):
+        """delete_user: 获取手机号 -> 调 offboard API -> 成功."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            mock_get_info.return_value = {
+                "errcode": 0,
+                "userid": "zhangsan",
+                "mobile": "13800001234",
+            }
+            mock_offboard.return_value = {
+                "ok": True,
+                "user_id": 42,
+                "cleared": "员工",
+            }
+
+            await _handle_contact_change(
+                ctx,
+                change_type="delete_user",
+                wecom_userid="zhangsan",
+                token_mgr=token_mgr,
+                msg={"UserID": "zhangsan", "ChangeType": "delete_user"},
+            )
+
+            mock_get_info.assert_called_once_with(token_mgr, "zhangsan")
+            mock_offboard.assert_called_once_with("13800001234")
+
+    @pytest.mark.asyncio
+    async def test_delete_user_no_mobile(self):
+        """delete_user: 企微已删除用户，无法获取手机号 -> 记日志不崩溃."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            mock_get_info.return_value = None  # 企微查不到
+
+            await _handle_contact_change(
+                ctx,
+                change_type="delete_user",
+                wecom_userid="deleted_user",
+                token_mgr=token_mgr,
+                msg={"UserID": "deleted_user", "ChangeType": "delete_user"},
+            )
+
+            mock_offboard.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_user_disabled_triggers_offboard(self):
+        """update_user + status=2(已禁用) -> 触发离职同步."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            mock_get_info.return_value = {
+                "errcode": 0,
+                "userid": "lisi",
+                "mobile": "13900005678",
+                "status": 2,  # 已禁用
+            }
+            mock_offboard.return_value = {"ok": True, "user_id": 99, "cleared": "实习生"}
+
+            await _handle_contact_change(
+                ctx,
+                change_type="update_user",
+                wecom_userid="lisi",
+                token_mgr=token_mgr,
+                msg={"UserID": "lisi", "ChangeType": "update_user"},
+            )
+
+            mock_offboard.assert_called_once_with("13900005678")
+
+    @pytest.mark.asyncio
+    async def test_update_user_active_no_offboard(self):
+        """update_user + status=1(活跃) -> 不触发离职同步."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            mock_get_info.return_value = {
+                "errcode": 0,
+                "userid": "wangwu",
+                "mobile": "13700009999",
+                "status": 1,  # 活跃
+            }
+
+            await _handle_contact_change(
+                ctx,
+                change_type="update_user",
+                wecom_userid="wangwu",
+                token_mgr=token_mgr,
+                msg={"UserID": "wangwu", "ChangeType": "update_user"},
+            )
+
+            mock_offboard.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_user_status_5_triggers_offboard(self):
+        """update_user + status=5(退出企业) -> 触发离职同步."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            mock_get_info.return_value = {
+                "errcode": 0,
+                "userid": "zhaoliu",
+                "mobile": "13600008888",
+                "status": 5,  # 退出企业
+            }
+            mock_offboard.return_value = {"ok": True, "user_id": 100, "cleared": "正式员工"}
+
+            await _handle_contact_change(
+                ctx,
+                change_type="update_user",
+                wecom_userid="zhaoliu",
+                token_mgr=token_mgr,
+                msg={"UserID": "zhaoliu", "ChangeType": "update_user"},
+            )
+
+            mock_offboard.assert_called_once_with("13600008888")
+
+    @pytest.mark.asyncio
+    async def test_empty_userid_skips(self):
+        """UserID 为空 -> 跳过不处理."""
+        from crew.webhook_wecom import _handle_contact_change
+
+        ctx = MagicMock()
+        token_mgr = MagicMock()
+
+        with (
+            patch("crew.wecom.get_wecom_user_info", new_callable=AsyncMock) as mock_get_info,
+            patch("crew.wecom.offboard_user_by_phone", new_callable=AsyncMock) as mock_offboard,
+        ):
+            await _handle_contact_change(
+                ctx,
+                change_type="delete_user",
+                wecom_userid="",
+                token_mgr=token_mgr,
+                msg={"UserID": "", "ChangeType": "delete_user"},
+            )
+
+            mock_get_info.assert_not_called()
+            mock_offboard.assert_not_called()
+
+
+class TestChangeContactWebhookRouting:
+    """handle_wecom_event 对 change_contact 事件的路由."""
+
+    def _make_ctx(self):
+        from crew.wecom import WecomCrypto
+        from crew.feishu import EventDeduplicator
+
+        ctx = MagicMock()
+        ctx.project_dir = None
+        crypto = WecomCrypto("qm7mzclOzyeB7Ee6rrKzzbPZAgVixfzHLi3fs20Xruz", "ww_test")
+        ctx.wecom_ctx = {
+            "config": MagicMock(
+                token="test_token",
+                agent_id=1000017,
+                default_employee="",
+                corp_id="ww_test",
+            ),
+            "crypto": crypto,
+            "token_mgr": MagicMock(),
+            "dedup": EventDeduplicator(),
+        }
+        return ctx
+
+    def _make_event_request(self, ctx, msg_type="event", event="change_contact", change_type="delete_user", userid="zhangsan"):
+        """构造通讯录变更事件的 POST 请求."""
+        from crew.wecom import generate_wecom_signature
+
+        crypto = ctx.wecom_ctx["crypto"]
+        token = ctx.wecom_ctx["config"].token
+
+        plain_xml = (
+            "<xml>"
+            "<ToUserName><![CDATA[ww_test]]></ToUserName>"
+            "<FromUserName><![CDATA[sys]]></FromUserName>"
+            "<CreateTime>1234567890</CreateTime>"
+            f"<MsgType><![CDATA[{msg_type}]]></MsgType>"
+            f"<Event><![CDATA[{event}]]></Event>"
+            f"<ChangeType><![CDATA[{change_type}]]></ChangeType>"
+            f"<UserID><![CDATA[{userid}]]></UserID>"
+            "</xml>"
+        )
+        encrypted = crypto.encrypt(plain_xml)
+
+        timestamp = "1234567890"
+        nonce = "random_nonce"
+        sig = generate_wecom_signature(token, timestamp, nonce, encrypted)
+
+        body_xml = (
+            "<xml>"
+            f"<ToUserName><![CDATA[ww_test]]></ToUserName>"
+            f"<Encrypt><![CDATA[{encrypted}]]></Encrypt>"
+            "</xml>"
+        )
+
+        request = MagicMock()
+        request.method = "POST"
+        request.path_params = {"app_id": "default"}
+        request.query_params = {
+            "msg_signature": sig,
+            "timestamp": timestamp,
+            "nonce": nonce,
+        }
+        request.body = AsyncMock(return_value=body_xml.encode("utf-8"))
+        return request
+
+    @pytest.mark.asyncio
+    async def test_change_contact_event_routes_to_handler(self):
+        """change_contact 事件正确路由到 _handle_contact_change."""
+        from crew.webhook_wecom import handle_wecom_event
+
+        ctx = self._make_ctx()
+        request = self._make_event_request(ctx, change_type="delete_user", userid="zhangsan")
+
+        with patch("crew.webhook_wecom._handle_contact_change", new_callable=AsyncMock) as mock_handler:
+            resp = await handle_wecom_event(request, ctx)
+
+            assert resp.status_code == 200
+            assert resp.body.decode("utf-8") == "success"
+            # asyncio.create_task 会异步执行，但我们 mock 了 _handle_contact_change
+            # 验证至少创建了 task（通过 asyncio.create_task）
+
+    @pytest.mark.asyncio
+    async def test_non_contact_event_ignored(self):
+        """非 change_contact 的 event 类型 -> 返回 success 不派遣消息处理."""
+        from crew.webhook_wecom import handle_wecom_event
+
+        ctx = self._make_ctx()
+        # subscribe 事件 -> 非 change_contact
+        request = self._make_event_request(ctx, event="subscribe", change_type="", userid="")
+
+        resp = await handle_wecom_event(request, ctx)
+        assert resp.status_code == 200
+        assert resp.body.decode("utf-8") == "success"

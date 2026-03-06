@@ -158,17 +158,17 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_task_replay,
     _handle_task_status,
     _handle_team_agents,
+    _handle_tenant_create,
+    _handle_tenant_delete,
+    _handle_tenant_get,
+    _handle_tenant_list,
+    _handle_tenant_update,
     _handle_trajectory_annotation_add,
     _handle_trajectory_annotation_list,
     _handle_trajectory_export,
     _handle_trajectory_report,
     _handle_wiki_file_delete,
     _handle_wiki_spaces_list,
-    _handle_tenant_create,
-    _handle_tenant_delete,
-    _handle_tenant_get,
-    _handle_tenant_list,
-    _handle_tenant_update,
     _handle_work_log,
     _health,
     _metrics,
@@ -308,6 +308,17 @@ def create_webhook_app(
             "token_mgr": WecomTokenManager(wecom_config.corp_id, wecom_config.secret),
             "dedup": EventDeduplicator(),
         }
+        # 通讯录同步独立密钥（如已配置）
+        if wecom_config.contact_token and wecom_config.contact_encoding_aes_key:
+            ctx.wecom_ctx["contact_crypto"] = WecomCrypto(
+                wecom_config.contact_encoding_aes_key, wecom_config.corp_id
+            )
+            ctx.wecom_ctx["contact_token"] = wecom_config.contact_token
+            logger.info("企微通讯录同步回调密钥已加载")
+        if wecom_config.contact_secret:
+            ctx.wecom_ctx["contact_token_mgr"] = WecomTokenManager(
+                wecom_config.corp_id, wecom_config.contact_secret
+            )
         logger.info(
             "企微 Bot 已启用: corp_id=%s agent_id=%d default=%s",
             wecom_config.corp_id,
@@ -1135,7 +1146,6 @@ def create_webhook_app(
             "/webhook/github",
             "/feishu/event",
             "/wecom/event",
-            "/api/team/agents",
             "/static",
         ] + [f"/feishu/event/{bot_id}" for bot_id in ctx.feishu_bots]
         # 共享缓存 dict：middleware 和 handlers 共用同一实例
