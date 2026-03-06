@@ -369,15 +369,18 @@ def _discover_employees_uncached(root: Path) -> DiscoveryResult:
 def get_employee(
     name_or_trigger: str,
     project_dir: Path | None = None,
+    *,
+    tenant_id: str | None = None,
 ) -> Employee | None:
     """按名称或触发别名查找员工.
 
     Args:
         name_or_trigger: 员工名称或触发别名
         project_dir: 项目根目录
+        tenant_id: 租户 ID（传入 discover_employees 做数据隔离）
 
     Returns:
         Employee 对象，未找到返回 None
     """
-    result = discover_employees(project_dir=project_dir)
+    result = discover_employees(project_dir=project_dir, tenant_id=tenant_id)
     return result.get(name_or_trigger)

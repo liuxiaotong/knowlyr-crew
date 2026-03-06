@@ -328,7 +328,7 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
     from crew.tool_schema import employee_tools_to_schemas
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
     if not employee:
@@ -434,7 +434,7 @@ async def _handle_employee_list(request: Any, ctx: _AppContext) -> Any:
 
     from crew.discovery import discover_employees
 
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
     items = []
     for emp in result.employees.values():
         avatar_url = f"/static/avatars/{emp.agent_id}.webp" if emp.agent_id else None
@@ -594,7 +594,7 @@ async def _handle_team_agents(request: Any, ctx: _AppContext) -> Any:
 
     from crew.discovery import discover_employees
 
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
     agents = []
     for emp in result.employees.values():
         if emp.agent_status != "active":
@@ -666,7 +666,7 @@ async def _handle_employee_get(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
     if not employee:
@@ -692,7 +692,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
     from crew.memory import get_memory_store
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
     if not employee:
@@ -811,7 +811,7 @@ async def _handle_employee_update(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
     if not employee:
@@ -885,7 +885,7 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir, cache_ttl=0)
+    result = discover_employees(ctx.project_dir, cache_ttl=0, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
 
@@ -3130,7 +3130,7 @@ async def _run_and_callback(
         from crew.tool_schema import AGENT_TOOLS
         from crew.webhook_feishu import _needs_tools
 
-        discovery = discover_employees(project_dir=ctx.project_dir)
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
         emp = discovery.get(name)
         has_tools = any(t in AGENT_TOOLS for t in (emp.tools or [])) if emp else False
         use_fast_path = (
@@ -3165,6 +3165,7 @@ async def _run_and_callback(
                 model=model,
                 user_message=user_message,
                 message_history=message_history,
+                tenant_id=_tenant_id_for_config(request),
             )
 
         _elapsed = _time.monotonic() - _t0
@@ -3306,7 +3307,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         # ── Skills 自动触发（必须在 callback 分支之前执行）──
         from crew.discovery import discover_employees
 
-        discovery = discover_employees(project_dir=ctx.project_dir)
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
         emp = discovery.get(name)
 
         enhanced_context = {}
@@ -3520,6 +3521,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 model=model,
                 user_message=user_message,
                 message_history=message_history,
+                tenant_id=_tenant_id_for_config(request),
             )
 
         _elapsed = _time.monotonic() - _t0
@@ -3580,7 +3582,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     if stream:
         import crew.webhook as _wh
 
-        return await _wh._stream_employee(ctx, name, args, agent_id=agent_id, model=model)
+        return await _wh._stream_employee(ctx, name, args, agent_id=agent_id, model=model, tenant_id=_tenant_id_for_config(request))
 
     # ── 原有同步/异步模式 ──
     import crew.webhook as _wh
@@ -3923,7 +3925,7 @@ async def _handle_authority_restore(request: Any, ctx: _AppContext) -> Any:
     )
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
 
     employee = _find_employee(result, identifier)
     if not employee:
@@ -4366,7 +4368,7 @@ async def _handle_project_status(request: Any, ctx: _AppContext) -> Any:
     if days not in (7, 30, 90):
         days = 7
 
-    result = discover_employees(ctx.project_dir)
+    result = discover_employees(ctx.project_dir, tenant_id=_tenant_id_for_config(request))
     org = load_organization(project_dir=ctx.project_dir)
     cost = query_cost_summary(ctx.registry, days=days)
 
@@ -4903,7 +4905,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         from crew.exceptions import EmployeeNotFoundError
         from crew.tool_schema import AGENT_TOOLS
 
-        discovery = discover_employees(project_dir=ctx.project_dir)
+        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
         emp = discovery.get(employee_id)
         if emp is None:
             return JSONResponse(
@@ -4931,6 +4933,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     attachments=attachments,
                     sender_type=sender_type,
                     channel=channel,
+                    tenant_id=_tenant_id_for_config(request),
                 )
 
                 async def _agent_sse_generator():
@@ -4962,6 +4965,7 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                     attachments=attachments,
                     sender_type=sender_type,
                     channel=channel,
+                    tenant_id=_tenant_id_for_config(request),
                 )
                 result = {
                     "reply": exec_result.get("output", ""),
@@ -5459,7 +5463,7 @@ async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
     from crew.tool_schema import resolve_effective_tools
 
-    result = discover_employees(project_dir=ctx.project_dir)
+    result = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
     emp_name = request.query_params.get("employee") or None
 
     employees = list(result.employees.values())
@@ -5579,7 +5583,7 @@ async def _handle_wiki_spaces_list(request: Any, ctx: _AppContext) -> Any:
 # ── 配置存储 API ──
 
 
-def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
+def _resolve_employee_name(identifier: str, ctx: _AppContext, *, tenant_id: str | None = None) -> str:
     """将 slug 或 agent_id 转换为中文名（用于配置查询）."""
     from crew.discovery import discover_employees
 
@@ -5589,7 +5593,7 @@ def _resolve_employee_name(identifier: str, ctx: _AppContext) -> str:
 
     # 尝试从员工列表查找
     if ctx.project_dir:
-        result = discover_employees(ctx.project_dir)
+        result = discover_employees(ctx.project_dir, tenant_id=tenant_id)
         emp = _find_employee(result, identifier)
         if emp:
             return emp.character_name
@@ -5609,7 +5613,7 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
 
     # 将 slug 转换为中文名
-    employee_name = _resolve_employee_name(identifier, ctx)
+    employee_name = _resolve_employee_name(identifier, ctx, tenant_id=_tenant_id_for_config(request))
 
     result = get_soul(employee_name, tenant_id=_tenant_id_for_config(request))
     if not result:
@@ -5634,7 +5638,7 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
 
     # 将 slug 转换为中文名
-    employee_name = _resolve_employee_name(identifier, ctx)
+    employee_name = _resolve_employee_name(identifier, ctx, tenant_id=_tenant_id_for_config(request))
 
     try:
         body = await request.json()
