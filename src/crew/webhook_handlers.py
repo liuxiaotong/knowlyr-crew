@@ -808,18 +808,20 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         for m in memories
     ]
 
-    # 读取最近笔记（API 只返回公开笔记，过滤 private）
-    notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
+    # 读取最近笔记 — 仅 admin 租户可见，防止内部 notes 泄露
     recent_notes: list[dict] = []
-    if notes_dir.is_dir():
-        note_files = sorted(notes_dir.glob("*.md"), reverse=True)
-        for nf in note_files[:5]:
-            text = nf.read_text(encoding="utf-8")
-            # 跳过 private 笔记
-            if "visibility: private" in text:
-                continue
-            if employee.character_name in text or employee.name in text:
-                recent_notes.append({"filename": nf.name, "content": text[:500]})
+    _notes_tenant = get_current_tenant(request)
+    if _notes_tenant.is_admin:
+        notes_dir = (ctx.project_dir or Path.cwd()) / ".crew" / "notes"
+        if notes_dir.is_dir():
+            note_files = sorted(notes_dir.glob("*.md"), reverse=True)
+            for nf in note_files[:5]:
+                text = nf.read_text(encoding="utf-8")
+                # 跳过 private 笔记
+                if "visibility: private" in text:
+                    continue
+                if employee.character_name in text or employee.name in text:
+                    recent_notes.append({"filename": nf.name, "content": text[:500]})
 
     response_data = {
         "name": employee.name,
@@ -1881,8 +1883,10 @@ async def _handle_memory_archive_query(request: Any, ctx: _AppContext) -> Any:
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else None
         end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-        archive = MemoryArchive(memory_store=memory_store)
+        _arc_tid = _tenant_id_for_store(request)
+        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
+        archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
         entries = archive.query_archive(
             employee=employee,
@@ -1935,8 +1939,10 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "entry_ids is required"}, status_code=400)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-        archive = MemoryArchive(memory_store=memory_store)
+        _arc_tid = _tenant_id_for_store(request)
+        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
+        archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
         stats = archive.restore_from_archive(employee, entry_ids)
 
@@ -1972,8 +1978,10 @@ async def _handle_memory_archive_stats(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "employee is required"}, status_code=400)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-        archive = MemoryArchive(memory_store=memory_store)
+        _arc_tid = _tenant_id_for_store(request)
+        _arc_dir = Path(f"/data/tenants/{_arc_tid}/memory_archive") if _arc_tid else None
+        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_arc_tid)
+        archive = MemoryArchive(archive_dir=_arc_dir, memory_store=memory_store)
 
         stats = archive.get_archive_stats(employee)
 
@@ -2066,8 +2074,15 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
             status_code=400,
         )
 
+    # 权限校验：共享记忆统计需要 admin 权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
+
     try:
-        stats = SharedMemoryStats()
+        _tid = _tenant_id_for_store(request)
+        _stats_dir = Path(f"/data/tenants/{_tid}/memory_shared_stats") if _tid else None
+        stats = SharedMemoryStats(stats_dir=_stats_dir)
         stats.record_usage(memory_id, memory_owner, used_by, context)
 
         return JSONResponse({"ok": True})
@@ -2092,13 +2107,20 @@ async def _handle_memory_shared_stats(request: Any, ctx: _AppContext) -> Any:
 
     from crew.memory_shared_stats import SharedMemoryStats
 
+    # 权限校验：共享记忆统计需要 admin 权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"ok": False, "error": admin_err}, status_code=403)
+
     memory_id = request.query_params.get("memory_id")
     owner = request.query_params.get("owner")
     user = request.query_params.get("user")
     popular = request.query_params.get("popular") == "true"
 
     try:
-        stats_manager = SharedMemoryStats()
+        _tid = _tenant_id_for_store(request)
+        _stats_dir = Path(f"/data/tenants/{_tid}/memory_shared_stats") if _tid else None
+        stats_manager = SharedMemoryStats(stats_dir=_stats_dir)
 
         if memory_id:
             # 获取指定记忆的使用统计
@@ -3628,7 +3650,7 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
         # ── 异步回调模式（频道 @mention）──
         # callback_sender_id 强制绑定调用者身份（X-User-Id header），防止伪造 sender
-        # 长期方案：引入 caller identity 体系后做完整的频道投递权限校验
+        # 安全：只有 admin 租户才能使用 callback 功能，防止任意租户通过回调在蚁聚频道发帖
         callback_channel_id = payload.get("callback_channel_id")
         if callback_channel_id is not None:
             try:
@@ -3644,6 +3666,15 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
                 callback_parent_id = int(callback_parent_id)
             except (TypeError, ValueError):
                 callback_parent_id = None
+
+        # 安全校验：非 admin 租户禁止使用 callback 功能
+        if callback_channel_id:
+            tenant = get_current_tenant(request)
+            if not tenant.is_admin:
+                return JSONResponse(
+                    {"error": "callback is only allowed for admin tenant"},
+                    status_code=403,
+                )
 
         # 绑定调用者身份：如果有 X-User-Id，强制覆盖 callback_sender_id 防止伪造
         if callback_channel_id:
@@ -5019,7 +5050,15 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
             extra_context = _skills_memory_text
 
     # 如果指定了异步模式，立即返回并在后台执行
+    # 安全校验：非 admin 租户禁止使用 callback 功能
     if async_mode and callback_channel_id:
+        _chat_tenant = get_current_tenant(request)
+        if not _chat_tenant.is_admin:
+            return JSONResponse(
+                {"ok": False, "error": "callback is only allowed for admin tenant"},
+                status_code=403,
+            )
+
         import asyncio
 
         # 启动后台任务
@@ -5698,6 +5737,11 @@ async def _handle_decision_evaluate(request: Any, ctx: _AppContext) -> Any:
 async def _handle_work_log(request: Any, ctx: _AppContext) -> Any:
     """获取工作日志 — GET /api/work-log."""
     from starlette.responses import JSONResponse
+
+    # 权限校验：工作日志包含所有 session，需要 admin 权限
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
 
     from crew.log import WorkLogger
 
