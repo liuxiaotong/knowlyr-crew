@@ -5102,10 +5102,18 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         reply_text: str = result.get("reply", "")
 
         async def _sse_generator():
-            # 兼容模式：将完整回复拆成字符逐个推送（模拟流式体验）
-            for ch in reply_text:
-                chunk_data = _json.dumps({"delta": ch, "done": False}, ensure_ascii=False)
+            # 兼容模式：将完整回复拆成小块推送（模拟流式体验）
+            # 每次推送 3-8 个字符，间隔 15-30ms，模拟真实 token 生成速度
+            import random as _rng
+
+            i = 0
+            while i < len(reply_text):
+                chunk_size = _rng.randint(3, 8)
+                chunk = reply_text[i : i + chunk_size]
+                i += chunk_size
+                chunk_data = _json.dumps({"delta": chunk, "done": False}, ensure_ascii=False)
                 yield f"data: {chunk_data}\n\n"
+                await asyncio.sleep(_rng.uniform(0.015, 0.030))
             done_data = _json.dumps(
                 {
                     "done": True,
