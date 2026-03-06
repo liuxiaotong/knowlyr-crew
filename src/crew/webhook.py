@@ -1007,29 +1007,6 @@ def create_webhook_app(
             _startup_tasks.add(_checkin_task)
             _checkin_task.add_done_callback(_startup_tasks.discard)
 
-        # ── MCP Gateway 初始化 ──
-        try:
-            from crew.mcp_gateway import MCPGatewayManager
-
-            _gw = MCPGatewayManager(project_dir=project_dir)
-            _tool_count = await _gw.start()
-            if _tool_count > 0:
-                _gw.inject_tools()
-                logger.info("MCP Gateway: %d 个外部工具已注入", _tool_count)
-            ctx.mcp_gateway = _gw
-        except Exception as _gw_err:
-            logger.warning("MCP Gateway 初始化跳过: %s", _gw_err)
-
-        # ── MCP Gateway 审计表 + 凭据表 ──
-        try:
-            from crew.mcp_gateway.audit import init_audit_table
-            from crew.mcp_gateway.credentials import _init_credentials_table
-
-            init_audit_table()
-            _init_credentials_table()
-        except Exception as _tbl_err:
-            logger.warning("MCP Gateway 表初始化跳过: %s", _tbl_err)
-
         # ── 决策扫描定时任务（每天 10:00 北京时间）──
         _evaluate_task = asyncio.create_task(_run_evaluate_scan_cron(), name="cron-evaluate-scan")
         _startup_tasks.add(_evaluate_task)

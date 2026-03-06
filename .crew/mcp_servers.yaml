@@ -2,15 +2,43 @@
 # 每个 server 通过 stdio transport 连接
 
 servers:
-  gws:
-    command: "gws"
-    args: ["mcp"]
+  github:
+    command: "docker"
+    args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
     env:
-      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
     whitelist:
-      - "calendar_list_events"
-      - "calendar_get_event"
-      - "gmail_list_messages"
-      - "gmail_get_message"
+      - "get_pull_request"
+      - "get_pull_request_diff"
+      - "get_pull_request_files"
+      - "get_pull_request_reviews"
+      - "get_pull_request_status"
+      - "get_pull_request_comments"
+      - "list_pull_requests"
+      - "list_issues"
+      - "get_issue"
+      - "get_issue_comments"
+      - "list_commits"
+      - "get_commit"
+      - "get_file_contents"
+      - "search_code"
+      - "search_issues"
+      - "search_repositories"
+      - "list_branches"
+      - "list_tags"
+      - "get_me"
     timeout: 30
-    description: "Google Workspace (只读)"
+    description: "GitHub API (official MCP server, read-only)"
+
+  # gws:
+  #   command: "gws"
+  #   args: ["mcp"]
+  #   env:
+  #     GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
+  #   whitelist:
+  #     - "calendar_list_events"
+  #     - "calendar_get_event"
+  #     - "gmail_list_messages"
+  #     - "gmail_get_message"
+  #   timeout: 30
+  #   description: "Google Workspace (只读)"
