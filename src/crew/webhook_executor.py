@@ -735,6 +735,7 @@ async def _execute_employee_with_tools(
     sender_type: str = "",
     channel: str = "",
     tenant_id: str | None = None,
+    is_admin: bool = False,
 ) -> dict[str, Any]:
     """执行带工具的员工（agent loop with tools）."""
     from crew.discovery import discover_employees
@@ -814,8 +815,8 @@ async def _execute_employee_with_tools(
 
     from crew.permission import PermissionGuard
 
-    # 管理员（sender_id == "1"）跳过权限检查
-    if sender_id == "1":
+    # 管理员判断：仅信任服务端 tenant 认证结果，不信任用户输入的 sender_id
+    if is_admin:
         # 管理员模式：允许所有工具
         from crew.tool_schema import AGENT_TOOLS
 
@@ -1100,6 +1101,7 @@ async def _stream_employee_with_tools(
     sender_type: str = "",
     channel: str = "",
     tenant_id: str | None = None,
+    is_admin: bool = False,
 ) -> Any:
     """流式版 agent loop — 每一轮都用原生流式 API，逐 token 输出.
 
@@ -1176,7 +1178,8 @@ async def _stream_employee_with_tools(
 
     from crew.permission import PermissionGuard
 
-    if sender_id == "1":
+    # 管理员判断：仅信任服务端 tenant 认证结果，不信任用户输入的 sender_id
+    if is_admin:
         from crew.tool_schema import AGENT_TOOLS as _AT
 
         class AdminGuard:
