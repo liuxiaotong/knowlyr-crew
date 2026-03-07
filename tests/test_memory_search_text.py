@@ -53,6 +53,39 @@ class TestMemoryStoreDBSearchText:
             assert "ILIKE" in sql
             assert "%部署%" in params
 
+    def test_search_text_multi_token_generates_multiple_ilike(self):
+        """多词 search_text 应生成多个 ILIKE AND 条件."""
+        from crew.memory_store_db import MemoryStoreDB
+
+        with (
+            patch("crew.memory_store_db.is_pg", return_value=True),
+            patch("crew.memory_store_db.get_connection") as mock_conn,
+            patch.object(MemoryStoreDB, "__init__", lambda self, **kw: None),
+        ):
+            store = MemoryStoreDB.__new__(MemoryStoreDB)
+            store._tenant_id = "test-tenant"
+            store._project_dir = None
+
+            mock_cursor = MagicMock()
+            mock_cursor.fetchall.return_value = []
+            mock_conn.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_conn.return_value.__enter__.return_value.cursor.return_value = mock_cursor
+            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+            store._dict_cursor_factory = MagicMock()
+            store.resolve_to_character_name = lambda e: e
+
+            store.query(employee="赵云帆", search_text="skip_paths 误删")
+
+            call_args = mock_cursor.execute.call_args
+            sql = call_args[0][0]
+            params = call_args[0][1]
+
+            # 应该有两个 ILIKE 条件
+            assert sql.count("ILIKE") == 2
+            assert "%skip_paths%" in params
+            assert "%误删%" in params
+
     def test_search_text_none_no_ilike(self):
         """search_text=None 时不应生成 ILIKE 条件."""
         from crew.memory_store_db import MemoryStoreDB
@@ -157,8 +190,27 @@ class TestSemanticMemorySearchFallback:
         assert call_log[0]["search_text"] == "部署"
         assert call_log[0]["limit"] == 5
 
-    def test_fallback_chinese_substring_for_file_store(self):
-        """文件版 store（无 search_text 参数）对中文用子串匹配."""
+    def test_fallback_chinese_multi_token_for_file_store(self):
+        """文件版 store（无 search_text 参数）对中文多词用 AND 匹配."""
+        from crew.webhook_handlers import _semantic_memory_search
+
+        entries = [
+            _make_entry("skip_paths 配置被误删了，需要恢复", entry_id="a1"),
+            _make_entry("skip_paths 列表已更新", entry_id="a2"),
+            _make_entry("数据库迁移需要注意", entry_id="a3"),
+        ]
+        store, _ = _make_store_without_search_text(entries)
+
+        result = _semantic_memory_search(store, "赵云帆", "skip_paths 误删", None, 5)
+
+        # 只有 a1 同时包含 "skip_paths" 和 "误删"
+        assert len(result) >= 1
+        assert result[0].content == "skip_paths 配置被误删了，需要恢复"
+        # a2 只包含 "skip_paths"（部分匹配），排在后面
+        assert len([e for e, *_ in [(r,) for r in result] if "误删" in e.content]) >= 1
+
+    def test_fallback_single_chinese_token_for_file_store(self):
+        """文件版 store 对单个中文词用子串匹配."""
         from crew.webhook_handlers import _semantic_memory_search
 
         entries = [
@@ -175,8 +227,8 @@ class TestSemanticMemorySearchFallback:
         assert "部署流程已更新" in contents
         assert "自动部署配置完成" in contents
 
-    def test_fallback_english_token_matching(self):
-        """文件版 store 对英文按空格分词匹配."""
+    def test_fallback_english_token_matching_and_semantics(self):
+        """文件版 store 对英文按空格分词，全匹配排在前面."""
         from crew.webhook_handlers import _semantic_memory_search
 
         entries = [
@@ -189,7 +241,7 @@ class TestSemanticMemorySearchFallback:
         result = _semantic_memory_search(store, "赵云帆", "deploy pipeline", None, 5)
 
         assert len(result) >= 1
-        # "deploy pipeline updated" 匹配 2 个 token，应排最前
+        # "deploy pipeline updated" 匹配 2 个 token（全匹配），应排最前
         assert result[0].content == "deploy pipeline updated"
 
 
@@ -226,3 +278,20 @@ class TestMcpLocalSemanticSearch:
 
         assert len(result) == 1
         assert result[0].content == "部署流程已更新"
+
+    def test_fallback_multi_token_for_file_store(self):
+        """mcp_server 文件版降级多词 AND 匹配."""
+        from crew.mcp_server import _local_semantic_memory_search
+
+        entries = [
+            _make_entry("skip_paths 配置被误删了", entry_id="a1"),
+            _make_entry("skip_paths 列表已更新", entry_id="a2"),
+            _make_entry("其他无关内容", entry_id="a3"),
+        ]
+        store, _ = _make_store_without_search_text(entries)
+
+        result = _local_semantic_memory_search(store, "赵云帆", "skip_paths 误删", None, 5)
+
+        # a1 全匹配（skip_paths + 误删），a2 部分匹配（只有 skip_paths）
+        assert len(result) >= 1
+        assert result[0].content == "skip_paths 配置被误删了"

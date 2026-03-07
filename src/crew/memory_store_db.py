@@ -362,9 +362,12 @@ class MemoryStoreDB:
             )
 
         # 文本搜索（ILIKE 子串匹配，对中文友好）
+        # 按空格拆分为多个词，每个词用 AND 连接，支持 "skip_paths 误删" 这类多词查询
         if search_text:
-            conditions.append("content ILIKE %s")
-            params.append(f"%{search_text}%")
+            tokens = search_text.strip().split()
+            for token in tokens:
+                conditions.append("content ILIKE %s")
+                params.append(f"%{token}%")
 
         # 信息分级过滤
         if not include_confidential:

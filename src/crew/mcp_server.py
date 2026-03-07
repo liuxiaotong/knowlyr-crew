@@ -175,17 +175,15 @@ def _local_semantic_memory_search(
             return []
 
         query_lower = query.lower()
-        # 中文：整个 query 作为子串匹配
-        if any("\u4e00" <= c <= "\u9fff" for c in query_lower):
-            return [e for e in candidates if query_lower in e.content.lower()][:limit]
-
-        # 英文：按空格分词匹配
-        query_tokens = set(query_lower.split())
+        # 按空格分词，所有词必须同时出现（AND 语义），与数据库 ILIKE 多词匹配一致
+        query_tokens = query_lower.split()
         scored = []
         for entry in candidates:
             content_lower = entry.content.lower()
             hits = sum(1 for t in query_tokens if t in content_lower)
-            if hits > 0:
+            if hits == len(query_tokens):
+                scored.append((entry, 1.0))
+            elif hits > 0:
                 scored.append((entry, hits / len(query_tokens)))
         scored.sort(key=lambda x: x[1], reverse=True)
         return [e for e, _ in scored[:limit]]
