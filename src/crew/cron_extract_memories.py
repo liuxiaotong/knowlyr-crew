@@ -1,4 +1,4 @@
-"""定时任务：从轨迹中提炼记忆草稿."""
+"""定时任务：从轨迹中提炼记忆（通过管线写入）."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def load_trajectories_for_date(
 def process_trajectories_batch(
     trajectories: list[dict],
     extractor,
-    draft_store,
+    store,
     batch_size: int = 10,
     batch_delay: float = 2.0,
 ) -> dict[str, int]:
@@ -75,7 +75,7 @@ def process_trajectories_batch(
     Args:
         trajectories: 轨迹列表
         extractor: TrajectoryExtractor 实例
-        draft_store: MemoryDraftStore 实例
+        store: MemoryStoreDB 实例
         batch_size: 每批处理数量
         batch_delay: 批次间延迟（秒）
 
@@ -84,15 +84,17 @@ def process_trajectories_batch(
             "total": 总数,
             "analyzed": 已分析,
             "extracted": 已提取,
-            "drafts_created": 创建的草稿数,
+            "memories_stored": 通过管线写入的记忆数,
             "errors": 错误数
         }
     """
+    from crew.memory_pipeline import process_memory
+
     stats = {
         "total": len(trajectories),
         "analyzed": 0,
         "extracted": 0,
-        "drafts_created": 0,
+        "memories_stored": 0,
         "errors": 0,
     }
 
@@ -124,17 +126,20 @@ def process_trajectories_batch(
 
                 stats["extracted"] += 1
 
-                # 3. 创建草稿
+                # 3. 通过管线写入记忆（skip_reflect: 已结构化数据）
                 for mem in memories:
-                    draft_store.create_draft(
+                    entry = process_memory(
+                        raw_text=mem["content"],
                         employee=mem["employee"],
+                        store=store,
+                        skip_reflect=True,
                         category=mem["category"],
-                        content=mem["content"],
                         tags=mem.get("tags", []),
                         confidence=mem.get("confidence", 1.0),
-                        source_trajectory_id=mem.get("source_trajectory_id", ""),
+                        source_session=mem.get("source_trajectory_id", ""),
                     )
-                    stats["drafts_created"] += 1
+                    if entry:
+                        stats["memories_stored"] += 1
 
                 logger.info(
                     "提取记忆: task_id=%s memories=%d",
@@ -156,7 +161,7 @@ def process_trajectories_batch(
 
 def main():
     """主函数."""
-    parser = argparse.ArgumentParser(description="从轨迹中提炼记忆草稿")
+    parser = argparse.ArgumentParser(description="从轨迹中提炼记忆并通过管线写入")
     parser.add_argument(
         "--manual",
         action="store_true",
@@ -208,7 +213,7 @@ def main():
 
     # 初始化组件
     try:
-        from crew.memory_drafts import MemoryDraftStore
+        from crew.memory import get_memory_store
         from crew.trajectory_extractor import TrajectoryExtractor
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -220,7 +225,7 @@ def main():
             api_key=api_key,
             value_threshold=args.threshold,
         )
-        draft_store = MemoryDraftStore()
+        store = get_memory_store()
 
         # 加载轨迹
         trajectories_dir = Path(".crew/trajectories")
@@ -234,24 +239,20 @@ def main():
         stats = process_trajectories_batch(
             trajectories,
             extractor,
-            draft_store,
+            store,
             batch_size=args.batch_size,
             batch_delay=args.batch_delay,
         )
 
         # 输出统计
         logger.info(
-            "提炼完成: total=%d analyzed=%d extracted=%d drafts=%d errors=%d",
+            "提炼完成: total=%d analyzed=%d extracted=%d stored=%d errors=%d",
             stats["total"],
             stats["analyzed"],
             stats["extracted"],
-            stats["drafts_created"],
+            stats["memories_stored"],
             stats["errors"],
         )
-
-        # 输出草稿统计
-        draft_counts = draft_store.count_by_status()
-        logger.info("草稿统计: %s", draft_counts)
 
     except Exception as e:
         logger.exception("提炼任务失败: %s", e)
