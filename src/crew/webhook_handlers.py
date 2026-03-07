@@ -858,20 +858,59 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         except Exception:
             logger.debug("读取员工 DB soul_content 失败", exc_info=True)
 
+    # task_context → 提取关键词做精准召回
+    task_context = request.query_params.get("task_context", "").strip()
+
     # 读取最近记忆（API 只返回公开记忆，过滤 private）
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-    memories = store.query(
-        employee.name,
-        limit=limit,
-        max_visibility="open",
-        sort_by=sort_by,
-        min_importance=min_importance,
-        update_access=True,
-    )
+
+    # 从 task_context 提取关键词（简单分词：按空格/标点分词，取 2 字以上的词）
+    _extracted_keywords: list[str] = []
+    if task_context:
+        import re as _re
+
+        tokens = _re.split(r"[\s,;，；。！？、\-/\\:：\[\]()（）\"']+", task_context)
+        _extracted_keywords = [t for t in tokens if len(t) >= 2][:10]
+
+    if _extracted_keywords and hasattr(store, "query_by_keywords"):
+        memories = store.query_by_keywords(
+            employee=employee.name,
+            keywords=_extracted_keywords,
+            limit=limit,
+            category=None,
+        )
+    else:
+        memories = store.query(
+            employee.name,
+            limit=limit,
+            max_visibility="open",
+            sort_by=sort_by,
+            min_importance=min_importance,
+            update_access=True,
+        )
+
     memory_list = [
         {"category": m.category, "content": m.content, "created_at": m.created_at, "tags": m.tags}
         for m in memories
     ]
+
+    # 跨员工记忆（用相同的关键词）
+    team_memory_list: list[dict] = []
+    if _extracted_keywords and hasattr(store, "query_cross_employee"):
+        team_memories = store.query_cross_employee(
+            keywords=_extracted_keywords,
+            exclude_employee=employee.name,
+            limit=5,
+        )
+        team_memory_list = [
+            {
+                "employee": m.employee,
+                "category": m.category,
+                "content": m.content,
+                "created_at": m.created_at,
+            }
+            for m in team_memories
+        ]
 
     # 租户上下文（一次获取，后续复用）
     _state_tenant = get_current_tenant(request)
@@ -908,6 +947,8 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         "memories": memory_list,
         "notes": recent_notes,
     }
+    if team_memory_list:
+        response_data["team_memories"] = team_memory_list
 
     # Token 预算截断：粗估 1 token ≈ 3 中文字符 / 4 英文字符
     if max_tokens > 0:
@@ -2412,6 +2453,30 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
 
     except Exception:
         logger.exception("获取仪表板数据失败")
+        return _error_response("内部错误", 500)
+
+
+async def _handle_knowledge_dashboard(request: Any, ctx: _AppContext) -> Any:
+    """GET /api/knowledge/dashboard — 知识仪表盘.
+
+    返回团队知识结构统计：员工分布、热门关键词、纠正热点、知识空白、周趋势。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return _error_response(admin_err, 403)
+
+    try:
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
+        if not hasattr(memory_store, "get_knowledge_stats"):
+            return _error_response("当前存储后端不支持知识仪表盘", 501)
+
+        stats = memory_store.get_knowledge_stats()
+        return JSONResponse({"ok": True, **stats})
+
+    except Exception:
+        logger.exception("获取知识仪表盘数据失败")
         return _error_response("内部错误", 500)
 
 

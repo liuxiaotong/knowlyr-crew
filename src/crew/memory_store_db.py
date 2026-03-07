@@ -1108,6 +1108,283 @@ class MemoryStoreDB:
             )
             return cur.rowcount > 0
 
+    def query_by_keywords(
+        self,
+        employee: str,
+        keywords: list[str],
+        limit: int = 10,
+        category: str | None = None,
+    ) -> list[MemoryEntry]:
+        """按关键词匹配记忆（用 keywords 数组字段做 ILIKE 匹配）.
+
+        逻辑：对每个搜索关键词，检查记忆的 keywords 数组是否有元素 ILIKE '%关键词%'。
+        按匹配到的关键词数量降序排列（匹配越多越靠前）。
+        """
+        employee = self._resolve_to_character_name(employee)
+
+        if not keywords:
+            return self.query(employee, category=category, limit=limit)
+
+        # 截断到最多 10 个关键词
+        keywords = keywords[:10]
+
+        # 构建 match_count 表达式：对每个搜索关键词累加是否匹配
+        match_parts: list[str] = []
+        params: list[Any] = []
+
+        for kw in keywords:
+            match_parts.append(
+                "(CASE WHEN EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s) THEN 1 ELSE 0 END)"
+            )
+            params.append(f"%{kw}%")
+
+        match_count_expr = " + ".join(match_parts)
+
+        conditions = [
+            "employee = %s",
+            "tenant_id = %s",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+            "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())",
+        ]
+        params.extend([employee, self._tenant_id])
+
+        if category:
+            conditions.append("category = %s")
+            params.append(category)
+
+        # 至少匹配一个关键词
+        or_conditions = []
+        for kw in keywords:
+            or_conditions.append(
+                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+            )
+            params.append(f"%{kw}%")
+        conditions.append(f"({' OR '.join(or_conditions)})")
+
+        params.append(limit)
+
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+            sql = f"""
+                SELECT id, employee, created_at, category, content,
+                       source_session, confidence, superseded_by, ttl_days,
+                       importance, last_accessed, tags, shared, visibility,
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain,
+                       keywords, linked_memories,
+                       ({match_count_expr}) AS match_count
+                FROM memories
+                WHERE {" AND ".join(conditions)}
+                ORDER BY match_count DESC, importance DESC, created_at DESC
+                LIMIT %s
+            """
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+
+        return [self._row_to_entry(row) for row in rows]
+
+    def query_cross_employee(
+        self,
+        keywords: list[str],
+        exclude_employee: str = "",
+        limit: int = 5,
+        category: str | None = None,
+    ) -> list[MemoryEntry]:
+        """跨员工按关键词匹配记忆（仅 visibility=open 的记忆）.
+
+        不限制员工，但排除指定员工（通常是当前员工自身）。
+        按匹配关键词数量降序排列。
+        """
+        if not keywords:
+            return []
+
+        exclude_employee = self._resolve_to_character_name(exclude_employee)
+        keywords = keywords[:10]
+
+        # 构建 match_count 表达式
+        match_parts: list[str] = []
+        params: list[Any] = []
+
+        for kw in keywords:
+            match_parts.append(
+                "(CASE WHEN EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s) THEN 1 ELSE 0 END)"
+            )
+            params.append(f"%{kw}%")
+
+        match_count_expr = " + ".join(match_parts)
+
+        conditions = [
+            "tenant_id = %s",
+            "(superseded_by = '' OR superseded_by IS NULL)",
+            "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())",
+            "visibility = 'open'",
+        ]
+        params.append(self._tenant_id)
+
+        if exclude_employee:
+            conditions.append("employee != %s")
+            params.append(exclude_employee)
+
+        if category:
+            conditions.append("category = %s")
+            params.append(category)
+
+        # 至少匹配一个关键词
+        or_conditions = []
+        for kw in keywords:
+            or_conditions.append(
+                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+            )
+            params.append(f"%{kw}%")
+        conditions.append(f"({' OR '.join(or_conditions)})")
+
+        params.append(limit)
+
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+            sql = f"""
+                SELECT id, employee, created_at, category, content,
+                       source_session, confidence, superseded_by, ttl_days,
+                       importance, last_accessed, tags, shared, visibility,
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain,
+                       keywords, linked_memories,
+                       ({match_count_expr}) AS match_count
+                FROM memories
+                WHERE {" AND ".join(conditions)}
+                ORDER BY match_count DESC, importance DESC, created_at DESC
+                LIMIT %s
+            """
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+
+        return [self._row_to_entry(row) for row in rows]
+
+    def get_knowledge_stats(self) -> dict:
+        """返回团队知识结构统计.
+
+        Returns:
+            {
+                "employee_stats": [{"employee": "xxx", "total": N, "by_category": {...}}],
+                "top_keywords": [{"keyword": "xxx", "count": N}],  # Top 30
+                "correction_hotspots": [{"keyword": "xxx", "correction_count": N}],
+                "knowledge_gaps": [{"keyword": "xxx", "findings": N, "patterns": 0}],
+                "weekly_trend": [{"week": "2026-W10", "count": N}],  # 最近 12 周
+            }
+        """
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+
+            # 1. employee_stats: 每个员工的记忆数和分类统计
+            cur.execute(
+                """
+                SELECT employee, category, COUNT(*) as cnt
+                FROM memories
+                WHERE tenant_id = %s
+                  AND (superseded_by = '' OR superseded_by IS NULL)
+                GROUP BY employee, category
+                ORDER BY employee, category
+                """,
+                (self._tenant_id,),
+            )
+            rows = cur.fetchall()
+            emp_map: dict[str, dict] = {}
+            for row in rows:
+                emp = row["employee"]
+                if emp not in emp_map:
+                    emp_map[emp] = {"employee": emp, "total": 0, "by_category": {}}
+                emp_map[emp]["by_category"][row["category"]] = row["cnt"]
+                emp_map[emp]["total"] += row["cnt"]
+            employee_stats = list(emp_map.values())
+
+            # 2. top_keywords: 展开 keywords 数组统计频次 Top 30
+            cur.execute(
+                """
+                SELECT kw, COUNT(*) as cnt
+                FROM memories, unnest(keywords) AS kw
+                WHERE tenant_id = %s
+                  AND (superseded_by = '' OR superseded_by IS NULL)
+                GROUP BY kw
+                ORDER BY cnt DESC
+                LIMIT 30
+                """,
+                (self._tenant_id,),
+            )
+            top_keywords = [{"keyword": r["kw"], "count": r["cnt"]} for r in cur.fetchall()]
+
+            # 3. correction_hotspots: correction 类别中高频关键词
+            cur.execute(
+                """
+                SELECT kw, COUNT(*) as cnt
+                FROM memories, unnest(keywords) AS kw
+                WHERE tenant_id = %s
+                  AND category = 'correction'
+                  AND (superseded_by = '' OR superseded_by IS NULL)
+                GROUP BY kw
+                ORDER BY cnt DESC
+                LIMIT 20
+                """,
+                (self._tenant_id,),
+            )
+            correction_hotspots = [
+                {"keyword": r["kw"], "correction_count": r["cnt"]} for r in cur.fetchall()
+            ]
+
+            # 4. knowledge_gaps: 有 finding 但没有 pattern 的关键词
+            cur.execute(
+                """
+                WITH finding_kws AS (
+                    SELECT kw, COUNT(*) as findings
+                    FROM memories, unnest(keywords) AS kw
+                    WHERE tenant_id = %s
+                      AND category = 'finding'
+                      AND (superseded_by = '' OR superseded_by IS NULL)
+                    GROUP BY kw
+                ),
+                pattern_kws AS (
+                    SELECT kw, COUNT(*) as patterns
+                    FROM memories, unnest(keywords) AS kw
+                    WHERE tenant_id = %s
+                      AND category = 'pattern'
+                      AND (superseded_by = '' OR superseded_by IS NULL)
+                    GROUP BY kw
+                )
+                SELECT f.kw AS keyword, f.findings, COALESCE(p.patterns, 0) AS patterns
+                FROM finding_kws f
+                LEFT JOIN pattern_kws p ON f.kw = p.kw
+                WHERE COALESCE(p.patterns, 0) = 0
+                ORDER BY f.findings DESC
+                LIMIT 20
+                """,
+                (self._tenant_id, self._tenant_id),
+            )
+            knowledge_gaps = [
+                {"keyword": r["keyword"], "findings": r["findings"], "patterns": r["patterns"]}
+                for r in cur.fetchall()
+            ]
+
+            # 5. weekly_trend: 最近 12 周每周新增记忆数
+            cur.execute(
+                """
+                SELECT to_char(created_at, 'IYYY-"W"IW') AS week, COUNT(*) as cnt
+                FROM memories
+                WHERE tenant_id = %s
+                  AND created_at >= NOW() - INTERVAL '12 weeks'
+                GROUP BY week
+                ORDER BY week
+                """,
+                (self._tenant_id,),
+            )
+            weekly_trend = [{"week": r["week"], "count": r["cnt"]} for r in cur.fetchall()]
+
+        return {
+            "employee_stats": employee_stats,
+            "top_keywords": top_keywords,
+            "correction_hotspots": correction_hotspots,
+            "knowledge_gaps": knowledge_gaps,
+            "weekly_trend": weekly_trend,
+        }
+
     def add_from_session(
         self,
         *,

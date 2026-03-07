@@ -1388,6 +1388,16 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "enum": ["public", "internal", "restricted", "confidential"],
                             "description": "最高信息分级（可选，不传则不过滤）",
                         },
+                        "keywords": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "按关键词精准召回（可选，匹配 keywords 字段，按匹配数量排序）",
+                        },
+                        "cross_employee": {
+                            "type": "boolean",
+                            "description": "跨员工查询（仅 visibility=open，需配合 keywords 使用）",
+                            "default": False,
+                        },
                     },
                     "required": ["employee"],
                 },
@@ -2649,7 +2659,24 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 store = get_memory_store(project_dir=_project_dir)
                 _local_category = arguments.get("category")
                 _local_limit = arguments.get("limit", 20)
-                if _query_text:
+                _local_keywords = arguments.get("keywords")
+                _local_cross = arguments.get("cross_employee", False)
+
+                if _local_cross and _local_keywords and hasattr(store, "query_cross_employee"):
+                    entries = store.query_cross_employee(
+                        keywords=_local_keywords,
+                        exclude_employee=arguments["employee"],
+                        limit=_local_limit,
+                        category=_local_category,
+                    )
+                elif _local_keywords and hasattr(store, "query_by_keywords"):
+                    entries = store.query_by_keywords(
+                        employee=arguments["employee"],
+                        keywords=_local_keywords,
+                        limit=_local_limit,
+                        category=_local_category,
+                    )
+                elif _query_text:
                     entries = _local_semantic_memory_search(
                         store,
                         arguments["employee"],
