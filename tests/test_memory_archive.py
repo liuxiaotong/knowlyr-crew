@@ -1,7 +1,7 @@
 """记忆归档测试."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -230,3 +230,142 @@ class TestMemoryArchive:
         path = archive._get_archive_path("赵云帆", 2026, 3)
         assert str(path).endswith("赵云帆/2026/03.jsonl")
         assert path.parent.exists()
+
+
+class TestPublicInterfaceCompat:
+    """测试公开接口兼容性（确保 cron/archive 不依赖私有方法）."""
+
+    def test_memory_store_public_load_employee_entries(self, memory_store):
+        """测试 MemoryStore.load_employee_entries() 公开接口."""
+        memory_store.add(employee="测试员工", category="finding", content="公开接口测试")
+        entries = memory_store.load_employee_entries("测试员工")
+        assert len(entries) >= 1
+        assert any(e.content == "公开接口测试" for e in entries)
+
+    def test_memory_store_public_is_expired(self, memory_store):
+        """测试 MemoryStore.is_expired() 公开接口."""
+        from crew.memory import MemoryEntry
+
+        # 未过期
+        entry = MemoryEntry(
+            employee="测试员工",
+            category="finding",
+            content="未过期",
+            ttl_days=30,
+        )
+        assert memory_store.is_expired(entry) is False
+
+        # 无 TTL = 永不过期
+        entry_no_ttl = MemoryEntry(
+            employee="测试员工",
+            category="finding",
+            content="永不过期",
+            ttl_days=0,
+        )
+        assert memory_store.is_expired(entry_no_ttl) is False
+
+        # 已过期
+        old_time = (datetime.now() - timedelta(days=10)).isoformat()
+        entry_expired = MemoryEntry(
+            employee="测试员工",
+            category="finding",
+            content="已过期",
+            ttl_days=1,
+            created_at=old_time,
+        )
+        assert memory_store.is_expired(entry_expired) is True
+
+    def test_archive_uses_public_interface(self, archive, memory_store):
+        """测试 MemoryArchive.archive_expired_memories 使用公开接口."""
+        # 创建过期记忆
+        old_time = (datetime.now() - timedelta(days=5)).isoformat()
+        entry = memory_store.add(
+            employee="赵云帆",
+            category="finding",
+            content="过期记忆-公开接口",
+            ttl_days=1,
+        )
+        entry.created_at = old_time
+
+        # 手动写入文件
+        path = memory_store._employee_file("赵云帆")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(entry.model_dump_json() + "\n")
+
+        # archive_expired_memories 内部应通过公开接口工作
+        stats = archive.archive_expired_memories("赵云帆")
+        assert stats["archived"] == 1
+        assert stats["failed"] == 0
+
+    def test_archive_with_mock_db_store(self, tmp_path):
+        """测试 MemoryArchive 兼容类 DB 接口的 mock store."""
+        from crew.memory import MemoryEntry
+
+        old_time = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+
+        # 模拟 MemoryStoreDB 的公开接口（无 _load_employee_entries / _is_expired）
+        class MockDBStore:
+            def __init__(self):
+                self.entries = [
+                    MemoryEntry(
+                        employee="mock员工",
+                        category="finding",
+                        content="DB过期记忆",
+                        ttl_days=1,
+                        created_at=old_time,
+                    ),
+                    MemoryEntry(
+                        employee="mock员工",
+                        category="finding",
+                        content="DB未过期记忆",
+                        ttl_days=30,
+                    ),
+                ]
+                self.deleted_ids = []
+
+            def load_employee_entries(self, employee):
+                return [e for e in self.entries if e.employee == employee]
+
+            def is_expired(self, entry):
+                if entry.ttl_days <= 0:
+                    return False
+                created = datetime.fromisoformat(entry.created_at)
+                now = datetime.now(timezone.utc) if created.tzinfo else datetime.now()
+                age_days = (now - created).total_seconds() / 86400
+                return age_days > entry.ttl_days
+
+            def delete(self, entry_id, employee=None):
+                self.deleted_ids.append(entry_id)
+                return True
+
+        mock_store = MockDBStore()
+        archive_dir = tmp_path / "archive"
+        archive_dir.mkdir()
+        archive = MemoryArchive(archive_dir=archive_dir, memory_store=mock_store)
+
+        stats = archive.archive_expired_memories("mock员工")
+        assert stats["archived"] == 1
+        assert stats["failed"] == 0
+        assert len(mock_store.deleted_ids) == 1
+
+    def test_cron_dry_run_uses_public_interface(self, memory_store):
+        """测试 dry-run 逻辑使用公开接口（模拟 cron 脚本的核心逻辑）."""
+        # 创建过期记忆
+        old_time = (datetime.now() - timedelta(days=5)).isoformat()
+        entry = memory_store.add(
+            employee="赵云帆",
+            category="finding",
+            content="dry-run测试",
+            ttl_days=1,
+        )
+        entry.created_at = old_time
+
+        # 手动更新文件
+        path = memory_store._employee_file("赵云帆")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(entry.model_dump_json() + "\n")
+
+        # 模拟 cron 脚本的 dry-run 逻辑（使用公开接口）
+        entries = memory_store.load_employee_entries("赵云帆")
+        expired_count = sum(1 for e in entries if memory_store.is_expired(e))
+        assert expired_count == 1

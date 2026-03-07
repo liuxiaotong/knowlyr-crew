@@ -95,9 +95,9 @@ class MemoryArchive:
 
         stats = {"archived": 0, "failed": 0}
 
-        # 加载所有记忆（包括过期的）
-        entries = self.memory_store._load_employee_entries(employee)
-        expired_entries = [e for e in entries if self.memory_store._is_expired(e)]
+        # 加载所有记忆（包括过期的）— 使用公开接口，兼容文件版和 DB 版
+        entries = self.memory_store.load_employee_entries(employee)
+        expired_entries = [e for e in entries if self.memory_store.is_expired(e)]
 
         if not expired_entries:
             logger.info("员工 %s 没有过期记忆", employee)
@@ -127,6 +127,10 @@ class MemoryArchive:
     def _remove_from_main_table(self, employee: str, entry_ids: list[str]) -> None:
         """从主表删除已归档的记忆.
 
+        兼容文件版 MemoryStore 和数据库版 MemoryStoreDB：
+        - 有 delete() 方法时逐条调用（DB 模式和文件模式都支持）
+        - 回退到文件操作仅在有 _employee_file 属性时
+
         Args:
             employee: 员工名称
             entry_ids: 要删除的记忆 ID 列表
@@ -134,30 +138,12 @@ class MemoryArchive:
         if self.memory_store is None:
             return
 
-        path = self.memory_store._employee_file(employee)
-        if not path.exists():
-            return
-
-        id_set = set(entry_ids)
-
-        with file_lock(path):
-            lines = path.read_text(encoding="utf-8").splitlines()
-            kept_lines: list[str] = []
-
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-
-                try:
-                    entry = MemoryEntry(**json.loads(stripped))
-                    if entry.id not in id_set:
-                        kept_lines.append(stripped)
-                except (json.JSONDecodeError, ValueError):
-                    # 保留损坏的行
-                    kept_lines.append(stripped)
-
-            path.write_text("\n".join(kept_lines) + "\n" if kept_lines else "", encoding="utf-8")
+        # 统一使用 delete() 公开接口（MemoryStore 和 MemoryStoreDB 都有）
+        for entry_id in entry_ids:
+            try:
+                self.memory_store.delete(entry_id, employee=employee)
+            except Exception as e:
+                logger.warning("删除已归档记忆失败: id=%s error=%s", entry_id, e)
 
         logger.info("从主表删除 %d 条已归档记忆: employee=%s", len(entry_ids), employee)
 
@@ -276,13 +262,26 @@ class MemoryArchive:
             if not id_set:
                 break
 
-        # 恢复到主表
-        path = self.memory_store._employee_file(employee)
-        with file_lock(path):
-            with open(path, "a", encoding="utf-8") as f:
-                for entry in found_entries:
-                    f.write(entry.model_dump_json() + "\n")
-                    stats["restored"] += 1
+        # 恢复到主表 — 使用 add() 公开接口，兼容文件版和 DB 版
+        for entry in found_entries:
+            try:
+                self.memory_store.add(
+                    employee=entry.employee,
+                    category=entry.category,
+                    content=entry.content,
+                    source_session=entry.source_session,
+                    confidence=entry.confidence,
+                    ttl_days=0,  # 恢复后清除 TTL，避免再次过期
+                    tags=entry.tags,
+                    shared=entry.shared,
+                    visibility=entry.visibility,
+                    trigger_condition=entry.trigger_condition,
+                    applicability=entry.applicability,
+                    origin_employee=entry.origin_employee,
+                )
+                stats["restored"] += 1
+            except Exception as e:
+                logger.warning("恢复记忆失败: id=%s error=%s", entry.id, e)
 
         stats["not_found"] = len(id_set)
 
