@@ -2513,11 +2513,12 @@ async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
         {
             "employee": "slug or name",
             "useful_memory_ids": ["id1", "id2"],
+            "recalled_memory_ids": ["id1", "id2", "id3", "id4"],  // 可选
             "session_id": "optional"
         }
 
     返回:
-        {"ok": true, "updated": N}
+        {"ok": true, "updated": N, "decayed": N}
     """
     try:
         body = await request.json()
@@ -2526,6 +2527,7 @@ async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
 
     employee = body.get("employee", "")
     useful_ids = body.get("useful_memory_ids", [])
+    recalled_ids = body.get("recalled_memory_ids", [])
 
     if not employee:
         return _error_response("employee 必填")
@@ -2537,7 +2539,13 @@ async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
             project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
         )
         updated = memory_store.record_useful(useful_ids, employee)
-        return JSONResponse({"ok": True, "updated": updated})
+
+        # 衰减被召回但未标记有用的记忆的 q_value
+        decayed = 0
+        if recalled_ids and isinstance(recalled_ids, list):
+            decayed = memory_store.decay_unverified_recalls(recalled_ids, useful_ids, employee)
+
+        return JSONResponse({"ok": True, "updated": updated, "decayed": decayed})
     except Exception:
         logger.exception("recall feedback 处理失败")
         return _error_response("内部错误", 500)
