@@ -4702,6 +4702,32 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         return _error_response("内部错误", 500)
 
 
+async def _handle_memory_consolidate(request: Any, ctx: _AppContext) -> Any:
+    """管理员端点，触发碎片聚合 — POST /api/memory/consolidate.
+
+    Query params:
+        dry_run: "true"/"false" (默认 "true")
+        employee: 可选，指定单个员工
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    dry_run = request.query_params.get("dry_run", "true").lower() != "false"
+    employee = request.query_params.get("employee", "").strip() or None
+
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+
+    try:
+        from crew.memory_consolidate import run_consolidation
+
+        result = run_consolidation(store=store, dry_run=dry_run, employee=employee)
+        return JSONResponse({"ok": True, **result})
+    except Exception:
+        logger.exception("碎片聚合失败")
+        return _error_response("内部错误", 500)
+
+
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     """接收外部 agent 的轨迹数据 — POST /api/trajectory/report.
 

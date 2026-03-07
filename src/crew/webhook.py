@@ -111,6 +111,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_archive_stats,
     _handle_memory_batch_delete,
     _handle_memory_batch_update,
+    _handle_memory_consolidate,
     _handle_memory_dashboard,
     _handle_memory_delete,
     _handle_memory_drafts_approve,
@@ -707,6 +708,11 @@ def create_webhook_app(
         Route(
             "/api/memory/batch/delete",
             endpoint=_make_handler(ctx, _handle_memory_batch_delete),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/memory/consolidate",
+            endpoint=_make_handler(ctx, _handle_memory_consolidate),
             methods=["POST"],
         ),
         Route(
