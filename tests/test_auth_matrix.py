@@ -6,10 +6,7 @@
 
 from __future__ import annotations
 
-import ast
-import inspect
 import re
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -107,7 +104,7 @@ def _detect_auth_level(handler_name: str) -> str:
     if "_require_admin_token" in source:
         # 模式 1: `is_admin = _require_admin_token(request) is None` → 仅字段过滤，不门控
         # 这种用法是 bearer_only（admin 信息仅用于决定返回字段范围）
-        has_gate = False
+        _has_gate = False
         has_field_filter_only = True
 
         lines = source.split("\n")
@@ -126,7 +123,7 @@ def _detect_auth_level(handler_name: str) -> str:
             if re.search(
                 r"if\s+admin_err\s*:\s*\n\s*return\s+", context_after
             ):
-                has_gate = True
+                _has_gate = True
                 return "admin_required"
             else:
                 return "admin_conditional"
@@ -480,7 +477,7 @@ class TestAuthMatrix:
         for level in EXPECTED_AUTH_MATRIX.values():
             level_counts[level] = level_counts.get(level, 0) + 1
 
-        print(f"\n--- Auth Matrix 覆盖统计 ---")
+        print("\n--- Auth Matrix 覆盖统计 ---")
         print(f"路由总数: {total}")
         print(f"矩阵注册: {registered}")
         for level, count in sorted(level_counts.items()):

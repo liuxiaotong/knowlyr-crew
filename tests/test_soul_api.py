@@ -1,7 +1,6 @@
 """测试 Soul API — MCP server get_soul / update_soul 请求携带 X-Admin-Token."""
 
 import asyncio
-import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,7 +35,6 @@ class TestGetSoulHeaders:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            from crew.mcp_server import serve
 
             # 直接调用 call_tool handler
             async def _run():
@@ -144,7 +142,6 @@ class TestSoulHandlerIntegration:
 
     def _call_tool(self, tool_name, arguments):
         """模拟调用 MCP server 的 call_tool."""
-        from crew.mcp_server import serve
 
         # 获取 serve 内部注册的 call_tool handler 比较复杂，
         # 这里直接验证修改后的代码逻辑：构建 headers 包含两个 token

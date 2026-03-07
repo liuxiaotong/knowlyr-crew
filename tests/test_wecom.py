@@ -1110,8 +1110,8 @@ class TestChangeContactWebhookRouting:
     """handle_wecom_event 对 change_contact 事件的路由."""
 
     def _make_ctx(self):
-        from crew.wecom import WecomCrypto
         from crew.feishu import EventDeduplicator
+        from crew.wecom import WecomCrypto
 
         ctx = MagicMock()
         ctx.project_dir = None
@@ -1179,7 +1179,7 @@ class TestChangeContactWebhookRouting:
         ctx = self._make_ctx()
         request = self._make_event_request(ctx, change_type="delete_user", userid="zhangsan")
 
-        with patch("crew.webhook_wecom._handle_contact_change", new_callable=AsyncMock) as mock_handler:
+        with patch("crew.webhook_wecom._handle_contact_change", new_callable=AsyncMock) as _mock_handler:
             resp = await handle_wecom_event(request, ctx)
 
             assert resp.status_code == 200
