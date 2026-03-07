@@ -99,6 +99,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_evaluate_scan,
     _handle_generic,
     _handle_github,
+    _handle_knowledge_dashboard,
     _handle_kv_get,
     _handle_kv_list,
     _handle_kv_put,
@@ -691,6 +692,11 @@ def create_webhook_app(
         Route(
             "/api/memory/dashboard",
             endpoint=_make_handler(ctx, _handle_memory_dashboard),
+            methods=["GET"],
+        ),
+        Route(
+            "/api/knowledge/dashboard",
+            endpoint=_make_handler(ctx, _handle_knowledge_dashboard),
             methods=["GET"],
         ),
         Route(

@@ -1707,19 +1707,41 @@ async def _handle_tool_call(
 
         project_dir = ctx.project_dir if ctx else Path(".")
         store = get_memory_store(project_dir=project_dir)
-        _query_kwargs: dict[str, Any] = {
-            "employee": arguments.get("employee", employee_name),
-            "limit": arguments.get("limit", 20),
-        }
+
+        _keywords = arguments.get("keywords")
+        _cross_employee = arguments.get("cross_employee", False)
         _cat = arguments.get("category")
-        if _cat:
-            _query_kwargs["category"] = _cat
-        _cls_max = arguments.get("classification_max")
-        if _cls_max:
-            _query_kwargs["classification_max"] = _cls_max
-        entries = store.query(**_query_kwargs)
+        _limit = arguments.get("limit", 20)
+        _emp = arguments.get("employee", employee_name)
+
+        if _cross_employee and _keywords and hasattr(store, "query_cross_employee"):
+            entries = store.query_cross_employee(
+                keywords=_keywords,
+                exclude_employee=_emp,
+                limit=_limit,
+                category=_cat,
+            )
+        elif _keywords and hasattr(store, "query_by_keywords"):
+            entries = store.query_by_keywords(
+                employee=_emp,
+                keywords=_keywords,
+                limit=_limit,
+                category=_cat,
+            )
+        else:
+            _query_kwargs: dict[str, Any] = {
+                "employee": _emp,
+                "limit": _limit,
+            }
+            if _cat:
+                _query_kwargs["category"] = _cat
+            _cls_max = arguments.get("classification_max")
+            if _cls_max:
+                _query_kwargs["classification_max"] = _cls_max
+            entries = store.query(**_query_kwargs)
+
         data = [e.model_dump() if hasattr(e, "model_dump") else e for e in entries]
-        logger.info("query_memory: %s → %d 条", _query_kwargs.get("employee"), len(data))
+        logger.info("query_memory: %s → %d 条", _emp, len(data))
         return _json.dumps(data, ensure_ascii=False, default=str)
 
     if tool_name == "add_memory":
