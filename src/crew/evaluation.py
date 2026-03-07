@@ -171,17 +171,28 @@ class EvaluationEngine:
                     os.unlink(tmp_path)
                 raise
 
-        # 将评估结论写入员工记忆（锁外执行，避免死锁）
+        # 将评估结论写入员工记忆（锁外执行，避免死锁，去重防止重复 correction）
+        # NOTE: 此处先查后写存在 TOCTOU 竞争，但当前场景风险极低：
+        # cron 按员工串行处理，同一 decision_id 不会被并行评估。
+        # 若需更严格保证，可在 MemoryStore.add 中做 upsert 或加 unique constraint。
         try:
             from crew.memory import get_memory_store
 
+            eval_source = f"eval:{decision_id}"
             store = get_memory_store(project_dir=self._project_dir, tenant_id=self._tenant_id)
-            store.add(
-                employee=found_decision.employee,
-                category="correction",
-                content=found_decision.evaluation,
-                source_session=f"eval:{decision_id}",
+            existing = store.query(
+                employee=found_decision.employee, category="correction", limit=200
             )
+            already_written = any(
+                getattr(e, "source_session", "") == eval_source for e in existing
+            )
+            if not already_written:
+                store.add(
+                    employee=found_decision.employee,
+                    category="correction",
+                    content=found_decision.evaluation,
+                    source_session=eval_source,
+                )
         except Exception:
             pass  # 记忆写入失败不影响评估
 

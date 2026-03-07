@@ -1346,35 +1346,49 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
 
 def _semantic_memory_search(store, employee: str, query: str, category: str | None, limit: int):
-    """语义混合搜索：先拉取记忆，再按关键词过滤排序.
+    """语义混合搜索：优先 SemanticMemoryIndex（向量70%+关键词30%），降级到关键词过滤."""
+    try:
+        from crew.memory_search import SemanticMemoryIndex
 
-    返回 MemoryEntry 列表，与 store.query 返回类型一致。
-    """
-    # 拉取更多条目用于过滤（上限 200，避免内存问题）
+        memory_dir = getattr(store, "memory_dir", None)
+        if memory_dir is not None:
+            with SemanticMemoryIndex(memory_dir) as index:
+                if index.has_index(employee):
+                    results = index.search(employee, query, limit=limit * 2)
+                    if results:
+                        entries_map = {e.id: e for e in store._load_employee_entries(employee)}
+                        filtered = []
+                        for entry_id, _content, _score in results:
+                            entry = entries_map.get(entry_id)
+                            if entry is None or entry.superseded_by:
+                                continue
+                            if store._is_expired(entry):
+                                continue
+                            if category and entry.category != category:
+                                continue
+                            filtered.append(store._apply_decay(entry))
+                        if filtered:
+                            return filtered[:limit]
+    except Exception as e:
+        logger.debug("SemanticMemoryIndex unavailable, fallback to keyword: %s", e)
+
     pool_size = min(limit * 10, 200)
     candidates = store.query(employee=employee, category=category, limit=pool_size)
-
-    if not query:
-        return candidates[:limit]
+    if not candidates:
+        return []
 
     query_lower = query.lower()
-    query_terms = set(query_lower.split())
+    query_tokens = set(query_lower.split())
 
     scored = []
     for entry in candidates:
         content_lower = entry.content.lower()
-        # 完整短语匹配得高分
-        if query_lower in content_lower:
-            score = 1.0
-        else:
-            # 按命中词占比打分
-            hits = sum(1 for t in query_terms if t in content_lower)
-            score = hits / len(query_terms) if query_terms else 0.0
-        if score > 0:
-            scored.append((score, entry))
+        hits = sum(1 for t in query_tokens if t in content_lower)
+        if hits > 0:
+            scored.append((entry, hits / len(query_tokens)))
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [entry for _, entry in scored[:limit]]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [e for e, _ in scored[:limit]]
 
 
 async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:

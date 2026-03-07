@@ -156,6 +156,16 @@ class SkillsEngine:
                     enhanced_context.setdefault("checklist_items", []).extend(
                         result.get("items", [])
                     )
+                elif action.type == "read_wiki":
+                    wiki_content = result.get("content", "")
+                    if wiki_content:
+                        enhanced_context.setdefault("wiki_docs", []).append(
+                            {
+                                "title": result.get("title", ""),
+                                "content": wiki_content,
+                                "doc_id": result.get("doc_id"),
+                            }
+                        )
 
             except Exception as e:
                 logger.error(f"Failed to execute action {action.type}: {e}")
@@ -309,13 +319,69 @@ class SkillsEngine:
         self, action: SkillAction, employee: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """执行 read_wiki 动作."""
+        import os
+
+        import httpx
+
         params = action.params
-        path = params.get("path", "")
+        doc_id = params.get("doc_id", "")
+        space_slug = params.get("space_slug", "")
+        doc_slug = params.get("doc_slug", "")
 
-        # TODO: 读取 Wiki 内容
-        logger.warning(f"read_wiki not fully implemented for path: {path}")
+        wiki_url = os.environ.get("WIKI_API_URL", "").rstrip("/")
+        wiki_token = os.environ.get("WIKI_ADMIN_TOKEN", "")
+        if not wiki_url or not wiki_token:
+            logger.warning("read_wiki: WIKI_API_URL or WIKI_ADMIN_TOKEN not configured")
+            return {"content": "", "error": "wiki not configured"}
 
-        return {"content": "", "path": path}
+        headers = {"Authorization": f"Bearer {wiki_token}"}
+
+        if not doc_id and space_slug and doc_slug:
+            doc_id = self._resolve_wiki_doc_id(wiki_url, headers, space_slug, doc_slug)
+            if not doc_id:
+                return {"content": "", "error": f"doc not found: {space_slug}/{doc_slug}"}
+
+        if not doc_id:
+            logger.warning("read_wiki: no doc_id or space_slug/doc_slug provided")
+            return {"content": "", "error": "no doc_id or slug provided"}
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(
+                    f"{wiki_url}/api/docs/{doc_id}",
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return {
+                    "content": data.get("content", ""),
+                    "title": data.get("title", ""),
+                    "doc_id": doc_id,
+                }
+        except Exception as e:
+            logger.error(f"read_wiki failed for doc_id={doc_id}: {e}")
+            return {"content": "", "doc_id": doc_id, "error": str(e)}
+
+    def _resolve_wiki_doc_id(
+        self, wiki_url: str, headers: dict, space_slug: str, doc_slug: str
+    ) -> str | None:
+        """通过 space_slug + doc_slug 解析 doc_id."""
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{wiki_url}/api/spaces/{space_slug}/docs",
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                docs = resp.json().get("docs", [])
+                for doc in docs:
+                    if doc.get("slug") == doc_slug:
+                        return doc.get("id", "")
+        except Exception as e:
+            logger.error(f"resolve_wiki_doc_id failed: {e}")
+        return None
 
     def _replace_template_vars(self, template: str, context: dict[str, Any]) -> str:
         """替换模板变量."""
