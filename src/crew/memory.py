@@ -212,15 +212,21 @@ class MemoryStore:
                 continue
         return entries
 
+    @staticmethod
+    def _parse_created_at_utc(created_at: str) -> datetime:
+        """Parse ISO datetime string, assume UTC if naive."""
+        dt = datetime.fromisoformat(created_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _apply_decay(self, entry: MemoryEntry) -> MemoryEntry:
         """计算时间衰减后的有效置信度（纯函数，不改原始数据）."""
         half_life = self.config.confidence_half_life_days
         if half_life <= 0:
             return entry
         try:
-            created = datetime.fromisoformat(entry.created_at)
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
+            created = self._parse_created_at_utc(entry.created_at)
             age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
             if age_days <= 0:
                 return entry
@@ -236,9 +242,7 @@ class MemoryStore:
         if ttl <= 0:
             return False
         try:
-            created = datetime.fromisoformat(entry.created_at)
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
+            created = self._parse_created_at_utc(entry.created_at)
             age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
             return age_days > ttl
         except (ValueError, TypeError):

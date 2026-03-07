@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from crew.memory import MemoryEntry
+from crew.memory import MemoryEntry, MemoryStore
 from crew.memory_store_db import MemoryStoreDB
 
 
@@ -39,3 +39,33 @@ class TestMemoryStoreDBIsExpired:
         future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         entry = _make_entry(future, ttl_days=30)
         assert MemoryStoreDB.is_expired(entry) is False
+
+
+class TestFileMemoryIsExpired:
+    """测试文件版 MemoryStore._is_expired 的 timezone 处理."""
+
+    def test_naive_datetime_expired(self):
+        """naive created_at + ttl_days=1 应该返回 True（已过期）."""
+        store = MemoryStore.__new__(MemoryStore)
+        entry = MemoryEntry(
+            id="t1",
+            employee="test",
+            created_at="2026-01-01T00:00:00",
+            category="finding",
+            content="test",
+            ttl_days=1,
+        )
+        assert store._is_expired(entry) is True
+
+    def test_naive_datetime_not_expired(self):
+        """未来的 naive created_at + ttl_days=9999 应该返回 False."""
+        store = MemoryStore.__new__(MemoryStore)
+        entry = MemoryEntry(
+            id="t2",
+            employee="test",
+            created_at="2099-01-01T00:00:00",
+            category="finding",
+            content="test",
+            ttl_days=9999,
+        )
+        assert store._is_expired(entry) is False
