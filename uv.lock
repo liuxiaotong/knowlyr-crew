@@ -827,7 +827,7 @@ wheels = [
 
 [[package]]
 name = "knowlyr-crew"
-version = "0.1.43"
+version = "0.1.44"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -840,6 +840,7 @@ dependencies = [
 all = [
     { name = "anthropic" },
     { name = "croniter" },
+    { name = "cryptography" },
     { name = "defusedxml" },
     { name = "httpx" },
     { name = "knowlyr-core" },
@@ -893,6 +894,7 @@ trajectory = [
 ]
 webhook = [
     { name = "croniter" },
+    { name = "cryptography" },
     { name = "defusedxml" },
     { name = "pycryptodome" },
     { name = "starlette" },
@@ -905,6 +907,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "croniter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "croniter", marker = "extra == 'webhook'", specifier = ">=2.0" },
+    { name = "cryptography", marker = "extra == 'webhook'", specifier = ">=41.0" },
     { name = "defusedxml", marker = "extra == 'webhook'", specifier = ">=0.7" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.5" },
     { name = "httpx", marker = "extra == 'id'", specifier = ">=0.25" },

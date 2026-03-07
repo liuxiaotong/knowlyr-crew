@@ -77,6 +77,7 @@ def init_audit_table() -> None:
 CREATE TABLE IF NOT EXISTS mcp_audit_log (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    tenant_id TEXT NOT NULL DEFAULT '',
     employee_name TEXT NOT NULL DEFAULT '',
     user_id TEXT NOT NULL DEFAULT '',
     server_name TEXT NOT NULL,
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS mcp_audit_log (
 CREATE TABLE IF NOT EXISTS mcp_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+    tenant_id TEXT NOT NULL DEFAULT '',
     employee_name TEXT NOT NULL DEFAULT '',
     user_id TEXT NOT NULL DEFAULT '',
     server_name TEXT NOT NULL,
@@ -116,6 +118,8 @@ CREATE TABLE IF NOT EXISTS mcp_audit_log (
         "CREATE INDEX IF NOT EXISTS idx_mcp_audit_timestamp ON mcp_audit_log(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_mcp_audit_server ON mcp_audit_log(server_name)",
         "CREATE INDEX IF NOT EXISTS idx_mcp_audit_employee ON mcp_audit_log(employee_name)",
+        "CREATE INDEX IF NOT EXISTS idx_mcp_audit_tenant ON mcp_audit_log(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mcp_audit_user ON mcp_audit_log(user_id)",
     ]
     with get_connection() as conn:
         cur = conn.cursor() if is_pg() else conn
@@ -131,6 +135,7 @@ CREATE TABLE IF NOT EXISTS mcp_audit_log (
 def log_tool_call(
     *,
     employee_name: str,
+    tenant_id: str = "",
     user_id: str = "",
     server_name: str,
     tool_name: str,
@@ -150,9 +155,10 @@ def log_tool_call(
 
     if is_pg():
         sql = """\
-INSERT INTO mcp_audit_log (employee_name, user_id, server_name, tool_name, namespaced_name, args_sanitized, success, error_message, duration_ms, metadata)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+INSERT INTO mcp_audit_log (tenant_id, employee_name, user_id, server_name, tool_name, namespaced_name, args_sanitized, success, error_message, duration_ms, metadata)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         params = (
+            tenant_id,
             employee_name,
             user_id,
             server_name,
@@ -166,9 +172,10 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         )
     else:
         sql = """\
-INSERT INTO mcp_audit_log (employee_name, user_id, server_name, tool_name, namespaced_name, args_sanitized, success, error_message, duration_ms, metadata)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+INSERT INTO mcp_audit_log (tenant_id, employee_name, user_id, server_name, tool_name, namespaced_name, args_sanitized, success, error_message, duration_ms, metadata)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         params = (
+            tenant_id,
             employee_name,
             user_id,
             server_name,

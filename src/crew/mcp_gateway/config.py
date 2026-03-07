@@ -53,6 +53,15 @@ class MCPServerConfig:
     whitelist: list[str] = field(default_factory=list)
     timeout: int = 30
     description: str = ""
+    allowed_tenants: list[str] = field(default_factory=list)
+
+    def is_tenant_allowed(self, tenant_id: str | None) -> bool:
+        """Check if tenant is allowed to use this MCP server."""
+        if not self.allowed_tenants:
+            return True
+        if not tenant_id:
+            return False
+        return tenant_id in self.allowed_tenants
 
     def resolved_env(self) -> dict[str, str]:
         """返回环境变量解析后的 env dict."""
@@ -105,6 +114,7 @@ def load_mcp_servers_config(
             whitelist=cfg.get("whitelist", []),
             timeout=cfg.get("timeout", 30),
             description=cfg.get("description", ""),
+            allowed_tenants=cfg.get("allowed_tenants", []),
         )
         logger.info(
             "MCP server 已加载: %s (command=%s, whitelist=%d tools)",
