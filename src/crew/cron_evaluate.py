@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 def _memory_exists_by_source(store, employee: str, source_session: str) -> bool:
-    """检查指定 source_session 的记忆是否已存在（去重用）."""
+    """检查指定 source_session 的记忆是否已存在（去重用）.
+
+    NOTE: 此函数与后续 store.add 之间存在 TOCTOU 竞争窗口，
+    但当前 cron 按员工串行调度，同一 session 不会被并行处理，风险极低。
+    若需更严格保证，可在 MemoryStore.add 中做 upsert 或加 unique constraint。
+    """
     try:
         existing = store.query(employee=employee, limit=200)
         for entry in existing:

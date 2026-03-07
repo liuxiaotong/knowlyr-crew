@@ -113,6 +113,7 @@ def _local_semantic_memory_search(store, employee, query, category, limit, *, cl
             results = index.search(employee, query, limit=limit * 2)
             if not results:
                 raise ValueError("no results")
+            _classification_levels = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
             entries_map = {e.id: e for e in store._load_employee_entries(employee)}
             filtered = []
             for entry_id, _content, _score in results:
@@ -123,8 +124,17 @@ def _local_semantic_memory_search(store, employee, query, category, limit, *, cl
                     continue
                 if category and entry.category != category:
                     continue
+                # W1: classification_max 过滤，防止高密级记忆泄露
+                if classification_max:
+                    entry_cls = getattr(entry, "classification", "internal")
+                    max_level = _classification_levels.get(classification_max, 1)
+                    if _classification_levels.get(entry_cls, 1) > max_level:
+                        continue
                 filtered.append(store._apply_decay(entry))
-            return filtered[:limit]
+            # W3: 过滤后为空则降级到关键词搜索，与 webhook_handlers 行为一致
+            if filtered:
+                return filtered[:limit]
+            raise ValueError("semantic results all filtered out, fallback")
     except Exception:
         _fallback_kwargs = {"employee": employee, "category": category, "limit": limit}
         if classification_max:

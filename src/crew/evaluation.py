@@ -172,6 +172,9 @@ class EvaluationEngine:
                 raise
 
         # 将评估结论写入员工记忆（锁外执行，避免死锁，去重防止重复 correction）
+        # NOTE: 此处先查后写存在 TOCTOU 竞争，但当前场景风险极低：
+        # cron 按员工串行处理，同一 decision_id 不会被并行评估。
+        # 若需更严格保证，可在 MemoryStore.add 中做 upsert 或加 unique constraint。
         try:
             from crew.memory import get_memory_store
 
