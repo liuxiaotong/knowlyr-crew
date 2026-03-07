@@ -99,9 +99,15 @@ def init_memory_tables() -> None:
         """)
         # 注意：keywords 列的查询使用 unnest + ILIKE 子串匹配，GIN 索引无法加速。
         # 当前数据量不需要索引；后续量大时可考虑 pg_trgm 或改为精确匹配再加 GIN。
-        cur.execute(
-            "DROP INDEX IF EXISTS idx_memories_keywords"
-        )
+        cur.execute("DROP INDEX IF EXISTS idx_memories_keywords")
+
+        # Phase 4: 幂等添加 recall_count 列（召回效果闭环）
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN recall_count INTEGER DEFAULT 0;
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
 
     logger.info("memories 表初始化完成")
 
@@ -271,7 +277,6 @@ class MemoryStoreDB:
                     [],  # linked_memories
                 ),
             )
-
 
         return MemoryEntry(
             id=entry_id,
@@ -1086,9 +1091,7 @@ class MemoryStoreDB:
             )
             return cur.rowcount > 0
 
-    def update_linked_memories(
-        self, entry_id: str, employee: str, linked_ids: list[str]
-    ) -> bool:
+    def update_linked_memories(self, entry_id: str, employee: str, linked_ids: list[str]) -> bool:
         """更新记忆的关联记忆 ID 列表.
 
         Args:
@@ -1155,9 +1158,7 @@ class MemoryStoreDB:
         # 至少匹配一个关键词
         or_conditions = []
         for kw in keywords:
-            or_conditions.append(
-                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
-            )
+            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
             params.append(f"%{kw}%")
         conditions.append(f"({' OR '.join(or_conditions)})")
 
@@ -1232,9 +1233,7 @@ class MemoryStoreDB:
         # 至少匹配一个关键词
         or_conditions = []
         for kw in keywords:
-            or_conditions.append(
-                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
-            )
+            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
             params.append(f"%{kw}%")
         conditions.append(f"({' OR '.join(or_conditions)})")
 
@@ -1383,6 +1382,110 @@ class MemoryStoreDB:
             "correction_hotspots": correction_hotspots,
             "knowledge_gaps": knowledge_gaps,
             "weekly_trend": weekly_trend,
+        }
+
+    def record_recall(self, memory_ids: list[str]) -> int:
+        """批量增加 recall_count.
+
+        每次这些记忆被召回注入上下文时调用。
+
+        Returns:
+            更新的行数
+        """
+        if not memory_ids:
+            return 0
+        now = datetime.now(timezone.utc)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE memories
+                SET recall_count = recall_count + 1,
+                    last_accessed = %s
+                WHERE id = ANY(%s) AND tenant_id = %s
+                """,
+                (now, memory_ids, self._tenant_id),
+            )
+            return cur.rowcount
+
+    def record_useful(self, memory_ids: list[str], employee: str) -> int:
+        """标记这些记忆在任务中被实际使用.
+
+        Returns:
+            更新的行数
+        """
+        if not memory_ids:
+            return 0
+        employee = self._resolve_to_character_name(employee)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE memories
+                SET verified_count = verified_count + 1
+                WHERE id = ANY(%s) AND tenant_id = %s AND employee = %s
+                """,
+                (memory_ids, self._tenant_id, employee),
+            )
+            return cur.rowcount
+
+    def get_recall_stats(self) -> dict:
+        """召回效果统计.
+
+        Returns:
+            包含 total_recalls, total_useful, hit_rate, top_useful,
+            never_recalled 的字典
+        """
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+
+            # 汇总统计
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(recall_count), 0) AS total_recalls,
+                       COALESCE(SUM(verified_count), 0) AS total_useful
+                FROM memories
+                WHERE tenant_id = %s
+                """,
+                (self._tenant_id,),
+            )
+            row = cur.fetchone()
+            total_recalls = int(row["total_recalls"])
+            total_useful = int(row["total_useful"])
+            hit_rate = total_useful / total_recalls if total_recalls > 0 else 0.0
+
+            # Top 10 最有用的记忆
+            cur.execute(
+                """
+                SELECT id, employee, content, category, verified_count, recall_count
+                FROM memories
+                WHERE tenant_id = %s AND verified_count > 0
+                ORDER BY verified_count DESC
+                LIMIT 10
+                """,
+                (self._tenant_id,),
+            )
+            top_useful = [dict(r) for r in cur.fetchall()]
+
+            # 从未被召回的记忆数
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM memories
+                WHERE tenant_id = %s
+                  AND recall_count = 0
+                  AND (superseded_by = '' OR superseded_by IS NULL)
+                """,
+                (self._tenant_id,),
+            )
+            never_recalled = int(cur.fetchone()["cnt"])
+
+        return {
+            "total_recalls": total_recalls,
+            "total_useful": total_useful,
+            "hit_rate": round(hit_rate, 4),
+            "top_useful": top_useful,
+            "never_recalled": never_recalled,
         }
 
     def add_from_session(

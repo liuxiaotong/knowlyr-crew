@@ -464,5 +464,6 @@ class TestEndToEnd:
             assert r2 is True
 
             import time
+
             time.sleep(0.5)
             assert mock_pipeline.call_count == 2

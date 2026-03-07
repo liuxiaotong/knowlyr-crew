@@ -911,6 +911,13 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             }
             for m in team_memories
         ]
+    # 记录召回（recall tracking 闭环）
+    recalled_memory_ids = [m.id for m in memories]
+    if recalled_memory_ids:
+        try:
+            store.record_recall(recalled_memory_ids)
+        except Exception:
+            logger.warning("record_recall failed for %s", employee.name)
 
     # 租户上下文（一次获取，后续复用）
     _state_tenant = get_current_tenant(request)
@@ -945,6 +952,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         "agent_status": employee.agent_status,
         "soul": soul_field,
         "memories": memory_list,
+        "recalled_memory_ids": recalled_memory_ids,
         "notes": recent_notes,
     }
     if team_memory_list:
@@ -2395,6 +2403,12 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                 reverse=True,
             )[:20]
 
+            # 召回效果统计
+            try:
+                recall_stats = memory_store.get_recall_stats()
+            except Exception:
+                recall_stats = {}
+
             return JSONResponse(
                 {
                     "ok": True,
@@ -2403,6 +2417,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                     "by_category": by_category,
                     "quality_distribution": quality_dist,
                     "top_tags": top_tags,
+                    "recall_stats": recall_stats,
                 }
             )
 
@@ -2440,6 +2455,12 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                 reverse=True,
             )[:20]
 
+            # 召回效果统计
+            try:
+                recall_stats = memory_store.get_recall_stats()
+            except Exception:
+                recall_stats = {}
+
             return JSONResponse(
                 {
                     "ok": True,
@@ -2448,6 +2469,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                     "by_employee": by_employee,
                     "quality_distribution": quality_dist,
                     "top_tags": top_tags,
+                    "recall_stats": recall_stats,
                 }
             )
 
@@ -2465,18 +2487,43 @@ async def _handle_knowledge_dashboard(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return _error_response(admin_err, 403)
 
+
+async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
+    """召回反馈 — POST /api/memory/recall-feedback.
+
+    员工任务完成后反馈哪些记忆有用。
+
+    JSON body:
+        {
+            "employee": "slug or name",
+            "useful_memory_ids": ["id1", "id2"],
+            "session_id": "optional"
+        }
+
+    返回:
+        {"ok": true, "updated": N}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("无效的 JSON body")
+
+    employee = body.get("employee", "")
+    useful_ids = body.get("useful_memory_ids", [])
+
+    if not employee:
+        return _error_response("employee 必填")
+    if not useful_ids or not isinstance(useful_ids, list):
+        return _error_response("useful_memory_ids 必须为非空列表")
+
     try:
         memory_store = get_memory_store(
             project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
         )
-        if not hasattr(memory_store, "get_knowledge_stats"):
-            return _error_response("当前存储后端不支持知识仪表盘", 501)
-
-        stats = memory_store.get_knowledge_stats()
-        return JSONResponse({"ok": True, **stats})
-
+        updated = memory_store.record_useful(useful_ids, employee)
+        return JSONResponse({"ok": True, "updated": updated})
     except Exception:
-        logger.exception("获取知识仪表盘数据失败")
+        logger.exception("recall feedback 处理失败")
         return _error_response("内部错误", 500)
 
 
@@ -4702,6 +4749,32 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
         return _error_response("内部错误", 500)
 
 
+async def _handle_memory_consolidate(request: Any, ctx: _AppContext) -> Any:
+    """管理员端点，触发碎片聚合 — POST /api/memory/consolidate.
+
+    Query params:
+        dry_run: "true"/"false" (默认 "true")
+        employee: 可选，指定单个员工
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    dry_run = request.query_params.get("dry_run", "true").lower() != "false"
+    employee = request.query_params.get("employee", "").strip() or None
+
+    store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+
+    try:
+        from crew.memory_consolidate import run_consolidation
+
+        result = run_consolidation(store=store, dry_run=dry_run, employee=employee)
+        return JSONResponse({"ok": True, **result})
+    except Exception:
+        logger.exception("碎片聚合失败")
+        return _error_response("内部错误", 500)
+
+
 async def _handle_trajectory_report(request: Any, ctx: _AppContext) -> Any:
     """接收外部 agent 的轨迹数据 — POST /api/trajectory/report.
 
@@ -6625,4 +6698,75 @@ async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as exc:
         logger.exception("evaluate scan failed: %s", exc)
+        return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_review(request: Any, ctx: _AppContext) -> Any:
+    """触发进化审查，生成候选列表 -- POST /api/soul/review.
+
+    Query params:
+    - employee: 可选，指定单个员工
+
+    需要 admin_required。
+    返回统计 + 候选列表。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    from crew.soul_evolution import run_evolution_review
+
+    employee = request.query_params.get("employee")
+
+    try:
+        store = get_memory_store(tenant_id=_tenant_id_for_store(request))
+        result = run_evolution_review(store=store, employee=employee)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("evolution review failed: %s", exc)
+        return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_candidates(request: Any, ctx: _AppContext) -> Any:
+    """查看当前待审批的候选列表 -- GET /api/soul/candidates.
+
+    Query params:
+    - employee: 可选，指定单个员工
+
+    需要 admin_required。
+    返回 candidates 列表。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    import json as _json
+
+    from crew.config_store import get_config
+
+    employee = request.query_params.get("employee")
+
+    try:
+        if employee:
+            # 查询指定员工
+            raw = get_config("soul_evolution", f"{employee}_candidates")
+            candidates = _json.loads(raw) if raw else []
+            return JSONResponse({"employee": employee, "candidates": candidates})
+
+        # 查询所有员工
+        store = get_memory_store(tenant_id=_tenant_id_for_store(request))
+        employees = store.list_employees()
+        all_candidates: list[dict] = []
+        for emp in employees:
+            emp_resolved = store._resolve_to_character_name(emp)
+            raw = get_config("soul_evolution", f"{emp_resolved}_candidates")
+            if raw:
+                try:
+                    items = _json.loads(raw)
+                    all_candidates.extend(items)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+        return JSONResponse({"candidates": all_candidates, "total": len(all_candidates)})
+    except Exception as exc:
+        logger.exception("evolution candidates query failed: %s", exc)
         return _error_response("内部错误", 500)

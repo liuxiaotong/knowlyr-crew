@@ -134,9 +134,7 @@ def reflect(raw_text: str, employee: str) -> ReflectResult | None:
         if text.startswith("```"):
             # 去掉 ```json ... ``` 包裹
             lines = text.split("\n")
-            text = "\n".join(
-                line for line in lines if not line.strip().startswith("```")
-            )
+            text = "\n".join(line for line in lines if not line.strip().startswith("```"))
 
         data = json.loads(text)
 
@@ -221,9 +219,7 @@ def _find_candidates_by_keywords(
     employee_resolved = store._resolve_to_character_name(employee)
 
     for kw in keywords[:10]:  # 最多 10 个关键词避免查询过大
-        conditions.append(
-            "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
-        )
+        conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
         params.append(f"%{kw}%")
 
     if not conditions:
@@ -332,9 +328,7 @@ def connect(
                 "keywords": merged_keywords,
             }
         )
-        return ConnectResult(
-            action="merge", entry=updated_entry, merged_entry_id=best_candidate.id
-        )
+        return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate.id)
 
     elif best_overlap >= 0.3:
         # link: 新建 + 双向 linked_memories
@@ -342,31 +336,24 @@ def connect(
 
         try:
             # 更新新记忆的 linked_memories
-            store.update_linked_memories(
-                new_entry.id, employee, [best_candidate.id]
-            )
+            store.update_linked_memories(new_entry.id, employee, [best_candidate.id])
 
             # 更新旧记忆的 linked_memories（双向），最多保留 20 个关联
             old_linked = list(best_candidate.linked_memories) + [new_entry.id]
             old_linked = old_linked[-20:]
-            store.update_linked_memories(
-                best_candidate.id, employee, old_linked
-            )
+            store.update_linked_memories(best_candidate.id, employee, old_linked)
 
             # 更新旧记忆的 keywords（合并新关键词）
             merged_kw = list(set(best_candidate.keywords + note.keywords))
             store.update_keywords(best_candidate.id, employee, merged_kw)
         except Exception:
             logger.warning(
-                "link: 关联更新部分失败 new_id=%s, candidate_id=%s，"
-                "新记忆已写入但关联可能不完整",
+                "link: 关联更新部分失败 new_id=%s, candidate_id=%s，新记忆已写入但关联可能不完整",
                 new_entry.id,
                 best_candidate.id,
             )
 
-        updated_entry = new_entry.model_copy(
-            update={"linked_memories": [best_candidate.id]}
-        )
+        updated_entry = new_entry.model_copy(update={"linked_memories": [best_candidate.id]})
         return ConnectResult(action="link", entry=updated_entry)
 
     else:

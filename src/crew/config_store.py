@@ -1220,3 +1220,78 @@ def migrate_employees_to_db(
         "errors": errors,
         "total": len(result.employees),
     }
+
+
+# ── 通用 KV 配置存储 ──
+
+_PG_CREATE_KV_CONFIGS = """\
+CREATE TABLE IF NOT EXISTS kv_configs (
+    namespace VARCHAR(255) NOT NULL,
+    key VARCHAR(255) NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (namespace, key)
+)
+"""
+
+
+def _ensure_kv_table() -> None:
+    """确保 kv_configs 表存在（幂等）."""
+    if not is_pg():
+        return
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_PG_CREATE_KV_CONFIGS)
+
+
+def put_config(namespace: str, key: str, value: str) -> None:
+    """写入通用 KV 配置.
+
+    Args:
+        namespace: 命名空间（如 'soul_evolution'）
+        key: 配置键
+        value: 配置值（通常为 JSON 字符串）
+    """
+    if not is_pg():
+        logger.debug("SQLite 模式，跳过 put_config")
+        return
+
+    _ensure_kv_table()
+    now = datetime.now(timezone.utc)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO kv_configs (namespace, key, value, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (namespace, key) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+            """,
+            (namespace, key, value, now),
+        )
+
+
+def get_config(namespace: str, key: str) -> str | None:
+    """读取通用 KV 配置.
+
+    Args:
+        namespace: 命名空间
+        key: 配置键
+
+    Returns:
+        配置值字符串，不存在返回 None
+    """
+    if not is_pg():
+        return None
+
+    _ensure_kv_table()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT value FROM kv_configs WHERE namespace = %s AND key = %s",
+            (namespace, key),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None

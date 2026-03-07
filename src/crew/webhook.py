@@ -97,6 +97,8 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_employee_state,
     _handle_employee_update,
     _handle_evaluate_scan,
+    _handle_evolution_candidates,
+    _handle_evolution_review,
     _handle_generic,
     _handle_github,
     _handle_knowledge_dashboard,
@@ -111,6 +113,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_memory_archive_stats,
     _handle_memory_batch_delete,
     _handle_memory_batch_update,
+    _handle_memory_consolidate,
     _handle_memory_dashboard,
     _handle_memory_delete,
     _handle_memory_drafts_approve,
@@ -149,6 +152,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_pipeline_list_config,
     _handle_pipeline_update_config,
     _handle_project_status,
+    _handle_recall_feedback,
     _handle_run_employee,
     _handle_run_pipeline,
     _handle_run_route,
@@ -700,6 +704,11 @@ def create_webhook_app(
             methods=["GET"],
         ),
         Route(
+            "/api/memory/recall-feedback",
+            endpoint=_make_handler(ctx, _handle_recall_feedback),
+            methods=["POST"],
+        ),
+        Route(
             "/api/memory/batch/update",
             endpoint=_make_handler(ctx, _handle_memory_batch_update),
             methods=["POST"],
@@ -707,6 +716,11 @@ def create_webhook_app(
         Route(
             "/api/memory/batch/delete",
             endpoint=_make_handler(ctx, _handle_memory_batch_delete),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/memory/consolidate",
+            endpoint=_make_handler(ctx, _handle_memory_consolidate),
             methods=["POST"],
         ),
         Route(
@@ -985,6 +999,17 @@ def create_webhook_app(
             "/api/souls/{employee_name}",
             endpoint=_make_handler(ctx, _handle_soul_update),
             methods=["PUT"],
+        ),
+        # 灵魂进化端点
+        Route(
+            "/api/soul/review",
+            endpoint=_make_handler(ctx, _handle_evolution_review),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/soul/candidates",
+            endpoint=_make_handler(ctx, _handle_evolution_candidates),
+            methods=["GET"],
         ),
         Route(
             "/api/config/discussions",

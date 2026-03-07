@@ -16,11 +16,13 @@ from crew.memory_pipeline import process_memory
 # daemon=False 线程退出前等待完成，避免记忆写入被截断
 _active_threads: list[weakref.ref] = []
 
+
 def _join_active_threads():
     for ref in _active_threads:
         t = ref()
         if t is not None and t.is_alive():
             t.join(timeout=15)
+
 
 atexit.register(_join_active_threads)
 

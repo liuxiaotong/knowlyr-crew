@@ -206,6 +206,7 @@ class TestPushIfNeeded:
         assert result is True
         # 异步调用，等线程完成
         import time
+
         time.sleep(0.5)
         mock_pipeline.assert_called_once()
 
@@ -252,6 +253,7 @@ class TestPushIfNeeded:
         assert result is True
         # 异步，等线程完成
         import time
+
         time.sleep(0.5)
         mock_pipeline.assert_called_once()
 
@@ -268,6 +270,7 @@ class TestPushIfNeeded:
         assert result is True
         # 不崩溃即可
         import time
+
         time.sleep(0.5)
 
 

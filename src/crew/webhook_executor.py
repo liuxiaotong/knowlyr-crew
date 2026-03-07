@@ -1771,8 +1771,8 @@ async def _handle_tool_call(
                 "记忆管线保存: %s → %s (visibility=%s, classification=%s)",
                 employee_name,
                 entry.content[:60],
-                getattr(entry, 'visibility', 'open'),
-                getattr(entry, 'classification', 'internal'),
+                getattr(entry, "visibility", "open"),
+                getattr(entry, "classification", "internal"),
             )
             return "已记住。"
         else:
