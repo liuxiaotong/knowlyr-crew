@@ -889,8 +889,24 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             update_access=True,
         )
 
+    # NG-3: 展开关联记忆上下文
+    linked_context_map: dict[str, list[str]] = {}
+    if hasattr(store, "expand_linked_memories"):
+        try:
+            linked_map = store.expand_linked_memories(memories, max_linked=2)
+            for mid, linked_entries in linked_map.items():
+                linked_context_map[mid] = [le.content for le in linked_entries[:2]]
+        except Exception:
+            logger.debug("expand_linked_memories failed", exc_info=True)
+
     memory_list = [
-        {"category": m.category, "content": m.content, "created_at": m.created_at, "tags": m.tags}
+        {
+            "category": m.category,
+            "content": m.content,
+            "created_at": m.created_at,
+            "tags": m.tags,
+            **({"linked_context": linked_context_map[m.id]} if m.id in linked_context_map else {}),
+        }
         for m in memories
     ]
 
