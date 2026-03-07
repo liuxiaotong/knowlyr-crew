@@ -29,6 +29,7 @@ servers:
       - "get_me"
     timeout: 30
     description: "GitHub API (official MCP server, read-only)"
+    allowed_tenants: ["admin"]  # 仅 admin 租户可用
 
   # gws:
   #   command: "gws"

@@ -341,7 +341,7 @@ class MCPGatewayManager:
                 continue
 
             # 构建 handler
-            handler = self._make_tool_handler(name, raw_name, conn)
+            handler = self._make_tool_handler(name, raw_name, conn, config)
 
             # 构建 Anthropic 格式 schema
             schema = {
@@ -378,14 +378,10 @@ class MCPGatewayManager:
         return registered
 
     def _make_tool_handler(
-        self, server_name: str, tool_name: str, conn: MCPServerConnection
+        self, server_name: str, tool_name: str, conn: MCPServerConnection,
+        config: MCPServerConfig,
     ) -> Any:
-        """为一个 MCP 工具创建 handler 函数.
-
-        handler 签名与现有内置工具一致::
-
-            async def handler(args, *, agent_id=None, ctx=None) -> str
-        """
+        """为一个 MCP 工具创建 handler（含租户检查 + 凭据检查）."""
         ns_name = make_namespaced_name(server_name, tool_name)
 
         async def _handler(
@@ -393,39 +389,36 @@ class MCPGatewayManager:
             *,
             agent_id: str | None = None,
             ctx: Any = None,
+            tenant_id: str | None = None,
+            user_id: str | None = None,
         ) -> str:
             start = time.monotonic()
+
+            # 1. 租户级权限检查
+            if not config.is_tenant_allowed(tenant_id):
+                logger.warning("租户拒绝: tenant=%s server=%s", tenant_id, server_name)
+                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="tenant_not_allowed", duration_ms=0)
+                return f"[权限拒绝] 当前租户无权使用 {server_name} 服务。请联系管理员开通权限。"
+
+            # 2. 用户级凭据检查
+            if user_id:
+                from crew.mcp_gateway.credentials import has_credential
+                if not has_credential(user_id, server_name):
+                    logger.warning("凭据缺失: user=%s server=%s", user_id, server_name)
+                    log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="credential_not_found", duration_ms=0)
+                    return f"[凭据缺失] 您尚未授权 {server_name} 服务。请先在设置中绑定相应账号。"
+
+            # 3. 执行调用
             try:
                 result = await conn.call_tool(tool_name, args)
                 duration = (time.monotonic() - start) * 1000
-
-                # 审计日志
-                log_tool_call(
-                    employee_name=str(agent_id or ""),
-                    server_name=server_name,
-                    tool_name=tool_name,
-                    namespaced_name=ns_name,
-                    args=args,
-                    success=True,
-                    duration_ms=duration,
-                )
+                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=True, duration_ms=duration)
                 return result
 
             except Exception as e:
                 duration = (time.monotonic() - start) * 1000
                 error_msg = sanitize_error(str(e))
-
-                # 审计日志
-                log_tool_call(
-                    employee_name=str(agent_id or ""),
-                    server_name=server_name,
-                    tool_name=tool_name,
-                    namespaced_name=ns_name,
-                    args=args,
-                    success=False,
-                    error_message=error_msg,
-                    duration_ms=duration,
-                )
+                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message=error_msg, duration_ms=duration)
                 return f"[MCP Error] {error_msg}"
 
         return _handler
@@ -444,6 +437,10 @@ class MCPGatewayManager:
         from crew.webhook_executor import _TOOL_HANDLERS
 
         return self.registry.inject_into(_TOOL_SCHEMAS, _TOOL_HANDLERS)
+
+    def get_server_config(self, server_name: str) -> MCPServerConfig | None:
+        """获取指定 MCP server 的配置."""
+        return self._configs.get(server_name)
 
     async def stop(self) -> None:
         """关闭所有 MCP Server 连接."""
@@ -466,6 +463,7 @@ class MCPGatewayManager:
                 "connected": conn.is_connected,
                 "circuit_breaker": conn.circuit_breaker.check_state(),
                 "description": conn.config.description,
+                "allowed_tenants": conn.config.allowed_tenants,
             }
 
         return {
