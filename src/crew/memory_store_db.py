@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -109,6 +110,14 @@ def init_memory_tables() -> None:
             END $$;
         """)
 
+        # NG-4: 幂等添加 q_value 列（效用评分）
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN q_value REAL DEFAULT 0.5;
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+
         # NG-1: pgvector 向量语义检索
         # 安装 pgvector 扩展（需要 superuser 或已预装）
         try:
@@ -141,6 +150,24 @@ def init_memory_tables() -> None:
             logger.warning("embedding 索引创建失败，将在数据回填后重试")
 
     logger.info("memories 表初始化完成")
+
+
+def _thompson_rescore(rows: list[dict]) -> list[dict]:
+    """对低召回记忆用 Thompson Sampling 重排."""
+    rescored = []
+    for row in rows:
+        score = row.get("hybrid_score", 0) or 0
+        rc = row.get("recall_count", 0) or 0
+        vc = row.get("verified_count", 0) or 0
+        if rc < 5:
+            # Beta 采样：用采样值替代固定 q_value 的贡献
+            sampled_q = random.betavariate(vc + 1, max(rc - vc, 0) + 1)
+            # 替换 q_value 部分（原 0.20 * q_value -> 0.20 * sampled_q）
+            base_score = score - 0.20 * (row.get("q_value", 0.5) or 0.5)
+            score = base_score + 0.20 * sampled_q
+        rescored.append((score, row))
+    rescored.sort(key=lambda x: (-x[0], -x[1].get("importance", 0)))
+    return [r[1] for r in rescored]
 
 
 # ── MemoryStoreDB 实现 ──
@@ -1462,9 +1489,10 @@ class MemoryStoreDB:
         limit: int = 10,
         category: str | None = None,
     ) -> list[MemoryEntry]:
-        """按关键词匹配记忆，支持混合检索（关键词 + 向量语义）.
+        """按关键词匹配记忆，支持混合检索（关键词 + 向量语义 + 效用评分）.
 
-        混合排序公式：final_score = 0.3 * keyword_score + 0.7 * cosine_similarity
+        混合排序公式：final_score = 0.25 * keyword_score + 0.55 * cosine_similarity + 0.20 * q_value
+        对低召回记忆（recall_count < 5）使用 Thompson Sampling 重排。
         当 embedding 不可用时，退化为纯关键词匹配（向后兼容）。
         """
         employee = self._resolve_to_character_name(employee)
@@ -1517,11 +1545,12 @@ class MemoryStoreDB:
             params.append(str(query_embedding))
             conditions.append(f"({' OR '.join(or_conditions)})")
 
-            # 混合评分：0.3 * keyword_norm + 0.7 * cosine_sim
+            # 混合评分：0.25 * keyword_norm + 0.55 * cosine_sim + 0.20 * q_value
             score_expr = (
-                f"(0.3 * (({match_count_expr}) / {num_keywords}.0)"
-                f" + 0.7 * CASE WHEN embedding IS NOT NULL"
-                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END)"
+                f"(0.25 * (({match_count_expr}) / {num_keywords}.0)"
+                f" + 0.55 * CASE WHEN embedding IS NOT NULL"
+                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END"
+                f" + 0.20 * COALESCE(q_value, 0.5))"
             )
             # match_count_expr 的参数需要再传一次（用于 SELECT 中的评分计算）
             score_params: list[Any] = []
@@ -1542,6 +1571,7 @@ class MemoryStoreDB:
                            trigger_condition, applicability, origin_employee, verified_count,
                            classification, domain,
                            keywords, linked_memories,
+                           recall_count, q_value,
                            {score_expr} AS hybrid_score
                     FROM memories
                     WHERE {" AND ".join(conditions)}
@@ -1552,6 +1582,8 @@ class MemoryStoreDB:
                 cur.execute(sql, all_params)
                 rows = cur.fetchall()
 
+            rows = [dict(r) for r in rows]
+            rows = _thompson_rescore(rows)
             return [self._row_to_entry(row) for row in rows]
 
         else:
@@ -1596,7 +1628,8 @@ class MemoryStoreDB:
         """跨员工按关键词匹配记忆，支持混合检索（仅 visibility=open）.
 
         不限制员工，但排除指定员工（通常是当前员工自身）。
-        混合排序公式：final_score = 0.3 * keyword_score + 0.7 * cosine_similarity
+        混合排序公式：final_score = 0.25 * keyword_score + 0.55 * cosine_similarity + 0.20 * q_value
+        对低召回记忆（recall_count < 5）使用 Thompson Sampling 重排。
         当 embedding 不可用时，退化为纯关键词匹配。
         """
         if not keywords:
@@ -1650,9 +1683,10 @@ class MemoryStoreDB:
             conditions.append(f"({' OR '.join(or_conditions)})")
 
             score_expr = (
-                f"(0.3 * (({match_count_expr}) / {num_keywords}.0)"
-                f" + 0.7 * CASE WHEN embedding IS NOT NULL"
-                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END)"
+                f"(0.25 * (({match_count_expr}) / {num_keywords}.0)"
+                f" + 0.55 * CASE WHEN embedding IS NOT NULL"
+                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END"
+                f" + 0.20 * COALESCE(q_value, 0.5))"
             )
             score_params: list[Any] = []
             for kw in keywords:
@@ -1672,6 +1706,7 @@ class MemoryStoreDB:
                            trigger_condition, applicability, origin_employee, verified_count,
                            classification, domain,
                            keywords, linked_memories,
+                           recall_count, q_value,
                            {score_expr} AS hybrid_score
                     FROM memories
                     WHERE {" AND ".join(conditions)}
@@ -1682,6 +1717,8 @@ class MemoryStoreDB:
                 cur.execute(sql, all_params)
                 rows = cur.fetchall()
 
+            rows = [dict(r) for r in rows]
+            rows = _thompson_rescore(rows)
             return [self._row_to_entry(row) for row in rows]
 
         else:
@@ -1879,10 +1916,31 @@ class MemoryStoreDB:
             cur.execute(
                 """
                 UPDATE memories
-                SET verified_count = verified_count + 1
+                SET verified_count = verified_count + 1,
+                    q_value = q_value + 0.1 * (1.0 - q_value)
                 WHERE id = ANY(%s) AND tenant_id = %s AND employee = %s
                 """,
                 (memory_ids, self._tenant_id, employee),
+            )
+            return cur.rowcount
+
+    def decay_unverified_recalls(
+        self, recalled_ids: list[str], useful_ids: list[str], employee: str
+    ) -> int:
+        """衰减被召回但未标记有用的记忆 q_value."""
+        unverified = [mid for mid in recalled_ids if mid not in set(useful_ids)]
+        if not unverified:
+            return 0
+        employee = self._resolve_to_character_name(employee)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE memories
+                SET q_value = q_value * 0.95
+                WHERE id = ANY(%s) AND tenant_id = %s AND employee = %s
+                """,
+                (unverified, self._tenant_id, employee),
             )
             return cur.rowcount
 
