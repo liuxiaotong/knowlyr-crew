@@ -75,6 +75,7 @@ async def _remote_memory_query(
     category: str | None = None,
     limit: int = 20,
     classification_max: str | None = None,
+    query: str = "",
 ) -> list[dict]:
     """通过远程 API 查询记忆，返回条目列表."""
     import httpx
@@ -84,6 +85,8 @@ async def _remote_memory_query(
         params["category"] = category
     if classification_max:
         params["classification_max"] = classification_max
+    if query:
+        params["query"] = query
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/memory/query",
@@ -93,6 +96,40 @@ async def _remote_memory_query(
         resp.raise_for_status()
         data = resp.json()
         return data.get("entries", [])
+
+
+
+def _local_semantic_memory_search(store, employee, query, category, limit, *, classification_max=None):
+    """本地语义混合搜索，降级到 store.query()."""
+    try:
+        from crew.memory_search import SemanticMemoryIndex
+
+        memory_dir = getattr(store, "memory_dir", None)
+        if memory_dir is None:
+            raise AttributeError("store has no memory_dir")
+        with SemanticMemoryIndex(memory_dir) as index:
+            if not index.has_index(employee):
+                raise ValueError("no index")
+            results = index.search(employee, query, limit=limit * 2)
+            if not results:
+                raise ValueError("no results")
+            entries_map = {e.id: e for e in store._load_employee_entries(employee)}
+            filtered = []
+            for entry_id, _content, _score in results:
+                entry = entries_map.get(entry_id)
+                if entry is None or entry.superseded_by:
+                    continue
+                if store._is_expired(entry):
+                    continue
+                if category and entry.category != category:
+                    continue
+                filtered.append(store._apply_decay(entry))
+            return filtered[:limit]
+    except Exception:
+        _fallback_kwargs = {"employee": employee, "category": category, "limit": limit}
+        if classification_max:
+            _fallback_kwargs["classification_max"] = classification_max
+        return store.query(**_fallback_kwargs)
 
 
 # ── Wiki Files API 客户端 ─────────────────────────────────────
@@ -1273,6 +1310,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "type": "integer",
                             "description": "最大返回条数（默认 20）",
                             "default": 20,
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "搜索关键词（可选）— 有值时走语义混合搜索",
                         },
                         "classification_max": {
                             "type": "string",
@@ -2487,6 +2528,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
 
         elif name == "query_memory":
             _classification_max = arguments.get("classification_max")
+            _query_text = arguments.get("query", "").strip()
             remote_cfg = _get_remote_memory_config()
             if remote_cfg:
                 # 远程 API 路径
@@ -2499,6 +2541,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         category=arguments.get("category"),
                         limit=arguments.get("limit", 20),
                         classification_max=_classification_max,
+                        query=_query_text,
                     )
                     return [
                         TextContent(
@@ -2522,14 +2565,26 @@ def create_server(project_dir: Path | None = None) -> "Server":
                 from crew.memory import get_memory_store
 
                 store = get_memory_store(project_dir=_project_dir)
-                _query_kwargs: dict = {
-                    "employee": arguments["employee"],
-                    "category": arguments.get("category"),
-                    "limit": arguments.get("limit", 20),
-                }
-                if _classification_max:
-                    _query_kwargs["classification_max"] = _classification_max
-                entries = store.query(**_query_kwargs)
+                _local_category = arguments.get("category")
+                _local_limit = arguments.get("limit", 20)
+                if _query_text:
+                    entries = _local_semantic_memory_search(
+                        store,
+                        arguments["employee"],
+                        _query_text,
+                        _local_category,
+                        _local_limit,
+                        classification_max=_classification_max,
+                    )
+                else:
+                    _query_kwargs: dict = {
+                        "employee": arguments["employee"],
+                        "category": _local_category,
+                        "limit": _local_limit,
+                    }
+                    if _classification_max:
+                        _query_kwargs["classification_max"] = _classification_max
+                    entries = store.query(**_query_kwargs)
                 data = [e.model_dump() for e in entries]
                 return [
                     TextContent(

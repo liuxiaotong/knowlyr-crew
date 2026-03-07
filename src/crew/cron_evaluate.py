@@ -12,6 +12,18 @@ from crew.task_registry import TaskRecord, TaskRegistry
 logger = logging.getLogger(__name__)
 
 
+def _memory_exists_by_source(store, employee: str, source_session: str) -> bool:
+    """检查指定 source_session 的记忆是否已存在（去重用）."""
+    try:
+        existing = store.query(employee=employee, limit=200)
+        for entry in existing:
+            if getattr(entry, "source_session", "") == source_session:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 async def scan_overdue_decisions(
     project_dir: Path | None = None,
 ) -> dict:
@@ -80,13 +92,15 @@ async def scan_overdue_decisions(
                 f"决策 [{content_summary}] 超期 {days_overdue} 天未评估（ID: {decision.id}）"
             )
             try:
+                source_session_tag = f"cron:overdue:{decision.id}"
                 store = get_memory_store(project_dir=project_dir)
-                store.add(
-                    employee=decision.employee,
-                    category="finding",
-                    content=finding_text,
-                    source_session=f"cron:overdue:{decision.id}",
-                )
+                if not _memory_exists_by_source(store, decision.employee, source_session_tag):
+                    store.add(
+                        employee=decision.employee,
+                        category="finding",
+                        content=finding_text,
+                        source_session=source_session_tag,
+                    )
                 logger.info(
                     "决策 %s 超期 %d 天，已写入 finding 记忆",
                     decision.id,

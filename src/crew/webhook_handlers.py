@@ -1377,6 +1377,52 @@ def _semantic_memory_search(store, employee: str, query: str, category: str | No
     return [entry for _, entry in scored[:limit]]
 
 
+def _semantic_memory_search(store, employee: str, query: str, category: str | None, limit: int):
+    """语义混合搜索：优先 SemanticMemoryIndex（向量70%+关键词30%），降级到关键词过滤."""
+    try:
+        from crew.memory_search import SemanticMemoryIndex
+
+        memory_dir = getattr(store, "memory_dir", None)
+        if memory_dir is not None:
+            with SemanticMemoryIndex(memory_dir) as index:
+                if index.has_index(employee):
+                    results = index.search(employee, query, limit=limit * 2)
+                    if results:
+                        entries_map = {e.id: e for e in store._load_employee_entries(employee)}
+                        filtered = []
+                        for entry_id, _content, _score in results:
+                            entry = entries_map.get(entry_id)
+                            if entry is None or entry.superseded_by:
+                                continue
+                            if store._is_expired(entry):
+                                continue
+                            if category and entry.category != category:
+                                continue
+                            filtered.append(store._apply_decay(entry))
+                        if filtered:
+                            return filtered[:limit]
+    except Exception as e:
+        logger.debug("SemanticMemoryIndex unavailable, fallback to keyword: %s", e)
+
+    pool_size = min(limit * 10, 200)
+    candidates = store.query(employee=employee, category=category, limit=pool_size)
+    if not candidates:
+        return []
+
+    query_lower = query.lower()
+    query_tokens = set(query_lower.split())
+
+    scored = []
+    for entry in candidates:
+        content_lower = entry.content.lower()
+        hits = sum(1 for t in query_tokens if t in content_lower)
+        if hits > 0:
+            scored.append((entry, hits / len(query_tokens)))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [e for e, _ in scored[:limit]]
+
+
 async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     """记忆查询 — GET /api/memory/query.
 
