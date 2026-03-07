@@ -1390,6 +1390,16 @@ def _semantic_memory_search(store, employee: str, query: str, category: str | No
     query_lower = query.lower()
     # 按空格分词，所有词必须同时出现（AND 语义），与数据库 ILIKE 多词匹配一致
     query_tokens = query_lower.split()
+
+    # category 权重映射（知识类优先，与 MemoryStoreDB.query 的 search_text 排序对齐）
+    _CATEGORY_WEIGHT = {
+        "pattern": 1,
+        "decision": 2,
+        "correction": 3,
+        "estimate": 4,
+        "finding": 5,
+    }
+
     scored = []
     for entry in candidates:
         content_lower = entry.content.lower()
@@ -1399,7 +1409,10 @@ def _semantic_memory_search(store, employee: str, query: str, category: str | No
         elif hits > 0:
             scored.append((entry, hits / len(query_tokens)))
 
-    scored.sort(key=lambda x: x[1], reverse=True)
+    # 排序：先按匹配分数降序，同分按 category 权重升序（越小越优先）
+    scored.sort(
+        key=lambda x: (-x[1], _CATEGORY_WEIGHT.get(x[0].category, 6)),
+    )
     return [e for e, _ in scored[:limit]]
 
 
