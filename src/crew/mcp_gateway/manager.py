@@ -400,7 +400,12 @@ class MCPGatewayManager:
                 log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="tenant_not_allowed", duration_ms=0)
                 return f"[权限拒绝] 当前租户无权使用 {server_name} 服务。请联系管理员开通权限。"
 
-            # 2. 用户级凭据检查
+            # 2. 用户级凭据检查（仅对需要租户隔离的服务）
+            if config.allowed_tenants:  # 该服务需要权限控制
+                if not user_id:
+                    logger.warning("凭据检查跳过: 无 user_id, server=%s", server_name)
+                    log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id="", server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="no_user_id", duration_ms=0)
+                    return f"[凭据缺失] 无法识别用户身份，无法使用 {server_name} 服务。"
             if user_id:
                 from crew.mcp_gateway.credentials import has_credential
                 if not has_credential(user_id, server_name):

@@ -140,6 +140,17 @@ class TestHandlerIntegration:
             loop.close()
         assert r == "ok"
 
+    def test_no_user_restricted_tenant_rejected(self):
+        h, _ = self._make(["admin"])
+        loop = asyncio.new_event_loop()
+        try:
+            with patch("crew.mcp_gateway.manager.log_tool_call"):
+                r = loop.run_until_complete(h({}, agent_id="a", tenant_id="admin"))
+        finally:
+            loop.close()
+        assert "凭据缺失" in r
+        assert "无法识别用户身份" in r
+
     def test_audit_fields(self):
         h, _ = self._make([])
         loop = asyncio.new_event_loop()

@@ -8,13 +8,14 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,9 @@ def _get_fernet() -> Fernet:
             raise RuntimeError(f"{_CREDENTIAL_KEY_ENV} 未设置，生产环境不允许使用默认密钥")
         logger.warning("%s 未设置，使用默认密钥（仅限开发环境！）", _CREDENTIAL_KEY_ENV)
         raw = "dev-only-insecure-key-do-not-use-in-prod"
-    # SHA-256 派生 32 字节，取前 32 字节做 url-safe base64 作为 Fernet key
-    derived = hashlib.sha256(raw.encode()).digest()
+    # HKDF-SHA256 派生 32 字节，url-safe base64 编码作为 Fernet key
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"mcp-credential-v1", info=b"fernet-key")
+    derived = hkdf.derive(raw.encode())
     fernet_key = base64.urlsafe_b64encode(derived)
     return Fernet(fernet_key)
 
@@ -182,7 +184,7 @@ def get_credential(user_id: str, mcp_server: str) -> dict[str, Any] | None:
         try:
             dr = _decrypt(enc_r)
         except Exception:
-            pass
+            logger.warning("refresh_token 解密失败: user=%s server=%s", user_id, mcp_server)
     return {"access_token": da, "refresh_token": dr, "token_expires_at": str(exp) if exp else None, "scopes": scp or "", "tenant_id": tid or ""}
 
 

@@ -12,10 +12,13 @@ Usage:
 from __future__ import annotations
 import argparse
 import logging
+import re
 import sys
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+_SAFE_TABLE_NAME = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
 def _table_exists(cur, table_name, is_pg):
@@ -27,6 +30,8 @@ def _table_exists(cur, table_name, is_pg):
 
 
 def _column_exists(cur, table_name, column_name, is_pg):
+    if not _SAFE_TABLE_NAME.match(table_name):
+        raise ValueError(f"Invalid table name: {table_name}")
     if is_pg:
         cur.execute("SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s LIMIT 1", (table_name, column_name))
         return cur.fetchone() is not None
