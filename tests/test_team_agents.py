@@ -14,6 +14,7 @@ from crew.webhook import create_webhook_app
 from crew.webhook_config import WebhookConfig
 
 TOKEN = "test-token-123"
+ADMIN_TOKEN = "test-admin-token-agents"
 
 
 def _make_employee(
@@ -40,6 +41,9 @@ def _make_employee(
 
 
 def _make_client():
+    import os
+
+    os.environ["ADMIN_TOKEN"] = ADMIN_TOKEN
     app = create_webhook_app(
         project_dir=Path("/tmp/test-team-agents"),
         token=TOKEN,
@@ -89,7 +93,10 @@ class TestTeamAgents:
 
         with patch("crew.discovery.discover_employees", return_value=mock_result):
             client = _make_client()
-            resp = client.get("/api/team/agents")
+            resp = client.get(
+                "/api/team/agents",
+                headers={"X-Admin-Token": ADMIN_TOKEN},
+            )
 
         data = resp.json()
         assert len(data) == 1
@@ -169,7 +176,10 @@ class TestTeamAgents:
 
         with patch("crew.discovery.discover_employees", return_value=mock_result):
             client = _make_client()
-            resp = client.get("/api/team/agents")
+            resp = client.get(
+                "/api/team/agents",
+                headers={"X-Admin-Token": ADMIN_TOKEN},
+            )
 
         data = resp.json()
         assert len(data) == 1

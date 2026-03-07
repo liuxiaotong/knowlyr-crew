@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,7 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -66,11 +68,10 @@ class TestTrajectoryArchive:
             ],
         }
 
-        # Mock /data/trajectory_archive 路径到 tmp_path 下
-        archive_dir = tmp_path / "trajectory_archive"
+        # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers.Path",
-            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+            "crew.webhook_handlers._tenant_base_dir",
+            lambda request: tmp_path,
         )
 
         request = MockRequest(payload)
@@ -97,6 +98,7 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -129,11 +131,10 @@ class TestTrajectoryArchive:
         # 使用真实路径
         date_str = date.today().isoformat()
 
-        # Mock /data/trajectory_archive 路径到 tmp_path 下
-        archive_dir = tmp_path / "trajectory_archive"
+        # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers.Path",
-            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+            "crew.webhook_handlers._tenant_base_dir",
+            lambda request: tmp_path,
         )
 
         request = MockRequest(payload)
@@ -168,6 +169,8 @@ class TestTrajectoryArchive:
             def __init__(self, payload):
                 self._payload = payload
                 self.query_params = {}
+                self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -197,11 +200,10 @@ class TestTrajectoryArchive:
             ],
         }
 
-        # Mock /data/trajectory_archive 路径到 tmp_path 下
-        archive_dir = tmp_path / "trajectory_archive"
+        # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers.Path",
-            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+            "crew.webhook_handlers._tenant_base_dir",
+            lambda request: tmp_path,
         )
 
         request = MockRequest(payload)
@@ -210,6 +212,7 @@ class TestTrajectoryArchive:
         response = await _handle_trajectory_report(request, ctx)
 
         # 验证索引文件
+        archive_dir = tmp_path / "trajectory_archive"
         index_file = archive_dir / "index.json"
         assert index_file.exists()
 
@@ -239,6 +242,8 @@ class TestTrajectoryArchive:
             def __init__(self, payload):
                 self._payload = payload
                 self.query_params = {}
+                self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -271,11 +276,10 @@ class TestTrajectoryArchive:
             ],
         }
 
-        # Mock /data/trajectory_archive 路径到 tmp_path 下
-        archive_dir = tmp_path / "trajectory_archive"
+        # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers.Path",
-            lambda p: archive_dir if p == "/data/trajectory_archive" else Path(p),
+            "crew.webhook_handlers._tenant_base_dir",
+            lambda request: tmp_path,
         )
 
         request = MockRequest(payload)
@@ -300,6 +304,8 @@ class TestTrajectoryArchive:
             def __init__(self, payload):
                 self._payload = payload
                 self.query_params = {}
+                self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -334,6 +340,8 @@ class TestTrajectoryArchive:
             def __init__(self, size):
                 self._size = size
                 self.query_params = {}
+                self.headers = {}
+                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
 
             async def body(self):
                 return b"x" * self._size
