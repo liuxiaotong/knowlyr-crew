@@ -25,7 +25,9 @@ def _get_skills_engine(request: Any, ctx: _AppContext) -> SkillsEngine:
     """获取 SkillsEngine 实例."""
     # 每次都创建新实例，使用 ctx.project_dir
     skill_store = SkillStore(project_dir=ctx.project_dir)
-    memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+    memory_store = get_memory_store(
+        project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+    )
     return SkillsEngine(skill_store, memory_store)
 
 

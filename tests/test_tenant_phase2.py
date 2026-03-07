@@ -38,9 +38,7 @@ class TestTenantIdForStore:
 
     def test_regular_tenant_returns_id(self):
         """非 admin 租户返回具体 tenant_id."""
-        req = _FakeRequest(
-            TenantContext(tenant_id="tenant_abc123", tenant_name="acme")
-        )
+        req = _FakeRequest(TenantContext(tenant_id="tenant_abc123", tenant_name="acme"))
         assert _tenant_id_for_store(req) == "tenant_abc123"
 
     def test_no_state_returns_none(self):
@@ -61,9 +59,7 @@ class TestTenantIdForConfig:
 
     def test_regular_tenant_returns_id(self):
         """非 admin 租户返回具体 tenant_id."""
-        req = _FakeRequest(
-            TenantContext(tenant_id="tenant_xyz", tenant_name="corp")
-        )
+        req = _FakeRequest(TenantContext(tenant_id="tenant_xyz", tenant_name="corp"))
         assert _tenant_id_for_config(req) == "tenant_xyz"
 
     def test_no_state_returns_admin_id(self):

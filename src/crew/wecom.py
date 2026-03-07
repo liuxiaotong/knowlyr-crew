@@ -422,7 +422,9 @@ async def offboard_user_by_phone(phone: str) -> dict[str, Any]:
         if not data.get("ok"):
             logger.warning("offboard_user_by_phone: phone=***%s resp=%s", phone[-4:], data)
         else:
-            logger.info("offboard_user_by_phone: phone=***%s -> %s", phone[-4:], data.get("msg", ""))
+            logger.info(
+                "offboard_user_by_phone: phone=***%s -> %s", phone[-4:], data.get("msg", "")
+            )
         return data
     except Exception as exc:
         logger.error("offboard_user_by_phone 调用失败: %s", exc)

@@ -69,13 +69,25 @@ async def _dispatch_task(
 
     if sync:
         await _wh._execute_task(
-            ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id, tenant_id=tenant_id
+            ctx,
+            record.task_id,
+            agent_id=agent_id,
+            model=model,
+            trace_id=trace_id,
+            tenant_id=tenant_id,
         )
         record = ctx.registry.get(record.task_id)
         return JSONResponse(record.model_dump(mode="json"))
 
     task = asyncio.create_task(
-        _wh._execute_task(ctx, record.task_id, agent_id=agent_id, model=model, trace_id=trace_id, tenant_id=tenant_id)
+        _wh._execute_task(
+            ctx,
+            record.task_id,
+            agent_id=agent_id,
+            model=model,
+            trace_id=trace_id,
+            tenant_id=tenant_id,
+        )
     )
     _background_tasks.add(task)
     task.add_done_callback(_task_done_callback)
@@ -218,7 +230,9 @@ async def _execute_task(
                         if match and getattr(match, "auto_memory", False):
                             from crew.memory import get_memory_store
 
-                            _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
+                            _mem_store = get_memory_store(
+                                project_dir=ctx.project_dir, tenant_id=tenant_id
+                            )
                             summary = output_text[:300].strip()
                             if len(output_text) > 300:
                                 summary += "..."
@@ -245,7 +259,9 @@ async def _execute_task(
                             if _mem_store is None:
                                 from crew.memory import get_memory_store
 
-                                _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
+                                _mem_store = get_memory_store(
+                                    project_dir=ctx.project_dir, tenant_id=tenant_id
+                                )
                             check_lines = check_match.group(1).strip().split("\n")
                             passed = []
                             failed = []
@@ -282,7 +298,9 @@ async def _execute_task(
                             if _mem_store is None:
                                 from crew.memory import get_memory_store
 
-                                _mem_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=tenant_id)
+                                _mem_store = get_memory_store(
+                                    project_dir=ctx.project_dir, tenant_id=tenant_id
+                                )
                             pattern_block = pattern_match.group(1).strip()
                             # 解析结构化字段
                             p_name = ""
