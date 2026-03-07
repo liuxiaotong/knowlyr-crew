@@ -1345,6 +1345,38 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+def _semantic_memory_search(store, employee: str, query: str, category: str | None, limit: int):
+    """语义混合搜索：先拉取记忆，再按关键词过滤排序.
+
+    返回 MemoryEntry 列表，与 store.query 返回类型一致。
+    """
+    # 拉取更多条目用于过滤（上限 200，避免内存问题）
+    pool_size = min(limit * 10, 200)
+    candidates = store.query(employee=employee, category=category, limit=pool_size)
+
+    if not query:
+        return candidates[:limit]
+
+    query_lower = query.lower()
+    query_terms = set(query_lower.split())
+
+    scored = []
+    for entry in candidates:
+        content_lower = entry.content.lower()
+        # 完整短语匹配得高分
+        if query_lower in content_lower:
+            score = 1.0
+        else:
+            # 按命中词占比打分
+            hits = sum(1 for t in query_terms if t in content_lower)
+            score = hits / len(query_terms) if query_terms else 0.0
+        if score > 0:
+            scored.append((score, entry))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [entry for _, entry in scored[:limit]]
+
+
 async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     """记忆查询 — GET /api/memory/query.
 
