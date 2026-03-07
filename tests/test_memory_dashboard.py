@@ -89,7 +89,7 @@ class TestMemoryBatchOperations:
         from crew.memory import MemoryEntry
         from crew.paths import file_lock
 
-        path = memory_store._employee_file("赵云帆")
+        path = memory_store.employee_file("赵云帆")
         entry_ids = {entry1.id, entry2.id}
         updates = {"tags": ["new-tag"], "remove_tags": ["old-tag"]}
 
@@ -137,7 +137,7 @@ class TestMemoryBatchOperations:
         from crew.memory import MemoryEntry
         from crew.paths import file_lock
 
-        path = memory_store._employee_file("赵云帆")
+        path = memory_store.employee_file("赵云帆")
         entry_ids = {entry1.id, entry2.id}
         new_confidence = 0.9
 

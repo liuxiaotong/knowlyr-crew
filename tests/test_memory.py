@@ -278,7 +278,7 @@ class TestMemoryDecay:
         """写入一条带指定创建时间的记忆."""
         entry = store.add(employee, "finding", content, **kwargs)
         # 手动修改创建时间
-        path = store._employee_file(employee)
+        path = store.employee_file(employee)
         lines = path.read_text(encoding="utf-8").splitlines()
         new_lines = []
         old_time = (datetime.now() - timedelta(days=days_ago)).isoformat()

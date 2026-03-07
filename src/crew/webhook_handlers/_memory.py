@@ -40,7 +40,6 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     幂等：同 employee + source_session + category 不重复写入。
     """
 
-
     try:
         payload = await request.json()
     except (ValueError, TypeError):
@@ -253,18 +252,82 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
     )
 
 
+def _semantic_memory_search(store, employee: str, query: str, category: str | None, limit: int):
+    """语义混合搜索：优先 SemanticMemoryIndex（向量70%+关键词30%），降级到数据库 ILIKE 搜索."""
+    try:
+        from crew.memory_search import SemanticMemoryIndex
+
+        memory_dir = getattr(store, "memory_dir", None)
+        if memory_dir is not None:
+            with SemanticMemoryIndex(memory_dir) as index:
+                if index.has_index(employee):
+                    results = index.search(employee, query, limit=limit * 2)
+                    if results:
+                        entries_map = {e.id: e for e in store._load_employee_entries(employee)}
+                        filtered = []
+                        for entry_id, _content, _score in results:
+                            entry = entries_map.get(entry_id)
+                            if entry is None or entry.superseded_by:
+                                continue
+                            if store._is_expired(entry):
+                                continue
+                            if category and entry.category != category:
+                                continue
+                            filtered.append(store._apply_decay(entry))
+                        if filtered:
+                            return filtered[:limit]
+    except Exception as e:
+        logger.debug("SemanticMemoryIndex unavailable, fallback to db search: %s", e)
+
+    # 降级：如果 store.query 支持 search_text 参数（MemoryStoreDB），
+    # 直接用数据库 ILIKE 做子串匹配（对中文友好）；
+    # 否则回退到 Python 侧关键词匹配（仅适用于文件版 MemoryStore）。
+    import inspect
+
+    query_sig = inspect.signature(store.query)
+    if "search_text" in query_sig.parameters:
+        return store.query(employee=employee, category=category, limit=limit, search_text=query)
+
+    # 文件版 MemoryStore 降级：Python 侧关键词匹配
+    pool_size = min(limit * 10, 200)
+    candidates = store.query(employee=employee, category=category, limit=pool_size)
+    if not candidates:
+        return []
+
+    query_lower = query.lower()
+    # 对中文：整个 query 作为子串匹配；对英文：按空格分词后匹配
+    if any("\u4e00" <= c <= "\u9fff" for c in query_lower):
+        scored = []
+        for entry in candidates:
+            if query_lower in entry.content.lower():
+                scored.append(entry)
+        return scored[:limit]
+
+    query_tokens = set(query_lower.split())
+    scored = []
+    for entry in candidates:
+        content_lower = entry.content.lower()
+        hits = sum(1 for t in query_tokens if t in content_lower)
+        if hits > 0:
+            scored.append((entry, hits / len(query_tokens)))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [e for e, _ in scored[:limit]]
+
+
 async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     """记忆查询 — GET /api/memory/query.
 
     查询参数（与 MCP query_memory 工具入参对齐）:
         employee (required): 员工名称
+        query (optional): 搜索关键词 — 有值时走语义混合搜索（向量 70% + 关键词 30%）
         category (optional): 按类别过滤
         limit (optional): 最大返回条数，默认 20
     """
 
-
     employee = request.query_params.get("employee", "")
     category = request.query_params.get("category") or None
+    query = request.query_params.get("query", "").strip()
     limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     if not employee:
@@ -276,11 +339,16 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     max_level = _classification_levels.get(classification_max, 1)
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-    entries = store.query(
-        employee=employee,
-        category=category,
-        limit=limit,
-    )
+
+    # 有搜索关键词时，走语义混合搜索
+    if query:
+        entries = _semantic_memory_search(store, employee, query, category, limit)
+    else:
+        entries = store.query(
+            employee=employee,
+            category=category,
+            limit=limit,
+        )
     # 过滤超出请求分级上限的记忆
     filtered = [
         e
@@ -312,8 +380,6 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
     """
     import json
     from datetime import datetime
-
-
 
     try:
         payload = await request.json()
@@ -575,7 +641,6 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     # 从路径参数获取 entry_id
     entry_id = request.path_params.get("entry_id", "")
     if not entry_id:
@@ -723,7 +788,9 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
 
         # 写入正式记忆
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         entry = memory_store.add(
             employee=draft.employee,
             category=draft.category,
@@ -780,7 +847,9 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     reason = payload.get("reason", "")
     # 安全加固: reviewed_by 从认证的租户上下文获取，不接受用户传入
@@ -882,7 +951,9 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_archive import MemoryArchive
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -958,7 +1029,6 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         {"ok": true, "entries": [...], "total": 10}
     """
 
-
     tags_str = request.query_params.get("tags", "")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
     category = request.query_params.get("category")
@@ -967,7 +1037,9 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
     limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         entries = memory_store.query_shared(
             tags=tags,
             exclude_employee=exclude_employee,
@@ -1009,7 +1081,9 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
     from crew.memory_shared_stats import SharedMemoryStats
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     memory_id = payload.get("memory_id", "")
@@ -1128,12 +1202,13 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return _error_response(admin_err, 403)
 
-
     employee = request.query_params.get("employee")
     limit = _safe_limit(request.query_params.get("limit", "200"), default=200)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
 
         if employee:
             # 单个员工的统计
@@ -1250,9 +1325,10 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -1268,7 +1344,9 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
 
         # DB 版：直接用 store.update()
         if hasattr(memory_store, "update") and callable(getattr(memory_store, "update", None)):
@@ -1381,9 +1459,10 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -1396,7 +1475,9 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         deleted_count = 0
 
         for entry_id in entry_ids:
@@ -1437,7 +1518,9 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee")
@@ -1517,7 +1600,9 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     trajectory_id = payload.get("trajectory_id", "")
@@ -1636,7 +1721,11 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
         if not query:
             return JSONResponse({"ok": False, "error": "query 参数必填"}, status_code=400)
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         results = engine.search(
             query=query,
             employee=employee,
@@ -1686,7 +1775,11 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
                 status_code=400,
             )
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         recommendations = engine.recommend_for_task(
             task_description=task_description,
             employee=employee,
@@ -1731,7 +1824,11 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
 
         limit = _safe_limit(request.query_params.get("limit", "5"), default=5)
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         similar = engine.find_similar_memories(
             memory_id=memory_id,
             limit=limit,
@@ -2107,4 +2204,3 @@ async def _handle_memory_feedback_summary(request: Any, ctx: _AppContext) -> Any
     except Exception:
         logger.exception("获取反馈汇总失败")
         return _error_response("内部错误", 500)
-

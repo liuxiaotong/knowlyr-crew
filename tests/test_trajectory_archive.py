@@ -72,7 +72,7 @@ class TestTrajectoryArchive:
 
         # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers._tenant_base_dir",
+            "crew.webhook_handlers._admin._tenant_base_dir",
             lambda request: tmp_path,
         )
 
@@ -137,7 +137,7 @@ class TestTrajectoryArchive:
 
         # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers._tenant_base_dir",
+            "crew.webhook_handlers._admin._tenant_base_dir",
             lambda request: tmp_path,
         )
 
@@ -208,7 +208,7 @@ class TestTrajectoryArchive:
 
         # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers._tenant_base_dir",
+            "crew.webhook_handlers._admin._tenant_base_dir",
             lambda request: tmp_path,
         )
 
@@ -286,7 +286,7 @@ class TestTrajectoryArchive:
 
         # Mock _tenant_base_dir 返回 tmp_path（使 trajectory_archive 写到 tmp_path 下）
         monkeypatch.setattr(
-            "crew.webhook_handlers._tenant_base_dir",
+            "crew.webhook_handlers._admin._tenant_base_dir",
             lambda request: tmp_path,
         )
 

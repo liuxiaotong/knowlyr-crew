@@ -67,7 +67,7 @@ class TestQueryShared:
         entry = store.add("pm", "decision", "过期决策", ttl_days=1, shared=True)
 
         # 手动修改创建时间为 2 天前
-        path = store._employee_file("pm")
+        path = store.employee_file("pm")
         lines = path.read_text(encoding="utf-8").splitlines()
         new_lines = []
         old_time = (datetime.now() - timedelta(days=2)).isoformat()
@@ -90,7 +90,7 @@ class TestQueryShared:
         entry = store.add("pm", "decision", "旧决策", shared=True)
 
         # 60 天前 → confidence ≈ 0.25
-        path = store._employee_file("pm")
+        path = store.employee_file("pm")
         lines = path.read_text(encoding="utf-8").splitlines()
         new_lines = []
         old_time = (datetime.now() - timedelta(days=60)).isoformat()

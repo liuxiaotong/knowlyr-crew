@@ -92,7 +92,7 @@ class TestMemoryArchive:
         )
 
         # 手动更新文件（因为我们修改了 created_at）
-        path = memory_store._employee_file("赵云帆")
+        path = memory_store.employee_file("赵云帆")
         entries = [entry1, entry2, entry3]
         with open(path, "w", encoding="utf-8") as f:
             for e in entries:
@@ -288,7 +288,7 @@ class TestPublicInterfaceCompat:
         entry.created_at = old_time
 
         # 手动写入文件
-        path = memory_store._employee_file("赵云帆")
+        path = memory_store.employee_file("赵云帆")
         with open(path, "w", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")
 
@@ -361,7 +361,7 @@ class TestPublicInterfaceCompat:
         entry.created_at = old_time
 
         # 手动更新文件
-        path = memory_store._employee_file("赵云帆")
+        path = memory_store.employee_file("赵云帆")
         with open(path, "w", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")
 

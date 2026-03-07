@@ -144,6 +144,7 @@ from crew.webhook_handlers._memory import (  # noqa: F401
     _handle_trajectory_annotation_add,
     _handle_trajectory_annotation_list,
     _handle_trajectory_export,
+    _semantic_memory_search,
 )
 from crew.webhook_handlers._tenant import (  # noqa: F401
     _handle_tenant_create,
