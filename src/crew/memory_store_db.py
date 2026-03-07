@@ -308,6 +308,7 @@ class MemoryStoreDB:
         classification_max: str | None = None,
         allowed_domains: list[str] | None = None,
         include_confidential: bool = False,
+        search_text: str | None = None,
     ) -> list[MemoryEntry]:
         """查询员工记忆.
 
@@ -324,6 +325,7 @@ class MemoryStoreDB:
             classification_max: 最高信息分级（可选，按等级过滤）
             allowed_domains: 允许的职能域（可选，restricted 级别需域匹配）
             include_confidential: 是否包含 confidential 级别记忆（默认 False）
+            search_text: 文本搜索（可选，ILIKE 子串匹配，支持中文）
 
         Returns:
             记忆列表（MemoryEntry）
@@ -358,6 +360,11 @@ class MemoryStoreDB:
             conditions.append(
                 "(ttl_days = 0 OR created_at + (ttl_days || ' days')::interval > NOW())"
             )
+
+        # 文本搜索（ILIKE 子串匹配，对中文友好）
+        if search_text:
+            conditions.append("content ILIKE %s")
+            params.append(f"%{search_text}%")
 
         # 信息分级过滤
         if not include_confidential:

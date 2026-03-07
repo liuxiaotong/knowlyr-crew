@@ -1346,7 +1346,7 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
 
 def _semantic_memory_search(store, employee: str, query: str, category: str | None, limit: int):
-    """语义混合搜索：优先 SemanticMemoryIndex（向量70%+关键词30%），降级到关键词过滤."""
+    """语义混合搜索：优先 SemanticMemoryIndex（向量70%+关键词30%），降级到数据库 ILIKE 搜索."""
     try:
         from crew.memory_search import SemanticMemoryIndex
 
@@ -1370,16 +1370,33 @@ def _semantic_memory_search(store, employee: str, query: str, category: str | No
                         if filtered:
                             return filtered[:limit]
     except Exception as e:
-        logger.debug("SemanticMemoryIndex unavailable, fallback to keyword: %s", e)
+        logger.debug("SemanticMemoryIndex unavailable, fallback to db search: %s", e)
 
+    # 降级：如果 store.query 支持 search_text 参数（MemoryStoreDB），
+    # 直接用数据库 ILIKE 做子串匹配（对中文友好）；
+    # 否则回退到 Python 侧关键词匹配（仅适用于文件版 MemoryStore）。
+    import inspect
+
+    query_sig = inspect.signature(store.query)
+    if "search_text" in query_sig.parameters:
+        return store.query(employee=employee, category=category, limit=limit, search_text=query)
+
+    # 文件版 MemoryStore 降级：Python 侧关键词匹配
     pool_size = min(limit * 10, 200)
     candidates = store.query(employee=employee, category=category, limit=pool_size)
     if not candidates:
         return []
 
     query_lower = query.lower()
-    query_tokens = set(query_lower.split())
+    # 对中文：整个 query 作为子串匹配；对英文：按空格分词后匹配
+    if any("\u4e00" <= c <= "\u9fff" for c in query_lower):
+        scored = []
+        for entry in candidates:
+            if query_lower in entry.content.lower():
+                scored.append(entry)
+        return scored[:limit]
 
+    query_tokens = set(query_lower.split())
     scored = []
     for entry in candidates:
         content_lower = entry.content.lower()
