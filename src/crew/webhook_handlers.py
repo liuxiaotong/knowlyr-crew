@@ -1388,20 +1388,15 @@ def _semantic_memory_search(store, employee: str, query: str, category: str | No
         return []
 
     query_lower = query.lower()
-    # 对中文：整个 query 作为子串匹配；对英文：按空格分词后匹配
-    if any("\u4e00" <= c <= "\u9fff" for c in query_lower):
-        scored = []
-        for entry in candidates:
-            if query_lower in entry.content.lower():
-                scored.append(entry)
-        return scored[:limit]
-
-    query_tokens = set(query_lower.split())
+    # 按空格分词，所有词必须同时出现（AND 语义），与数据库 ILIKE 多词匹配一致
+    query_tokens = query_lower.split()
     scored = []
     for entry in candidates:
         content_lower = entry.content.lower()
         hits = sum(1 for t in query_tokens if t in content_lower)
-        if hits > 0:
+        if hits == len(query_tokens):
+            scored.append((entry, 1.0))
+        elif hits > 0:
             scored.append((entry, hits / len(query_tokens)))
 
     scored.sort(key=lambda x: x[1], reverse=True)
