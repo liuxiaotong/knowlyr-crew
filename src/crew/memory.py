@@ -67,6 +67,13 @@ class MemoryEntry(BaseModel):
     applicability: list[str] = Field(default_factory=list, description="适用范围：角色/领域标签")
     origin_employee: str = Field(default="", description="来源员工：谁发现的此模式")
     verified_count: int = Field(default=0, description="被验证次数：其他员工确认有效的次数")
+    # Phase 3-1: 记忆管线 — 结构化关键词与关联
+    keywords: list[str] = Field(
+        default_factory=list, description="结构化关键词，用于 Connect 阶段匹配"
+    )
+    linked_memories: list[str] = Field(
+        default_factory=list, description="关联记忆 ID 列表（双向）"
+    )
 
 
 class MemoryStore:
