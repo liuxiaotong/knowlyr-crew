@@ -333,11 +333,14 @@ class MemoryStore:
         origin_employee: str = "",
         classification: Literal["public", "internal", "restricted", "confidential"] = "internal",
         domain: list[str] | None = None,
+        keywords: list[str] | None = None,
     ) -> MemoryEntry:
         """添加一条记忆."""
         employee = self._resolve_to_character_name(employee)
         self._ensure_dir()
         effective_ttl = ttl_days if ttl_days > 0 else self.config.default_ttl_days
+        # 支持 keywords 原子写入，与 MemoryStoreDB 接口对齐
+        keywords_list = keywords or []
         entry = MemoryEntry(
             employee=employee,
             category=category,
@@ -353,6 +356,7 @@ class MemoryStore:
             origin_employee=origin_employee or employee,
             classification=classification,
             domain=domain or [],
+            keywords=keywords_list,
         )
         path = self._employee_file(employee)
         with file_lock(path):

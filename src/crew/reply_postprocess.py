@@ -3,13 +3,26 @@
 推送门槛：预计 95% 对话不触发，只有含决策/纠正/长产出的对话才写入记忆。
 """
 
+import atexit
 import logging
 import re
 import threading
+import weakref
 
 from crew.memory import get_memory_store
 from crew.memory_cache import invalidate
 from crew.memory_pipeline import process_memory
+
+# daemon=False 线程退出前等待完成，避免记忆写入被截断
+_active_threads: list[weakref.ref] = []
+
+def _join_active_threads():
+    for ref in _active_threads:
+        t = ref()
+        if t is not None and t.is_alive():
+            t.join(timeout=15)
+
+atexit.register(_join_active_threads)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +130,8 @@ def push_if_needed(
     t = threading.Thread(
         target=_do_push,
         args=(employee, reply, session_id, store),
-        daemon=True,
+        daemon=False,  # 非 daemon：进程退出前等待记忆写入完成
     )
     t.start()
+    _active_threads.append(weakref.ref(t))
     return True

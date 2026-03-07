@@ -1723,17 +1723,20 @@ async def _handle_tool_call(
         return _json.dumps(data, ensure_ascii=False, default=str)
 
     if tool_name == "add_memory":
+        # 统一走记忆管线，确保 Reflect/Connect 逻辑一致（skip_reflect 跳过 LLM 提炼）
         from crew.memory import get_memory_store
+        from crew.memory_pipeline import process_memory
 
         project_dir = ctx.project_dir if ctx else Path(".")
         store = get_memory_store(project_dir=project_dir)
-        # 私聊时默认 private，LLM 也可显式指定
         default_vis = "private" if max_visibility == "private" else "open"
-        entry = store.add(
+        entry = process_memory(
+            raw_text=arguments.get("content", ""),
             employee=employee_name,
+            store=store,
+            skip_reflect=True,
             category=arguments.get("category", "finding"),
-            content=arguments.get("content", ""),
-            source_session="",
+            tags=arguments.get("tags"),
             visibility=arguments.get("visibility", default_vis),
             trigger_condition=arguments.get("trigger_condition", ""),
             applicability=arguments.get("applicability"),
@@ -1741,14 +1744,17 @@ async def _handle_tool_call(
             classification=arguments.get("classification", "internal"),
             domain=arguments.get("domain"),
         )
-        logger.info(
-            "记忆保存: %s → %s (visibility=%s, classification=%s)",
-            employee_name,
-            entry.content[:60],
-            entry.visibility,
-            entry.classification,
-        )
-        return "已记住。"
+        if entry:
+            logger.info(
+                "记忆管线保存: %s → %s (visibility=%s, classification=%s)",
+                employee_name,
+                entry.content[:60],
+                getattr(entry, 'visibility', 'open'),
+                getattr(entry, 'classification', 'internal'),
+            )
+            return "已记住。"
+        else:
+            return "记忆写入被管线跳过（可能重复）。"
 
     if tool_name == "track_decision":
         from datetime import datetime, timedelta

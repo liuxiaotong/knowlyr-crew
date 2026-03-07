@@ -75,7 +75,8 @@ _REFLECT_PROMPT = """\
 }}
 """
 
-_MAX_INPUT_LENGTH = 500
+# 500 太短，丢失上下文导致 Reflect 质量差；2000 兼顾质量和 token 成本
+_MAX_INPUT_LENGTH = 2000
 
 
 def _call_llm(prompt: str) -> str:
@@ -304,7 +305,11 @@ def connect(
 
     if best_overlap >= 0.7 and best_candidate.category == note.category:
         # merge: 更新已有记忆的 content 和 keywords
+        # 合并内容，限制总长度防止无限膨胀
         merged_content = f"{best_candidate.content}\n---\n{note.content}"
+        if len(merged_content) > 3000:
+            # 保留最新内容，截断旧内容
+            merged_content = f"{best_candidate.content[:1500]}\n---\n{note.content}"
         merged_keywords = list(set(best_candidate.keywords + note.keywords))
 
         store.update(
@@ -341,8 +346,9 @@ def connect(
                 new_entry.id, employee, [best_candidate.id]
             )
 
-            # 更新旧记忆的 linked_memories（双向）
+            # 更新旧记忆的 linked_memories（双向），最多保留 20 个关联
             old_linked = list(best_candidate.linked_memories) + [new_entry.id]
+            old_linked = old_linked[-20:]
             store.update_linked_memories(
                 best_candidate.id, employee, old_linked
             )
@@ -387,17 +393,15 @@ def _store_new(
     Returns:
         新创建的 MemoryEntry
     """
+    # 原子写入 keywords，避免 add() + update_keywords() 两步非原子操作
     entry = store.add(
         employee=employee,
         category=note.category,
         content=note.content,
         tags=note.tags,
+        keywords=note.keywords,
         **store_kwargs,
     )
-    # 更新 keywords（add() 默认是空的）
-    if note.keywords:
-        store.update_keywords(entry.id, employee, note.keywords)
-        entry = entry.model_copy(update={"keywords": note.keywords})
     return entry
 
 
