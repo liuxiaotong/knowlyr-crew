@@ -271,7 +271,7 @@ class MemoryArchive:
                     content=entry.content,
                     source_session=entry.source_session,
                     confidence=entry.confidence,
-                    ttl_days=0,  # 恢复后清除 TTL，避免再次过期
+                    ttl_days=entry.ttl_days,  # 保留原始 TTL
                     tags=entry.tags,
                     shared=entry.shared,
                     visibility=entry.visibility,

@@ -51,7 +51,7 @@ running=0
 for emp in $EMPLOYEES; do
     echo "[$(date +%H:%M:%S)] 启动: $emp"
     $PYTHON $SCRIPT \
-        $DATE_ARG --force --with-judge \
+        $DATE_ARG --with-judge \
         --model $MODEL --provider $PROVIDER \
         --base-url $BASE_URL --api-key "$AIBERM_API_KEY" \
         --employee "$emp" &
