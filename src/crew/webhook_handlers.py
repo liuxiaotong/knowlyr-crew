@@ -2518,14 +2518,6 @@ async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
         memory_store = get_memory_store(
             project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
         )
-        if not hasattr(memory_store, "get_knowledge_stats"):
-            return _error_response("当前存储后端不支持知识仪表盘", 501)
-
-        stats = memory_store.get_knowledge_stats()
-        return JSONResponse({"ok": True, **stats})
-
-    except Exception:
-        logger.exception("获取知识仪表盘数据失败")
         updated = memory_store.record_useful(useful_ids, employee)
         return JSONResponse({"ok": True, "updated": updated})
     except Exception:
@@ -6704,4 +6696,75 @@ async def _handle_evaluate_scan(request: Any, ctx: _AppContext) -> Any:
         )
     except Exception as exc:
         logger.exception("evaluate scan failed: %s", exc)
+        return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_review(request: Any, ctx: _AppContext) -> Any:
+    """触发进化审查，生成候选列表 -- POST /api/soul/review.
+
+    Query params:
+    - employee: 可选，指定单个员工
+
+    需要 admin_required。
+    返回统计 + 候选列表。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    from crew.soul_evolution import run_evolution_review
+
+    employee = request.query_params.get("employee")
+
+    try:
+        store = get_memory_store(tenant_id=_tenant_id_for_store(request))
+        result = run_evolution_review(store=store, employee=employee)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("evolution review failed: %s", exc)
+        return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_candidates(request: Any, ctx: _AppContext) -> Any:
+    """查看当前待审批的候选列表 -- GET /api/soul/candidates.
+
+    Query params:
+    - employee: 可选，指定单个员工
+
+    需要 admin_required。
+    返回 candidates 列表。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    import json as _json
+
+    from crew.config_store import get_config
+
+    employee = request.query_params.get("employee")
+
+    try:
+        if employee:
+            # 查询指定员工
+            raw = get_config("soul_evolution", f"{employee}_candidates")
+            candidates = _json.loads(raw) if raw else []
+            return JSONResponse({"employee": employee, "candidates": candidates})
+
+        # 查询所有员工
+        store = get_memory_store(tenant_id=_tenant_id_for_store(request))
+        employees = store.list_employees()
+        all_candidates: list[dict] = []
+        for emp in employees:
+            emp_resolved = store._resolve_to_character_name(emp)
+            raw = get_config("soul_evolution", f"{emp_resolved}_candidates")
+            if raw:
+                try:
+                    items = _json.loads(raw)
+                    all_candidates.extend(items)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+        return JSONResponse({"candidates": all_candidates, "total": len(all_candidates)})
+    except Exception as exc:
+        logger.exception("evolution candidates query failed: %s", exc)
         return _error_response("内部错误", 500)

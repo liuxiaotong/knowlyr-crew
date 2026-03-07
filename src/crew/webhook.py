@@ -97,6 +97,8 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_employee_state,
     _handle_employee_update,
     _handle_evaluate_scan,
+    _handle_evolution_candidates,
+    _handle_evolution_review,
     _handle_generic,
     _handle_github,
     _handle_knowledge_dashboard,
@@ -995,6 +997,17 @@ def create_webhook_app(
             "/api/souls/{employee_name}",
             endpoint=_make_handler(ctx, _handle_soul_update),
             methods=["PUT"],
+        ),
+        # 灵魂进化端点
+        Route(
+            "/api/soul/review",
+            endpoint=_make_handler(ctx, _handle_evolution_review),
+            methods=["POST"],
+        ),
+        Route(
+            "/api/soul/candidates",
+            endpoint=_make_handler(ctx, _handle_evolution_candidates),
+            methods=["GET"],
         ),
         Route(
             "/api/config/discussions",
