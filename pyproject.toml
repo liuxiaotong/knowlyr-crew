@@ -46,6 +46,7 @@ execute = ["anthropic>=0.40"]
 openai = ["openai>=1.0"]
 gemini = ["google-generativeai>=0.5"]
 pg = ["psycopg2-binary>=2.9"]
+vector = ["sentence-transformers>=2.2", "pgvector>=0.2"]
 webhook = ["starlette>=0.27", "uvicorn>=0.20", "croniter>=2.0", "defusedxml>=0.7", "pycryptodome>=3.19", "cryptography>=41.0"]
 trajectory = [
     "knowlyr-core>=0.1.0",

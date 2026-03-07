@@ -109,6 +109,37 @@ def init_memory_tables() -> None:
             END $$;
         """)
 
+        # NG-1: pgvector 向量语义检索
+        # 安装 pgvector 扩展（需要 superuser 或已预装）
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception:
+            # pgvector 扩展未安装时不阻塞初始化
+            conn.rollback()
+            logger.warning("pgvector 扩展不可用，向量检索功能将被禁用")
+
+        # 幂等添加 embedding 列（vector(384) = all-MiniLM-L6-v2 输出维度）
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN embedding vector(384);
+            EXCEPTION
+                WHEN duplicate_column THEN NULL;
+                WHEN undefined_object THEN NULL;
+            END $$;
+        """)
+
+        # ivfflat 索引：需要表中至少有足够行才能建 lists=100 的索引
+        # 用 IF NOT EXISTS 保持幂等
+        try:
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_embedding
+                ON memories USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)
+            """)
+        except Exception:
+            # 索引创建失败（如 vector 类型不存在或数据不足），不阻塞
+            conn.rollback()
+            logger.warning("embedding 索引创建失败，将在数据回填后重试")
+
     logger.info("memories 表初始化完成")
 
 
@@ -156,6 +187,23 @@ class MemoryStoreDB:
         except Exception:
             pass
         return employee
+
+    def _get_query_embedding(self, keywords: list[str]) -> list[float] | None:
+        """为查询关键词生成 embedding 向量.
+
+        Args:
+            keywords: 搜索关键词列表
+
+        Returns:
+            384 维浮点向量，或 None（不可用时静默降级）
+        """
+        try:
+            from crew.embedding import build_embedding_text, get_embedding
+
+            query_text = build_embedding_text(" ".join(keywords))
+            return get_embedding(query_text)
+        except Exception:
+            return None
 
     def _row_to_entry(self, row: dict) -> MemoryEntry:
         """将数据库行（RealDictCursor dict）转换为 MemoryEntry."""
@@ -231,6 +279,16 @@ class MemoryStoreDB:
         # 支持 keywords 原子写入，避免先 INSERT 空再 UPDATE 的两步操作
         keywords_list = keywords or []
 
+        # NG-1: 生成 embedding 向量（失败不阻塞写入）
+        embedding_vector = None
+        try:
+            from crew.embedding import build_embedding_text, get_embedding
+
+            emb_text = build_embedding_text(content, keywords_list)
+            embedding_vector = get_embedding(emb_text)
+        except Exception as e:
+            logger.debug("embedding 生成跳过: %s", e)
+
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -241,14 +299,14 @@ class MemoryStoreDB:
                     importance, last_accessed, tags, shared, visibility,
                     trigger_condition, applicability, origin_employee, verified_count,
                     classification, domain, tenant_id,
-                    keywords, linked_memories
+                    keywords, linked_memories, embedding
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s
                 )
                 """,
                 (
@@ -275,6 +333,7 @@ class MemoryStoreDB:
                     self._tenant_id,
                     keywords_list,  # keywords: 原子写入传入值
                     [],  # linked_memories
+                    embedding_vector,  # NG-1: embedding 向量（可能为 None）
                 ),
             )
 
@@ -1118,10 +1177,10 @@ class MemoryStoreDB:
         limit: int = 10,
         category: str | None = None,
     ) -> list[MemoryEntry]:
-        """按关键词匹配记忆（用 keywords 数组字段做 ILIKE 匹配）.
+        """按关键词匹配记忆，支持混合检索（关键词 + 向量语义）.
 
-        逻辑：对每个搜索关键词，检查记忆的 keywords 数组是否有元素 ILIKE '%关键词%'。
-        按匹配到的关键词数量降序排列（匹配越多越靠前）。
+        混合排序公式：final_score = 0.3 * keyword_score + 0.7 * cosine_similarity
+        当 embedding 不可用时，退化为纯关键词匹配（向后兼容）。
         """
         employee = self._resolve_to_character_name(employee)
 
@@ -1130,6 +1189,9 @@ class MemoryStoreDB:
 
         # 截断到最多 10 个关键词
         keywords = keywords[:10]
+
+        # 尝试生成查询向量
+        query_embedding = self._get_query_embedding(keywords)
 
         # 构建 match_count 表达式：对每个搜索关键词累加是否匹配
         match_parts: list[str] = []
@@ -1142,6 +1204,7 @@ class MemoryStoreDB:
             params.append(f"%{kw}%")
 
         match_count_expr = " + ".join(match_parts)
+        num_keywords = len(keywords)
 
         conditions = [
             "employee = %s",
@@ -1155,34 +1218,86 @@ class MemoryStoreDB:
             conditions.append("category = %s")
             params.append(category)
 
-        # 至少匹配一个关键词
-        or_conditions = []
-        for kw in keywords:
-            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
-            params.append(f"%{kw}%")
-        conditions.append(f"({' OR '.join(or_conditions)})")
+        if query_embedding is not None:
+            # 混合检索：关键词匹配 OR 向量相似度足够高
+            # 不要求必须命中关键词 — 语义相似也可召回
+            or_conditions = []
+            for kw in keywords:
+                or_conditions.append(
+                    "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+                )
+                params.append(f"%{kw}%")
+            # cosine distance < 0.5 即 cosine_similarity > 0.5
+            or_conditions.append("(embedding IS NOT NULL AND embedding <=> %s < 0.5)")
+            params.append(str(query_embedding))
+            conditions.append(f"({' OR '.join(or_conditions)})")
 
-        params.append(limit)
+            # 混合评分：0.3 * keyword_norm + 0.7 * cosine_sim
+            score_expr = (
+                f"(0.3 * (({match_count_expr}) / {num_keywords}.0)"
+                f" + 0.7 * CASE WHEN embedding IS NOT NULL"
+                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END)"
+            )
+            # match_count_expr 的参数需要再传一次（用于 SELECT 中的评分计算）
+            score_params: list[Any] = []
+            for kw in keywords:
+                score_params.append(f"%{kw}%")
+            score_params.append(str(query_embedding))
 
-        with get_connection() as conn:
-            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
-            sql = f"""
-                SELECT id, employee, created_at, category, content,
-                       source_session, confidence, superseded_by, ttl_days,
-                       importance, last_accessed, tags, shared, visibility,
-                       trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain,
-                       keywords, linked_memories,
-                       ({match_count_expr}) AS match_count
-                FROM memories
-                WHERE {" AND ".join(conditions)}
-                ORDER BY match_count DESC, importance DESC, created_at DESC
-                LIMIT %s
-            """
-            cur.execute(sql, tuple(params))
-            rows = cur.fetchall()
+            params.append(limit)
 
-        return [self._row_to_entry(row) for row in rows]
+            with get_connection() as conn:
+                cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+                sql = f"""
+                    SELECT id, employee, created_at, category, content,
+                           source_session, confidence, superseded_by, ttl_days,
+                           importance, last_accessed, tags, shared, visibility,
+                           trigger_condition, applicability, origin_employee, verified_count,
+                           classification, domain,
+                           keywords, linked_memories,
+                           {score_expr} AS hybrid_score
+                    FROM memories
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY hybrid_score DESC, importance DESC, created_at DESC
+                    LIMIT %s
+                """
+                all_params = tuple(score_params + params)
+                cur.execute(sql, all_params)
+                rows = cur.fetchall()
+
+            return [self._row_to_entry(row) for row in rows]
+
+        else:
+            # 纯关键词匹配（降级模式）
+            or_conditions = []
+            for kw in keywords:
+                or_conditions.append(
+                    "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+                )
+                params.append(f"%{kw}%")
+            conditions.append(f"({' OR '.join(or_conditions)})")
+
+            params.append(limit)
+
+            with get_connection() as conn:
+                cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+                sql = f"""
+                    SELECT id, employee, created_at, category, content,
+                           source_session, confidence, superseded_by, ttl_days,
+                           importance, last_accessed, tags, shared, visibility,
+                           trigger_condition, applicability, origin_employee, verified_count,
+                           classification, domain,
+                           keywords, linked_memories,
+                           ({match_count_expr}) AS match_count
+                    FROM memories
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY match_count DESC, importance DESC, created_at DESC
+                    LIMIT %s
+                """
+                cur.execute(sql, tuple(params))
+                rows = cur.fetchall()
+
+            return [self._row_to_entry(row) for row in rows]
 
     def query_cross_employee(
         self,
@@ -1191,16 +1306,20 @@ class MemoryStoreDB:
         limit: int = 5,
         category: str | None = None,
     ) -> list[MemoryEntry]:
-        """跨员工按关键词匹配记忆（仅 visibility=open 的记忆）.
+        """跨员工按关键词匹配记忆，支持混合检索（仅 visibility=open）.
 
         不限制员工，但排除指定员工（通常是当前员工自身）。
-        按匹配关键词数量降序排列。
+        混合排序公式：final_score = 0.3 * keyword_score + 0.7 * cosine_similarity
+        当 embedding 不可用时，退化为纯关键词匹配。
         """
         if not keywords:
             return []
 
         exclude_employee = self._resolve_to_character_name(exclude_employee)
         keywords = keywords[:10]
+
+        # 尝试生成查询向量
+        query_embedding = self._get_query_embedding(keywords)
 
         # 构建 match_count 表达式
         match_parts: list[str] = []
@@ -1213,6 +1332,7 @@ class MemoryStoreDB:
             params.append(f"%{kw}%")
 
         match_count_expr = " + ".join(match_parts)
+        num_keywords = len(keywords)
 
         conditions = [
             "tenant_id = %s",
@@ -1230,34 +1350,82 @@ class MemoryStoreDB:
             conditions.append("category = %s")
             params.append(category)
 
-        # 至少匹配一个关键词
-        or_conditions = []
-        for kw in keywords:
-            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
-            params.append(f"%{kw}%")
-        conditions.append(f"({' OR '.join(or_conditions)})")
+        if query_embedding is not None:
+            # 混合检索
+            or_conditions = []
+            for kw in keywords:
+                or_conditions.append(
+                    "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+                )
+                params.append(f"%{kw}%")
+            or_conditions.append("(embedding IS NOT NULL AND embedding <=> %s < 0.5)")
+            params.append(str(query_embedding))
+            conditions.append(f"({' OR '.join(or_conditions)})")
 
-        params.append(limit)
+            score_expr = (
+                f"(0.3 * (({match_count_expr}) / {num_keywords}.0)"
+                f" + 0.7 * CASE WHEN embedding IS NOT NULL"
+                f" THEN 1.0 - (embedding <=> %s) ELSE 0 END)"
+            )
+            score_params: list[Any] = []
+            for kw in keywords:
+                score_params.append(f"%{kw}%")
+            score_params.append(str(query_embedding))
 
-        with get_connection() as conn:
-            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
-            sql = f"""
-                SELECT id, employee, created_at, category, content,
-                       source_session, confidence, superseded_by, ttl_days,
-                       importance, last_accessed, tags, shared, visibility,
-                       trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain,
-                       keywords, linked_memories,
-                       ({match_count_expr}) AS match_count
-                FROM memories
-                WHERE {" AND ".join(conditions)}
-                ORDER BY match_count DESC, importance DESC, created_at DESC
-                LIMIT %s
-            """
-            cur.execute(sql, tuple(params))
-            rows = cur.fetchall()
+            params.append(limit)
 
-        return [self._row_to_entry(row) for row in rows]
+            with get_connection() as conn:
+                cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+                sql = f"""
+                    SELECT id, employee, created_at, category, content,
+                           source_session, confidence, superseded_by, ttl_days,
+                           importance, last_accessed, tags, shared, visibility,
+                           trigger_condition, applicability, origin_employee, verified_count,
+                           classification, domain,
+                           keywords, linked_memories,
+                           {score_expr} AS hybrid_score
+                    FROM memories
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY hybrid_score DESC, importance DESC, created_at DESC
+                    LIMIT %s
+                """
+                all_params = tuple(score_params + params)
+                cur.execute(sql, all_params)
+                rows = cur.fetchall()
+
+            return [self._row_to_entry(row) for row in rows]
+
+        else:
+            # 纯关键词匹配（降级模式）
+            or_conditions = []
+            for kw in keywords:
+                or_conditions.append(
+                    "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
+                )
+                params.append(f"%{kw}%")
+            conditions.append(f"({' OR '.join(or_conditions)})")
+
+            params.append(limit)
+
+            with get_connection() as conn:
+                cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+                sql = f"""
+                    SELECT id, employee, created_at, category, content,
+                           source_session, confidence, superseded_by, ttl_days,
+                           importance, last_accessed, tags, shared, visibility,
+                           trigger_condition, applicability, origin_employee, verified_count,
+                           classification, domain,
+                           keywords, linked_memories,
+                           ({match_count_expr}) AS match_count
+                    FROM memories
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY match_count DESC, importance DESC, created_at DESC
+                    LIMIT %s
+                """
+                cur.execute(sql, tuple(params))
+                rows = cur.fetchall()
+
+            return [self._row_to_entry(row) for row in rows]
 
     def get_knowledge_stats(self) -> dict:
         """返回团队知识结构统计.
