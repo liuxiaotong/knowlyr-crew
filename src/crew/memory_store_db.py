@@ -515,10 +515,11 @@ class MemoryStoreDB:
 
         Best-effort：失败只 log 不报错。
         """
+        import psycopg2
+        import psycopg2.extras
+
         try:
             with get_connection() as conn:
-                import psycopg2.extras
-
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cur.execute(
                     """
@@ -528,15 +529,17 @@ class MemoryStoreDB:
                       AND id != %s
                       AND (superseded_by = '' OR superseded_by IS NULL)
                       AND embedding IS NOT NULL
+                      AND (1.0 - (embedding <=> %s)) >= 0.5
                     ORDER BY embedding <=> %s
                     LIMIT 3
                     """,
                     (
-                        str(embedding_vector),
+                        embedding_vector,
                         employee,
                         self._tenant_id,
                         entry_id,
-                        str(embedding_vector),
+                        embedding_vector,
+                        embedding_vector,
                     ),
                 )
                 candidates = cur.fetchall()
@@ -544,38 +547,25 @@ class MemoryStoreDB:
             if not candidates:
                 return
 
-            # 过滤 similarity >= 0.5
-            linked_ids: list[str] = []
-            for row in candidates:
-                sim = float(row["similarity"])
-                if sim < 0.5:
-                    continue
-                linked_ids.append(row["id"])
+            linked_ids: list[str] = [row["id"] for row in candidates]
 
-            if not linked_ids:
-                return
-
-            # 更新新记忆的 linked_memories
+            # 在同一个事务中完成所有 UPDATE（新记忆 + 旧记忆双向关联）
             with get_connection() as conn:
                 cur = conn.cursor()
+                # 更新新记忆的 linked_memories
                 cur.execute(
                     "UPDATE memories SET linked_memories = %s WHERE id = %s AND tenant_id = %s",
                     (linked_ids, entry_id, self._tenant_id),
                 )
-
-            # 更新旧记忆的 linked_memories（双向关联，最多 20 个）
-            for row in candidates:
-                if row["id"] not in linked_ids:
-                    continue
-                old_linked = list(row.get("linked_memories") or [])
-                if entry_id in old_linked:
-                    continue
-                old_linked.append(entry_id)
-                # 超出 20 个截断最旧的（列表前面是最旧的）
-                if len(old_linked) > 20:
-                    old_linked = old_linked[-20:]
-                with get_connection() as conn:
-                    cur = conn.cursor()
+                # 更新旧记忆的 linked_memories（双向关联，最多 20 个）
+                for row in candidates:
+                    old_linked = list(row.get("linked_memories") or [])
+                    if entry_id in old_linked:
+                        continue
+                    old_linked.append(entry_id)
+                    # 超出 20 个截断最旧的（列表前面是最旧的）
+                    if len(old_linked) > 20:
+                        old_linked = old_linked[-20:]
                     cur.execute(
                         "UPDATE memories SET linked_memories = %s WHERE id = %s AND tenant_id = %s",
                         (old_linked, row["id"], self._tenant_id),
@@ -587,8 +577,10 @@ class MemoryStoreDB:
                 linked_ids,
             )
 
-        except Exception as e:
+        except (psycopg2.Error, ValueError, KeyError) as e:
             logger.debug("auto-link failed (best-effort): %s", e)
+        except Exception:
+            logger.exception("auto-link unexpected error")
 
     # 信息分级等级序（用于 classification_max 过滤）
     _CLASSIFICATION_LEVELS = {

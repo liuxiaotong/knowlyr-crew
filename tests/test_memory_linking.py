@@ -103,15 +103,10 @@ class TestAutoLinkOnAdd:
         # 第一个 connection: SELECT 候选
         mock_conn1, mock_cursor1 = _make_mock_conn(candidates)
 
-        # 后续 connections: UPDATE 操作
-        update_conns = []
-        update_cursors = []
-        for _ in range(3):  # 1 for new + 2 for old memories
-            conn, cur = _make_mock_conn()
-            update_conns.append(conn)
-            update_cursors.append(cur)
+        # 第二个 connection: 所有 UPDATE 在同一个事务中
+        mock_conn_update, mock_cursor_update = _make_mock_conn()
 
-        all_conns = [mock_conn1] + update_conns
+        all_conns = [mock_conn1, mock_conn_update]
         call_count = {"n": 0}
 
         def fake_get_conn():
@@ -128,13 +123,25 @@ class TestAutoLinkOnAdd:
         ):
             store._auto_link_similar("new001", "test", fake_vec)
 
-        # 验证新记忆被更新 linked_memories = ["old001", "old002"]
-        update_cursors[0].execute.assert_called_once()
-        update_args = update_cursors[0].execute.call_args[0]
-        assert "UPDATE memories SET linked_memories" in update_args[0]
-        new_linked = update_args[1][0]
+        # 所有 UPDATE 在同一个 cursor 上执行：1 次新记忆 + 2 次旧记忆
+        assert mock_cursor_update.execute.call_count == 3
+        update_calls = mock_cursor_update.execute.call_args_list
+
+        # 第一个 UPDATE：新记忆 linked_memories = ["old001", "old002"]
+        new_update_args = update_calls[0][0]
+        assert "UPDATE memories SET linked_memories" in new_update_args[0]
+        new_linked = new_update_args[1][0]
         assert "old001" in new_linked
         assert "old002" in new_linked
+
+        # 第二个 UPDATE：old001 的 linked_memories 包含 new001
+        old1_args = update_calls[1][0]
+        assert "new001" in old1_args[1][0]
+
+        # 第三个 UPDATE：old002 的 linked_memories 包含 prev001 和 new001
+        old2_args = update_calls[2][0]
+        assert "prev001" in old2_args[1][0]
+        assert "new001" in old2_args[1][0]
 
 
 # ── 2. test_auto_link_respects_threshold ──
@@ -194,11 +201,10 @@ class TestAutoLinkMax20:
 
         mock_conn1, _ = _make_mock_conn(candidates)
 
-        # connections: SELECT, UPDATE new, UPDATE old
-        update_conn_new, update_cursor_new = _make_mock_conn()
-        update_conn_old, update_cursor_old = _make_mock_conn()
+        # 所有 UPDATE 在同一个 connection 中
+        mock_conn_update, mock_cursor_update = _make_mock_conn()
 
-        all_conns = [mock_conn1, update_conn_new, update_conn_old]
+        all_conns = [mock_conn1, mock_conn_update]
         call_count = {"n": 0}
 
         def fake_get_conn():
@@ -215,10 +221,13 @@ class TestAutoLinkMax20:
         ):
             store._auto_link_similar("new001", "test", fake_vec)
 
-        # 验证旧记忆的 UPDATE 包含最多 20 个（截断最旧的）
-        update_cursor_old.execute.assert_called_once()
-        update_args = update_cursor_old.execute.call_args[0]
-        old_linked_updated = update_args[1][0]
+        # 2 次 execute：1 次新记忆 + 1 次旧记忆
+        assert mock_cursor_update.execute.call_count == 2
+        update_calls = mock_cursor_update.execute.call_args_list
+
+        # 第二个 UPDATE 是旧记忆的，验证截断到 20
+        old_update_args = update_calls[1][0]
+        old_linked_updated = old_update_args[1][0]
         assert len(old_linked_updated) == 20
         # 新的 entry_id 应在列表中
         assert "new001" in old_linked_updated
@@ -495,3 +504,104 @@ class TestAutoLinkNoEmbedding:
 
         # add() 应该成功返回（auto_link 失败不阻塞）
         assert entry.id
+
+
+# ── 8. test_auto_link_null_linked_memories ──
+
+
+class TestAutoLinkNullLinkedMemories:
+    """候选记忆的 linked_memories 为 NULL 时正确处理."""
+
+    def test_null_linked_memories_handled(self) -> None:
+        store = _make_store()
+        store._resolve_to_character_name = lambda x: x
+
+        fake_vec = [0.1] * 384
+        mock_psycopg2 = MagicMock()
+        mock_psycopg2.extras.RealDictCursor = MagicMock()
+
+        # 候选记忆 linked_memories 为 None（数据库 NULL）
+        candidates = [
+            {"id": "old001", "linked_memories": None, "similarity": 0.8},
+            {"id": "old002", "linked_memories": None, "similarity": 0.7},
+        ]
+
+        mock_conn_select, _ = _make_mock_conn(candidates)
+        mock_conn_update, mock_cursor_update = _make_mock_conn()
+
+        all_conns = [mock_conn_select, mock_conn_update]
+        call_count = {"n": 0}
+
+        def fake_get_conn():
+            idx = min(call_count["n"], len(all_conns) - 1)
+            call_count["n"] += 1
+            return all_conns[idx]
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras},
+            ),
+            patch("crew.memory_store_db.get_connection", side_effect=fake_get_conn),
+        ):
+            store._auto_link_similar("new001", "test", fake_vec)
+
+        # 应该有 3 次 execute 调用：1 次新记忆 + 2 次旧记忆
+        assert mock_cursor_update.execute.call_count == 3
+
+        # 验证旧记忆更新时 linked_memories 从 None 变为 ["new001"]
+        update_calls = mock_cursor_update.execute.call_args_list
+        for c in update_calls[1:]:  # 跳过第一个（新记忆更新）
+            params = c[0][1]
+            assert "new001" in params[0]
+
+
+# ── 9. test_auto_link_psycopg2_error ──
+
+
+class TestAutoLinkPsycopg2Error:
+    """_auto_link_similar 遇到 psycopg2.Error 时 add() 正常返回."""
+
+    def test_psycopg2_error_does_not_block_add(self) -> None:
+        store = _make_store()
+        store._resolve_to_character_name = lambda x: x
+
+        fake_vec = [0.1] * 384
+        mock_psycopg2 = MagicMock()
+        mock_psycopg2.Error = type("Error", (Exception,), {})
+
+        # 让 get_connection 内部抛出 psycopg2.Error
+        db_error = mock_psycopg2.Error("connection lost")
+
+        mock_conn_insert, mock_cursor_insert = _make_mock_conn()
+
+        conn_call_count = {"n": 0}
+
+        def fake_get_conn():
+            conn_call_count["n"] += 1
+            # add() 内部的 INSERT 用第一次连接
+            if conn_call_count["n"] <= 1:
+                return mock_conn_insert
+            # _auto_link_similar 内部的连接抛错
+            raise db_error
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras},
+            ),
+            patch("crew.embedding.get_embedding", return_value=fake_vec),
+            patch("crew.embedding.build_embedding_text", return_value="text"),
+            patch.object(store, "_try_dedup_merge", return_value=None),
+            patch("crew.memory_store_db.get_connection", side_effect=fake_get_conn),
+        ):
+            entry = store.add(
+                employee="test",
+                category="finding",
+                content="test content",
+                keywords=["测试"],
+            )
+
+        # add() 应该成功返回
+        assert entry.id
+        assert entry.content == "test content"
