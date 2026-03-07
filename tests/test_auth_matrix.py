@@ -210,6 +210,8 @@ EXPECTED_AUTH_MATRIX: dict[tuple[str, str], str] = {
     ("/api/memory/consolidate", "POST"): "admin_required",
     ("/api/soul/review", "POST"): "admin_required",
     ("/api/soul/candidates", "GET"): "admin_required",
+    ("/api/soul/approve", "POST"): "admin_required",
+    ("/api/soul/reject", "POST"): "admin_required",
     ("/api/memory/feedback/{memory_id}", "GET"): "admin_required",
     ("/api/memory/feedback/summary", "GET"): "admin_required",
     ("/api/memory/usage/stats/{memory_id}", "GET"): "admin_required",
