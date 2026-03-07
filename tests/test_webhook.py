@@ -1075,7 +1075,7 @@ class TestEmployeeUpdatePUT:
         return emp, emp_dir
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.webhook_handlers._write_yaml_field")
+    @patch("crew.webhook_handlers._employee._write_yaml_field")
     @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_model(self, mock_write, mock_discover, tmp_path):
         """PUT 应更新 model 到 employee.yaml."""
@@ -1097,7 +1097,7 @@ class TestEmployeeUpdatePUT:
         mock_write.assert_called_once_with(emp_dir, {"model": "claude-opus-4-6"})
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.webhook_handlers._write_yaml_field")
+    @patch("crew.webhook_handlers._employee._write_yaml_field")
     @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_by_agent_id(self, mock_write, mock_discover, tmp_path):
         """PUT 可通过 agent_id 查找员工."""
@@ -1269,7 +1269,7 @@ class TestModelTierUpdatable:
     """model_tier 应在员工可更新字段白名单中."""
 
     @patch("crew.discovery.discover_employees")
-    @patch("crew.webhook_handlers._write_yaml_field")
+    @patch("crew.webhook_handlers._employee._write_yaml_field")
     @patch.dict("os.environ", {"ADMIN_TOKEN": ADMIN_TOKEN})
     def test_update_model_tier(self, mock_write, mock_discover, tmp_path):
         """PUT 应允许更新 model_tier."""

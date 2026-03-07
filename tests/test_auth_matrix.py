@@ -18,7 +18,10 @@ import pytest
 
 _SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "crew"
 _WEBHOOK_PY = _SRC_DIR / "webhook.py"
+# webhook_handlers 可能是单文件 (.py) 或目录 (拆分后的包)
 _HANDLERS_PY = _SRC_DIR / "webhook_handlers.py"
+if not _HANDLERS_PY.exists():
+    _HANDLERS_PY = _SRC_DIR / "webhook_handlers"
 _SKILLS_PY = _SRC_DIR / "webhook_skills.py"
 
 
@@ -144,9 +147,17 @@ def _detect_auth_level(handler_name: str) -> str:
 
 
 def _get_handler_source(handler_name: str) -> str | None:
-    """从 webhook_handlers.py 或 webhook_skills.py 读取指定 handler 的源码."""
-    for filepath in [_HANDLERS_PY, _SKILLS_PY]:
-        if not filepath.exists():
+    """从 webhook_handlers 子模块或 webhook_skills.py 读取指定 handler 的源码."""
+    candidates: list[Path] = []
+    if _HANDLERS_PY.is_dir():
+        candidates.extend(sorted(_HANDLERS_PY.glob("*.py")))
+    elif _HANDLERS_PY.exists():
+        candidates.append(_HANDLERS_PY)
+    if _SKILLS_PY.exists():
+        candidates.append(_SKILLS_PY)
+
+    for filepath in candidates:
+        if not filepath.is_file():
             continue
         source = filepath.read_text(encoding="utf-8")
 
