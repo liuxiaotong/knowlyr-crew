@@ -107,8 +107,9 @@ async def _remote_memory_query(
         return data.get("entries", [])
 
 
-
-def _local_semantic_memory_search(store, employee, query, category, limit, *, classification_max=None):
+def _local_semantic_memory_search(
+    store, employee, query, category, limit, *, classification_max=None
+):
     """本地语义混合搜索，降级到 store.query()."""
     try:
         from crew.memory_search import SemanticMemoryIndex
@@ -122,7 +123,12 @@ def _local_semantic_memory_search(store, employee, query, category, limit, *, cl
             results = index.search(employee, query, limit=limit * 2)
             if not results:
                 raise ValueError("no results")
-            _classification_levels = {"public": 0, "internal": 1, "restricted": 2, "confidential": 3}
+            _classification_levels = {
+                "public": 0,
+                "internal": 1,
+                "restricted": 2,
+                "confidential": 3,
+            }
             entries_map = {e.id: e for e in store._load_employee_entries(employee)}
             filtered = []
             for entry_id, _content, _score in results:

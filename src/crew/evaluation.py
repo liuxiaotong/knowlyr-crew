@@ -183,9 +183,7 @@ class EvaluationEngine:
             existing = store.query(
                 employee=found_decision.employee, category="correction", limit=200
             )
-            already_written = any(
-                getattr(e, "source_session", "") == eval_source for e in existing
-            )
+            already_written = any(getattr(e, "source_session", "") == eval_source for e in existing)
             if not already_written:
                 store.add(
                     employee=found_decision.employee,
