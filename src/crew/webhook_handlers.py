@@ -1302,8 +1302,14 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
                     }
                 )
 
-    result = store.add(
+    # 统一走记忆管线，确保 Connect 去重/关联逻辑生效（skip_reflect 跳过 LLM 提炼）
+    from crew.memory_pipeline import process_memory
+
+    entry = process_memory(
+        raw_text=content,
         employee=employee,
+        store=store,
+        skip_reflect=True,
         category=category,
         content=content,
         source_session=source_session,
@@ -1318,6 +1324,11 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
         else "internal",
         domain=domain if isinstance(domain, list) else [],
     )
+
+    if entry is None:
+        return JSONResponse({"ok": True, "skipped": True, "reason": "pipeline_skip"})
+
+    result = entry
 
     # 兼容 MemoryEntry（属性访问）和 dict（键访问）
     result_employee = (

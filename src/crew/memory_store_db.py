@@ -197,6 +197,7 @@ class MemoryStoreDB:
         origin_employee: str = "",
         classification: Literal["public", "internal", "restricted", "confidential"] = "internal",
         domain: list[str] | None = None,
+        keywords: list[str] | None = None,
     ) -> MemoryEntry:
         """添加一条记忆.
 
@@ -221,6 +222,8 @@ class MemoryStoreDB:
         applicability_list = applicability or []
         origin_emp = origin_employee or employee
         domain_list = domain or []
+        # 支持 keywords 原子写入，避免先 INSERT 空再 UPDATE 的两步操作
+        keywords_list = keywords or []
 
         with get_connection() as conn:
             cur = conn.cursor()
@@ -264,7 +267,7 @@ class MemoryStoreDB:
                     classification,
                     domain_list,
                     self._tenant_id,
-                    [],  # keywords
+                    keywords_list,  # keywords: 原子写入传入值
                     [],  # linked_memories
                 ),
             )
@@ -290,7 +293,7 @@ class MemoryStoreDB:
             origin_employee=origin_emp,
             classification=classification,
             domain=domain_list,
-            keywords=[],
+            keywords=keywords_list,
             linked_memories=[],
         )
 

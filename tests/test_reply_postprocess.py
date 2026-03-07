@@ -202,5 +202,5 @@ class TestPushIfNeeded:
 
         mock_thread_cls.assert_called_once()
         call_kwargs = mock_thread_cls.call_args[1]
-        assert call_kwargs["daemon"] is True
+        assert call_kwargs["daemon"] is False  # 非 daemon：进程退出前等待记忆写入完成
         mock_thread.start.assert_called_once()

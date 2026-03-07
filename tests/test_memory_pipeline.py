@@ -132,19 +132,18 @@ class TestReflect:
 
     @patch("crew.memory_pipeline._call_llm")
     def test_reflect_truncates_long_input(self, mock_llm):
-        """超过 500 字的输入被截断."""
+        """超过 2000 字的输入被截断."""
         mock_llm.return_value = json.dumps(
             {"store": True, "content": "长文本", "category": "finding",
              "keywords": [], "tags": [], "context": ""}
         )
-        long_text = "x" * 1000
+        long_text = "x" * 3000
         reflect(long_text, "赵云帆")
 
-        # 验证发给 LLM 的 prompt 中文本被截断
+        # 验证发给 LLM 的 prompt 中文本被截断到 2000 字
         call_args = mock_llm.call_args[0][0]
-        # 原始文本 1000 字，截断后应为 500 字
-        assert "x" * 500 in call_args
-        assert "x" * 501 not in call_args
+        assert "x" * 2000 in call_args
+        assert "x" * 2001 not in call_args
 
     @patch("crew.memory_pipeline._call_llm")
     def test_reflect_handles_markdown_wrapped_json(self, mock_llm):
