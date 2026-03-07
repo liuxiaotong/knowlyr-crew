@@ -2569,14 +2569,17 @@ def create_server(project_dir: Path | None = None) -> "Server":
                         )
                     ]
             else:
-                # 本地 fallback（未配置远程 API 时）
+                # 本地 fallback — 走 Connect→Store（跳 Reflect，已结构化）
                 from crew.memory import get_memory_store
+                from crew.memory_pipeline import process_memory
 
                 store = get_memory_store(project_dir=_project_dir)
-                entry = store.add(
+                entry = process_memory(
+                    raw_text=arguments["content"],
                     employee=arguments["employee"],
+                    store=store,
+                    skip_reflect=True,
                     category=arguments["category"],
-                    content=arguments["content"],
                     source_session=arguments.get("source_session", ""),
                     ttl_days=arguments.get("ttl_days", 0),
                     tags=arguments.get("tags"),
@@ -2586,7 +2589,18 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     origin_employee=arguments.get("origin_employee", ""),
                     classification=arguments.get("classification", "internal"),
                     domain=arguments.get("domain"),
+                    confidence=arguments.get("confidence", 1.0),
                 )
+                if entry is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {"status": "skipped", "reason": "pipeline decided not to store"},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ]
                 return [
                     TextContent(
                         type="text",

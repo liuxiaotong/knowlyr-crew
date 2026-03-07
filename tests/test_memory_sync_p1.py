@@ -431,26 +431,38 @@ class TestEndToEnd:
         assert "端到端测试" in entries[0].content
         assert "e2e" in entries[0].tags
 
-    def test_different_sessions_different_categories(self, store):
-        """不同 session 可以写入相同 category."""
+    def test_different_sessions_both_trigger(self, store):
+        """不同 session 都能触发管线（异步模式）."""
+        from unittest.mock import patch
+
         from crew.reply_postprocess import push_if_needed
 
-        # session 1
-        push_if_needed(
-            employee="multi",
-            reply="决定使用方案 A",
-            session_id="sess-A",
-            store=store,
-        )
+        with patch("crew.reply_postprocess.process_memory") as mock_pipeline:
+            from crew.memory import MemoryEntry
 
-        # session 2
-        push_if_needed(
-            employee="multi",
-            reply="决定使用方案 B",
-            session_id="sess-B",
-            store=store,
-        )
+            mock_pipeline.return_value = MemoryEntry(
+                employee="multi", category="decision", content="方案"
+            )
 
-        entries = store.query("multi")
-        assert len(entries) == 2
-        assert all(e.category == "decision" for e in entries)
+            # session 1
+            r1 = push_if_needed(
+                employee="multi",
+                reply="决定使用方案 A",
+                session_id="sess-A",
+                store=store,
+            )
+
+            # session 2
+            r2 = push_if_needed(
+                employee="multi",
+                reply="决定使用方案 B",
+                session_id="sess-B",
+                store=store,
+            )
+
+            assert r1 is True
+            assert r2 is True
+
+            import time
+            time.sleep(0.5)
+            assert mock_pipeline.call_count == 2

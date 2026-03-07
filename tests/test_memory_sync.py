@@ -184,9 +184,19 @@ class TestShouldPush:
 
 
 class TestPushIfNeeded:
-    """推送记忆写入测试."""
+    """推送记忆写入测试.
 
-    def test_push_decision(self, store):
+    注意：Phase 3-2 后 push_if_needed 改为异步（后台线程）调用记忆管线。
+    这里用 mock process_memory 验证行为，避免依赖 LLM API。
+    """
+
+    @patch("crew.reply_postprocess.process_memory")
+    def test_push_decision(self, mock_pipeline, store):
+        from crew.memory import MemoryEntry
+
+        mock_pipeline.return_value = MemoryEntry(
+            employee="alice", category="decision", content="决定使用新架构"
+        )
         result = push_if_needed(
             employee="alice",
             reply="我们决定使用新架构",
@@ -194,30 +204,28 @@ class TestPushIfNeeded:
             store=store,
         )
         assert result is True
+        # 异步调用，等线程完成
+        import time
+        time.sleep(0.5)
+        mock_pipeline.assert_called_once()
 
-        entries = store.query("alice")
-        assert len(entries) == 1
-        assert entries[0].category == "decision"
-        assert "auto-push" in entries[0].tags
-
-    def test_push_idempotent(self, store):
-        """同 session 同 category 不重复写入."""
-        push_if_needed(
+    def test_push_triggers_for_same_session(self, store):
+        """异步模式下不再做幂等校验（管线内部处理）."""
+        result1 = push_if_needed(
             employee="bob",
             reply="决定重构",
             session_id="sess-002",
             store=store,
         )
-        result = push_if_needed(
+        result2 = push_if_needed(
             employee="bob",
             reply="决定另一件事",
             session_id="sess-002",
             store=store,
         )
-        assert result is False
-
-        entries = store.query("bob")
-        assert len(entries) == 1
+        # 两次都触发（should_push 通过即触发后台线程）
+        assert result1 is True
+        assert result2 is True
 
     def test_no_push_for_short_reply(self, store):
         result = push_if_needed(
@@ -226,35 +234,31 @@ class TestPushIfNeeded:
             store=store,
         )
         assert result is False
-        assert store.query("carol") == []
 
-    def test_push_invalidates_cache(self, store):
-        """推送后缓存被失效."""
-        store.add("dave", "finding", "旧记忆")
-        get_prompt_cached("dave", store=store)
-        assert "dave" in _CACHE
+    @patch("crew.reply_postprocess.process_memory")
+    def test_push_triggers_pipeline(self, mock_pipeline, store):
+        """推送触发管线调用."""
+        from crew.memory import MemoryEntry
 
-        push_if_needed(
+        mock_pipeline.return_value = MemoryEntry(
+            employee="dave", category="decision", content="统一使用新方案"
+        )
+        result = push_if_needed(
             employee="dave",
             reply="统一使用新方案",
             session_id="sess-003",
             store=store,
         )
-        assert "dave" not in _CACHE
+        assert result is True
+        # 异步，等线程完成
+        import time
+        time.sleep(0.5)
+        mock_pipeline.assert_called_once()
 
-    def test_push_retry_on_failure(self, store):
-        """写入失败时重试."""
-        call_count = 0
-        original_add = store.add
-
-        def flaky_add(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise OSError("临时写入错误")
-            return original_add(*args, **kwargs)
-
-        store.add = flaky_add
+    @patch("crew.reply_postprocess.process_memory")
+    def test_push_pipeline_error_no_crash(self, mock_pipeline, store):
+        """管线失败时不崩溃（异步线程内部捕获异常）."""
+        mock_pipeline.side_effect = RuntimeError("LLM 不可用")
         result = push_if_needed(
             employee="eve",
             reply="决定使用新框架",
@@ -262,7 +266,9 @@ class TestPushIfNeeded:
             store=store,
         )
         assert result is True
-        assert call_count == 2  # 第 1 次失败，第 2 次成功
+        # 不崩溃即可
+        import time
+        time.sleep(0.5)
 
 
 # ── 3. 轨迹写回链路测试（单元测试模式） ──
