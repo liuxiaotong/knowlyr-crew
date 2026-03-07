@@ -244,9 +244,7 @@ def find_archive_candidates(
     if not corrections:
         return []
 
-    existing_ids = _get_existing_candidate_ids(
-        store._resolve_to_character_name(employee)
-    )
+    existing_ids = _get_existing_candidate_ids(store._resolve_to_character_name(employee))
 
     # 按 tags 聚类
     clusters: list[list[Any]] = []

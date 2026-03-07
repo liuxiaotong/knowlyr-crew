@@ -134,8 +134,14 @@ class TestReflect:
     def test_reflect_truncates_long_input(self, mock_llm):
         """超过 2000 字的输入被截断."""
         mock_llm.return_value = json.dumps(
-            {"store": True, "content": "长文本", "category": "finding",
-             "keywords": [], "tags": [], "context": ""}
+            {
+                "store": True,
+                "content": "长文本",
+                "category": "finding",
+                "keywords": [],
+                "tags": [],
+                "context": "",
+            }
         )
         long_text = "x" * 3000
         reflect(long_text, "赵云帆")
@@ -158,8 +164,14 @@ class TestReflect:
     def test_reflect_handles_invalid_category(self, mock_llm):
         """无效 category 降级为 finding."""
         mock_llm.return_value = json.dumps(
-            {"store": True, "content": "test", "category": "invalid_cat",
-             "keywords": [], "tags": [], "context": ""}
+            {
+                "store": True,
+                "content": "test",
+                "category": "invalid_cat",
+                "keywords": [],
+                "tags": [],
+                "context": "",
+            }
         )
 
         result = reflect("某条记录", "赵云帆")
@@ -189,9 +201,7 @@ class TestConnect:
         )
         store = _make_mock_store()
 
-        with patch(
-            "crew.memory_pipeline._find_candidates_by_keywords", return_value=[]
-        ):
+        with patch("crew.memory_pipeline._find_candidates_by_keywords", return_value=[]):
             result = connect(note, "赵云帆", store)
 
         assert result.action == "new"
@@ -465,6 +475,4 @@ class TestDBFields:
         store.update_keywords.assert_called_once_with("entry1", "员工A", ["kw1", "kw2"])
 
         store.update_linked_memories("entry1", "员工A", ["linked1"])
-        store.update_linked_memories.assert_called_once_with(
-            "entry1", "员工A", ["linked1"]
-        )
+        store.update_linked_memories.assert_called_once_with("entry1", "员工A", ["linked1"])

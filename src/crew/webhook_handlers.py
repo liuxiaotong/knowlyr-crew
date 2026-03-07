@@ -2486,6 +2486,8 @@ async def _handle_knowledge_dashboard(request: Any, ctx: _AppContext) -> Any:
     admin_err = _require_admin_token(request)
     if admin_err:
         return _error_response(admin_err, 403)
+
+
 async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
     """召回反馈 — POST /api/memory/recall-feedback.
 

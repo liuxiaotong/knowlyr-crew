@@ -9,11 +9,16 @@ import pytest
 
 def _make_store():
     """创建一个 mock 出的 MemoryStoreDB 实例，跳过 psycopg2 依赖."""
-    with patch("crew.memory_store_db.is_pg", return_value=True), \
-         patch("crew.memory_store_db.get_connection"):
+    with (
+        patch("crew.memory_store_db.is_pg", return_value=True),
+        patch("crew.memory_store_db.get_connection"),
+    ):
         mock_psycopg2 = MagicMock()
-        with patch.dict("sys.modules", {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras}):
+        with patch.dict(
+            "sys.modules", {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras}
+        ):
             from crew.memory_store_db import MemoryStoreDB
+
             store = MemoryStoreDB.__new__(MemoryStoreDB)
             store._project_dir = None
             store._tenant_id = "test-tenant"

@@ -136,9 +136,7 @@ class TestSynthesizeCluster:
     @patch("crew.memory_consolidate._mark_superseded", return_value=3)
     @patch("crew.memory_consolidate._update_importance")
     @patch("crew.memory_consolidate._call_llm")
-    def test_synthesize_cluster_creates_pattern(
-        self, mock_llm, mock_importance, mock_superseded
-    ):
+    def test_synthesize_cluster_creates_pattern(self, mock_llm, mock_importance, mock_superseded):
         """mock LLM，验证新 pattern 被创建 + 原 findings 被 superseded."""
         mock_llm.return_value = json.dumps(
             {
@@ -179,9 +177,7 @@ class TestSynthesizeCluster:
     @patch("crew.memory_consolidate._mark_superseded")
     @patch("crew.memory_consolidate._update_importance")
     @patch("crew.memory_consolidate._call_llm")
-    def test_synthesize_cluster_llm_failure(
-        self, mock_llm, mock_importance, mock_superseded
-    ):
+    def test_synthesize_cluster_llm_failure(self, mock_llm, mock_importance, mock_superseded):
         """LLM 失败时返回 None，不影响原数据."""
         mock_llm.side_effect = RuntimeError("API error")
 

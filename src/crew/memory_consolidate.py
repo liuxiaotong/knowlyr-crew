@@ -187,9 +187,7 @@ def synthesize_cluster(
     top_entries = sorted_entries[:_MAX_CLUSTER_SIZE]
 
     # 拼接 findings 内容
-    findings_text = "\n".join(
-        f"- [{i + 1}] {e.content}" for i, e in enumerate(top_entries)
-    )
+    findings_text = "\n".join(f"- [{i + 1}] {e.content}" for i, e in enumerate(top_entries))
 
     prompt = _SYNTHESIZE_PROMPT.format(findings=findings_text)
 
@@ -200,9 +198,7 @@ def synthesize_cluster(
         text = response_text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
-            text = "\n".join(
-                line for line in lines if not line.strip().startswith("```")
-            )
+            text = "\n".join(line for line in lines if not line.strip().startswith("```"))
 
         data = json.loads(text)
 

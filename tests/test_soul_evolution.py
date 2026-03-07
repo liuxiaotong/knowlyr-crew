@@ -202,9 +202,7 @@ class TestFindArchiveCandidates:
     """测试 find_archive_candidates."""
 
     @patch("crew.soul_evolution.get_config", return_value=None)
-    def test_find_archive_candidates_clusters_corrections(
-        self, mock_get_config: MagicMock
-    ):
+    def test_find_archive_candidates_clusters_corrections(self, mock_get_config: MagicMock):
         """多条同主题 correction 应生成 archive 候选."""
         corrections = [
             _MockMemoryEntry(

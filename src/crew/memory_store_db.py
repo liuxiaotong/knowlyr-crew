@@ -99,9 +99,7 @@ def init_memory_tables() -> None:
         """)
         # 注意：keywords 列的查询使用 unnest + ILIKE 子串匹配，GIN 索引无法加速。
         # 当前数据量不需要索引；后续量大时可考虑 pg_trgm 或改为精确匹配再加 GIN。
-        cur.execute(
-            "DROP INDEX IF EXISTS idx_memories_keywords"
-        )
+        cur.execute("DROP INDEX IF EXISTS idx_memories_keywords")
 
         # Phase 4: 幂等添加 recall_count 列（召回效果闭环）
         cur.execute("""
@@ -279,7 +277,6 @@ class MemoryStoreDB:
                     [],  # linked_memories
                 ),
             )
-
 
         return MemoryEntry(
             id=entry_id,
@@ -1094,9 +1091,7 @@ class MemoryStoreDB:
             )
             return cur.rowcount > 0
 
-    def update_linked_memories(
-        self, entry_id: str, employee: str, linked_ids: list[str]
-    ) -> bool:
+    def update_linked_memories(self, entry_id: str, employee: str, linked_ids: list[str]) -> bool:
         """更新记忆的关联记忆 ID 列表.
 
         Args:
@@ -1163,9 +1158,7 @@ class MemoryStoreDB:
         # 至少匹配一个关键词
         or_conditions = []
         for kw in keywords:
-            or_conditions.append(
-                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
-            )
+            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
             params.append(f"%{kw}%")
         conditions.append(f"({' OR '.join(or_conditions)})")
 
@@ -1240,9 +1233,7 @@ class MemoryStoreDB:
         # 至少匹配一个关键词
         or_conditions = []
         for kw in keywords:
-            or_conditions.append(
-                "EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)"
-            )
+            or_conditions.append("EXISTS (SELECT 1 FROM unnest(keywords) AS k WHERE k ILIKE %s)")
             params.append(f"%{kw}%")
         conditions.append(f"({' OR '.join(or_conditions)})")
 

@@ -33,12 +33,17 @@ def _make_entry(
 
 def _make_store():
     """创建一个 mock 出的 MemoryStoreDB 实例，跳过 psycopg2 依赖."""
-    with patch("crew.memory_store_db.is_pg", return_value=True), \
-         patch("crew.memory_store_db.get_connection"):
+    with (
+        patch("crew.memory_store_db.is_pg", return_value=True),
+        patch("crew.memory_store_db.get_connection"),
+    ):
         # 在导入阶段 mock psycopg2
         mock_psycopg2 = MagicMock()
-        with patch.dict("sys.modules", {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras}):
+        with patch.dict(
+            "sys.modules", {"psycopg2": mock_psycopg2, "psycopg2.extras": mock_psycopg2.extras}
+        ):
             from crew.memory_store_db import MemoryStoreDB
+
             store = MemoryStoreDB.__new__(MemoryStoreDB)
             store._project_dir = None
             store._tenant_id = "test-tenant"
@@ -59,21 +64,36 @@ class TestQueryByKeywords:
         store = _make_store()
 
         row_2_matches = {
-            "id": "mem001", "employee": "测试员工",
-            "created_at": "2026-03-01T00:00:00", "category": "finding",
-            "content": "API 性能优化方案", "source_session": "",
-            "confidence": 1.0, "superseded_by": "", "ttl_days": 0,
-            "importance": 3, "last_accessed": None, "tags": [],
-            "shared": False, "visibility": "open", "trigger_condition": "",
-            "applicability": [], "origin_employee": "", "verified_count": 0,
-            "classification": "internal", "domain": [],
-            "keywords": ["API", "性能", "优化"], "linked_memories": [],
+            "id": "mem001",
+            "employee": "测试员工",
+            "created_at": "2026-03-01T00:00:00",
+            "category": "finding",
+            "content": "API 性能优化方案",
+            "source_session": "",
+            "confidence": 1.0,
+            "superseded_by": "",
+            "ttl_days": 0,
+            "importance": 3,
+            "last_accessed": None,
+            "tags": [],
+            "shared": False,
+            "visibility": "open",
+            "trigger_condition": "",
+            "applicability": [],
+            "origin_employee": "",
+            "verified_count": 0,
+            "classification": "internal",
+            "domain": [],
+            "keywords": ["API", "性能", "优化"],
+            "linked_memories": [],
             "match_count": 2,
         }
         row_1_match = {
             **row_2_matches,
-            "id": "mem002", "content": "数据库索引方案",
-            "keywords": ["数据库", "索引"], "match_count": 1,
+            "id": "mem002",
+            "content": "数据库索引方案",
+            "keywords": ["数据库", "索引"],
+            "match_count": 1,
         }
 
         mock_cursor = MagicMock()
@@ -85,7 +105,8 @@ class TestQueryByKeywords:
         mock_conn.return_value = mock_cm
 
         results = store.query_by_keywords(
-            employee="测试员工", keywords=["API", "性能"],
+            employee="测试员工",
+            keywords=["API", "性能"],
         )
 
         assert len(results) == 2
@@ -123,7 +144,9 @@ class TestQueryByKeywords:
         mock_conn.return_value = mock_cm
 
         store.query_by_keywords(
-            employee="测试员工", keywords=["API"], category="pattern",
+            employee="测试员工",
+            keywords=["API"],
+            category="pattern",
         )
 
         executed_sql = mock_cursor.execute.call_args[0][0]
@@ -146,7 +169,8 @@ class TestQueryByKeywords:
         mock_conn.return_value = mock_cm
 
         store.query_by_keywords(
-            employee="测试员工", keywords=["API", "性能", "缓存"],
+            employee="测试员工",
+            keywords=["API", "性能", "缓存"],
         )
 
         executed_sql = mock_cursor.execute.call_args[0][0]
@@ -175,7 +199,8 @@ class TestQueryCrossEmployee:
         mock_conn.return_value = mock_cm
 
         store.query_cross_employee(
-            keywords=["API", "性能"], exclude_employee="赵云帆",
+            keywords=["API", "性能"],
+            exclude_employee="赵云帆",
         )
 
         executed_sql = mock_cursor.execute.call_args[0][0]
@@ -196,7 +221,8 @@ class TestQueryCrossEmployee:
         mock_conn.return_value = mock_cm
 
         store.query_cross_employee(
-            keywords=["记忆"], exclude_employee="赵云帆",
+            keywords=["记忆"],
+            exclude_employee="赵云帆",
         )
 
         executed_sql = mock_cursor.execute.call_args[0][0]

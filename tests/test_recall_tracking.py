@@ -130,9 +130,7 @@ class TestGetRecallStats:
         )
 
         stats = store.get_recall_stats()
-        assert stats["hit_rate"] == pytest.approx(
-            stats["total_useful"] / stats["total_recalls"]
-        )
+        assert stats["hit_rate"] == pytest.approx(stats["total_useful"] / stats["total_recalls"])
 
     def test_get_recall_stats_zero_recalls(self):
         """零次召回时 hit_rate 为 0."""
@@ -173,9 +171,10 @@ class TestRecallFeedbackHandler:
 
         mock_store = _make_mock_store()
 
-        with patch(
-            "crew.webhook_handlers.get_memory_store", return_value=mock_store
-        ), patch("crew.webhook_handlers._tenant_id_for_store", return_value=None):
+        with (
+            patch("crew.webhook_handlers.get_memory_store", return_value=mock_store),
+            patch("crew.webhook_handlers._tenant_id_for_store", return_value=None),
+        ):
             response = await _handle_recall_feedback(mock_request, mock_ctx)
 
         body = json.loads(response.body.decode())
