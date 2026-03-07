@@ -698,6 +698,8 @@ class MemoryStoreDB:
             return False
         try:
             created = datetime.fromisoformat(entry.created_at)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
             age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
             return age_days > ttl
         except (ValueError, TypeError):

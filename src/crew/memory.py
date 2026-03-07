@@ -219,7 +219,9 @@ class MemoryStore:
             return entry
         try:
             created = datetime.fromisoformat(entry.created_at)
-            age_days = (datetime.now() - created).total_seconds() / 86400
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
             if age_days <= 0:
                 return entry
             decay_factor = 0.5 ** (age_days / half_life)
@@ -235,7 +237,9 @@ class MemoryStore:
             return False
         try:
             created = datetime.fromisoformat(entry.created_at)
-            age_days = (datetime.now() - created).total_seconds() / 86400
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
             return age_days > ttl
         except (ValueError, TypeError):
             return False
