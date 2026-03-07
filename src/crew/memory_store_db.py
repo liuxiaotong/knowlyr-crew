@@ -289,6 +289,14 @@ class MemoryStoreDB:
         except Exception as e:
             logger.debug("embedding 生成跳过: %s", e)
 
+        # NG-2: 轻量去重 — correction 类型不做去重（每次纠正都应独立记录）
+        if embedding_vector is not None and category != "correction":
+            merged = self._try_dedup_merge(
+                employee, embedding_vector, content, keywords_list, category,
+            )
+            if merged is not None:
+                return merged
+
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -360,6 +368,119 @@ class MemoryStoreDB:
             keywords=keywords_list,
             linked_memories=[],
         )
+
+    def _try_dedup_merge(
+        self,
+        employee: str,
+        embedding_vector: list[float],
+        content: str,
+        keywords: list[str],
+        category: str,
+    ) -> MemoryEntry | None:
+        """NG-2: 去重合并 — 查同员工同租户 top-1 最相似记忆，>=0.90 则合并.
+
+        Args:
+            employee: 员工名称（已 resolve）
+            embedding_vector: 新记忆的 embedding 向量
+            content: 新记忆内容
+            keywords: 新记忆关键词
+            category: 新记忆类别
+
+        Returns:
+            合并后的 MemoryEntry（如果触发合并），否则 None
+        """
+        try:
+            with get_connection() as conn:
+                import psycopg2.extras
+
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    SELECT id, content, keywords, category, embedding,
+                           employee, created_at, source_session, confidence,
+                           superseded_by, ttl_days, importance, last_accessed,
+                           tags, shared, visibility, trigger_condition,
+                           applicability, origin_employee, verified_count,
+                           classification, domain, linked_memories
+                    FROM memories
+                    WHERE employee = %s AND tenant_id = %s
+                      AND (superseded_by = '' OR superseded_by IS NULL)
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s
+                    LIMIT 1
+                    """,
+                    (employee, self._tenant_id, str(embedding_vector)),
+                )
+                row = cur.fetchone()
+
+            if row is None:
+                return None
+
+            # cosine_distance = 1 - cosine_similarity
+            # embedding <=> 返回 cosine distance，需要 Python 端计算 similarity
+            # 但 pgvector <=> 已经返回了距离值，不在 row 中
+            # 重新查询获取距离
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT embedding <=> %s AS dist FROM memories WHERE id = %s AND tenant_id = %s",
+                    (str(embedding_vector), row["id"], self._tenant_id),
+                )
+                dist_row = cur.fetchone()
+
+            if dist_row is None:
+                return None
+
+            cosine_distance = float(dist_row[0])
+            similarity = 1.0 - cosine_distance
+
+            if similarity < 0.90 or row["category"] != category:
+                return None
+
+            # 触发合并：UPDATE 旧记忆
+            merged_content = f"{row['content']}\n---\n{content}"
+            if len(merged_content) > 3000:
+                merged_content = f"{row['content'][:1500]}\n---\n{content}"
+
+            old_keywords = list(row.get("keywords") or [])
+            merged_keywords = list(set(old_keywords + keywords))
+
+            # 重新生成 embedding（用合并后内容）
+            new_embedding = None
+            try:
+                from crew.embedding import build_embedding_text, get_embedding
+
+                emb_text = build_embedding_text(merged_content, merged_keywords)
+                new_embedding = get_embedding(emb_text)
+            except Exception:
+                new_embedding = embedding_vector  # fallback: 用新记忆的向量
+
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE memories
+                    SET content = %s, keywords = %s, embedding = %s
+                    WHERE id = %s AND employee = %s AND tenant_id = %s
+                    """,
+                    (merged_content, merged_keywords, new_embedding,
+                     row["id"], employee, self._tenant_id),
+                )
+
+            logger.info(
+                "dedup: merged into %s (similarity=%.2f)", row["id"], similarity,
+            )
+
+            # 返回更新后的 entry
+            return self._row_to_entry({
+                **row,
+                "content": merged_content,
+                "keywords": merged_keywords,
+            })
+
+        except Exception as e:
+            logger.debug("dedup 查询失败，回退到正常写入: %s", e)
+            return None
 
     # 信息分级等级序（用于 classification_max 过滤）
     _CLASSIFICATION_LEVELS = {

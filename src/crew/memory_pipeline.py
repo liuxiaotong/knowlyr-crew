@@ -254,6 +254,85 @@ def _find_candidates_by_keywords(
     return [store._row_to_entry(row) for row in rows]
 
 
+def _find_candidates_by_semantic(
+    content: str,
+    keywords: list[str],
+    employee: str,
+    store: MemoryStoreDB,
+    limit: int = 5,
+    min_similarity: float = 0.3,
+) -> list[tuple[MemoryEntry, float]]:
+    """NG-2: 用向量相似度找候选记忆.
+
+    Args:
+        content: 新记忆内容
+        keywords: 新记忆关键词
+        employee: 员工标识符
+        store: 数据库存储实例
+        limit: 最多返回候选数
+        min_similarity: 最低 cosine similarity 阈值
+
+    Returns:
+        (MemoryEntry, similarity) 元组列表，按相似度降序
+    """
+    try:
+        from crew.embedding import build_embedding_text, get_embedding
+
+        emb_text = build_embedding_text(content, keywords)
+        query_vec = get_embedding(emb_text)
+        if query_vec is None:
+            return []
+    except Exception:
+        return []
+
+    from crew.database import get_connection
+
+    employee_resolved = store._resolve_to_character_name(employee)
+    max_distance = 1.0 - min_similarity  # cosine distance 阈值
+
+    try:
+        with get_connection() as conn:
+            import psycopg2.extras
+
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT id, employee, created_at, category, content,
+                       source_session, confidence, superseded_by, ttl_days,
+                       importance, last_accessed, tags, shared, visibility,
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain,
+                       keywords, linked_memories,
+                       (embedding <=> %s) AS cosine_dist
+                FROM memories
+                WHERE employee = %s
+                  AND tenant_id = %s
+                  AND (superseded_by = '' OR superseded_by IS NULL)
+                  AND embedding IS NOT NULL
+                  AND (embedding <=> %s) < %s
+                ORDER BY embedding <=> %s
+                LIMIT %s
+                """,
+                (
+                    str(query_vec), employee_resolved, store._tenant_id,
+                    str(query_vec), max_distance,
+                    str(query_vec), limit,
+                ),
+            )
+            rows = cur.fetchall()
+
+        results = []
+        for row in rows:
+            sim = 1.0 - float(row["cosine_dist"])
+            entry = store._row_to_entry(row)
+            results.append((entry, sim))
+        return results
+
+    except Exception as e:
+        logger.debug("semantic candidate search failed: %s", e)
+        return []
+
+
 def connect(
     note: ReflectResult,
     employee: str,
@@ -262,12 +341,17 @@ def connect(
 ) -> ConnectResult:
     """Connect 阶段：找到关联记忆，决定 merge/link/new.
 
-    逻辑：
-    - 用 note.keywords 做 ILIKE 匹配，查已有记忆 Top-5
-    - 计算 keyword 重叠度：
-      - >= 70% 且 category 相同 -> merge
-      - 30%-70% 或 category 不同 -> link
-      - < 30% 或无候选 -> new
+    NG-2 升级：优先用向量语义查找候选，embedding 不可用时降级为关键词 Jaccard。
+
+    语义模式阈值：
+    - >= 0.85 且同 category → merge
+    - >= 0.5 → link
+    - < 0.5 → new
+
+    关键词模式阈值（降级）：
+    - >= 70% 且同 category → merge
+    - >= 30% → link
+    - < 30% → new
 
     Args:
         note: Reflect 阶段输出的结构化笔记
@@ -278,82 +362,162 @@ def connect(
     Returns:
         ConnectResult 包含 action 和结果 entry
     """
+    # NG-2: 优先尝试语义查找
+    semantic_candidates = _find_candidates_by_semantic(
+        note.content, note.keywords, employee, store,
+    )
+
+    if semantic_candidates:
+        # 语义模式：用相似度判断
+        best_candidate, best_sim = semantic_candidates[0]
+
+        if best_sim >= 0.85 and best_candidate.category == note.category:
+            # merge: 语义几乎一样，合并内容
+            merged_content = f"{best_candidate.content}\n---\n{note.content}"
+            if len(merged_content) > 3000:
+                merged_content = f"{best_candidate.content[:1500]}\n---\n{note.content}"
+            merged_keywords = list(set(best_candidate.keywords + note.keywords))
+
+            store.update(
+                best_candidate.id,
+                employee,
+                content=merged_content,
+            )
+            try:
+                store.update_keywords(best_candidate.id, employee, merged_keywords)
+            except Exception:
+                logger.warning(
+                    "merge: update_keywords 失败 entry_id=%s，content 已更新",
+                    best_candidate.id,
+                )
+
+            # NG-2: merge 时更新 embedding
+            try:
+                from crew.embedding import build_embedding_text, get_embedding
+
+                emb_text = build_embedding_text(merged_content, merged_keywords)
+                new_vec = get_embedding(emb_text)
+                if new_vec is not None:
+                    from crew.database import get_connection as _gc
+
+                    with _gc() as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "UPDATE memories SET embedding = %s WHERE id = %s AND tenant_id = %s",
+                            (new_vec, best_candidate.id, store._tenant_id),
+                        )
+            except Exception:
+                logger.debug("merge: embedding 更新失败，不影响合并结果")
+
+            updated_entry = best_candidate.model_copy(
+                update={
+                    "content": merged_content,
+                    "keywords": merged_keywords,
+                }
+            )
+            logger.info(
+                "connect semantic merge: id=%s similarity=%.2f",
+                best_candidate.id, best_sim,
+            )
+            return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate.id)
+
+        elif best_sim >= 0.5:
+            # link: 相关但不重复
+            new_entry = _store_new(note, employee, store, **store_kwargs)
+
+            try:
+                store.update_linked_memories(new_entry.id, employee, [best_candidate.id])
+                old_linked = list(best_candidate.linked_memories) + [new_entry.id]
+                old_linked = old_linked[-20:]
+                store.update_linked_memories(best_candidate.id, employee, old_linked)
+                merged_kw = list(set(best_candidate.keywords + note.keywords))
+                store.update_keywords(best_candidate.id, employee, merged_kw)
+            except Exception:
+                logger.warning(
+                    "link: 关联更新部分失败 new_id=%s, candidate_id=%s",
+                    new_entry.id, best_candidate.id,
+                )
+
+            updated_entry = new_entry.model_copy(update={"linked_memories": [best_candidate.id]})
+            logger.info(
+                "connect semantic link: new=%s linked_to=%s similarity=%.2f",
+                new_entry.id, best_candidate.id, best_sim,
+            )
+            return ConnectResult(action="link", entry=updated_entry)
+
+        else:
+            # < 0.5 → new
+            entry = _store_new(note, employee, store, **store_kwargs)
+            return ConnectResult(action="new", entry=entry)
+
+    # 降级：关键词 Jaccard 逻辑（embedding 不可用时）
     candidates = _find_candidates_by_keywords(note.keywords, employee, store)
 
     if not candidates:
-        # 无候选 -> new
         entry = _store_new(note, employee, store, **store_kwargs)
         return ConnectResult(action="new", entry=entry)
 
     # 找最高重叠度的候选
     best_overlap = 0.0
-    best_candidate: MemoryEntry | None = None
+    best_candidate_kw: MemoryEntry | None = None
 
     for candidate in candidates:
         overlap = _keyword_overlap(note.keywords, candidate.keywords)
         if overlap > best_overlap:
             best_overlap = overlap
-            best_candidate = candidate
+            best_candidate_kw = candidate
 
-    if best_candidate is None:
+    if best_candidate_kw is None:
         entry = _store_new(note, employee, store, **store_kwargs)
         return ConnectResult(action="new", entry=entry)
 
-    if best_overlap >= 0.7 and best_candidate.category == note.category:
+    if best_overlap >= 0.7 and best_candidate_kw.category == note.category:
         # merge: 更新已有记忆的 content 和 keywords
-        # 合并内容，限制总长度防止无限膨胀
-        merged_content = f"{best_candidate.content}\n---\n{note.content}"
+        merged_content = f"{best_candidate_kw.content}\n---\n{note.content}"
         if len(merged_content) > 3000:
-            # 保留最新内容，截断旧内容
-            merged_content = f"{best_candidate.content[:1500]}\n---\n{note.content}"
-        merged_keywords = list(set(best_candidate.keywords + note.keywords))
+            merged_content = f"{best_candidate_kw.content[:1500]}\n---\n{note.content}"
+        merged_keywords = list(set(best_candidate_kw.keywords + note.keywords))
 
         store.update(
-            best_candidate.id,
+            best_candidate_kw.id,
             employee,
             content=merged_content,
         )
         try:
-            store.update_keywords(best_candidate.id, employee, merged_keywords)
+            store.update_keywords(best_candidate_kw.id, employee, merged_keywords)
         except Exception:
             logger.warning(
                 "merge: update_keywords 失败 entry_id=%s，content 已更新",
-                best_candidate.id,
+                best_candidate_kw.id,
             )
 
-        # 返回更新后的 entry
-        updated_entry = best_candidate.model_copy(
+        updated_entry = best_candidate_kw.model_copy(
             update={
                 "content": merged_content,
                 "keywords": merged_keywords,
             }
         )
-        return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate.id)
+        return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate_kw.id)
 
     elif best_overlap >= 0.3:
         # link: 新建 + 双向 linked_memories
         new_entry = _store_new(note, employee, store, **store_kwargs)
 
         try:
-            # 更新新记忆的 linked_memories
-            store.update_linked_memories(new_entry.id, employee, [best_candidate.id])
-
-            # 更新旧记忆的 linked_memories（双向），最多保留 20 个关联
-            old_linked = list(best_candidate.linked_memories) + [new_entry.id]
+            store.update_linked_memories(new_entry.id, employee, [best_candidate_kw.id])
+            old_linked = list(best_candidate_kw.linked_memories) + [new_entry.id]
             old_linked = old_linked[-20:]
-            store.update_linked_memories(best_candidate.id, employee, old_linked)
-
-            # 更新旧记忆的 keywords（合并新关键词）
-            merged_kw = list(set(best_candidate.keywords + note.keywords))
-            store.update_keywords(best_candidate.id, employee, merged_kw)
+            store.update_linked_memories(best_candidate_kw.id, employee, old_linked)
+            merged_kw = list(set(best_candidate_kw.keywords + note.keywords))
+            store.update_keywords(best_candidate_kw.id, employee, merged_kw)
         except Exception:
             logger.warning(
                 "link: 关联更新部分失败 new_id=%s, candidate_id=%s，新记忆已写入但关联可能不完整",
                 new_entry.id,
-                best_candidate.id,
+                best_candidate_kw.id,
             )
 
-        updated_entry = new_entry.model_copy(update={"linked_memories": [best_candidate.id]})
+        updated_entry = new_entry.model_copy(update={"linked_memories": [best_candidate_kw.id]})
         return ConnectResult(action="link", entry=updated_entry)
 
     else:
