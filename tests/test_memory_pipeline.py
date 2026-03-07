@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from crew.memory import MemoryEntry
 from crew.memory_pipeline import (
     ConnectResult,
@@ -16,7 +14,6 @@ from crew.memory_pipeline import (
     process_memory,
     reflect,
 )
-
 
 # ── Fixtures ──
 
