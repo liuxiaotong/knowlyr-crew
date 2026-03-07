@@ -391,7 +391,19 @@ class MemoryStoreDB:
             params.extend(allowed_domains)
 
         # 排序
-        if sort_by == "importance":
+        # 当有 search_text 时，按 category 权重排序（知识类优先）
+        if search_text:
+            order_by = (
+                "CASE category "
+                "WHEN 'pattern' THEN 1 "
+                "WHEN 'decision' THEN 2 "
+                "WHEN 'correction' THEN 3 "
+                "WHEN 'estimate' THEN 4 "
+                "WHEN 'finding' THEN 5 "
+                "ELSE 6 END, "
+                "importance DESC, created_at DESC"
+            )
+        elif sort_by == "importance":
             order_by = "importance DESC, created_at DESC"
         elif sort_by == "confidence":
             order_by = "confidence DESC, created_at DESC"
@@ -787,7 +799,7 @@ class MemoryStoreDB:
         Args:
             employee: 员工名称
             limit: 最大条数
-            query: 查询上下文（暂不支持语义搜索，降级为普通查询）
+            query: 查询上下文（有值时走 search_text 语义搜索，返回相关记忆）
             employee_tags: 员工标签（用于匹配共享记忆）
             max_visibility: 可见性上限
             team_members: 同团队成员名列表
@@ -802,6 +814,7 @@ class MemoryStoreDB:
         parts: list[str] = []
 
         # 个人记忆（透传 classification 参数）
+        # L2 优化：有 query 时走 search_text 语义搜索，返回最相关 Top-N
         entries = self.query(
             employee,
             limit=limit,
@@ -809,6 +822,7 @@ class MemoryStoreDB:
             classification_max=classification_max,
             allowed_domains=allowed_domains,
             include_confidential=include_confidential,
+            search_text=query if query else None,
         )
         if entries:
             parts.append(self._format_entries(entries))

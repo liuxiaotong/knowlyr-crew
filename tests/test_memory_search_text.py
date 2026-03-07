@@ -295,3 +295,189 @@ class TestMcpLocalSemanticSearch:
         # a1 全匹配（skip_paths + 误删），a2 部分匹配（只有 skip_paths）
         assert len(result) >= 1
         assert result[0].content == "skip_paths 配置被误删了"
+
+
+# ── Phase 2: 检索权重排序测试 ──
+
+
+class TestSearchWeightOrdering:
+    """验证 search_text 有值时，结果按 category 权重排序."""
+
+    def test_db_query_search_text_uses_category_weight_order(self):
+        """MemoryStoreDB.query(search_text=...) 生成的 SQL 包含 CASE category 排序."""
+        from crew.memory_store_db import MemoryStoreDB
+
+        with (
+            patch("crew.memory_store_db.is_pg", return_value=True),
+            patch("crew.memory_store_db.get_connection") as mock_conn,
+            patch.object(MemoryStoreDB, "__init__", lambda self, **kw: None),
+        ):
+            store = MemoryStoreDB.__new__(MemoryStoreDB)
+            store._tenant_id = "test-tenant"
+            store._project_dir = None
+            store._dict_cursor_factory = MagicMock()
+            store.resolve_to_character_name = lambda e: e
+
+            mock_cursor = MagicMock()
+            mock_cursor.fetchall.return_value = []
+            mock_conn.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_conn.return_value.__enter__.return_value.cursor.return_value = mock_cursor
+            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+            store.query(employee="test", search_text="deploy")
+
+            sql = mock_cursor.execute.call_args[0][0]
+            assert "CASE category" in sql
+            assert "WHEN 'pattern' THEN 1" in sql
+            assert "WHEN 'decision' THEN 2" in sql
+            assert "WHEN 'finding' THEN 5" in sql
+
+    def test_db_query_no_search_text_uses_default_order(self):
+        """search_text=None 时不使用 CASE category 排序."""
+        from crew.memory_store_db import MemoryStoreDB
+
+        with (
+            patch("crew.memory_store_db.is_pg", return_value=True),
+            patch("crew.memory_store_db.get_connection") as mock_conn,
+            patch.object(MemoryStoreDB, "__init__", lambda self, **kw: None),
+        ):
+            store = MemoryStoreDB.__new__(MemoryStoreDB)
+            store._tenant_id = "test-tenant"
+            store._project_dir = None
+            store._dict_cursor_factory = MagicMock()
+            store.resolve_to_character_name = lambda e: e
+
+            mock_cursor = MagicMock()
+            mock_cursor.fetchall.return_value = []
+            mock_conn.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_conn.return_value.__enter__.return_value.cursor.return_value = mock_cursor
+            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+            store.query(employee="test", search_text=None)
+
+            sql = mock_cursor.execute.call_args[0][0]
+            assert "CASE category" not in sql
+            assert "created_at DESC" in sql
+
+    def test_webhook_fallback_category_weight_sorting(self):
+        """webhook_handlers 降级路径中，同分结果按 category 权重排序."""
+        from crew.webhook_handlers import _semantic_memory_search
+
+        entries = [
+            _make_entry("deploy config", entry_id="a1", category="finding"),
+            _make_entry("deploy decision", entry_id="a2", category="decision"),
+            _make_entry("deploy pattern", entry_id="a3", category="pattern"),
+            _make_entry("deploy correction", entry_id="a4", category="correction"),
+        ]
+        store, _ = _make_store_without_search_text(entries)
+
+        result = _semantic_memory_search(store, "test", "deploy", None, 10)
+
+        # 所有 4 条都匹配 "deploy"（score=1.0），按 category 权重排序
+        assert len(result) == 4
+        assert result[0].category == "pattern"  # weight 1
+        assert result[1].category == "decision"  # weight 2
+        assert result[2].category == "correction"  # weight 3
+        assert result[3].category == "finding"  # weight 5
+
+    def test_mcp_fallback_category_weight_sorting(self):
+        """mcp_server 降级路径中，同分结果按 category 权重排序."""
+        from crew.mcp_server import _local_semantic_memory_search
+
+        entries = [
+            _make_entry("deploy config", entry_id="a1", category="finding"),
+            _make_entry("deploy decision", entry_id="a2", category="decision"),
+            _make_entry("deploy pattern", entry_id="a3", category="pattern"),
+        ]
+        store, _ = _make_store_without_search_text(entries)
+
+        result = _local_semantic_memory_search(store, "test", "deploy", None, 10)
+
+        assert len(result) == 3
+        assert result[0].category == "pattern"
+        assert result[1].category == "decision"
+        assert result[2].category == "finding"
+
+    def test_score_takes_precedence_over_category(self):
+        """匹配分数优先于 category 权重."""
+        from crew.webhook_handlers import _semantic_memory_search
+
+        entries = [
+            _make_entry("deploy pipeline updated", entry_id="a1", category="finding"),
+            _make_entry("deploy config", entry_id="a2", category="pattern"),
+        ]
+        store, _ = _make_store_without_search_text(entries)
+
+        result = _semantic_memory_search(store, "test", "deploy pipeline", None, 10)
+
+        # a1 全匹配 (score=1.0)，a2 部分匹配 (score=0.5)
+        # 即使 pattern 权重更高，a1 的分数更高应排前
+        assert len(result) == 2
+        assert result[0].id == "a1"
+        assert result[1].id == "a2"
+
+
+# ── Phase 2: L2 启动加载优化测试 ──
+
+
+class TestL2LoadingOptimization:
+    """验证 format_for_prompt 有 query 时走 search_text 路径."""
+
+    def test_db_format_for_prompt_with_query_uses_search_text(self):
+        """MemoryStoreDB.format_for_prompt(query=...) 调用 query(search_text=...)."""
+        from crew.memory_store_db import MemoryStoreDB
+
+        with (
+            patch("crew.memory_store_db.is_pg", return_value=True),
+            patch("crew.memory_store_db.get_connection") as mock_conn,
+            patch.object(MemoryStoreDB, "__init__", lambda self, **kw: None),
+        ):
+            store = MemoryStoreDB.__new__(MemoryStoreDB)
+            store._tenant_id = "test-tenant"
+            store._project_dir = None
+            store._dict_cursor_factory = MagicMock()
+
+            mock_cursor = MagicMock()
+            mock_cursor.fetchall.return_value = []
+            mock_conn.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_conn.return_value.__enter__.return_value.cursor.return_value = mock_cursor
+            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+            # 调用 format_for_prompt，query 有值
+            store.format_for_prompt("test", query="deploy pipeline")
+
+            # format_for_prompt 会调用 query() 然后 query_shared()
+            # 第一次 execute 调用应该是 query(search_text="deploy pipeline")
+            all_calls = mock_cursor.execute.call_args_list
+            first_sql = all_calls[0][0][0]
+            assert "ILIKE" in first_sql
+            assert "CASE category" in first_sql
+
+    def test_db_format_for_prompt_without_query_no_search_text(self):
+        """MemoryStoreDB.format_for_prompt(query='') 不使用 search_text."""
+        from crew.memory_store_db import MemoryStoreDB
+
+        with (
+            patch("crew.memory_store_db.is_pg", return_value=True),
+            patch("crew.memory_store_db.get_connection") as mock_conn,
+            patch.object(MemoryStoreDB, "__init__", lambda self, **kw: None),
+        ):
+            store = MemoryStoreDB.__new__(MemoryStoreDB)
+            store._tenant_id = "test-tenant"
+            store._project_dir = None
+            store._dict_cursor_factory = MagicMock()
+
+            mock_cursor = MagicMock()
+            mock_cursor.fetchall.return_value = []
+            mock_conn.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_conn.return_value.__enter__.return_value.cursor.return_value = mock_cursor
+            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+            # 调用 format_for_prompt，query 为空
+            store.format_for_prompt("test", query="")
+
+            # 第一次 execute 调用（query）不应该有 ILIKE
+            all_calls = mock_cursor.execute.call_args_list
+            first_sql = all_calls[0][0][0]
+            assert "ILIKE" not in first_sql
+            assert "CASE category" not in first_sql
