@@ -71,9 +71,7 @@ class MemoryEntry(BaseModel):
     keywords: list[str] = Field(
         default_factory=list, description="结构化关键词，用于 Connect 阶段匹配"
     )
-    linked_memories: list[str] = Field(
-        default_factory=list, description="关联记忆 ID 列表（双向）"
-    )
+    linked_memories: list[str] = Field(default_factory=list, description="关联记忆 ID 列表（双向）")
 
 
 class MemoryStore:
