@@ -1,9 +1,10 @@
 """MCP credential isolation tests."""
+
 from __future__ import annotations
+
 import asyncio
 import sqlite3
 from unittest.mock import AsyncMock, patch
-import pytest
 
 
 class TestCredentialsCRUD:
@@ -29,6 +30,7 @@ class TestCredentialsCRUD:
 
     def test_roundtrip(self, tmp_path):
         from crew.mcp_gateway.credentials import _decrypt, _encrypt
+
         conn = self._setup_db(tmp_path)
         t = "ya29.test"
         conn.execute(
@@ -46,6 +48,7 @@ class TestCredentialsCRUD:
 
     def test_tenant_isolation(self, tmp_path):
         from crew.mcp_gateway.credentials import _encrypt
+
         conn = self._setup_db(tmp_path)
         conn.execute(
             "INSERT INTO user_mcp_credentials (user_id, mcp_server, access_token, tenant_id) VALUES (?, ?, ?, ?)",
@@ -56,7 +59,9 @@ class TestCredentialsCRUD:
             ("u2", "gws", _encrypt("t2"), "ent"),
         )
         conn.commit()
-        rows = conn.execute("SELECT tenant_id FROM user_mcp_credentials ORDER BY user_id").fetchall()
+        rows = conn.execute(
+            "SELECT tenant_id FROM user_mcp_credentials ORDER BY user_id"
+        ).fetchall()
         assert rows[0]["tenant_id"] == "admin"
         assert rows[1]["tenant_id"] == "ent"
         conn.close()
@@ -65,12 +70,14 @@ class TestCredentialsCRUD:
 class TestTenantFiltering:
     def test_empty_allows_all(self):
         from crew.mcp_gateway.config import MCPServerConfig
+
         cfg = MCPServerConfig(name="gws", command="gws", allowed_tenants=[])
         assert cfg.is_tenant_allowed("admin")
         assert cfg.is_tenant_allowed(None)
 
     def test_restricted(self):
         from crew.mcp_gateway.config import MCPServerConfig
+
         cfg = MCPServerConfig(name="gws", command="gws", allowed_tenants=["admin"])
         assert cfg.is_tenant_allowed("admin")
         assert not cfg.is_tenant_allowed("other")
@@ -78,9 +85,10 @@ class TestTenantFiltering:
 
     def test_yaml_loads(self, tmp_path):
         from crew.mcp_gateway.config import load_mcp_servers_config
+
         d = tmp_path / ".crew"
         d.mkdir()
-        yaml_text = "servers:\n  gws:\n    command: gws\n    allowed_tenants: [\"admin\"]\n  s2:\n    command: s2\n"
+        yaml_text = 'servers:\n  gws:\n    command: gws\n    allowed_tenants: ["admin"]\n  s2:\n    command: s2\n'
         (d / "mcp_servers.yaml").write_text(yaml_text)
         r = load_mcp_servers_config(tmp_path)
         assert r["gws"].allowed_tenants == ["admin"]
@@ -91,6 +99,7 @@ class TestHandlerIntegration:
     def _make(self, tenants=None):
         from crew.mcp_gateway.config import MCPServerConfig
         from crew.mcp_gateway.manager import MCPGatewayManager
+
         cfg = MCPServerConfig(name="gws", command="gws", allowed_tenants=tenants or [])
         mc = AsyncMock()
         mc.call_tool = AsyncMock(return_value="ok")
@@ -169,7 +178,9 @@ class TestHandlerIntegration:
 class TestAuditSig:
     def test_has_tenant_id(self):
         import inspect
+
         from crew.mcp_gateway.audit import log_tool_call
+
         sig = inspect.signature(log_tool_call)
         assert "tenant_id" in sig.parameters
 
@@ -177,5 +188,6 @@ class TestAuditSig:
 class TestConfigDefaults:
     def test_default_empty(self):
         from crew.mcp_gateway.config import MCPServerConfig
+
         cfg = MCPServerConfig(name="t", command="t")
         assert cfg.allowed_tenants == []
