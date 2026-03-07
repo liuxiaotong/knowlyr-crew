@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import random
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── 辅助 ──
 
@@ -308,3 +308,75 @@ class TestDecayBounds:
             q = q * 0.95
         assert q >= 0.0
         assert q < 0.001  # 应该趋近 0
+
+
+# ── 8. recall-feedback webhook 衰减集成 ──
+
+
+class TestRecallFeedbackDecay:
+    """recall-feedback handler 在 recalled_memory_ids 存在时调用 decay_unverified_recalls."""
+
+    def test_decay_called_when_recalled_ids_present(self) -> None:
+        """当 recalled_memory_ids 存在时，decay_unverified_recalls 被调用."""
+        import asyncio
+        import json
+
+        mock_store = MagicMock()
+        mock_store.record_useful.return_value = 2
+        mock_store.decay_unverified_recalls.return_value = 1
+
+        mock_request = MagicMock()
+        mock_request.json = AsyncMock(
+            return_value={
+                "employee": "test-emp",
+                "useful_memory_ids": ["id1", "id2"],
+                "recalled_memory_ids": ["id1", "id2", "id3", "id4"],
+            }
+        )
+
+        mock_ctx = MagicMock()
+
+        with patch("crew.webhook_handlers.get_memory_store", return_value=mock_store):
+            from crew.webhook_handlers import _handle_recall_feedback
+
+            result = asyncio.run(_handle_recall_feedback(mock_request, mock_ctx))
+
+        body = json.loads(result.body.decode())
+        assert body["ok"] is True
+        assert body["updated"] == 2
+        assert body["decayed"] == 1
+
+        mock_store.record_useful.assert_called_once_with(["id1", "id2"], "test-emp")
+        mock_store.decay_unverified_recalls.assert_called_once_with(
+            ["id1", "id2", "id3", "id4"], ["id1", "id2"], "test-emp"
+        )
+
+    def test_decay_not_called_without_recalled_ids(self) -> None:
+        """当 recalled_memory_ids 不存在时，decay_unverified_recalls 不被调用."""
+        import asyncio
+        import json
+
+        mock_store = MagicMock()
+        mock_store.record_useful.return_value = 2
+
+        mock_request = MagicMock()
+        mock_request.json = AsyncMock(
+            return_value={
+                "employee": "test-emp",
+                "useful_memory_ids": ["id1", "id2"],
+            }
+        )
+
+        mock_ctx = MagicMock()
+
+        with patch("crew.webhook_handlers.get_memory_store", return_value=mock_store):
+            from crew.webhook_handlers import _handle_recall_feedback
+
+            result = asyncio.run(_handle_recall_feedback(mock_request, mock_ctx))
+
+        body = json.loads(result.body.decode())
+        assert body["ok"] is True
+        assert body["updated"] == 2
+        assert body["decayed"] == 0
+
+        mock_store.decay_unverified_recalls.assert_not_called()
