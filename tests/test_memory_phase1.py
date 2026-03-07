@@ -100,9 +100,7 @@ class TestSemanticMemorySearchWebhook:
             "crew.memory_search.SemanticMemoryIndex",
             MagicMock(return_value=mock_index),
         ):
-            result = _semantic_memory_search(
-                store, "test-employee", "API", "finding", 10
-            )
+            result = _semantic_memory_search(store, "test-employee", "API", "finding", 10)
 
         assert len(result) == 1
         assert result[0].category == "finding"
@@ -139,9 +137,7 @@ class TestCronEvaluateDedup:
         from crew.cron_evaluate import _memory_exists_by_source
 
         store = _make_mock_store([_make_memory_entry(source_session="other")])
-        assert (
-            _memory_exists_by_source(store, "test-employee", "cron:overdue:D999") is False
-        )
+        assert _memory_exists_by_source(store, "test-employee", "cron:overdue:D999") is False
 
     def test_empty_store(self):
         from crew.cron_evaluate import _memory_exists_by_source
@@ -171,19 +167,13 @@ class TestEvaluationCorrectionDedup:
             assert mock_store.add.call_count == 1
 
             mock_store.query.return_value = [
-                _make_memory_entry(
-                    source_session=f"eval:{decision.id}", category="correction"
-                )
+                _make_memory_entry(source_session=f"eval:{decision.id}", category="correction")
             ]
             mock_store.add.reset_mock()
 
-            d2 = engine.track(
-                employee="test-employee", category="estimate", content="另一个估算"
-            )
+            d2 = engine.track(employee="test-employee", category="estimate", content="另一个估算")
             mock_store.query.return_value = [
-                _make_memory_entry(
-                    source_session=f"eval:{d2.id}", category="correction"
-                )
+                _make_memory_entry(source_session=f"eval:{d2.id}", category="correction")
             ]
             result2 = engine.evaluate(d2.id, "实际结果", "评估内容")
             assert result2 is not None
