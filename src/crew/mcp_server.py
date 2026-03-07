@@ -3727,10 +3727,14 @@ def create_server(project_dir: Path | None = None) -> "Server":
             try:
                 import httpx
 
+                headers: dict[str, str] = {"Authorization": f"Bearer {api_token}"}
+                admin_token = os.environ.get("ADMIN_TOKEN", "")
+                if admin_token:
+                    headers["X-Admin-Token"] = admin_token
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(
                         f"{base_url}/api/souls/{employee_name}",
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=headers,
                     )
                     if resp.status_code == 404:
                         return [
@@ -3773,11 +3777,15 @@ def create_server(project_dir: Path | None = None) -> "Server":
             try:
                 import httpx
 
+                headers: dict[str, str] = {"Authorization": f"Bearer {api_token}"}
+                admin_token = os.environ.get("ADMIN_TOKEN", "")
+                if admin_token:
+                    headers["X-Admin-Token"] = admin_token
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.put(
                         f"{base_url}/api/souls/{employee_name}",
                         json={"content": content, "updated_by": updated_by},
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=headers,
                     )
                     resp.raise_for_status()
                     return [
