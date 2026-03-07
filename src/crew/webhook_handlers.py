@@ -911,6 +911,13 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
             }
             for m in team_memories
         ]
+    # 记录召回（recall tracking 闭环）
+    recalled_memory_ids = [m.id for m in memories]
+    if recalled_memory_ids:
+        try:
+            store.record_recall(recalled_memory_ids)
+        except Exception:
+            logger.warning("record_recall failed for %s", employee.name)
 
     # 租户上下文（一次获取，后续复用）
     _state_tenant = get_current_tenant(request)
@@ -945,6 +952,7 @@ async def _handle_employee_state(request: Any, ctx: _AppContext) -> Any:
         "agent_status": employee.agent_status,
         "soul": soul_field,
         "memories": memory_list,
+        "recalled_memory_ids": recalled_memory_ids,
         "notes": recent_notes,
     }
     if team_memory_list:
@@ -2395,6 +2403,12 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                 reverse=True,
             )[:20]
 
+            # 召回效果统计
+            try:
+                recall_stats = memory_store.get_recall_stats()
+            except Exception:
+                recall_stats = {}
+
             return JSONResponse(
                 {
                     "ok": True,
@@ -2403,6 +2417,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                     "by_category": by_category,
                     "quality_distribution": quality_dist,
                     "top_tags": top_tags,
+                    "recall_stats": recall_stats,
                 }
             )
 
@@ -2440,6 +2455,12 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                 reverse=True,
             )[:20]
 
+            # 召回效果统计
+            try:
+                recall_stats = memory_store.get_recall_stats()
+            except Exception:
+                recall_stats = {}
+
             return JSONResponse(
                 {
                     "ok": True,
@@ -2448,6 +2469,7 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
                     "by_employee": by_employee,
                     "quality_distribution": quality_dist,
                     "top_tags": top_tags,
+                    "recall_stats": recall_stats,
                 }
             )
 
@@ -2464,6 +2486,33 @@ async def _handle_knowledge_dashboard(request: Any, ctx: _AppContext) -> Any:
     admin_err = _require_admin_token(request)
     if admin_err:
         return _error_response(admin_err, 403)
+async def _handle_recall_feedback(request: Any, ctx: _AppContext) -> Any:
+    """召回反馈 — POST /api/memory/recall-feedback.
+
+    员工任务完成后反馈哪些记忆有用。
+
+    JSON body:
+        {
+            "employee": "slug or name",
+            "useful_memory_ids": ["id1", "id2"],
+            "session_id": "optional"
+        }
+
+    返回:
+        {"ok": true, "updated": N}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("无效的 JSON body")
+
+    employee = body.get("employee", "")
+    useful_ids = body.get("useful_memory_ids", [])
+
+    if not employee:
+        return _error_response("employee 必填")
+    if not useful_ids or not isinstance(useful_ids, list):
+        return _error_response("useful_memory_ids 必须为非空列表")
 
     try:
         memory_store = get_memory_store(
@@ -2477,6 +2526,10 @@ async def _handle_knowledge_dashboard(request: Any, ctx: _AppContext) -> Any:
 
     except Exception:
         logger.exception("获取知识仪表盘数据失败")
+        updated = memory_store.record_useful(useful_ids, employee)
+        return JSONResponse({"ok": True, "updated": updated})
+    except Exception:
+        logger.exception("recall feedback 处理失败")
         return _error_response("内部错误", 500)
 
 

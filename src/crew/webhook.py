@@ -150,6 +150,7 @@ from crew.webhook_handlers import (  # noqa: F401
     _handle_pipeline_list_config,
     _handle_pipeline_update_config,
     _handle_project_status,
+    _handle_recall_feedback,
     _handle_run_employee,
     _handle_run_pipeline,
     _handle_run_route,
@@ -699,6 +700,9 @@ def create_webhook_app(
             "/api/knowledge/dashboard",
             endpoint=_make_handler(ctx, _handle_knowledge_dashboard),
             methods=["GET"],
+            "/api/memory/recall-feedback",
+            endpoint=_make_handler(ctx, _handle_recall_feedback),
+            methods=["POST"],
         ),
         Route(
             "/api/memory/batch/update",
