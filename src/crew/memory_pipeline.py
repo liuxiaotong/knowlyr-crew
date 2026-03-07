@@ -314,9 +314,13 @@ def _find_candidates_by_semantic(
                 LIMIT %s
                 """,
                 (
-                    str(query_vec), employee_resolved, store._tenant_id,
-                    str(query_vec), max_distance,
-                    str(query_vec), limit,
+                    str(query_vec),
+                    employee_resolved,
+                    store._tenant_id,
+                    str(query_vec),
+                    max_distance,
+                    str(query_vec),
+                    limit,
                 ),
             )
             rows = cur.fetchall()
@@ -364,7 +368,10 @@ def connect(
     """
     # NG-2: 优先尝试语义查找
     semantic_candidates = _find_candidates_by_semantic(
-        note.content, note.keywords, employee, store,
+        note.content,
+        note.keywords,
+        employee,
+        store,
     )
 
     if semantic_candidates:
@@ -417,9 +424,12 @@ def connect(
             )
             logger.info(
                 "connect semantic merge: id=%s similarity=%.2f",
-                best_candidate.id, best_sim,
+                best_candidate.id,
+                best_sim,
             )
-            return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate.id)
+            return ConnectResult(
+                action="merge", entry=updated_entry, merged_entry_id=best_candidate.id
+            )
 
         elif best_sim >= 0.5:
             # link: 相关但不重复
@@ -435,13 +445,16 @@ def connect(
             except Exception:
                 logger.warning(
                     "link: 关联更新部分失败 new_id=%s, candidate_id=%s",
-                    new_entry.id, best_candidate.id,
+                    new_entry.id,
+                    best_candidate.id,
                 )
 
             updated_entry = new_entry.model_copy(update={"linked_memories": [best_candidate.id]})
             logger.info(
                 "connect semantic link: new=%s linked_to=%s similarity=%.2f",
-                new_entry.id, best_candidate.id, best_sim,
+                new_entry.id,
+                best_candidate.id,
+                best_sim,
             )
             return ConnectResult(action="link", entry=updated_entry)
 
@@ -497,7 +510,9 @@ def connect(
                 "keywords": merged_keywords,
             }
         )
-        return ConnectResult(action="merge", entry=updated_entry, merged_entry_id=best_candidate_kw.id)
+        return ConnectResult(
+            action="merge", entry=updated_entry, merged_entry_id=best_candidate_kw.id
+        )
 
     elif best_overlap >= 0.3:
         # link: 新建 + 双向 linked_memories

@@ -322,16 +322,23 @@ class TestTryDedupMerge:
             return connections[idx]
 
         with (
-            patch.dict("sys.modules", {
-                "psycopg2": mock_psycopg2,
-                "psycopg2.extras": mock_psycopg2.extras,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "psycopg2": mock_psycopg2,
+                    "psycopg2.extras": mock_psycopg2.extras,
+                },
+            ),
             patch("crew.memory_store_db.get_connection", side_effect=fake_get_conn),
             patch("crew.embedding.get_embedding", return_value=[0.2] * 384),
             patch("crew.embedding.build_embedding_text", return_value="merged text"),
         ):
             result = store._try_dedup_merge(
-                "test", [0.1] * 384, "new content", ["性能"], "finding",
+                "test",
+                [0.1] * 384,
+                "new content",
+                ["性能"],
+                "finding",
             )
 
         assert result is not None
@@ -364,14 +371,21 @@ class TestTryDedupMerge:
             return connections[idx]
 
         with (
-            patch.dict("sys.modules", {
-                "psycopg2": mock_psycopg2,
-                "psycopg2.extras": mock_psycopg2.extras,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "psycopg2": mock_psycopg2,
+                    "psycopg2.extras": mock_psycopg2.extras,
+                },
+            ),
             patch("crew.memory_store_db.get_connection", side_effect=fake_get_conn),
         ):
             result = store._try_dedup_merge(
-                "test", [0.1] * 384, "new content", ["性能"], "finding",
+                "test",
+                [0.1] * 384,
+                "new content",
+                ["性能"],
+                "finding",
             )
 
         assert result is None
@@ -402,14 +416,21 @@ class TestTryDedupMerge:
             return connections[idx]
 
         with (
-            patch.dict("sys.modules", {
-                "psycopg2": mock_psycopg2,
-                "psycopg2.extras": mock_psycopg2.extras,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "psycopg2": mock_psycopg2,
+                    "psycopg2.extras": mock_psycopg2.extras,
+                },
+            ),
             patch("crew.memory_store_db.get_connection", side_effect=fake_get_conn),
         ):
             result = store._try_dedup_merge(
-                "test", [0.1] * 384, "new content", ["性能"], "finding",
+                "test",
+                [0.1] * 384,
+                "new content",
+                ["性能"],
+                "finding",
             )
 
         assert result is None
@@ -453,7 +474,9 @@ class TestConnectSemanticMerge:
             # mock embedding 更新
             patch("crew.embedding.get_embedding", return_value=[0.2] * 384),
             patch("crew.embedding.build_embedding_text", return_value="text"),
-            patch("crew.memory_pipeline.get_connection") if False else patch(
+            patch("crew.memory_pipeline.get_connection")
+            if False
+            else patch(
                 "crew.database.get_connection",
                 return_value=MagicMock(
                     __enter__=lambda s: s,

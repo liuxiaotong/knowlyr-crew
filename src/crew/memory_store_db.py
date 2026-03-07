@@ -292,7 +292,11 @@ class MemoryStoreDB:
         # NG-2: 轻量去重 — correction 类型不做去重（每次纠正都应独立记录）
         if embedding_vector is not None and category != "correction":
             merged = self._try_dedup_merge(
-                employee, embedding_vector, content, keywords_list, category,
+                employee,
+                embedding_vector,
+                content,
+                keywords_list,
+                category,
             )
             if merged is not None:
                 return merged
@@ -463,20 +467,30 @@ class MemoryStoreDB:
                     SET content = %s, keywords = %s, embedding = %s
                     WHERE id = %s AND employee = %s AND tenant_id = %s
                     """,
-                    (merged_content, merged_keywords, new_embedding,
-                     row["id"], employee, self._tenant_id),
+                    (
+                        merged_content,
+                        merged_keywords,
+                        new_embedding,
+                        row["id"],
+                        employee,
+                        self._tenant_id,
+                    ),
                 )
 
             logger.info(
-                "dedup: merged into %s (similarity=%.2f)", row["id"], similarity,
+                "dedup: merged into %s (similarity=%.2f)",
+                row["id"],
+                similarity,
             )
 
             # 返回更新后的 entry
-            return self._row_to_entry({
-                **row,
-                "content": merged_content,
-                "keywords": merged_keywords,
-            })
+            return self._row_to_entry(
+                {
+                    **row,
+                    "content": merged_content,
+                    "keywords": merged_keywords,
+                }
+            )
 
         except Exception as e:
             logger.debug("dedup 查询失败，回退到正常写入: %s", e)
