@@ -1244,7 +1244,9 @@ class MemoryStoreDB:
                 score_params.append(f"%{kw}%")
             score_params.append(str(query_embedding))
 
-            params.append(limit)
+            # params 开头有 N 个 match_parts 参数（用于纯关键词分支的 SELECT），
+            # 混合分支的 SELECT 用 score_params 代替，所以跳过它们
+            where_params = params[num_keywords:]
 
             with get_connection() as conn:
                 cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
@@ -1261,7 +1263,7 @@ class MemoryStoreDB:
                     ORDER BY hybrid_score DESC, importance DESC, created_at DESC
                     LIMIT %s
                 """
-                all_params = tuple(score_params + params)
+                all_params = tuple(score_params + where_params + [limit])
                 cur.execute(sql, all_params)
                 rows = cur.fetchall()
 
@@ -1372,7 +1374,9 @@ class MemoryStoreDB:
                 score_params.append(f"%{kw}%")
             score_params.append(str(query_embedding))
 
-            params.append(limit)
+            # params 开头有 N 个 match_parts 参数（用于纯关键词分支的 SELECT），
+            # 混合分支的 SELECT 用 score_params 代替，所以跳过它们
+            where_params = params[num_keywords:]
 
             with get_connection() as conn:
                 cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
@@ -1389,7 +1393,7 @@ class MemoryStoreDB:
                     ORDER BY hybrid_score DESC, importance DESC, created_at DESC
                     LIMIT %s
                 """
-                all_params = tuple(score_params + params)
+                all_params = tuple(score_params + where_params + [limit])
                 cur.execute(sql, all_params)
                 rows = cur.fetchall()
 
