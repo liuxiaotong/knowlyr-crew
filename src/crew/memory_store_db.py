@@ -269,26 +269,6 @@ class MemoryStoreDB:
                 ),
             )
 
-            # [W10] 容量管理：每个租户每个员工最多保留 500 条
-            MAX_ENTRIES = 500
-            cur.execute(
-                "SELECT count(*) FROM memories WHERE employee = %s AND tenant_id = %s AND (superseded_by = '' OR superseded_by IS NULL)",
-                (employee, self._tenant_id),
-            )
-            count = cur.fetchone()[0]
-            if count > MAX_ENTRIES:
-                # 删除最旧的超出部分
-                cur.execute(
-                    """
-                    DELETE FROM memories WHERE id IN (
-                        SELECT id FROM memories
-                        WHERE employee = %s AND tenant_id = %s AND (superseded_by = '' OR superseded_by IS NULL)
-                        ORDER BY created_at ASC
-                        LIMIT %s
-                    )
-                    """,
-                    (employee, self._tenant_id, count - MAX_ENTRIES),
-                )
 
         return MemoryEntry(
             id=entry_id,
