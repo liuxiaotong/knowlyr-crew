@@ -378,7 +378,10 @@ class MCPGatewayManager:
         return registered
 
     def _make_tool_handler(
-        self, server_name: str, tool_name: str, conn: MCPServerConnection,
+        self,
+        server_name: str,
+        tool_name: str,
+        conn: MCPServerConnection,
         config: MCPServerConfig,
     ) -> Any:
         """为一个 MCP 工具创建 handler（含租户检查 + 凭据检查）."""
@@ -397,33 +400,88 @@ class MCPGatewayManager:
             # 1. 租户级权限检查
             if not config.is_tenant_allowed(tenant_id):
                 logger.warning("租户拒绝: tenant=%s server=%s", tenant_id, server_name)
-                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="tenant_not_allowed", duration_ms=0)
+                log_tool_call(
+                    employee_name=str(agent_id or ""),
+                    tenant_id=str(tenant_id or ""),
+                    user_id=str(user_id or ""),
+                    server_name=server_name,
+                    tool_name=tool_name,
+                    namespaced_name=ns_name,
+                    args=args,
+                    success=False,
+                    error_message="tenant_not_allowed",
+                    duration_ms=0,
+                )
                 return f"[权限拒绝] 当前租户无权使用 {server_name} 服务。请联系管理员开通权限。"
 
             # 2. 用户级凭据检查（仅对需要租户隔离的服务）
             if config.allowed_tenants:  # 该服务需要权限控制
                 if not user_id:
                     logger.warning("凭据检查跳过: 无 user_id, server=%s", server_name)
-                    log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id="", server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="no_user_id", duration_ms=0)
+                    log_tool_call(
+                        employee_name=str(agent_id or ""),
+                        tenant_id=str(tenant_id or ""),
+                        user_id="",
+                        server_name=server_name,
+                        tool_name=tool_name,
+                        namespaced_name=ns_name,
+                        args=args,
+                        success=False,
+                        error_message="no_user_id",
+                        duration_ms=0,
+                    )
                     return f"[凭据缺失] 无法识别用户身份，无法使用 {server_name} 服务。"
             if user_id:
                 from crew.mcp_gateway.credentials import has_credential
+
                 if not has_credential(user_id, server_name):
                     logger.warning("凭据缺失: user=%s server=%s", user_id, server_name)
-                    log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message="credential_not_found", duration_ms=0)
+                    log_tool_call(
+                        employee_name=str(agent_id or ""),
+                        tenant_id=str(tenant_id or ""),
+                        user_id=str(user_id or ""),
+                        server_name=server_name,
+                        tool_name=tool_name,
+                        namespaced_name=ns_name,
+                        args=args,
+                        success=False,
+                        error_message="credential_not_found",
+                        duration_ms=0,
+                    )
                     return f"[凭据缺失] 您尚未授权 {server_name} 服务。请先在设置中绑定相应账号。"
 
             # 3. 执行调用
             try:
                 result = await conn.call_tool(tool_name, args)
                 duration = (time.monotonic() - start) * 1000
-                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=True, duration_ms=duration)
+                log_tool_call(
+                    employee_name=str(agent_id or ""),
+                    tenant_id=str(tenant_id or ""),
+                    user_id=str(user_id or ""),
+                    server_name=server_name,
+                    tool_name=tool_name,
+                    namespaced_name=ns_name,
+                    args=args,
+                    success=True,
+                    duration_ms=duration,
+                )
                 return result
 
             except Exception as e:
                 duration = (time.monotonic() - start) * 1000
                 error_msg = sanitize_error(str(e))
-                log_tool_call(employee_name=str(agent_id or ""), tenant_id=str(tenant_id or ""), user_id=str(user_id or ""), server_name=server_name, tool_name=tool_name, namespaced_name=ns_name, args=args, success=False, error_message=error_msg, duration_ms=duration)
+                log_tool_call(
+                    employee_name=str(agent_id or ""),
+                    tenant_id=str(tenant_id or ""),
+                    user_id=str(user_id or ""),
+                    server_name=server_name,
+                    tool_name=tool_name,
+                    namespaced_name=ns_name,
+                    args=args,
+                    success=False,
+                    error_message=error_msg,
+                    duration_ms=duration,
+                )
                 return f"[MCP Error] {error_msg}"
 
         return _handler

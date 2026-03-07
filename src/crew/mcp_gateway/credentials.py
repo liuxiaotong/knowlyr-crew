@@ -115,7 +115,11 @@ def store_credential(
 
     enc_access = _encrypt(access_token)
     enc_refresh = _encrypt(refresh_token) if refresh_token else ""
-    expires_val = token_expires_at if is_pg() else (token_expires_at.isoformat() if token_expires_at else None)
+    expires_val = (
+        token_expires_at
+        if is_pg()
+        else (token_expires_at.isoformat() if token_expires_at else None)
+    )
     now = datetime.now(timezone.utc)
 
     if is_pg():
@@ -143,7 +147,16 @@ ON CONFLICT (user_id, mcp_server) DO UPDATE SET
     tenant_id = excluded.tenant_id,
     updated_at = excluded.updated_at
 """
-        params = (user_id, mcp_server, enc_access, enc_refresh, expires_val, scopes, tenant_id, now.isoformat())
+        params = (
+            user_id,
+            mcp_server,
+            enc_access,
+            enc_refresh,
+            expires_val,
+            scopes,
+            tenant_id,
+            now.isoformat(),
+        )
 
     with get_connection() as conn:
         cur = conn.cursor() if is_pg() else conn
@@ -173,7 +186,13 @@ def get_credential(user_id: str, mcp_server: str) -> dict[str, Any] | None:
     if isinstance(row, (tuple, list)):
         enc_a, enc_r, exp, scp, tid = row
     else:
-        enc_a, enc_r, exp, scp, tid = row["access_token"], row["refresh_token"], row["token_expires_at"], row["scopes"], row["tenant_id"]
+        enc_a, enc_r, exp, scp, tid = (
+            row["access_token"],
+            row["refresh_token"],
+            row["token_expires_at"],
+            row["scopes"],
+            row["tenant_id"],
+        )
     try:
         da = _decrypt(enc_a) if enc_a else ""
     except Exception:
@@ -185,7 +204,13 @@ def get_credential(user_id: str, mcp_server: str) -> dict[str, Any] | None:
             dr = _decrypt(enc_r)
         except Exception:
             logger.warning("refresh_token 解密失败: user=%s server=%s", user_id, mcp_server)
-    return {"access_token": da, "refresh_token": dr, "token_expires_at": str(exp) if exp else None, "scopes": scp or "", "tenant_id": tid or ""}
+    return {
+        "access_token": da,
+        "refresh_token": dr,
+        "token_expires_at": str(exp) if exp else None,
+        "scopes": scp or "",
+        "tenant_id": tid or "",
+    }
 
 
 def delete_credential(user_id: str, mcp_server: str) -> bool:
@@ -226,9 +251,29 @@ def list_credentials(user_id: str) -> list[dict[str, Any]]:
     results = []
     for row in rows:
         if isinstance(row, (tuple, list)):
-            results.append({"mcp_server": row[0], "scopes": row[1] or "", "tenant_id": row[2] or "", "token_expires_at": str(row[3]) if row[3] else None, "created_at": str(row[4]), "updated_at": str(row[5])})
+            results.append(
+                {
+                    "mcp_server": row[0],
+                    "scopes": row[1] or "",
+                    "tenant_id": row[2] or "",
+                    "token_expires_at": str(row[3]) if row[3] else None,
+                    "created_at": str(row[4]),
+                    "updated_at": str(row[5]),
+                }
+            )
         else:
-            results.append({"mcp_server": row["mcp_server"], "scopes": row["scopes"] or "", "tenant_id": row["tenant_id"] or "", "token_expires_at": str(row["token_expires_at"]) if row["token_expires_at"] else None, "created_at": str(row["created_at"]), "updated_at": str(row["updated_at"])})
+            results.append(
+                {
+                    "mcp_server": row["mcp_server"],
+                    "scopes": row["scopes"] or "",
+                    "tenant_id": row["tenant_id"] or "",
+                    "token_expires_at": str(row["token_expires_at"])
+                    if row["token_expires_at"]
+                    else None,
+                    "created_at": str(row["created_at"]),
+                    "updated_at": str(row["updated_at"]),
+                }
+            )
 
     return results
 
@@ -236,6 +281,7 @@ def list_credentials(user_id: str) -> list[dict[str, Any]]:
 def has_credential(user_id: str, mcp_server: str) -> bool:
     """检查用户是否有指定 MCP server 的凭据."""
     from crew.database import get_connection, is_pg
+
     if is_pg():
         sql = "SELECT 1 FROM user_mcp_credentials WHERE user_id = %s AND mcp_server = %s LIMIT 1"
     else:
