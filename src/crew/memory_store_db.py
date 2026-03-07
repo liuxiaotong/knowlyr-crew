@@ -97,8 +97,10 @@ def init_memory_tables() -> None:
             EXCEPTION WHEN duplicate_column THEN NULL;
             END $$;
         """)
+        # 注意：keywords 列的查询使用 unnest + ILIKE 子串匹配，GIN 索引无法加速。
+        # 当前数据量不需要索引；后续量大时可考虑 pg_trgm 或改为精确匹配再加 GIN。
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_keywords ON memories USING GIN(keywords)"
+            "DROP INDEX IF EXISTS idx_memories_keywords"
         )
 
     logger.info("memories 表初始化完成")

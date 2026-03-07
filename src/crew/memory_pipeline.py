@@ -16,6 +16,8 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+import httpx
+
 from crew.memory import MemoryEntry
 
 if TYPE_CHECKING:
@@ -97,7 +99,7 @@ def _call_llm(prompt: str) -> str:
     try:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=httpx.Timeout(30.0))
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1024,
@@ -306,7 +308,13 @@ def connect(
             employee,
             content=merged_content,
         )
-        store.update_keywords(best_candidate.id, employee, merged_keywords)
+        try:
+            store.update_keywords(best_candidate.id, employee, merged_keywords)
+        except Exception:
+            logger.warning(
+                "merge: update_keywords 失败 entry_id=%s，content 已更新",
+                best_candidate.id,
+            )
 
         # 返回更新后的 entry
         updated_entry = best_candidate.model_copy(
@@ -323,20 +331,28 @@ def connect(
         # link: 新建 + 双向 linked_memories
         new_entry = _store_new(note, employee, store)
 
-        # 更新新记忆的 linked_memories
-        store.update_linked_memories(
-            new_entry.id, employee, [best_candidate.id]
-        )
+        try:
+            # 更新新记忆的 linked_memories
+            store.update_linked_memories(
+                new_entry.id, employee, [best_candidate.id]
+            )
 
-        # 更新旧记忆的 linked_memories（双向）
-        old_linked = list(best_candidate.linked_memories) + [new_entry.id]
-        store.update_linked_memories(
-            best_candidate.id, employee, old_linked
-        )
+            # 更新旧记忆的 linked_memories（双向）
+            old_linked = list(best_candidate.linked_memories) + [new_entry.id]
+            store.update_linked_memories(
+                best_candidate.id, employee, old_linked
+            )
 
-        # 更新旧记忆的 keywords（合并新关键词）
-        merged_kw = list(set(best_candidate.keywords + note.keywords))
-        store.update_keywords(best_candidate.id, employee, merged_kw)
+            # 更新旧记忆的 keywords（合并新关键词）
+            merged_kw = list(set(best_candidate.keywords + note.keywords))
+            store.update_keywords(best_candidate.id, employee, merged_kw)
+        except Exception:
+            logger.warning(
+                "link: 关联更新部分失败 new_id=%s, candidate_id=%s，"
+                "新记忆已写入但关联可能不完整",
+                new_entry.id,
+                best_candidate.id,
+            )
 
         updated_entry = new_entry.model_copy(
             update={"linked_memories": [best_candidate.id]}
