@@ -5,10 +5,7 @@ from __future__ import annotations
 import re
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from crew.memory import MemoryEntry
-
 
 # ── Helpers ──
 

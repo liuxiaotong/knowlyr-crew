@@ -702,6 +702,8 @@ def create_webhook_app(
             "/api/knowledge/dashboard",
             endpoint=_make_handler(ctx, _handle_knowledge_dashboard),
             methods=["GET"],
+        ),
+        Route(
             "/api/memory/recall-feedback",
             endpoint=_make_handler(ctx, _handle_recall_feedback),
             methods=["POST"],

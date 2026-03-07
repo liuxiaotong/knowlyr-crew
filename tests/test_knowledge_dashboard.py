@@ -146,7 +146,7 @@ class TestKnowledgeDashboardEndpoint:
 
     def test_route_registered(self):
         """验证路由已注册."""
-        starlette = pytest.importorskip("starlette")
+        pytest.importorskip("starlette")
         from pathlib import Path
 
         from crew.webhook import create_webhook_app
