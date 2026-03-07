@@ -23,6 +23,15 @@ def _get_remote_memory_config() -> tuple[str, str] | None:
     return None
 
 
+def _get_crew_api_headers(api_token: str) -> dict[str, str]:
+    """构建 Crew API 请求 headers，包含 Bearer token 和 Admin-Token."""
+    headers = {"Authorization": f"Bearer {api_token}"}
+    admin_token = os.environ.get("ADMIN_TOKEN", "")
+    if admin_token:
+        headers["X-Admin-Token"] = admin_token
+    return headers
+
+
 async def _remote_memory_add(
     base_url: str,
     token: str,
@@ -61,7 +70,7 @@ async def _remote_memory_add(
         resp = await client.post(
             f"{base_url}/api/memory/add",
             json=payload,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -88,7 +97,7 @@ async def _remote_memory_query(
         resp = await client.get(
             f"{base_url}/api/memory/query",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -435,10 +444,8 @@ async def _remote_kv_put(
     """通过远程 API 写入 KV，返回响应 dict."""
     import httpx
 
-    headers: dict[str, str] = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "text/plain; charset=utf-8",
-    }
+    headers = _get_crew_api_headers(token)
+    headers["Content-Type"] = "text/plain; charset=utf-8"
     if admin_token:
         headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -455,7 +462,7 @@ async def _remote_kv_get(base_url: str, token: str, *, key: str, admin_token: st
     """通过远程 API 读取 KV，返回文件内容字符串. 不存在时抛 httpx.HTTPStatusError."""
     import httpx
 
-    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    headers = _get_crew_api_headers(token)
     if admin_token:
         headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -476,7 +483,7 @@ async def _remote_kv_list(
     params: dict[str, str] = {}
     if prefix:
         params["prefix"] = prefix
-    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    headers = _get_crew_api_headers(token)
     if admin_token:
         headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -509,7 +516,7 @@ async def _remote_list_employees(
         resp = await client.get(
             f"{base_url}/api/employees",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -528,7 +535,7 @@ async def _remote_get_employee(
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/employees/{name}",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -555,7 +562,7 @@ async def _remote_run_employee(
         resp = await client.get(
             f"{base_url}/api/employees/{name}/prompt",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -572,7 +579,7 @@ async def _remote_list_pipelines(base_url: str, token: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/config/pipelines",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json().get("items", [])
@@ -585,7 +592,7 @@ async def _remote_list_discussions(base_url: str, token: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/config/discussions",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json().get("items", [])
@@ -615,7 +622,7 @@ async def _remote_run_discussion_prompt(
         resp = await client.get(
             f"{base_url}/api/discussions/{name}/prompt",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -646,7 +653,7 @@ async def _remote_run_discussion_plan(
         resp = await client.get(
             f"{base_url}/api/discussions/{name}/plan",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -682,7 +689,7 @@ async def _remote_track_decision(
         resp = await client.post(
             f"{base_url}/api/decisions/track",
             json=payload,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -706,7 +713,7 @@ async def _remote_evaluate_decision(
         resp = await client.post(
             f"{base_url}/api/decisions/{decision_id}/evaluate",
             json=payload,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -729,7 +736,7 @@ async def _remote_list_meeting_history(
         resp = await client.get(
             f"{base_url}/api/meetings",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json().get("items", [])
@@ -747,7 +754,7 @@ async def _remote_get_meeting_detail(
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/meetings/{meeting_id}",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json()
@@ -770,7 +777,7 @@ async def _remote_get_work_log(
         resp = await client.get(
             f"{base_url}/api/work-log",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json().get("items", [])
@@ -792,7 +799,7 @@ async def _remote_get_permission_matrix(
         resp = await client.get(
             f"{base_url}/api/permission-matrix",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=_get_crew_api_headers(token),
         )
         resp.raise_for_status()
         return resp.json().get("items", [])
@@ -3376,7 +3383,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     async with httpx.AsyncClient(timeout=15.0) as client:
                         resp = await client.delete(
                             f"{remote_cfg[0]}/api/wiki/files/{fid}",
-                            headers={"Authorization": f"Bearer {remote_cfg[1]}"},
+                            headers=_get_crew_api_headers(remote_cfg[1]),
                         )
                         resp.raise_for_status()
                         return [
@@ -3738,14 +3745,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             try:
                 import httpx
 
-                headers: dict[str, str] = {"Authorization": f"Bearer {api_token}"}
-                admin_token = os.environ.get("ADMIN_TOKEN", "")
-                if admin_token:
-                    headers["X-Admin-Token"] = admin_token
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(
                         f"{base_url}/api/souls/{employee_name}",
-                        headers=headers,
+                        headers=_get_crew_api_headers(api_token),
                     )
                     if resp.status_code == 404:
                         return [
@@ -3788,15 +3791,11 @@ def create_server(project_dir: Path | None = None) -> "Server":
             try:
                 import httpx
 
-                headers: dict[str, str] = {"Authorization": f"Bearer {api_token}"}
-                admin_token = os.environ.get("ADMIN_TOKEN", "")
-                if admin_token:
-                    headers["X-Admin-Token"] = admin_token
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.put(
                         f"{base_url}/api/souls/{employee_name}",
                         json={"content": content, "updated_by": updated_by},
-                        headers=headers,
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
@@ -3843,7 +3842,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                     resp = await client.post(
                         f"{base_url}/api/employees",
                         json=payload,
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
@@ -3881,7 +3880,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "yaml_content": arguments["yaml_content"],
                             "description": arguments.get("description", ""),
                         },
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
@@ -3918,7 +3917,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "yaml_content": arguments["yaml_content"],
                             "description": arguments.get("description"),
                         },
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
@@ -3956,7 +3955,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "yaml_content": arguments["yaml_content"],
                             "description": arguments.get("description", ""),
                         },
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
@@ -3993,7 +3992,7 @@ def create_server(project_dir: Path | None = None) -> "Server":
                             "yaml_content": arguments["yaml_content"],
                             "description": arguments.get("description"),
                         },
-                        headers={"Authorization": f"Bearer {api_token}"},
+                        headers=_get_crew_api_headers(api_token),
                     )
                     resp.raise_for_status()
                     return [
