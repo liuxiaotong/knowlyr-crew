@@ -12,7 +12,6 @@ from crew.tenant import (
 )
 from crew.webhook_handlers import _tenant_id_for_config, _tenant_id_for_store
 
-
 # ── 辅助函数测试 ──
 
 

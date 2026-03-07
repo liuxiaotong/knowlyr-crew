@@ -1262,6 +1262,7 @@ async def _stream_employee_with_tools(
             max_visibility=max_visibility,
             max_rounds=_max_rounds,
             sender_id=sender_id,
+            tenant_id=tenant_id,
         ):
             yield chunk
         return
@@ -1515,6 +1516,7 @@ async def _stream_employee_with_tools_fallback(
     max_visibility: str,
     max_rounds: int,
     sender_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> Any:
     """非 Anthropic provider 的降级 agent loop — 非流式执行，结果分块输出.
 

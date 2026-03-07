@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ── config_store.copy_employee_to_tenant 单元测试 ──
 
 
@@ -137,7 +136,7 @@ class TestCopyEmployeeToTenant:
         mock_get.side_effect = [source, None]
         mock_upsert.return_value = {"name": "my-be", "agent_id": "AI8888"}
 
-        result = copy_employee_to_tenant(
+        _result = copy_employee_to_tenant(
             source_name="backend-engineer",
             target_tenant_id="tenant_abc",
             new_name="my-be",

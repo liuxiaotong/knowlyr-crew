@@ -3,9 +3,7 @@
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from crew.discovery import _db_row_to_employee
 from crew.models import Employee
