@@ -151,10 +151,44 @@ def _local_semantic_memory_search(
                 return filtered[:limit]
             raise ValueError("semantic results all filtered out, fallback")
     except Exception:
-        _fallback_kwargs = {"employee": employee, "category": category, "limit": limit}
+        import inspect
+
+        _fallback_kwargs: dict = {
+            "employee": employee,
+            "category": category,
+            "limit": limit,
+        }
         if classification_max:
             _fallback_kwargs["classification_max"] = classification_max
-        return store.query(**_fallback_kwargs)
+
+        # 如果 store.query 支持 search_text（MemoryStoreDB），用数据库 ILIKE 搜索
+        query_sig = inspect.signature(store.query)
+        if "search_text" in query_sig.parameters:
+            _fallback_kwargs["search_text"] = query
+            return store.query(**_fallback_kwargs)
+
+        # 文件版 MemoryStore：Python 侧关键词/子串匹配
+        pool_size = min(limit * 10, 200)
+        _fallback_kwargs["limit"] = pool_size
+        candidates = store.query(**_fallback_kwargs)
+        if not candidates:
+            return []
+
+        query_lower = query.lower()
+        # 中文：整个 query 作为子串匹配
+        if any("\u4e00" <= c <= "\u9fff" for c in query_lower):
+            return [e for e in candidates if query_lower in e.content.lower()][:limit]
+
+        # 英文：按空格分词匹配
+        query_tokens = set(query_lower.split())
+        scored = []
+        for entry in candidates:
+            content_lower = entry.content.lower()
+            hits = sum(1 for t in query_tokens if t in content_lower)
+            if hits > 0:
+                scored.append((entry, hits / len(query_tokens)))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [e for e, _ in scored[:limit]]
 
 
 # ── Wiki Files API 客户端 ─────────────────────────────────────
