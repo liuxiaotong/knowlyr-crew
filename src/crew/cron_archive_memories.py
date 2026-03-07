@@ -58,9 +58,9 @@ def main():
             logger.info("处理员工: %s", employee)
 
             if args.dry_run:
-                # 试运行：只统计过期记忆数量
-                entries = memory_store._load_employee_entries(employee)
-                expired_count = sum(1 for e in entries if memory_store._is_expired(e))
+                # 试运行：只统计过期记忆数量（使用公开接口，兼容文件版和 DB 版）
+                entries = memory_store.load_employee_entries(employee)
+                expired_count = sum(1 for e in entries if memory_store.is_expired(e))
                 logger.info("员工 %s 有 %d 条过期记忆（试运行，未归档）", employee, expired_count)
                 total_stats["archived"] += expired_count
             else:

@@ -642,6 +642,45 @@ class MemoryStoreDB:
             row = cur.fetchone()
             return row[0] if row else 0
 
+    def load_employee_entries(self, employee: str) -> list[MemoryEntry]:
+        """加载指定员工的全部记忆条目（不做过滤）。
+
+        公开接口，与文件版 MemoryStore.load_employee_entries() 对齐。
+        """
+        employee = self._resolve_to_character_name(employee)
+
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+            cur.execute(
+                """
+                SELECT id, employee, created_at, category, content,
+                       source_session, confidence, superseded_by, ttl_days,
+                       importance, last_accessed, tags, shared, visibility,
+                       trigger_condition, applicability, origin_employee, verified_count,
+                       classification, domain
+                FROM memories
+                WHERE employee = %s AND tenant_id = %s
+                ORDER BY created_at ASC
+                """,
+                (employee, self._tenant_id),
+            )
+            rows = cur.fetchall()
+
+        return [self._row_to_entry(row) for row in rows]
+
+    @staticmethod
+    def is_expired(entry: MemoryEntry) -> bool:
+        """检查记忆是否已过期（公开接口，与文件版对齐）."""
+        ttl = entry.ttl_days
+        if ttl <= 0:
+            return False
+        try:
+            created = datetime.fromisoformat(entry.created_at)
+            age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
+            return age_days > ttl
+        except (ValueError, TypeError):
+            return False
+
     def list_employees(self) -> list[str]:
         """列出有记忆的员工（当前租户）."""
         with get_connection() as conn:

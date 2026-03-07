@@ -1012,6 +1012,17 @@ class MemoryStore:
             n += 1
         return n
 
+    def load_employee_entries(self, employee: str) -> list[MemoryEntry]:
+        """加载指定员工的全部记忆条目（不做过滤）。
+
+        公开接口，供 cron_archive_memories / MemoryArchive 等外部模块使用。
+        """
+        return self._load_employee_entries(employee)
+
+    def is_expired(self, entry: MemoryEntry) -> bool:
+        """检查记忆是否已过期（公开接口）."""
+        return self._is_expired(entry)
+
     def list_employees(self) -> list[str]:
         """列出有记忆的员工."""
         if not self.memory_dir.is_dir():
