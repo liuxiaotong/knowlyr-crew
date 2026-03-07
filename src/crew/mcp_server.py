@@ -429,48 +429,61 @@ async def _wiki_read_doc(
 # ── 远程 KV API 客户端 ──────────────────────────────────────────
 
 
-async def _remote_kv_put(base_url: str, token: str, *, key: str, content: str) -> dict:
+async def _remote_kv_put(
+    base_url: str, token: str, *, key: str, content: str, admin_token: str = ""
+) -> dict:
     """通过远程 API 写入 KV，返回响应 dict."""
     import httpx
 
+    headers: dict[str, str] = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/plain; charset=utf-8",
+    }
+    if admin_token:
+        headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.put(
             f"{base_url}/api/kv/{key}",
             content=content.encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "text/plain; charset=utf-8",
-            },
+            headers=headers,
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def _remote_kv_get(base_url: str, token: str, *, key: str) -> str:
+async def _remote_kv_get(base_url: str, token: str, *, key: str, admin_token: str = "") -> str:
     """通过远程 API 读取 KV，返回文件内容字符串. 不存在时抛 httpx.HTTPStatusError."""
     import httpx
 
+    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    if admin_token:
+        headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/kv/{key}",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
         )
         resp.raise_for_status()
         return resp.text
 
 
-async def _remote_kv_list(base_url: str, token: str, *, prefix: str = "") -> list[str]:
+async def _remote_kv_list(
+    base_url: str, token: str, *, prefix: str = "", admin_token: str = ""
+) -> list[str]:
     """通过远程 API 列出 KV keys，返回 key 列表."""
     import httpx
 
     params: dict[str, str] = {}
     if prefix:
         params["prefix"] = prefix
+    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    if admin_token:
+        headers["X-Admin-Token"] = admin_token
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base_url}/api/kv/",
             params=params,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -2858,7 +2871,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 base_url, api_token = remote_cfg
                 try:
-                    result = await _remote_kv_put(base_url, api_token, key=key, content=content)
+                    result = await _remote_kv_put(
+                        base_url, api_token, key=key, content=content,
+                        admin_token=os.environ.get("ADMIN_TOKEN", ""),
+                    )
                     return [
                         TextContent(
                             type="text",
@@ -2933,7 +2949,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 base_url, api_token = remote_cfg
                 try:
-                    text = await _remote_kv_get(base_url, api_token, key=key)
+                    text = await _remote_kv_get(
+                        base_url, api_token, key=key,
+                        admin_token=os.environ.get("ADMIN_TOKEN", ""),
+                    )
                     return [TextContent(type="text", text=text)]
                 except Exception as exc:
                     logging.getLogger(__name__).warning("远程 KV get 失败: %s", exc)
@@ -2996,7 +3015,10 @@ def create_server(project_dir: Path | None = None) -> "Server":
             if remote_cfg:
                 base_url, api_token = remote_cfg
                 try:
-                    keys = await _remote_kv_list(base_url, api_token, prefix=prefix)
+                    keys = await _remote_kv_list(
+                        base_url, api_token, prefix=prefix,
+                        admin_token=os.environ.get("ADMIN_TOKEN", ""),
+                    )
                     return [
                         TextContent(
                             type="text",
