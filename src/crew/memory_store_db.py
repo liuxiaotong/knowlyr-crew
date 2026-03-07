@@ -83,6 +83,26 @@ def init_memory_tables() -> None:
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories USING GIN(domain)")
 
+        # Phase 3-1: 幂等添加 keywords 列
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN keywords text[] DEFAULT '{}';
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # Phase 3-1: 幂等添加 linked_memories 列
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE memories ADD COLUMN linked_memories text[] DEFAULT '{}';
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # 注意：keywords 列的查询使用 unnest + ILIKE 子串匹配，GIN 索引无法加速。
+        # 当前数据量不需要索引；后续量大时可考虑 pg_trgm 或改为精确匹配再加 GIN。
+        cur.execute(
+            "DROP INDEX IF EXISTS idx_memories_keywords"
+        )
+
     logger.info("memories 表初始化完成")
 
 
@@ -157,6 +177,8 @@ class MemoryStoreDB:
             origin_employee=row.get("origin_employee") or "",
             classification=row.get("classification") or "internal",
             domain=list(row.get("domain") or []),
+            keywords=list(row.get("keywords") or []),
+            linked_memories=list(row.get("linked_memories") or []),
         )
 
     def add(
@@ -209,13 +231,15 @@ class MemoryStoreDB:
                     source_session, confidence, superseded_by, ttl_days,
                     importance, last_accessed, tags, shared, visibility,
                     trigger_condition, applicability, origin_employee, verified_count,
-                    classification, domain, tenant_id
+                    classification, domain, tenant_id,
+                    keywords, linked_memories
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s,
+                    %s, %s
                 )
                 """,
                 (
@@ -240,6 +264,8 @@ class MemoryStoreDB:
                     classification,
                     domain_list,
                     self._tenant_id,
+                    [],  # keywords
+                    [],  # linked_memories
                 ),
             )
 
@@ -284,6 +310,8 @@ class MemoryStoreDB:
             origin_employee=origin_emp,
             classification=classification,
             domain=domain_list,
+            keywords=[],
+            linked_memories=[],
         )
 
     # 信息分级等级序（用于 classification_max 过滤）
@@ -418,7 +446,8 @@ class MemoryStoreDB:
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain
+                       classification, domain,
+                       keywords, linked_memories
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY {order_by}
@@ -520,7 +549,8 @@ class MemoryStoreDB:
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain
+                       classification, domain,
+                       keywords, linked_memories
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY created_at DESC
@@ -585,7 +615,8 @@ class MemoryStoreDB:
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain
+                       classification, domain,
+                       keywords, linked_memories
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY verified_count DESC, created_at DESC
@@ -679,7 +710,8 @@ class MemoryStoreDB:
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain
+                       classification, domain,
+                       keywords, linked_memories
                 FROM memories
                 WHERE employee = %s AND tenant_id = %s
                 ORDER BY created_at ASC
@@ -943,7 +975,8 @@ class MemoryStoreDB:
                        source_session, confidence, superseded_by, ttl_days,
                        importance, last_accessed, tags, shared, visibility,
                        trigger_condition, applicability, origin_employee, verified_count,
-                       classification, domain
+                       classification, domain,
+                       keywords, linked_memories
                 FROM memories
                 WHERE {" AND ".join(conditions)}
                 ORDER BY created_at DESC
@@ -1047,6 +1080,48 @@ class MemoryStoreDB:
             cur.execute(
                 f"UPDATE memories SET {', '.join(sets)} WHERE id = %s AND employee = %s AND tenant_id = %s",
                 tuple(params),
+            )
+            return cur.rowcount > 0
+
+    def update_keywords(self, entry_id: str, employee: str, keywords: list[str]) -> bool:
+        """更新记忆的结构化关键词.
+
+        Args:
+            entry_id: 记忆 ID
+            employee: 员工名称
+            keywords: 新的关键词列表（完全替换）
+
+        Returns:
+            True 更新成功，False 未找到
+        """
+        employee = self._resolve_to_character_name(employee)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE memories SET keywords = %s WHERE id = %s AND employee = %s AND tenant_id = %s",
+                (keywords, entry_id, employee, self._tenant_id),
+            )
+            return cur.rowcount > 0
+
+    def update_linked_memories(
+        self, entry_id: str, employee: str, linked_ids: list[str]
+    ) -> bool:
+        """更新记忆的关联记忆 ID 列表.
+
+        Args:
+            entry_id: 记忆 ID
+            employee: 员工名称
+            linked_ids: 关联记忆 ID 列表（完全替换）
+
+        Returns:
+            True 更新成功，False 未找到
+        """
+        employee = self._resolve_to_character_name(employee)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE memories SET linked_memories = %s WHERE id = %s AND employee = %s AND tenant_id = %s",
+                (linked_ids, entry_id, employee, self._tenant_id),
             )
             return cur.rowcount > 0
 
