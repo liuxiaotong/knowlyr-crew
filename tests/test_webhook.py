@@ -308,6 +308,9 @@ ADMIN_TOKEN = "test-admin-token-456"
 
 def _make_client(config=None, token=TOKEN):
     """创建测试客户端."""
+    import os
+
+    os.environ["ADMIN_TOKEN"] = ADMIN_TOKEN
     app = create_webhook_app(
         project_dir=Path("/tmp/test"),
         token=token,
@@ -560,7 +563,7 @@ class TestRunPipeline:
         resp = client.post(
             "/run/pipeline/full-review",
             json={"args": {"target": "main"}},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 202
         assert "task_id" in resp.json()
@@ -670,14 +673,14 @@ class TestTaskStatus:
         resp = client.post(
             "/run/pipeline/test",
             json={"args": {}},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         task_id = resp.json()["task_id"]
 
         # 查询任务
         resp = client.get(
             f"/tasks/{task_id}",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -702,7 +705,7 @@ class TestSyncExecution:
         resp = client.post(
             "/run/pipeline/full-review",
             json={"args": {"target": "main"}, "sync": True},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -762,7 +765,7 @@ class TestIdentityPassthrough:
         resp = client.post(
             "/run/pipeline/full-review",
             json={"args": {"target": "main"}, "agent_id": "AI99"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 202
         mock_execute.assert_called_once()
@@ -794,7 +797,7 @@ class TestTaskReplay:
         resp = client.post(
             "/run/pipeline/test",
             json={"args": {"target": "main"}, "sync": True},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         task_id = resp.json()["task_id"]
         # _execute_task 是 mock 的，任务实际状态仍为 completed (sync mode 会更新)
@@ -809,7 +812,7 @@ class TestTaskReplay:
         with patch.object(TaskRegistry, "get", return_value=mock_record):
             resp = client.post(
                 f"/tasks/{task_id}/replay",
-                headers={"Authorization": f"Bearer {TOKEN}"},
+                headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
             )
         assert resp.status_code == 202
 
@@ -828,14 +831,14 @@ class TestTaskReplay:
         resp = client.post(
             "/run/pipeline/test",
             json={"args": {}},
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         task_id = resp.json()["task_id"]
 
         # 尝试重放 pending 任务 → 应该 400
         resp = client.post(
             f"/tasks/{task_id}/replay",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 400
         assert "只能重放" in resp.json()["error"]
@@ -1321,7 +1324,7 @@ class TestCostSummaryEndpoint:
         client = _make_client()
         resp = client.get(
             "/api/cost/summary",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -1335,7 +1338,7 @@ class TestCostSummaryEndpoint:
         client = _make_client()
         resp = client.get(
             "/api/cost/summary?days=30",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         assert resp.json()["period_days"] == 30
@@ -1355,7 +1358,7 @@ class TestProjectStatusEndpoint:
         client = _make_client()
         resp = client.get(
             "/api/project/status",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -1400,7 +1403,7 @@ class TestProjectStatusEndpoint:
         client = _make_client()
         resp = client.get(
             "/api/project/status",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()

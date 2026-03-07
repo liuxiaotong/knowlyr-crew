@@ -198,7 +198,7 @@ class TestKVGetEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/config/test.md",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         assert resp.text == "# Hello"
@@ -209,7 +209,7 @@ class TestKVGetEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/config/nonexistent.md",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 404
         data = resp.json()
@@ -230,7 +230,7 @@ class TestKVGetEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/config%2F..%2F..%2Fsecret",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 400
 
@@ -271,7 +271,7 @@ class TestKVListEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -290,7 +290,7 @@ class TestKVListEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -311,7 +311,7 @@ class TestKVListEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/?prefix=config/",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -323,7 +323,7 @@ class TestKVListEndpoint:
         client = _make_client(project_dir=tmp_path)
         resp = client.get(
             "/api/kv/?prefix=../secret",
-            headers={"Authorization": f"Bearer {TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Admin-Token": ADMIN_TOKEN},
         )
         assert resp.status_code == 400
 
