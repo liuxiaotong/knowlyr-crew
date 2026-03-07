@@ -274,7 +274,16 @@ def update_soul(
                     soul_updated_by = %s, updated_at = %s
                 WHERE tenant_id = %s AND (name = %s OR character_name = %s)
                 """,
-                (content, new_version, now, updated_by, now, tenant_id, employee_name, employee_name),
+                (
+                    content,
+                    new_version,
+                    now,
+                    updated_by,
+                    now,
+                    tenant_id,
+                    employee_name,
+                    employee_name,
+                ),
             )
     except Exception as e:
         logger.debug("同步 soul 到 employees 表跳过: %s", e)
@@ -693,15 +702,45 @@ def list_pipelines(tenant_id: str = DEFAULT_ADMIN_TENANT_ID) -> list[dict[str, A
 
 # employees 表列名（INSERT 顺序）
 _EMPLOYEE_COLUMNS = (
-    "tenant_id", "name", "character_name", "display_name", "description",
-    "summary", "version", "tags", "author", "triggers",
-    "model", "model_tier", "agent_id", "agent_status", "avatar_prompt",
-    "auto_memory", "kpi", "bio", "domains", "temperature",
-    "max_tokens", "tools", "context", "permissions_json",
-    "api_key", "base_url", "fallback_model", "fallback_api_key", "fallback_base_url",
-    "research_instructions", "body", "soul_content", "soul_version",
-    "soul_updated_at", "soul_updated_by", "source_layer",
-    "created_at", "updated_at", "metadata",
+    "tenant_id",
+    "name",
+    "character_name",
+    "display_name",
+    "description",
+    "summary",
+    "version",
+    "tags",
+    "author",
+    "triggers",
+    "model",
+    "model_tier",
+    "agent_id",
+    "agent_status",
+    "avatar_prompt",
+    "auto_memory",
+    "kpi",
+    "bio",
+    "domains",
+    "temperature",
+    "max_tokens",
+    "tools",
+    "context",
+    "permissions_json",
+    "api_key",
+    "base_url",
+    "fallback_model",
+    "fallback_api_key",
+    "fallback_base_url",
+    "research_instructions",
+    "body",
+    "soul_content",
+    "soul_version",
+    "soul_updated_at",
+    "soul_updated_by",
+    "source_layer",
+    "created_at",
+    "updated_at",
+    "metadata",
 )
 
 
@@ -806,7 +845,9 @@ def upsert_employee_to_db(
         "max_tokens": data.get("max_tokens"),
         "tools": data.get("tools") or [],
         "context": data.get("context") or [],
-        "permissions_json": json.dumps(data["permissions"], ensure_ascii=False) if data.get("permissions") else None,
+        "permissions_json": json.dumps(data["permissions"], ensure_ascii=False)
+        if data.get("permissions")
+        else None,
         "api_key": data.get("api_key", ""),
         "base_url": data.get("base_url", ""),
         "fallback_model": data.get("fallback_model", ""),
@@ -966,7 +1007,9 @@ def copy_employee_to_tenant(
     # 3. 检查目标租户内名字是否已存在
     existing = get_employee_from_db(target_name, tenant_id=target_tenant_id)
     if existing:
-        raise ValueError(f"employee already exists in target tenant: {target_tenant_id}/{target_name}")
+        raise ValueError(
+            f"employee already exists in target tenant: {target_tenant_id}/{target_name}"
+        )
 
     # 4. 生成新的 agent_id
     agent_id = _generate_unique_agent_id()
@@ -998,13 +1041,17 @@ def copy_employee_to_tenant(
         "max_tokens": customs.get("max_tokens", source.get("max_tokens")),
         "tools": source.get("tools") or [],
         "context": source.get("context") or [],
-        "permissions": json.loads(source["permissions_json"]) if source.get("permissions_json") else None,
+        "permissions": json.loads(source["permissions_json"])
+        if source.get("permissions_json")
+        else None,
         "api_key": source.get("api_key", ""),
         "base_url": source.get("base_url", ""),
         "fallback_model": source.get("fallback_model", ""),
         "fallback_api_key": source.get("fallback_api_key", ""),
         "fallback_base_url": source.get("fallback_base_url", ""),
-        "research_instructions": customs.get("research_instructions", source.get("research_instructions", "")),
+        "research_instructions": customs.get(
+            "research_instructions", source.get("research_instructions", "")
+        ),
         "body": customs.get("body", source.get("body", "")),
         "soul_content": customs.get("soul_content", source.get("soul_content", "")),
         "soul_version": 1,

@@ -43,7 +43,13 @@ class EvaluationEngine:
         decisions.jsonl  — 所有决策记录
     """
 
-    def __init__(self, eval_dir: Path | None = None, *, project_dir: Path | None = None, tenant_id: str | None = None):
+    def __init__(
+        self,
+        eval_dir: Path | None = None,
+        *,
+        project_dir: Path | None = None,
+        tenant_id: str | None = None,
+    ):
         self._project_dir = project_dir
         self._tenant_id = tenant_id
         self.eval_dir = (

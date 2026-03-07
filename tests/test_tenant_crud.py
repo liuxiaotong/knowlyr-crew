@@ -150,9 +150,7 @@ class TestTenantCreate:
         assert data["tenant"]["name"] == "test-tenant"
         assert "api_key" in data["tenant"]  # 创建时返回 api_key
 
-        mock_create.assert_called_once_with(
-            name="test-tenant", is_admin=False, metadata=None
-        )
+        mock_create.assert_called_once_with(name="test-tenant", is_admin=False, metadata=None)
 
     @patch("crew.tenant.create_tenant")
     def test_create_with_metadata(self, mock_create):
@@ -172,9 +170,7 @@ class TestTenantCreate:
             json={"name": "test", "is_admin": True, "metadata": {"plan": "pro"}},
         )
         assert resp.status_code == 201
-        mock_create.assert_called_once_with(
-            name="test", is_admin=True, metadata={"plan": "pro"}
-        )
+        mock_create.assert_called_once_with(name="test", is_admin=True, metadata={"plan": "pro"})
 
     def test_create_missing_name(self):
         ctx = _make_ctx()
@@ -203,9 +199,7 @@ class TestTenantCreate:
             "created_at": "2026-01-01T00:00:00+00:00",
         }
         ctx = _make_ctx()
-        ctx.tenant_auth_cache["old-key"] = TenantContext(
-            tenant_id="old", tenant_name="old"
-        )
+        ctx.tenant_auth_cache["old-key"] = TenantContext(tenant_id="old", tenant_name="old")
         app = _make_app(ctx)
         client = TestClient(app)
 
@@ -305,9 +299,7 @@ class TestTenantDelete:
     def test_delete_clears_cache(self, mock_delete):
         mock_delete.return_value = True
         ctx = _make_ctx()
-        ctx.tenant_auth_cache["some-key"] = TenantContext(
-            tenant_id="x", tenant_name="x"
-        )
+        ctx.tenant_auth_cache["some-key"] = TenantContext(tenant_id="x", tenant_name="x")
         app = _make_app(ctx)
         client = TestClient(app)
 
@@ -344,9 +336,7 @@ class TestTenantUpdate:
         app = _make_app(ctx)
         client = TestClient(app)
 
-        resp = client.patch(
-            "/api/tenants/t1", json={"metadata": {"plan": "pro"}}
-        )
+        resp = client.patch("/api/tenants/t1", json={"metadata": {"plan": "pro"}})
         assert resp.status_code == 200
 
     def test_update_no_fields(self):

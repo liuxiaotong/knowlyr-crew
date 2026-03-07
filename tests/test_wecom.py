@@ -1129,7 +1129,14 @@ class TestChangeContactWebhookRouting:
         }
         return ctx
 
-    def _make_event_request(self, ctx, msg_type="event", event="change_contact", change_type="delete_user", userid="zhangsan"):
+    def _make_event_request(
+        self,
+        ctx,
+        msg_type="event",
+        event="change_contact",
+        change_type="delete_user",
+        userid="zhangsan",
+    ):
         """构造通讯录变更事件的 POST 请求."""
         from crew.wecom import generate_wecom_signature
 
@@ -1179,7 +1186,9 @@ class TestChangeContactWebhookRouting:
         ctx = self._make_ctx()
         request = self._make_event_request(ctx, change_type="delete_user", userid="zhangsan")
 
-        with patch("crew.webhook_wecom._handle_contact_change", new_callable=AsyncMock) as _mock_handler:
+        with patch(
+            "crew.webhook_wecom._handle_contact_change", new_callable=AsyncMock
+        ) as _mock_handler:
             resp = await handle_wecom_event(request, ctx)
 
             assert resp.status_code == 200

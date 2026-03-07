@@ -35,7 +35,6 @@ class TestGetSoulHeaders:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-
             # 直接调用 call_tool handler
             async def _run():
                 from crew.mcp_server import _get_remote_memory_config
@@ -78,6 +77,7 @@ class TestGetSoulHeaders:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
+
             async def _run():
                 import httpx
 
@@ -112,6 +112,7 @@ class TestUpdateSoulHeaders:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
+
             async def _run():
                 import httpx
 

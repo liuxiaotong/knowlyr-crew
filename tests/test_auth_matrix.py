@@ -66,7 +66,7 @@ def _extract_routes() -> list[dict[str, Any]]:
         handler = handler_m.group(1)
 
         # 提取 methods
-        methods_m = re.search(r'methods\s*=\s*\[([^\]]+)\]', block)
+        methods_m = re.search(r"methods\s*=\s*\[([^\]]+)\]", block)
         if not methods_m:
             continue
         methods_str = methods_m.group(1)
@@ -120,9 +120,7 @@ def _detect_auth_level(handler_name: str) -> str:
 
             # 查找后续 5 行是否有直接 return 403 模式
             context_after = "\n".join(lines[i : i + 5])
-            if re.search(
-                r"if\s+admin_err\s*:\s*\n\s*return\s+", context_after
-            ):
+            if re.search(r"if\s+admin_err\s*:\s*\n\s*return\s+", context_after):
                 _has_gate = True
                 return "admin_required"
             else:
@@ -164,9 +162,7 @@ def _get_handler_source(handler_name: str) -> str | None:
         # 提取函数体：从 def 行开始，到下一个同缩进的 def 或文件结尾
         start = match.start()
         # 查找下一个顶层函数定义
-        next_func = re.search(
-            r"\n(?:async\s+)?def\s+\w+\s*\(", source[match.end() :]
-        )
+        next_func = re.search(r"\n(?:async\s+)?def\s+\w+\s*\(", source[match.end() :])
         if next_func:
             end = match.end() + next_func.start()
         else:
@@ -417,9 +413,7 @@ class TestAuthMatrix:
 
             source = _get_handler_source(route["handler"])
             if source is None:
-                missing_403.append(
-                    f"  {route['method']:6s} {route['path']} — 找不到 handler 源码"
-                )
+                missing_403.append(f"  {route['method']:6s} {route['path']} — 找不到 handler 源码")
                 continue
 
             if "403" not in source:
@@ -430,9 +424,7 @@ class TestAuthMatrix:
 
         if missing_403:
             detail = "\n".join(missing_403)
-            pytest.fail(
-                f"admin_required 端点中有 {len(missing_403)} 个缺少 403 返回:\n{detail}"
-            )
+            pytest.fail(f"admin_required 端点中有 {len(missing_403)} 个缺少 403 返回:\n{detail}")
 
     def test_bearer_only_handlers_no_admin_gate(self):
         """bearer_only 端点的 handler 不应有 _require_admin_token 硬门控.
@@ -469,9 +461,7 @@ class TestAuthMatrix:
         """输出 auth matrix 覆盖统计."""
         routes = self._get_routes()
         total = len(routes)
-        registered = sum(
-            1 for r in routes if (r["path"], r["method"]) in EXPECTED_AUTH_MATRIX
-        )
+        registered = sum(1 for r in routes if (r["path"], r["method"]) in EXPECTED_AUTH_MATRIX)
 
         level_counts: dict[str, int] = {}
         for level in EXPECTED_AUTH_MATRIX.values():

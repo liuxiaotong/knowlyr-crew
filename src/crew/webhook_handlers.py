@@ -427,7 +427,9 @@ async def _handle_employee_prompt(request: Any, ctx: _AppContext) -> Any:
 
     # fields 过滤：?fields=system_prompt 可省略 tool_schemas 等大字段
     fields_param = request.query_params.get("fields", "")
-    requested_fields = {f.strip() for f in fields_param.split(",") if f.strip()} if fields_param else set()
+    requested_fields = (
+        {f.strip() for f in fields_param.split(",") if f.strip()} if fields_param else set()
+    )
 
     resp: dict[str, Any] = {
         "name": employee.name,
@@ -691,6 +693,7 @@ async def _handle_employee_copy(request: Any, ctx: _AppContext) -> Any:
     metadata = result.get("metadata")
     if isinstance(metadata, str):
         import json as _json
+
         try:
             metadata = _json.loads(metadata)
         except Exception:
@@ -1020,7 +1023,6 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     import shutil
     from pathlib import Path
 
-
     # 管理员权限校验
     admin_err = _require_admin_token(request)
     if admin_err:
@@ -1031,7 +1033,9 @@ async def _handle_employee_delete(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
 
     identifier = request.path_params["identifier"]
-    result = discover_employees(ctx.project_dir, cache_ttl=0, tenant_id=_tenant_id_for_config(request))
+    result = discover_employees(
+        ctx.project_dir, cache_ttl=0, tenant_id=_tenant_id_for_config(request)
+    )
 
     employee = _find_employee(result, identifier)
 
@@ -1128,7 +1132,6 @@ async def _handle_memory_add(request: Any, ctx: _AppContext) -> Any:
 
     幂等：同 employee + source_session + category 不重复写入。
     """
-
 
     try:
         payload = await request.json()
@@ -1347,13 +1350,14 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
 
     查询参数（与 MCP query_memory 工具入参对齐）:
         employee (required): 员工名称
+        query (optional): 搜索关键词 — 有值时走语义混合搜索（向量 70% + 关键词 30%）
         category (optional): 按类别过滤
         limit (optional): 最大返回条数，默认 20
     """
 
-
     employee = request.query_params.get("employee", "")
     category = request.query_params.get("category") or None
+    query = request.query_params.get("query", "").strip()
     limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     if not employee:
@@ -1365,11 +1369,17 @@ async def _handle_memory_query(request: Any, ctx: _AppContext) -> Any:
     max_level = _classification_levels.get(classification_max, 1)
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
-    entries = store.query(
-        employee=employee,
-        category=category,
-        limit=limit,
-    )
+
+    # 有搜索关键词时，走语义混合搜索
+    if query:
+        entries = _semantic_memory_search(store, employee, query, category, limit)
+    else:
+        entries = store.query(
+            employee=employee,
+            category=category,
+            limit=limit,
+        )
+
     # 过滤超出请求分级上限的记忆
     filtered = [
         e
@@ -1401,8 +1411,6 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
     """
     import json
     from datetime import datetime
-
-
 
     try:
         payload = await request.json()
@@ -1664,7 +1672,6 @@ async def _handle_memory_delete(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     # 从路径参数获取 entry_id
     entry_id = request.path_params.get("entry_id", "")
     if not entry_id:
@@ -1812,7 +1819,9 @@ async def _handle_memory_drafts_approve(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": False, "error": "Draft not found"}, status_code=404)
 
         # 写入正式记忆
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         entry = memory_store.add(
             employee=draft.employee,
             category=draft.category,
@@ -1869,7 +1878,9 @@ async def _handle_memory_drafts_reject(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"ok": False, "error": "draft_id is required"}, status_code=400)
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     reason = payload.get("reason", "")
     # 安全加固: reviewed_by 从认证的租户上下文获取，不接受用户传入
@@ -1971,7 +1982,9 @@ async def _handle_memory_archive_restore(request: Any, ctx: _AppContext) -> Any:
     from crew.memory_archive import MemoryArchive
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -2047,7 +2060,6 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
         {"ok": true, "entries": [...], "total": 10}
     """
 
-
     tags_str = request.query_params.get("tags", "")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
     category = request.query_params.get("category")
@@ -2056,7 +2068,9 @@ async def _handle_memory_shared_list(request: Any, ctx: _AppContext) -> Any:
     limit = _safe_limit(request.query_params.get("limit", "20"), default=20)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         entries = memory_store.query_shared(
             tags=tags,
             exclude_employee=exclude_employee,
@@ -2098,7 +2112,9 @@ async def _handle_memory_shared_record_usage(request: Any, ctx: _AppContext) -> 
     from crew.memory_shared_stats import SharedMemoryStats
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     memory_id = payload.get("memory_id", "")
@@ -2217,12 +2233,13 @@ async def _handle_memory_dashboard(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return _error_response(admin_err, 403)
 
-
     employee = request.query_params.get("employee")
     limit = _safe_limit(request.query_params.get("limit", "200"), default=200)
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
 
         if employee:
             # 单个员工的统计
@@ -2339,9 +2356,10 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -2357,7 +2375,9 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
 
         # DB 版：直接用 store.update()
         if hasattr(memory_store, "update") and callable(getattr(memory_store, "update", None)):
@@ -2470,9 +2490,10 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee", "")
@@ -2485,7 +2506,9 @@ async def _handle_memory_batch_delete(request: Any, ctx: _AppContext) -> Any:
         )
 
     try:
-        memory_store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+        memory_store = get_memory_store(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+        )
         deleted_count = 0
 
         for entry_id in entry_ids:
@@ -2526,7 +2549,9 @@ async def _handle_trajectory_export(request: Any, ctx: _AppContext) -> Any:
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     employee = payload.get("employee")
@@ -2606,7 +2631,9 @@ async def _handle_trajectory_annotation_add(request: Any, ctx: _AppContext) -> A
     from crew.trajectory_export import TrajectoryExporter
 
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
 
     trajectory_id = payload.get("trajectory_id", "")
@@ -2725,7 +2752,11 @@ async def _handle_memory_semantic_search(request: Any, ctx: _AppContext) -> Any:
         if not query:
             return JSONResponse({"ok": False, "error": "query 参数必填"}, status_code=400)
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         results = engine.search(
             query=query,
             employee=employee,
@@ -2775,7 +2806,11 @@ async def _handle_memory_recommend(request: Any, ctx: _AppContext) -> Any:
                 status_code=400,
             )
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         recommendations = engine.recommend_for_task(
             task_description=task_description,
             employee=employee,
@@ -2820,7 +2855,11 @@ async def _handle_memory_similar(request: Any, ctx: _AppContext) -> Any:
 
         limit = _safe_limit(request.query_params.get("limit", "5"), default=5)
 
-        engine = SemanticSearchEngine(memory_store=get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)))
+        engine = SemanticSearchEngine(
+            memory_store=get_memory_store(
+                project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+            )
+        )
         similar = engine.find_similar_memories(
             memory_id=memory_id,
             limit=limit,
@@ -3255,7 +3294,8 @@ async def _handle_openclaw(request: Any, ctx: _AppContext) -> Any:
 
     if target_type not in _ALLOWED_TARGET_TYPES:
         return _error_response(
-            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}",
+            400,
         )
 
     if not target_name:
@@ -3286,7 +3326,8 @@ async def _handle_generic(request: Any, ctx: _AppContext) -> Any:
 
     if target_type not in _ALLOWED_TARGET_TYPES:
         return _error_response(
-            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}", 400
+            f"不支持的 target_type: {target_type}，允许: {', '.join(sorted(_ALLOWED_TARGET_TYPES))}",
+            400,
         )
 
     if not target_name:
@@ -3315,7 +3356,9 @@ async def _handle_run_pipeline(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     args = payload.get("args", {})
     sync = payload.get("sync", False)
@@ -3591,9 +3634,7 @@ def _execute_skills(
             if result.get("enhanced_context"):
                 for key, value in result["enhanced_context"].items():
                     if key in enhanced_context:
-                        if isinstance(enhanced_context[key], list) and isinstance(
-                            value, list
-                        ):
+                        if isinstance(enhanced_context[key], list) and isinstance(value, list):
                             enhanced_context[key].extend(value)
                         else:
                             enhanced_context[key] = value
@@ -3620,8 +3661,7 @@ def _execute_skills(
         return None
 
     memory_text = "【相关历史记忆】\n" + "\n".join(
-        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}"
-        for m in memories[:5]
+        f"- [{m.get('category', '?')}] {m.get('content', '')[:200]}" for m in memories[:5]
     )
     logger.info(
         "Skills 记忆注入%s: employee=%s memories=%d text_len=%d",
@@ -3638,7 +3678,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     args = payload.get("args", {})
     # 兼容：顶层 task 自动塞入 args（旧版调用方式）
@@ -3660,7 +3702,9 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
         # ── Skills 自动触发（必须在 callback 分支之前执行）──
         from crew.discovery import discover_employees
 
-        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
+        discovery = discover_employees(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request)
+        )
         emp = discovery.get(name)
 
         if emp is not None and isinstance(user_message, str):
@@ -3887,7 +3931,14 @@ async def _handle_run_employee(request: Any, ctx: _AppContext) -> Any:
     if stream:
         import crew.webhook as _wh
 
-        return await _wh._stream_employee(ctx, name, args, agent_id=agent_id, model=model, tenant_id=_tenant_id_for_config(request))
+        return await _wh._stream_employee(
+            ctx,
+            name,
+            args,
+            agent_id=agent_id,
+            model=model,
+            tenant_id=_tenant_id_for_config(request),
+        )
 
     # ── 原有同步/异步模式 ──
     import crew.webhook as _wh
@@ -3913,7 +3964,6 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
     """直接触发路由模板 — 展开为 delegate_chain 执行."""
     import json as _json
 
-
     # 安全加固: 路由模板是全局共享的，租户不应直接调用
     admin_err = _require_admin_token(request)
     if admin_err:
@@ -3923,7 +3973,9 @@ async def _handle_run_route(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     task = payload.get("args", {}).get("task", "") or payload.get("task", "")
     overrides = payload.get("overrides", {})
@@ -3989,7 +4041,6 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
     """Agent 模式执行员工 — 在 Docker 沙箱中自主完成任务 (SSE 流式)."""
     import json as _json
 
-
     # 安全加固: agent run 涉及沙箱远程执行，仅 admin 可用
     admin_err = _require_admin_token(request)
     if admin_err:
@@ -3997,7 +4048,9 @@ async def _handle_agent_run(request: Any, ctx: _AppContext) -> Any:
 
     name = request.path_params["name"]
     payload = (
-        await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
     )
     task_desc = payload.get("task", "")
     if not task_desc:
@@ -4128,7 +4181,11 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "task not found"}, status_code=404)
 
     # 归属校验：有 owner 时检查 user_id，无 owner 时必须 admin
-    body = await request.json() if "application/json" in (request.headers.get("content-type") or "") else {}
+    body = (
+        await request.json()
+        if "application/json" in (request.headers.get("content-type") or "")
+        else {}
+    )
     user_id = body.get("user_id") or request.headers.get("x-user-id", "")
     if record.owner:
         if not user_id:
@@ -4161,7 +4218,6 @@ async def _handle_task_replay(request: Any, ctx: _AppContext) -> Any:
 async def _handle_task_approve(request: Any, ctx: _AppContext) -> Any:
     """POST /api/tasks/{task_id}/approve — 批准或拒绝等待审批的任务."""
     import asyncio
-
 
     # 安全加固: owner 为空时默认需要 admin
     admin_err = _require_admin_token(request)
@@ -4300,17 +4356,19 @@ async def _handle_org_memories(request: Any, ctx: _AppContext) -> Any:
     """
     from datetime import datetime, timedelta
 
-
     # 安全加固: 组织级记忆聚合暴露全员工知识库，仅 admin 可访问
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
 
-
     days = _safe_int(request.query_params.get("days", "7"), 7)
     category = request.query_params.get("category") or None
     # limit 上限 2000，默认 500（防止全量加载 OOM）
-    limit = min(int(request.query_params.get("limit", "500")), 2000) if request.query_params.get("limit") else 500
+    limit = (
+        min(int(request.query_params.get("limit", "500")), 2000)
+        if request.query_params.get("limit")
+        else 500
+    )
 
     store = get_memory_store(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
     # 用 list_employees() 扫描实际 JSONL 文件，不遗漏任何员工
@@ -4459,7 +4517,6 @@ async def _handle_memory_search(request: Any, ctx: _AppContext) -> Any:
     admin_err = _require_admin_token(request)
     if admin_err:
         return JSONResponse({"error": admin_err}, status_code=403)
-
 
     query = request.query_params.get("q", "").strip()
     if not query:
@@ -4960,7 +5017,6 @@ async def _handle_audit_trends(request: Any, ctx: _AppContext) -> Any:
     from collections import defaultdict
     from datetime import datetime, timedelta
 
-
     days = _safe_int(request.query_params.get("days", "7"), 7)
     cutoff = datetime.now() - timedelta(days=days)
     cutoff_str = cutoff.isoformat()
@@ -5179,8 +5235,7 @@ async def _chat_via_agent_tools(
             "reply": exec_result.get("output", ""),
             "employee_id": employee_id,
             "memory_updated": False,
-            "tokens_used": exec_result.get("input_tokens", 0)
-            + exec_result.get("output_tokens", 0),
+            "tokens_used": exec_result.get("input_tokens", 0) + exec_result.get("output_tokens", 0),
             "latency_ms": 0,
         }
 
@@ -5200,7 +5255,6 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
     }
     """
     import json as _json
-
 
     # ── 解析请求体 ──
     try:
@@ -5355,7 +5409,9 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
         from crew.exceptions import EmployeeNotFoundError
         from crew.tool_schema import AGENT_TOOLS
 
-        discovery = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
+        discovery = discover_employees(
+            project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request)
+        )
         emp = discovery.get(employee_id)
         if emp is None:
             return JSONResponse(
@@ -5388,7 +5444,9 @@ async def _handle_chat(request: Any, ctx: _AppContext) -> Any:
                 result = agent_result
             else:
                 # 使用简单的 chat 路径（无工具）
-                engine = CrewEngine(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request))
+                engine = CrewEngine(
+                    project_dir=ctx.project_dir, tenant_id=_tenant_id_for_store(request)
+                )
                 chat_result = await engine.chat(
                     employee_id=employee_id,
                     message=_effective_message,
@@ -5697,7 +5755,6 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
     """获取编排模式讨论计划 — GET /api/discussions/{name}/plan."""
     import json as _json
 
-
     # 安全加固: 讨论计划含完整编排流程，仅 admin 可读
     admin_err = _require_admin_token(request)
     if admin_err:
@@ -5748,7 +5805,6 @@ async def _handle_discussion_plan(request: Any, ctx: _AppContext) -> Any:
 async def _handle_discussion_prompt(request: Any, ctx: _AppContext) -> Any:
     """获取非编排模式讨论 prompt — GET /api/discussions/{name}/prompt."""
     import json as _json
-
 
     # 安全加固: 讨论 prompt 含完整指令，仅 admin 可读
     admin_err = _require_admin_token(request)
@@ -5936,7 +5992,9 @@ async def _handle_permission_matrix(request: Any, ctx: _AppContext) -> Any:
     from crew.discovery import discover_employees
     from crew.tool_schema import resolve_effective_tools
 
-    result = discover_employees(project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request))
+    result = discover_employees(
+        project_dir=ctx.project_dir, tenant_id=_tenant_id_for_config(request)
+    )
     emp_name = request.query_params.get("employee") or None
 
     employees = list(result.employees.values())
@@ -6054,7 +6112,9 @@ async def _handle_wiki_spaces_list(request: Any, ctx: _AppContext) -> Any:
 # ── 配置存储 API ──
 
 
-def _resolve_employee_name(identifier: str, ctx: _AppContext, *, tenant_id: str | None = None) -> str:
+def _resolve_employee_name(
+    identifier: str, ctx: _AppContext, *, tenant_id: str | None = None
+) -> str:
     """将 slug 或 agent_id 转换为中文名（用于配置查询）."""
     from crew.discovery import discover_employees
 
@@ -6088,7 +6148,9 @@ async def _handle_soul_get(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
 
     # 将 slug 转换为中文名
-    employee_name = _resolve_employee_name(identifier, ctx, tenant_id=_tenant_id_for_config(request))
+    employee_name = _resolve_employee_name(
+        identifier, ctx, tenant_id=_tenant_id_for_config(request)
+    )
 
     result = get_soul(employee_name, tenant_id=_tenant_id_for_config(request))
     if not result:
@@ -6112,7 +6174,9 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
         return JSONResponse({"error": "employee_name is required"}, status_code=400)
 
     # 将 slug 转换为中文名
-    employee_name = _resolve_employee_name(identifier, ctx, tenant_id=_tenant_id_for_config(request))
+    employee_name = _resolve_employee_name(
+        identifier, ctx, tenant_id=_tenant_id_for_config(request)
+    )
 
     try:
         body = await request.json()
@@ -6127,7 +6191,9 @@ async def _handle_soul_update(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_soul(employee_name, content, updated_by, metadata, tenant_id=_tenant_id_for_config(request))
+        result = update_soul(
+            employee_name, content, updated_by, metadata, tenant_id=_tenant_id_for_config(request)
+        )
         return JSONResponse(result)
     except Exception:
         logger.exception("更新 soul 失败: employee=%s", employee_name)
@@ -6192,7 +6258,9 @@ async def _handle_discussion_create(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = create_discussion(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
+        result = create_discussion(
+            name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request)
+        )
         return JSONResponse(result, status_code=201)
     except Exception:
         logger.exception("创建 discussion 失败: name=%s", name)
@@ -6226,7 +6294,9 @@ async def _handle_discussion_update(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_discussion(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
+        result = update_discussion(
+            name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request)
+        )
         return JSONResponse(result)
     except Exception:
         logger.exception("更新 discussion 失败: name=%s", name)
@@ -6307,7 +6377,9 @@ async def _handle_pipeline_create_config(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = create_pipeline(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
+        result = create_pipeline(
+            name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request)
+        )
         return JSONResponse(result, status_code=201)
     except Exception:
         logger.exception("创建 pipeline 失败: name=%s", name)
@@ -6341,7 +6413,9 @@ async def _handle_pipeline_update_config(request: Any, ctx: _AppContext) -> Any:
     metadata = body.get("metadata")
 
     try:
-        result = update_pipeline(name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request))
+        result = update_pipeline(
+            name, yaml_content, description, metadata, tenant_id=_tenant_id_for_config(request)
+        )
         return JSONResponse(result)
     except Exception:
         logger.exception("更新 pipeline 失败: name=%s", name)

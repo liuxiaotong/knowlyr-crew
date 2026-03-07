@@ -23,7 +23,9 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -98,7 +100,9 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -170,7 +174,9 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -243,7 +249,9 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -305,7 +313,9 @@ class TestTrajectoryArchive:
                 self._payload = payload
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return json.dumps(self._payload).encode("utf-8")
@@ -341,7 +351,9 @@ class TestTrajectoryArchive:
                 self._size = size
                 self.query_params = {}
                 self.headers = {}
-                self.state = SimpleNamespace(tenant=SimpleNamespace(tenant_id="admin", is_admin=True))
+                self.state = SimpleNamespace(
+                    tenant=SimpleNamespace(tenant_id="admin", is_admin=True)
+                )
 
             async def body(self):
                 return b"x" * self._size

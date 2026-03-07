@@ -952,7 +952,9 @@ class CrewEngine:
 
             async def _write_memory() -> None:
                 try:
-                    mem_store = get_memory_store(project_dir=self.project_dir, tenant_id=self.tenant_id)
+                    mem_store = get_memory_store(
+                        project_dir=self.project_dir, tenant_id=self.tenant_id
+                    )
 
                     # 基础对话记录
                     mem_store.add(
