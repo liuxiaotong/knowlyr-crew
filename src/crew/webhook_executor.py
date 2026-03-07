@@ -1797,7 +1797,13 @@ async def _handle_tool_call(
             logger.info("工具调用: %s.%s(%s)", employee_name, tool_name, list(arguments.keys()))
             # MCP 工具需要额外透传 tenant_id 和 user_id
             if tool_name.startswith("mcp__"):
-                return await handler(arguments, agent_id=agent_id, ctx=ctx, tenant_id=tenant_id, user_id=target_user_id or None)
+                return await handler(
+                    arguments,
+                    agent_id=agent_id,
+                    ctx=ctx,
+                    tenant_id=tenant_id,
+                    user_id=target_user_id or None,
+                )
             return await handler(arguments, agent_id=agent_id, ctx=ctx)
         except Exception as e:
             logger.warning("工具 %s 执行失败: %s", tool_name, e)
