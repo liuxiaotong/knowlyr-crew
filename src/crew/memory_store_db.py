@@ -299,6 +299,11 @@ class MemoryStoreDB:
                 category,
             )
             if merged is not None:
+                # NG-3: dedup merge 后也做自动关联（best-effort）
+                try:
+                    self._auto_link_similar(merged.id, employee, embedding_vector)
+                except Exception:
+                    logger.debug("auto-link after dedup failed", exc_info=True)
                 return merged
 
         with get_connection() as conn:
@@ -348,6 +353,13 @@ class MemoryStoreDB:
                     embedding_vector,  # NG-1: embedding 向量（可能为 None）
                 ),
             )
+
+        # NG-3: INSERT 后自动关联相似记忆（best-effort）
+        if embedding_vector is not None:
+            try:
+                self._auto_link_similar(entry_id, employee, embedding_vector)
+            except Exception:
+                logger.debug("auto-link after insert failed", exc_info=True)
 
         return MemoryEntry(
             id=entry_id,
@@ -495,6 +507,88 @@ class MemoryStoreDB:
         except Exception as e:
             logger.debug("dedup 查询失败，回退到正常写入: %s", e)
             return None
+
+    def _auto_link_similar(
+        self, entry_id: str, employee: str, embedding_vector: list[float]
+    ) -> None:
+        """NG-3: 自动关联 — 查同员工 top-3 相似记忆，>= 0.5 建立双向链接.
+
+        Best-effort：失败只 log 不报错。
+        """
+        try:
+            with get_connection() as conn:
+                import psycopg2.extras
+
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    SELECT id, linked_memories, 1.0 - (embedding <=> %s) AS similarity
+                    FROM memories
+                    WHERE employee = %s AND tenant_id = %s
+                      AND id != %s
+                      AND (superseded_by = '' OR superseded_by IS NULL)
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s
+                    LIMIT 3
+                    """,
+                    (
+                        str(embedding_vector),
+                        employee,
+                        self._tenant_id,
+                        entry_id,
+                        str(embedding_vector),
+                    ),
+                )
+                candidates = cur.fetchall()
+
+            if not candidates:
+                return
+
+            # 过滤 similarity >= 0.5
+            linked_ids: list[str] = []
+            for row in candidates:
+                sim = float(row["similarity"])
+                if sim < 0.5:
+                    continue
+                linked_ids.append(row["id"])
+
+            if not linked_ids:
+                return
+
+            # 更新新记忆的 linked_memories
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE memories SET linked_memories = %s WHERE id = %s AND tenant_id = %s",
+                    (linked_ids, entry_id, self._tenant_id),
+                )
+
+            # 更新旧记忆的 linked_memories（双向关联，最多 20 个）
+            for row in candidates:
+                if row["id"] not in linked_ids:
+                    continue
+                old_linked = list(row.get("linked_memories") or [])
+                if entry_id in old_linked:
+                    continue
+                old_linked.append(entry_id)
+                # 超出 20 个截断最旧的（列表前面是最旧的）
+                if len(old_linked) > 20:
+                    old_linked = old_linked[-20:]
+                with get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE memories SET linked_memories = %s WHERE id = %s AND tenant_id = %s",
+                        (old_linked, row["id"], self._tenant_id),
+                    )
+
+            logger.debug(
+                "auto-link: %s linked to %s",
+                entry_id,
+                linked_ids,
+            )
+
+        except Exception as e:
+            logger.debug("auto-link failed (best-effort): %s", e)
 
     # 信息分级等级序（用于 classification_max 过滤）
     _CLASSIFICATION_LEVELS = {
@@ -1304,6 +1398,70 @@ class MemoryStoreDB:
                 (linked_ids, entry_id, employee, self._tenant_id),
             )
             return cur.rowcount > 0
+
+    def expand_linked_memories(
+        self, entries: list[MemoryEntry], max_linked: int = 2
+    ) -> dict[str, list[MemoryEntry]]:
+        """NG-3: 展开关联记忆 — 对每条 entry 取前 max_linked 个 linked ID 批量查询.
+
+        Args:
+            entries: 一组 MemoryEntry
+            max_linked: 每条记忆最多展开的关联记忆数
+
+        Returns:
+            dict: {entry_id: [linked_entry_1, linked_entry_2, ...]}
+            不递归展开（只展一层）。
+        """
+        # 收集所有需要查询的 linked IDs
+        all_linked_ids: list[str] = []
+        entry_to_linked: dict[str, list[str]] = {}
+        for entry in entries:
+            linked = list(entry.linked_memories or [])[:max_linked]
+            if linked:
+                entry_to_linked[entry.id] = linked
+                all_linked_ids.extend(linked)
+
+        if not all_linked_ids:
+            return {}
+
+        # 去重
+        unique_ids = list(set(all_linked_ids))
+
+        # 批量查询
+        try:
+            with get_connection() as conn:
+                cur = conn.cursor(cursor_factory=self._dict_cursor_factory)
+                cur.execute(
+                    """
+                    SELECT id, employee, created_at, category, content,
+                           source_session, confidence, superseded_by, ttl_days,
+                           importance, last_accessed, tags, shared, visibility,
+                           trigger_condition, applicability, origin_employee, verified_count,
+                           classification, domain,
+                           keywords, linked_memories
+                    FROM memories
+                    WHERE id = ANY(%s) AND tenant_id = %s
+                    """,
+                    (unique_ids, self._tenant_id),
+                )
+                rows = cur.fetchall()
+        except Exception:
+            logger.debug("expand_linked_memories query failed", exc_info=True)
+            return {}
+
+        # 建立 id -> MemoryEntry 映射
+        id_to_entry: dict[str, MemoryEntry] = {}
+        for row in rows:
+            id_to_entry[row["id"]] = self._row_to_entry(row)
+
+        # 组装结果
+        result: dict[str, list[MemoryEntry]] = {}
+        for entry_id, linked_ids in entry_to_linked.items():
+            linked_entries = [id_to_entry[lid] for lid in linked_ids if lid in id_to_entry]
+            if linked_entries:
+                result[entry_id] = linked_entries
+
+        return result
 
     def query_by_keywords(
         self,
