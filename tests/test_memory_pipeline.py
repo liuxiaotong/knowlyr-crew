@@ -392,6 +392,31 @@ class TestProcessMemory:
         assert note.content == "原始文本"  # 默认用 raw_text
         assert note.category == "finding"  # 默认 category
 
+    @patch("crew.memory_pipeline.connect")
+    def test_process_memory_kwargs_passthrough(self, mock_connect):
+        """store.add() 参数通过 kwargs 透传到 connect."""
+        entry = _make_entry()
+        mock_connect.return_value = ConnectResult(action="new", entry=entry)
+
+        store = _make_mock_store()
+        process_memory(
+            "原始文本",
+            "赵云帆",
+            store=store,
+            skip_reflect=True,
+            category="decision",
+            source_session="sess-42",
+            ttl_days=30,
+            shared=True,
+            confidence=0.9,
+        )
+
+        call_kwargs = mock_connect.call_args[1]
+        assert call_kwargs["source_session"] == "sess-42"
+        assert call_kwargs["ttl_days"] == 30
+        assert call_kwargs["shared"] is True
+        assert call_kwargs["confidence"] == 0.9
+
 
 # ── Test: DB fields (keywords + linked_memories) ──
 

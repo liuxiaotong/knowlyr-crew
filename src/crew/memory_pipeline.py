@@ -258,7 +258,10 @@ def _find_candidates_by_keywords(
 
 
 def connect(
-    note: ReflectResult, employee: str, store: MemoryStoreDB
+    note: ReflectResult,
+    employee: str,
+    store: MemoryStoreDB,
+    **store_kwargs,
 ) -> ConnectResult:
     """Connect 阶段：找到关联记忆，决定 merge/link/new.
 
@@ -273,6 +276,7 @@ def connect(
         note: Reflect 阶段输出的结构化笔记
         employee: 员工标识符
         store: 数据库存储实例
+        **store_kwargs: 透传给 store.add() 的额外参数
 
     Returns:
         ConnectResult 包含 action 和结果 entry
@@ -281,7 +285,7 @@ def connect(
 
     if not candidates:
         # 无候选 -> new
-        entry = _store_new(note, employee, store)
+        entry = _store_new(note, employee, store, **store_kwargs)
         return ConnectResult(action="new", entry=entry)
 
     # 找最高重叠度的候选
@@ -295,7 +299,7 @@ def connect(
             best_candidate = candidate
 
     if best_candidate is None:
-        entry = _store_new(note, employee, store)
+        entry = _store_new(note, employee, store, **store_kwargs)
         return ConnectResult(action="new", entry=entry)
 
     if best_overlap >= 0.7 and best_candidate.category == note.category:
@@ -329,7 +333,7 @@ def connect(
 
     elif best_overlap >= 0.3:
         # link: 新建 + 双向 linked_memories
-        new_entry = _store_new(note, employee, store)
+        new_entry = _store_new(note, employee, store, **store_kwargs)
 
         try:
             # 更新新记忆的 linked_memories
@@ -361,12 +365,15 @@ def connect(
 
     else:
         # < 30% -> new
-        entry = _store_new(note, employee, store)
+        entry = _store_new(note, employee, store, **store_kwargs)
         return ConnectResult(action="new", entry=entry)
 
 
 def _store_new(
-    note: ReflectResult, employee: str, store: MemoryStoreDB
+    note: ReflectResult,
+    employee: str,
+    store: MemoryStoreDB,
+    **store_kwargs,
 ) -> MemoryEntry:
     """Store 阶段 - 新建记忆条目.
 
@@ -374,6 +381,8 @@ def _store_new(
         note: Reflect 阶段输出
         employee: 员工标识符
         store: 数据库存储实例
+        **store_kwargs: 透传给 store.add() 的额外参数
+            (source_session, ttl_days, shared, confidence 等)
 
     Returns:
         新创建的 MemoryEntry
@@ -383,6 +392,7 @@ def _store_new(
         category=note.category,
         content=note.content,
         tags=note.tags,
+        **store_kwargs,
     )
     # 更新 keywords（add() 默认是空的）
     if note.keywords:
@@ -399,6 +409,7 @@ def process_memory(
     employee: str,
     store: MemoryStoreDB | None = None,
     skip_reflect: bool = False,
+    source_session: str = "",
     **kwargs,
 ) -> MemoryEntry | None:
     """记忆管线顶层入口：Reflect -> Connect -> Store.
@@ -408,8 +419,12 @@ def process_memory(
         employee: 员工标识符
         store: 数据库存储实例（None 则自动获取）
         skip_reflect: 跳过 Reflect 阶段（给 add_memory 等已结构化的路径用）
+        source_session: 来源会话 ID
         **kwargs: skip_reflect=True 时，用于构造 ReflectResult 的参数：
             content, category, keywords, tags, context
+            以及透传给 store.add() 的参数：
+            ttl_days, shared, confidence, trigger_condition,
+            applicability, origin_employee, classification, domain
 
     Returns:
         处理后的 MemoryEntry，Reflect 决定跳过时返回 None
@@ -418,6 +433,12 @@ def process_memory(
         from crew.memory import get_memory_store
 
         store = get_memory_store()
+
+    # 分离 ReflectResult 参数和 store.add() 透传参数
+    _reflect_keys = {"content", "category", "keywords", "tags", "context"}
+    _store_extra = {k: v for k, v in kwargs.items() if k not in _reflect_keys}
+    if source_session:
+        _store_extra["source_session"] = source_session
 
     if skip_reflect:
         # 直接构造 ReflectResult
@@ -434,5 +455,5 @@ def process_memory(
         if note is None:
             return None
 
-    result = connect(note, employee, store)
+    result = connect(note, employee, store, **_store_extra)
     return result.entry

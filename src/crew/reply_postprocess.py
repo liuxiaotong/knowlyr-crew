@@ -5,9 +5,11 @@
 
 import logging
 import re
+import threading
 
 from crew.memory import get_memory_store
 from crew.memory_cache import invalidate
+from crew.memory_pipeline import process_memory
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,29 @@ def should_push(
     return False, ""
 
 
+def _do_push(employee: str, reply: str, session_id: str, store) -> None:
+    """后台线程执行记忆管线."""
+    try:
+        entry = process_memory(
+            raw_text=reply,
+            employee=employee,
+            store=store,
+            skip_reflect=False,
+            source_session=session_id,
+        )
+        if entry:
+            invalidate(employee)
+            logger.info(
+                "记忆管线推送成功: employee=%s id=%s",
+                employee,
+                entry.id,
+            )
+        else:
+            logger.info("记忆管线决定跳过: employee=%s", employee)
+    except Exception as e:
+        logger.error("记忆管线推送失败: employee=%s error=%s", employee, e)
+
+
 def push_if_needed(
     *,
     employee: str,
@@ -67,17 +92,19 @@ def push_if_needed(
 ) -> bool:
     """检查并推送回复到记忆（如果满足门槛）.
 
+    LLM 管线调用在后台线程异步执行，不阻塞调用方。
+
     Args:
         employee: 员工名称
         reply: 回复文本
         turn_count: 对话轮数
         session_id: 会话 ID（用于去重）
         store: MemoryStore 实例
-        max_retries: 写入失败重试次数
-        timeout: 超时秒数（保留字段，当前同步写入）
+        max_retries: 保留参数（已废弃，管线内部有错误处理）
+        timeout: 保留参数（已废弃）
 
     Returns:
-        True 如果写入了记忆，False 如果未触发或写入失败
+        True 如果已触发管线（不等待结果），False 如果未触发
     """
     do_push, category = should_push(reply, turn_count)
     if not do_push or not category:
@@ -86,57 +113,11 @@ def push_if_needed(
     if store is None:
         store = get_memory_store()
 
-    # 幂等校验：用 session_id 去重
-    if session_id:
-        existing = store.query(employee, limit=50)
-        for entry in existing:
-            if entry.source_session == session_id and entry.category == category:
-                logger.debug(
-                    "记忆推送跳过（幂等）: employee=%s session=%s category=%s",
-                    employee,
-                    session_id,
-                    category,
-                )
-                return False
-
-    # 提取摘要（取前 300 字符作为记忆内容）
-    summary = reply.strip()[:300]
-    if len(reply.strip()) > 300:
-        summary += "..."
-
-    # 写入，带重试
-    for attempt in range(max_retries + 1):
-        try:
-            store.add(
-                employee=employee,
-                category=category,
-                content=summary,
-                source_session=session_id,
-                tags=["auto-push", f"turns-{turn_count}"],
-            )
-            # 写入后失效缓存
-            invalidate(employee)
-            logger.info(
-                "记忆推送成功: employee=%s category=%s session=%s",
-                employee,
-                category,
-                session_id,
-            )
-            return True
-        except Exception as e:
-            if attempt < max_retries:
-                logger.warning(
-                    "记忆推送重试 (%d/%d): %s",
-                    attempt + 1,
-                    max_retries,
-                    e,
-                )
-            else:
-                logger.error(
-                    "记忆推送最终失败: employee=%s category=%s error=%s",
-                    employee,
-                    category,
-                    e,
-                )
-
-    return False
+    # 后台线程异步执行管线（LLM 调用 2-5 秒，不阻塞）
+    t = threading.Thread(
+        target=_do_push,
+        args=(employee, reply, session_id, store),
+        daemon=True,
+    )
+    t.start()
+    return True
