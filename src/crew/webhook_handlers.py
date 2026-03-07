@@ -6770,3 +6770,80 @@ async def _handle_evolution_candidates(request: Any, ctx: _AppContext) -> Any:
     except Exception as exc:
         logger.exception("evolution candidates query failed: %s", exc)
         return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_approve(request: Any, ctx: _AppContext) -> Any:
+    """批准进化候选 -- POST /api/soul/approve.
+
+    Body JSON:
+    {
+        "candidate_id": "xxx",
+        "employee": "姜墨言"
+    }
+
+    需要 admin_required。
+    调用 approve_candidate()，返回结果。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("invalid JSON body", 400)
+
+    candidate_id = body.get("candidate_id")
+    employee = body.get("employee")
+
+    if not candidate_id or not employee:
+        return _error_response("candidate_id 和 employee 为必填字段", 400)
+
+    from crew.soul_evolution import approve_candidate
+
+    try:
+        store = get_memory_store(tenant_id=_tenant_id_for_store(request))
+        result = approve_candidate(candidate_id=candidate_id, employee=employee, store=store)
+        status = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=status)
+    except Exception as exc:
+        logger.exception("evolution approve failed: %s", exc)
+        return _error_response("内部错误", 500)
+
+
+async def _handle_evolution_reject(request: Any, ctx: _AppContext) -> Any:
+    """拒绝进化候选 -- POST /api/soul/reject.
+
+    Body JSON:
+    {
+        "candidate_id": "xxx",
+        "employee": "姜墨言"
+    }
+
+    需要 admin_required。
+    调用 reject_candidate()，返回结果。
+    """
+    admin_err = _require_admin_token(request)
+    if admin_err:
+        return JSONResponse({"error": admin_err}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("invalid JSON body", 400)
+
+    candidate_id = body.get("candidate_id")
+    employee = body.get("employee")
+
+    if not candidate_id or not employee:
+        return _error_response("candidate_id 和 employee 为必填字段", 400)
+
+    from crew.soul_evolution import reject_candidate
+
+    try:
+        result = reject_candidate(candidate_id=candidate_id, employee=employee)
+        status = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=status)
+    except Exception as exc:
+        logger.exception("evolution reject failed: %s", exc)
+        return _error_response("内部错误", 500)

@@ -17,6 +17,13 @@ from typing import Any
 
 from crew.config_store import get_config, put_config
 
+try:
+    import httpx
+
+    _HAS_HTTPX = True
+except ImportError:
+    _HAS_HTTPX = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -367,3 +374,339 @@ def run_evolution_review(
         "archive_candidates": total_archive,
         "candidates": all_candidates,
     }
+
+
+# ---------------------------------------------------------------------------
+# 审批执行（Phase 5）
+# ---------------------------------------------------------------------------
+
+_CREW_API_BASE = "https://crew.knowlyr.com/api"
+
+
+def _employee_slug_from_name(employee_name: str) -> str | None:
+    """通过 character_name 反查员工 slug.
+
+    Returns:
+        slug 字符串，找不到返回 None
+    """
+    try:
+        from crew.discovery import discover_employees
+
+        discovery = discover_employees()
+        for slug, emp in discovery.items():
+            if emp.character_name == employee_name:
+                return slug
+        return None
+    except Exception:
+        logger.warning("无法通过 discover_employees 查找 slug: %s", employee_name)
+        return None
+
+
+def _get_crew_api_token() -> str | None:
+    """从环境变量获取 CREW API token."""
+    return os.environ.get("CREW_API_TOKEN")
+
+
+def _update_soul_promote(employee_slug: str, rule_text: str) -> bool:
+    """在 soul 的行为准则 section 追加一条规则.
+
+    1. 调 crew API 获取当前 soul
+    2. 找到 "## 行为准则" section
+    3. 在该 section 末尾（下一个 ## 之前）追加 "- {rule_text}"
+    4. PUT 写回 soul
+
+    Returns:
+        True 更新成功
+    """
+    token = _get_crew_api_token()
+    if not token or not _HAS_HTTPX:
+        logger.warning("CREW_API_TOKEN 或 httpx 不可用，跳过 soul 更新")
+        return False
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        resp = httpx.get(
+            f"{_CREW_API_BASE}/souls/{employee_slug}",
+            headers=headers,
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.error("获取 soul 失败: HTTP %d", resp.status_code)
+            return False
+
+        data = resp.json()
+        soul_text = data.get("soul", "")
+        if not soul_text:
+            logger.error("soul 内容为空: %s", employee_slug)
+            return False
+
+        # 在 "## 行为准则" section 末尾追加
+        import re
+
+        pattern = re.compile(r"(## 行为准则.*?)((?=\n## )|$)", re.DOTALL)
+        match = pattern.search(soul_text)
+        if match:
+            insert_pos = match.end(1)
+            new_line = f"\n- {rule_text}"
+            updated = soul_text[:insert_pos] + new_line + soul_text[insert_pos:]
+        else:
+            # 没有"行为准则"section，追加到末尾
+            updated = soul_text.rstrip() + f"\n\n## 行为准则\n\n- {rule_text}\n"
+
+        put_resp = httpx.put(
+            f"{_CREW_API_BASE}/souls/{employee_slug}",
+            headers=headers,
+            json={"soul": updated},
+            timeout=15.0,
+        )
+        if put_resp.status_code != 200:
+            logger.error("写回 soul 失败: HTTP %d", put_resp.status_code)
+            return False
+
+        return True
+
+    except Exception as exc:
+        logger.exception("更新 soul promote 异常: %s", exc)
+        return False
+
+
+def _update_soul_archive(employee_slug: str, archive_note: str) -> bool:
+    """在 soul 末尾添加归档说明.
+
+    简化实现：不尝试删除旧规则（太危险），而是在 soul 末尾
+    "## 自检清单" 之前加一行注释。
+
+    Returns:
+        True 更新成功
+    """
+    token = _get_crew_api_token()
+    if not token or not _HAS_HTTPX:
+        logger.warning("CREW_API_TOKEN 或 httpx 不可用，跳过 soul 更新")
+        return False
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        resp = httpx.get(
+            f"{_CREW_API_BASE}/souls/{employee_slug}",
+            headers=headers,
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.error("获取 soul 失败: HTTP %d", resp.status_code)
+            return False
+
+        data = resp.json()
+        soul_text = data.get("soul", "")
+        if not soul_text:
+            logger.error("soul 内容为空: %s", employee_slug)
+            return False
+
+        # 在 "## 自检清单" 之前插入归档注释
+        note_line = f"\n<!-- archived: {archive_note} -->\n"
+        selfcheck_idx = soul_text.find("## 自检清单")
+        if selfcheck_idx != -1:
+            updated = soul_text[:selfcheck_idx] + note_line + soul_text[selfcheck_idx:]
+        else:
+            # 没有自检清单，追加到末尾
+            updated = soul_text.rstrip() + "\n" + note_line
+
+        put_resp = httpx.put(
+            f"{_CREW_API_BASE}/souls/{employee_slug}",
+            headers=headers,
+            json={"soul": updated},
+            timeout=15.0,
+        )
+        if put_resp.status_code != 200:
+            logger.error("写回 soul 失败: HTTP %d", put_resp.status_code)
+            return False
+
+        return True
+
+    except Exception as exc:
+        logger.exception("更新 soul archive 异常: %s", exc)
+        return False
+
+
+def approve_candidate(
+    candidate_id: str,
+    employee: str,
+    store: Any | None = None,
+) -> dict[str, Any]:
+    """批准一个进化候选，执行 soul 更新.
+
+    流程：
+    1. 从 config_store 找到该候选（遍历 {employee}_candidates）
+    2. 根据 action 类型执行 promote/archive soul 更新
+    3. 标记候选为已执行（从 candidates 列表移除，存入 {employee}_approved 列表）
+    4. 记一条 decision 类记忆
+
+    Args:
+        candidate_id: 候选 ID
+        employee: 员工名
+        store: DB store（None 则自动创建）
+
+    Returns:
+        {"ok": True, "action": "promote/archive", "content": "...", "soul_updated": True/False}
+    """
+    # 1. 从 config_store 读取候选列表
+    raw = get_config("soul_evolution", f"{employee}_candidates")
+    if not raw:
+        return {"ok": False, "error": f"员工 {employee} 没有待审批候选"}
+
+    try:
+        candidates = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {"ok": False, "error": "候选列表解析失败"}
+
+    # 找到目标候选
+    target = None
+    remaining = []
+    for c in candidates:
+        if c.get("id") == candidate_id:
+            target = c
+        else:
+            remaining.append(c)
+
+    if target is None:
+        return {"ok": False, "error": f"候选 {candidate_id} 不存在"}
+
+    action = target.get("action", "")
+    content = target.get("content", "")
+
+    # 2. 执行 soul 更新
+    soul_updated = False
+    slug = _employee_slug_from_name(employee)
+
+    if slug:
+        if action == "promote":
+            soul_updated = _update_soul_promote(slug, content)
+        elif action == "archive":
+            soul_updated = _update_soul_archive(slug, content)
+    else:
+        logger.warning("找不到员工 %s 的 slug，跳过 soul 更新", employee)
+
+    # 3. 更新 config_store：移除候选，存入 approved 列表
+    put_config(
+        "soul_evolution",
+        f"{employee}_candidates",
+        json.dumps(remaining, ensure_ascii=False),
+    )
+
+    # 存入 approved 列表
+    approved_raw = get_config("soul_evolution", f"{employee}_approved")
+    try:
+        approved = json.loads(approved_raw) if approved_raw else []
+    except (json.JSONDecodeError, TypeError):
+        approved = []
+
+    target["approved_at"] = datetime.now(timezone.utc).isoformat()
+    target["soul_updated"] = soul_updated
+    approved.append(target)
+    put_config(
+        "soul_evolution",
+        f"{employee}_approved",
+        json.dumps(approved, ensure_ascii=False),
+    )
+
+    # 4. 记 decision 类记忆
+    if store is None:
+        try:
+            from crew.memory import get_memory_store
+
+            store = get_memory_store()
+        except Exception:
+            logger.warning("无法创建 memory store，跳过 decision 记忆")
+            store = None
+
+    if store is not None:
+        try:
+            decision_content = (
+                f"灵魂进化审批: {action} — {content}。"
+                f"来源: {target.get('source_type', '')}，"
+                f"source_ids: {target.get('source_ids', [])}"
+            )
+            store.add(
+                employee=employee,
+                category="decision",
+                content=decision_content,
+                tags=["soul_evolution", action],
+            )
+        except Exception as exc:
+            logger.warning("记录 decision 记忆失败: %s", exc)
+
+    # 5. 标记 source corrections superseded_by（archive 场景）
+    if action == "archive" and store is not None:
+        for sid in target.get("source_ids", []):
+            try:
+                store.update(sid, superseded_by="archived")
+            except Exception:
+                pass
+
+    return {
+        "ok": True,
+        "action": action,
+        "content": content,
+        "soul_updated": soul_updated,
+    }
+
+
+def reject_candidate(
+    candidate_id: str,
+    employee: str,
+) -> dict[str, Any]:
+    """拒绝一个进化候选.
+
+    从 candidates 列表移除，存入 {employee}_rejected 列表。
+
+    Args:
+        candidate_id: 候选 ID
+        employee: 员工名
+
+    Returns:
+        {"ok": True, "candidate_id": "..."}
+    """
+    raw = get_config("soul_evolution", f"{employee}_candidates")
+    if not raw:
+        return {"ok": False, "error": f"员工 {employee} 没有待审批候选"}
+
+    try:
+        candidates = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {"ok": False, "error": "候选列表解析失败"}
+
+    target = None
+    remaining = []
+    for c in candidates:
+        if c.get("id") == candidate_id:
+            target = c
+        else:
+            remaining.append(c)
+
+    if target is None:
+        return {"ok": False, "error": f"候选 {candidate_id} 不存在"}
+
+    # 更新 candidates 列表
+    put_config(
+        "soul_evolution",
+        f"{employee}_candidates",
+        json.dumps(remaining, ensure_ascii=False),
+    )
+
+    # 存入 rejected 列表
+    rejected_raw = get_config("soul_evolution", f"{employee}_rejected")
+    try:
+        rejected = json.loads(rejected_raw) if rejected_raw else []
+    except (json.JSONDecodeError, TypeError):
+        rejected = []
+
+    target["rejected_at"] = datetime.now(timezone.utc).isoformat()
+    rejected.append(target)
+    put_config(
+        "soul_evolution",
+        f"{employee}_rejected",
+        json.dumps(rejected, ensure_ascii=False),
+    )
+
+    return {"ok": True, "candidate_id": candidate_id}
