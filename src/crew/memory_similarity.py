@@ -296,7 +296,7 @@ async def find_similar_memories(
     memory_dir = getattr(store, "memory_dir", None)
 
     # 解析员工名
-    employee = store._resolve_to_character_name(employee)
+    employee = store.resolve_to_character_name(employee)
 
     # 查询该员工最近 100 条同类记忆
     recent_memories = store.query(

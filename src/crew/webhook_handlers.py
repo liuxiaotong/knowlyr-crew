@@ -1476,7 +1476,7 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
 
     # DB 版：直接用 store.update()
     if hasattr(store, "update") and callable(getattr(store, "update", None)):
-        employee = store._resolve_to_character_name(employee)  # TODO: 提升为公共方法
+        employee = store.resolve_to_character_name(employee)
 
         # 构建更新标签
         update_tag = f"updated-by:{updated_by or 'unknown'}"
@@ -1520,8 +1520,8 @@ async def _handle_memory_update(request: Any, ctx: _AppContext) -> Any:
         )
 
     # 文件版：保留原有的 JSONL 操作逻辑
-    employee = store._resolve_to_character_name(employee)
-    path = store._employee_file(employee)  # TODO: 提升为公共方法
+    employee = store.resolve_to_character_name(employee)
+    path = store.employee_file(employee)
 
     if not path.exists():
         return JSONResponse({"error": "Employee not found"}, status_code=404)
@@ -2456,7 +2456,7 @@ async def _handle_memory_batch_update(request: Any, ctx: _AppContext) -> Any:
             return JSONResponse({"ok": True, "updated": updated_count, "failed": failed_count})
 
         # 文件版：保留原有的 JSONL 操作逻辑
-        path = memory_store._employee_file(employee)
+        path = memory_store.employee_file(employee)
 
         if not path.exists():
             return JSONResponse({"ok": False, "error": "Employee not found"}, status_code=404)

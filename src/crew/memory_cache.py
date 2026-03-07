@@ -35,9 +35,9 @@ _CACHE: dict[str, MemorySnapshot] = {}
 
 def _count_lines(store, employee: str) -> int:
     """快速统计 JSONL 文件行数（不解析 JSON）."""
-    if not hasattr(store, "_employee_file"):
+    if not hasattr(store, "employee_file"):
         return -1  # DB-backed store: 无文件，依靠 TTL 失效
-    path = store._employee_file(employee)
+    path = store.employee_file(employee)
     if not path.exists():
         return 0
     try:
@@ -102,7 +102,7 @@ def get_prompt_cached(
         store = get_memory_store()
 
     # 统一用花名作为缓存 key（slug 自动转换）
-    employee = store._resolve_to_character_name(employee)
+    employee = store.resolve_to_character_name(employee)
 
     # 缓存 key：有 classification_max 时拼入，避免不同分级互相污染
     cache_key = f"{employee}:{classification_max}" if classification_max is not None else employee
@@ -160,7 +160,7 @@ def invalidate(employee: str) -> None:
     _CACHE.pop(employee, None)
     # 也尝试解析后的花名（以防传入的是 slug）
     try:
-        resolved = get_memory_store()._resolve_to_character_name(employee)
+        resolved = get_memory_store().resolve_to_character_name(employee)
         if resolved != employee:
             _CACHE.pop(resolved, None)
     except Exception:

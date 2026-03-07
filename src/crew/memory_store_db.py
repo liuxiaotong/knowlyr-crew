@@ -110,7 +110,7 @@ class MemoryStoreDB:
 
         self._dict_cursor_factory = psycopg2.extras.RealDictCursor
 
-    def _resolve_to_character_name(self, employee: str) -> str:
+    def resolve_to_character_name(self, employee: str) -> str:
         """将 slug 或花名统一转换为花名（character_name）.
 
         与文件版本保持一致的逻辑。
@@ -181,7 +181,7 @@ class MemoryStoreDB:
         Returns:
             MemoryEntry 对象
         """
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
 
         # 防御性截断（S4：以防 API 层校验被绕过）
         content = content[:5000] if len(content) > 5000 else content
@@ -328,7 +328,7 @@ class MemoryStoreDB:
         Returns:
             记忆列表（MemoryEntry）
         """
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
 
         # 构建查询（租户隔离）
         conditions = [
@@ -466,7 +466,7 @@ class MemoryStoreDB:
         Returns:
             共享记忆列表（MemoryEntry）
         """
-        exclude_employee = self._resolve_to_character_name(exclude_employee)
+        exclude_employee = self.resolve_to_character_name(exclude_employee)
 
         conditions = [
             "shared = TRUE",
@@ -540,7 +540,7 @@ class MemoryStoreDB:
         params: list[Any] = [self._tenant_id]
 
         if employee:
-            employee = self._resolve_to_character_name(employee)
+            employee = self.resolve_to_character_name(employee)
             conditions.append("employee != %s")
             params.append(employee)
 
@@ -592,7 +592,7 @@ class MemoryStoreDB:
         with get_connection() as conn:
             cur = conn.cursor()
             if employee:
-                employee = self._resolve_to_character_name(employee)
+                employee = self.resolve_to_character_name(employee)
                 cur.execute(
                     "DELETE FROM memories WHERE id = %s AND employee = %s AND tenant_id = %s",
                     (entry_id, employee, self._tenant_id),
@@ -625,7 +625,7 @@ class MemoryStoreDB:
 
     def count(self, employee: str) -> int:
         """返回员工的有效记忆条数."""
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
 
         with get_connection() as conn:
             cur = conn.cursor()
@@ -710,7 +710,7 @@ class MemoryStoreDB:
         Returns:
             新创建的纠正记忆，如果旧记忆不存在返回 None
         """
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
 
         # 12 位 hex = 48 bit 熵，碰撞概率 ~1/2.8e14，当前数据量安全
         new_id = uuid.uuid4().hex[:12]
@@ -788,7 +788,7 @@ class MemoryStoreDB:
         Returns:
             Markdown 格式的记忆文本，无记忆时返回空字符串
         """
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
         parts: list[str] = []
 
         # 个人记忆（透传 classification 参数）
@@ -890,8 +890,8 @@ class MemoryStoreDB:
             limit: 最大返回条数
             min_confidence: 最低有效置信度
         """
-        members = [self._resolve_to_character_name(m) for m in members]
-        exclude_employee = self._resolve_to_character_name(exclude_employee)
+        members = [self.resolve_to_character_name(m) for m in members]
+        exclude_employee = self.resolve_to_character_name(exclude_employee)
 
         member_set = set(members) - {exclude_employee}
         if not member_set:
@@ -972,7 +972,7 @@ class MemoryStoreDB:
         Returns:
             True 更新成功，False 未找到
         """
-        employee = self._resolve_to_character_name(employee)
+        employee = self.resolve_to_character_name(employee)
 
         # 先查出当前状态
         with get_connection() as conn:
